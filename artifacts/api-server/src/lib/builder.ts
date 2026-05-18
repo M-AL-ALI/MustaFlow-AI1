@@ -10,6 +10,13 @@ const MODEL_FOR_MODE: Record<AgentMode, string> = {
   pro: "gpt-5.4",
 };
 
+const MODE_QUALITY_HINTS: Record<AgentMode, string> = {
+  lite: "Speed over polish. Generate minimal, working code quickly. Keep it simple.",
+  eco: "Balance quality and brevity. Write clean, readable code without over-engineering.",
+  power: "Production-grade quality. Prioritize completeness, accessibility, polished UX, and thorough error handling.",
+  pro: "Highest quality. Focus on UX excellence, accessibility, robust error handling, edge cases, clean code structure, and long-term maintainability.",
+};
+
 export type BuilderFile = {
   path: string;
   content: string;
@@ -50,7 +57,7 @@ const PREVIEW_NOTE = `IMPORTANT preview-runtime constraints:
 - Use Tailwind via the CDN: <script src="https://cdn.tailwindcss.com"></script>. Do NOT reference node_modules, npm packages, or build tools.
 - Use lucide icons via CDN if you need icons: <script src="https://unpkg.com/lucide@latest"></script>.
 - All <img> src must be absolute https URLs (use https://images.unsplash.com/... or https://picsum.photos/...). Never reference local image files.
-- Keep total output under 16,000 characters across all files combined. Pages should be polished and complete, but concise.
+- Keep total output under 32,000 characters across all files combined. Pages should be polished and complete — use the full budget freely for rich, high-quality UIs.
 - Forms should validate client-side and show a friendly success state — do NOT post to real servers.
 - Do not use emojis in copy. Use lucide icons via class="lucide" or inline SVG instead.
 
@@ -141,6 +148,28 @@ function modelFor(mode: AgentMode): string {
   return MODEL_FOR_MODE[mode] ?? MODEL_FOR_MODE.eco;
 }
 
+/**
+ * For refine mode: if the full file manifest is too large (> 20k chars),
+ * truncate each file body to the first 400 chars to keep the prompt manageable
+ * while still giving the AI full awareness of all file paths and types.
+ */
+function makeCompactManifest(files: BuilderFile[]): string {
+  const full = files
+    .map((f) => `--- ${f.path} (${f.mimeType}) ---\n${f.content}`)
+    .join("\n\n");
+  if (full.length <= 20000) return full;
+  return files
+    .map((f) => {
+      const body =
+        f.content.length > 400
+          ? f.content.slice(0, 400) +
+            `\n…(${f.content.length - 400} more chars)`
+          : f.content;
+      return `--- ${f.path} (${f.mimeType}, ${f.content.length} chars total) ---\n${body}`;
+    })
+    .join("\n\n");
+}
+
 async function callWithRetry(
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
   model: string,
@@ -170,7 +199,6 @@ async function callWithRetry(
           `AI returned malformed JSON on attempt ${attempt + 1}. Retrying…`,
         );
         if (attempt === 0) {
-          // Add a correction nudge to the message array for the second attempt
           messages = [
             ...messages,
             {
@@ -221,7 +249,11 @@ export async function runBuildPipeline(args: {
     });
   }
 
-  // Inject recent conversation turns for context (skip system messages)
+  messages.push({
+    role: "system",
+    content: `Quality mode: ${MODE_QUALITY_HINTS[agentMode]}`,
+  });
+
   if (conversationHistory && conversationHistory.length > 0) {
     for (const turn of conversationHistory.slice(-6)) {
       messages.push({ role: turn.role, content: turn.content });
@@ -230,7 +262,7 @@ export async function runBuildPipeline(args: {
 
   messages.push({ role: "user", content: userPrompt });
 
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 16000, "build");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "build");
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -303,9 +335,7 @@ export async function runRefinePipeline(args: {
 }> {
   const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext } = args;
 
-  const fileManifest = existingFiles
-    .map((f) => `--- ${f.path} (${f.mimeType}) ---\n${f.content}`)
-    .join("\n\n");
+  const fileManifest = makeCompactManifest(existingFiles);
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: REFINE_SYSTEM_PROMPT },
@@ -322,7 +352,11 @@ export async function runRefinePipeline(args: {
     });
   }
 
-  // Inject recent conversation turns for context
+  messages.push({
+    role: "system",
+    content: `Quality mode: ${MODE_QUALITY_HINTS[agentMode]}`,
+  });
+
   if (conversationHistory && conversationHistory.length > 0) {
     for (const turn of conversationHistory.slice(-6)) {
       messages.push({ role: turn.role, content: turn.content });
@@ -331,7 +365,7 @@ export async function runRefinePipeline(args: {
 
   messages.push({ role: "user", content: userPrompt });
 
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 16000, "refine");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "refine");
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
   const changedFiles: BuilderFile[] = rawFiles

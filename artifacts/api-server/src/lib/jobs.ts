@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and, inArray, desc } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -76,6 +76,11 @@ async function snapshotFilesForVersion(
   }));
 }
 
+/**
+ * Bulk-safe file writer. For replaceAll (initial build): one DELETE + one bulk INSERT.
+ * For refine (replaceAll=false): one DELETE of affected paths + one bulk INSERT.
+ * Eliminates the N+1 per-file loop.
+ */
 async function writeFiles(
   projectId: number,
   files: BuilderFile[],
@@ -85,35 +90,43 @@ async function writeFiles(
     await db
       .delete(projectFilesTable)
       .where(eq(projectFilesTable.projectId, projectId));
+  } else if (files.length > 0) {
+    await db.delete(projectFilesTable).where(
+      and(
+        eq(projectFilesTable.projectId, projectId),
+        inArray(
+          projectFilesTable.path,
+          files.map((f) => f.path),
+        ),
+      ),
+    );
   }
-  for (const f of files) {
-    if (!replaceAll) {
-      await db
-        .delete(projectFilesTable)
-        .where(
-          sql`${projectFilesTable.projectId} = ${projectId} AND ${projectFilesTable.path} = ${f.path}`,
-        );
-    }
-    await db.insert(projectFilesTable).values({
-      projectId,
-      path: f.path,
-      content: f.content,
-      mimeType: f.mimeType,
-    });
+  if (files.length > 0) {
+    await db.insert(projectFilesTable).values(
+      files.map((f) => ({
+        projectId,
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+      })),
+    );
   }
 }
 
+/**
+ * Bulk-safe file deleter — one DELETE with inArray instead of N individual deletes.
+ */
 async function deleteFiles(
   projectId: number,
   paths: string[],
 ): Promise<void> {
-  for (const p of paths) {
-    await db
-      .delete(projectFilesTable)
-      .where(
-        sql`${projectFilesTable.projectId} = ${projectId} AND ${projectFilesTable.path} = ${p}`,
-      );
-  }
+  if (paths.length === 0) return;
+  await db.delete(projectFilesTable).where(
+    and(
+      eq(projectFilesTable.projectId, projectId),
+      inArray(projectFilesTable.path, paths),
+    ),
+  );
 }
 
 async function loadKnowledgeContext(): Promise<string> {
@@ -179,6 +192,47 @@ async function autoWriteFailureLesson(
     });
   } catch (err) {
     logger.warn({ err }, "Failed to auto-write failure lesson to Knowledge Vault");
+  }
+}
+
+/**
+ * Checks whether warnings from the current build also appeared in recent prior builds.
+ * If so, writes a "recurring warning" escalation entry to the Knowledge Vault so the AI
+ * can proactively avoid the pattern in future builds.
+ */
+async function maybeEscalateWarnings(
+  projectId: number,
+  currentWarnings: string[],
+): Promise<void> {
+  if (currentWarnings.length === 0) return;
+  try {
+    const prevTasks = await db
+      .select({ report: agentTasksTable.report })
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.projectId, projectId),
+          eq(agentTasksTable.status, "completed"),
+        ),
+      )
+      .orderBy(desc(agentTasksTable.createdAt))
+      .limit(3);
+
+    const prevWarnings = prevTasks.flatMap((t) => t.report?.warnings ?? []);
+    const repeated = currentWarnings.filter((w) =>
+      prevWarnings.some((pw) => pw.slice(0, 50) === w.slice(0, 50)),
+    );
+
+    if (repeated.length > 0) {
+      await db.insert(knowledgeEntriesTable).values({
+        title: `Recurring warning: "${repeated[0].slice(0, 60)}"`,
+        category: "lesson",
+        content: `This warning has appeared across multiple builds for this project: ${repeated.join("; ")}. Proactively address it in future builds.`,
+      });
+      logger.info({ projectId, repeated }, "Escalated recurring warning to Knowledge Vault");
+    }
+  } catch (err) {
+    logger.warn({ err }, "Failed to escalate repeated warnings");
   }
 }
 
@@ -331,16 +385,21 @@ export async function runJob(input: JobInput): Promise<void> {
       })
       .where(eq(agentTasksTable.id, taskId));
 
+    // Update project status and persist the latest summary as the project-level description
     await db
       .update(projectsTable)
       .set({
         status: "testing",
         lastTaskSummary: assistantSummary.slice(0, 140),
+        summary: assistantSummary,
         updatedAt: sql`now()`,
       })
       .where(eq(projectsTable.id, projectId));
 
     await emitEvent(taskId, "completed", "Task completed.");
+
+    // Fire-and-forget: escalate any recurring warnings to the Knowledge Vault
+    void maybeEscalateWarnings(projectId, report.warnings ?? []);
 
     // Append a system message so the chat shows the report was produced
     await db.insert(chatMessagesTable).values({

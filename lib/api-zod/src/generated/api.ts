@@ -27,6 +27,7 @@ export const ListProjectsResponseItem = zod.object({
   "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
+  "summary": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -59,6 +60,7 @@ export const GetProjectResponse = zod.object({
   "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
+  "summary": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -83,6 +85,7 @@ export const UpdateProjectResponse = zod.object({
   "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
+  "summary": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -108,6 +111,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
+  "summary": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))

@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp, boolean, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, boolean, jsonb, index } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export const chatMessagesTable = pgTable("chat_messages", {
@@ -10,7 +10,9 @@ export const chatMessagesTable = pgTable("chat_messages", {
   planMode: boolean("plan_mode").notNull().default(false),
   plan: jsonb("plan"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("chat_messages_project_id_created_at_idx").on(table.projectId, table.createdAt),
+]);
 
 export type ChatMessage = typeof chatMessagesTable.$inferSelect;
 export type InsertChatMessage = typeof chatMessagesTable.$inferInsert;

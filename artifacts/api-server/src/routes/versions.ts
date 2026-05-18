@@ -6,6 +6,7 @@ import {
   projectVersionsTable,
   projectFilesTable,
   chatMessagesTable,
+  knowledgeEntriesTable,
 } from "@workspace/db";
 import {
   ListVersionsParams,
@@ -133,6 +134,17 @@ router.post(
         lastTaskSummary: `Rolled back to "${version.label}"`,
       })
       .where(eq(projectsTable.id, projectId));
+
+    // Write a rollback signal to the Knowledge Vault so the AI can learn from it
+    try {
+      await db.insert(knowledgeEntriesTable).values({
+        title: `Rollback to "${version.label}"`,
+        category: "diagnostic",
+        content: `User rolled back to version "${version.label}" (${snapshot.length} files). The subsequent build may have had issues worth addressing differently next time.`,
+      });
+    } catch {
+      // best-effort — don't fail the rollback if knowledge write fails
+    }
 
     res.json({
       restoredFiles: snapshot.length,

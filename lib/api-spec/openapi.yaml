@@ -449,6 +449,7 @@ components:
           type: string
           enum: [lite, eco, power, pro]
         lastTaskSummary: { type: ["string", "null"] }
+        summary: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 

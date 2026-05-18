@@ -61,6 +61,8 @@ export interface Project {
   agentMode: ProjectAgentMode;
   /** @nullable */
   lastTaskSummary?: string | null;
+  /** @nullable */
+  summary?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -5,6 +5,7 @@ import {
   text,
   jsonb,
   timestamp,
+  index,
 } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
@@ -43,7 +44,9 @@ export const agentTasksTable = pgTable("agent_tasks", {
     .notNull()
     .defaultNow(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
-});
+}, (table) => [
+  index("agent_tasks_project_id_created_at_idx").on(table.projectId, table.createdAt),
+]);
 
 export type AgentTask = typeof agentTasksTable.$inferSelect;
 export type InsertAgentTask = typeof agentTasksTable.$inferInsert;

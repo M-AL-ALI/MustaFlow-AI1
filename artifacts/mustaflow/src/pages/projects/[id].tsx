@@ -322,7 +322,8 @@ export default function ProjectWorkspacePage() {
     query: {
       enabled: !!projectId,
       queryKey: getListMessagesQueryKey(projectId),
-      refetchInterval: 4000,
+      // Poll fast while building, back off to 15 s when idle to reduce server load
+      refetchInterval: project?.status === "building" ? 2000 : 15000,
     },
   });
   const sendMessage = useSendMessage();
@@ -385,11 +386,15 @@ export default function ProjectWorkspacePage() {
       },
       {
         onSuccess: (data) => {
-          queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
-          queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
-          queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
-          queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
-          queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+          // Invalidate immediately: messages + project status drive UI visibility
+          void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+          void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+          // Stagger file/version/task invalidations to avoid a burst of 5 parallel refetches
+          setTimeout(() => {
+            void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
+            void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
+            void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+          }, 3000);
           const plan = data?.assistantMessage?.plan as Record<string, unknown> | null | undefined;
           const tid = plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
           if (tid) setActiveTaskId(tid);

@@ -10,9 +10,14 @@ import {
   Zap,
   BrainCircuit,
   Loader2,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  Terminal,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { useListProjectFiles, getListProjectFilesQueryKey } from "@workspace/api-client-react";
 
@@ -43,6 +48,12 @@ const DEVICE_SIZES: Record<Platform, Record<DeviceFrame, { w: number | string; h
   },
 };
 
+type ConsoleEntry = {
+  type: "log" | "warn" | "error";
+  text: string;
+  time: string;
+};
+
 type Project = {
   id: number;
   status: string;
@@ -54,6 +65,14 @@ export function PreviewTab({ project }: { project: Project }) {
   const [platform, setPlatform] = useState<Platform>("web");
   const [device, setDevice] = useState<DeviceFrame>("desktop");
   const [iframeKey, setIframeKey] = useState(0);
+  const [consoleLogs, setConsoleLogs] = useState<ConsoleEntry[]>([]);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [healthWarning, setHealthWarning] = useState<string | null>(null);
+
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const prevStatusRef = useRef<string>(project.status);
+  const healthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const consoleBottomRef = useRef<HTMLDivElement>(null);
 
   const { data: files, isLoading: filesLoading } = useListProjectFiles(project.id, {
     query: {
@@ -65,7 +84,6 @@ export function PreviewTab({ project }: { project: Project }) {
   const hasFiles = (files?.length ?? 0) > 0;
   const isLoading = filesLoading && files === undefined;
   const previewSrc = `/api/projects/${project.id}/preview/?t=${iframeKey}`;
-  const refresh = () => setIframeKey((k) => k + 1);
 
   const sizes = DEVICE_SIZES[platform][device];
   const isFullWidth = sizes.w === "100%";
@@ -73,6 +91,125 @@ export function PreviewTab({ project }: { project: Project }) {
   const lastUpdated = project.updatedAt
     ? new Date(project.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : null;
+
+  // Smooth reload: use contentWindow.location.reload() so the iframe doesn't
+  // unmount/remount (avoids flash). Falls back to iframeKey change if unavailable.
+  const smoothRefresh = useCallback(() => {
+    setHealthWarning(null);
+    try {
+      const cw = iframeRef.current?.contentWindow;
+      if (cw) {
+        cw.location.reload();
+        return;
+      }
+    } catch {
+      // cross-origin guard — fall through
+    }
+    setIframeKey((k) => k + 1);
+  }, []);
+
+  // Hard refresh: force remount (use after a full rebuild)
+  const forceRefresh = useCallback(() => {
+    setHealthWarning(null);
+    setConsoleLogs([]);
+    setIframeKey((k) => k + 1);
+  }, []);
+
+  // Auto-refresh: when project transitions OUT of "building", reload the preview
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = project.status;
+    if (prev === "building" && project.status !== "building" && hasFiles) {
+      // Full rebuild just finished — force a hard key change so iframe re-fetches fresh files
+      setConsoleLogs([]);
+      setHealthWarning(null);
+      setIframeKey((k) => k + 1);
+    }
+  }, [project.status, hasFiles]);
+
+  // Intercept iframe console messages and errors once the frame loads
+  const handleIframeLoad = useCallback(() => {
+    setHealthWarning(null);
+    if (healthTimerRef.current) clearTimeout(healthTimerRef.current);
+
+    // Wrap console methods inside the iframe (works because allow-same-origin is set)
+    try {
+      const rawCw = iframeRef.current?.contentWindow;
+      if (!rawCw) return;
+      const cw = rawCw as Window & typeof globalThis & { __mf_patched?: boolean };
+      if (!cw.__mf_patched) {
+        cw.__mf_patched = true;
+        const capture = (type: ConsoleEntry["type"]) =>
+          (...args: unknown[]) => {
+            const text = args
+              .map((a) =>
+                typeof a === "object" && a !== null
+                  ? JSON.stringify(a)
+                  : String(a),
+              )
+              .join(" ");
+            const time = new Date().toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            });
+            setConsoleLogs((prev) => [...prev.slice(-99), { type, text, time }]);
+          };
+
+        const origLog = cw.console.log.bind(cw.console);
+        const origWarn = cw.console.warn.bind(cw.console);
+        const origError = cw.console.error.bind(cw.console);
+
+        cw.console.log = (...args: unknown[]) => {
+          origLog(...args);
+          capture("log")(...args);
+        };
+        cw.console.warn = (...args: unknown[]) => {
+          origWarn(...args);
+          capture("warn")(...args);
+        };
+        cw.console.error = (...args: unknown[]) => {
+          origError(...args);
+          capture("error")(...args);
+        };
+        cw.onerror = (msg) => {
+          capture("error")(msg);
+          return false;
+        };
+      }
+    } catch {
+      // Silently ignore — frame may have navigated cross-origin
+    }
+
+    // Health check: if the iframe body is still empty after 3 s, warn the user
+    healthTimerRef.current = setTimeout(() => {
+      try {
+        const body = iframeRef.current?.contentDocument?.body;
+        if (!body || body.innerHTML.trim() === "") {
+          setHealthWarning(
+            "The preview appears empty. The app may have a load error — check the console below.",
+          );
+        }
+      } catch {
+        // cross-origin or not yet ready — skip
+      }
+    }, 3000);
+  }, []);
+
+  // Scroll console panel to bottom when new entries arrive
+  useEffect(() => {
+    if (consoleOpen && consoleBottomRef.current) {
+      consoleBottomRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [consoleLogs, consoleOpen]);
+
+  // Cleanup health timer on unmount
+  useEffect(() => () => {
+    if (healthTimerRef.current) clearTimeout(healthTimerRef.current);
+  }, []);
+
+  const errorCount = consoleLogs.filter((l) => l.type === "error").length;
+  const warnCount = consoleLogs.filter((l) => l.type === "warn").length;
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -155,15 +292,53 @@ export function PreviewTab({ project }: { project: Project }) {
 
         <div className="flex-1" />
 
+        {/* Console toggle button */}
+        {hasFiles && (
+          <button
+            onClick={() => setConsoleOpen((o) => !o)}
+            aria-label={consoleOpen ? "Close console panel" : "Open console panel"}
+            aria-pressed={consoleOpen}
+            className={cn(
+              "flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors shrink-0",
+              consoleOpen
+                ? "bg-zinc-800 text-zinc-100"
+                : "bg-muted text-muted-foreground hover:text-foreground",
+            )}
+            title="Toggle console panel"
+          >
+            <Terminal className="h-3 w-3" />
+            Console
+            {errorCount > 0 && (
+              <span className="bg-destructive text-destructive-foreground text-[10px] px-1 rounded-full leading-4 min-w-[16px] text-center">
+                {errorCount}
+              </span>
+            )}
+            {errorCount === 0 && warnCount > 0 && (
+              <span className="bg-yellow-500 text-white text-[10px] px-1 rounded-full leading-4 min-w-[16px] text-center">
+                {warnCount}
+              </span>
+            )}
+          </button>
+        )}
+
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7"
-            onClick={refresh}
-            title="Refresh preview"
+            onClick={smoothRefresh}
+            title="Smooth reload (keeps iframe alive)"
           >
             <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={forceRefresh}
+            title="Hard refresh (full reload)"
+          >
+            <RefreshCw className="h-3.5 w-3.5 opacity-50" />
           </Button>
           <Button
             variant="ghost"
@@ -178,6 +353,20 @@ export function PreviewTab({ project }: { project: Project }) {
           </Button>
         </div>
       </div>
+
+      {/* Health warning banner */}
+      {healthWarning && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-xs">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">{healthWarning}</span>
+          <button
+            onClick={() => setHealthWarning(null)}
+            className="shrink-0 hover:opacity-70 transition-opacity"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Preview area */}
       <div className="flex-1 min-h-0 bg-muted/20 overflow-auto flex items-start justify-center p-4">
@@ -212,12 +401,14 @@ export function PreviewTab({ project }: { project: Project }) {
             </div>
             <iframe
               key={iframeKey}
+              ref={iframeRef}
               src={previewSrc}
               title="App preview"
               aria-label="App preview"
               className="flex-1 w-full border-0"
               style={{ minHeight: isFullWidth ? "100%" : sizes.h }}
               sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
+              onLoad={handleIframeLoad}
             />
           </div>
         ) : (
@@ -259,6 +450,90 @@ export function PreviewTab({ project }: { project: Project }) {
           </div>
         )}
       </div>
+
+      {/* Console panel */}
+      {hasFiles && consoleOpen && (
+        <div className="shrink-0 border-t border-border bg-zinc-950 flex flex-col" style={{ maxHeight: 220 }}>
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 shrink-0">
+            <Terminal className="h-3.5 w-3.5 text-zinc-400" />
+            <span className="text-[11px] font-medium text-zinc-300">Console</span>
+            <span className="text-[10px] text-zinc-500 ml-1">{consoleLogs.length} entries</span>
+            <div className="flex-1" />
+            {consoleLogs.length > 0 && (
+              <button
+                onClick={() => setConsoleLogs([])}
+                className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+            <button
+              onClick={() => setConsoleOpen(false)}
+              className="text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="overflow-y-auto flex-1 font-mono text-[11px]">
+            {consoleLogs.length === 0 ? (
+              <div className="flex items-center justify-center h-12 text-zinc-600">
+                No console output yet
+              </div>
+            ) : (
+              consoleLogs.map((entry, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    "flex items-start gap-2 px-3 py-1 border-b border-zinc-900",
+                    entry.type === "error"
+                      ? "bg-red-950/40 text-red-300"
+                      : entry.type === "warn"
+                      ? "bg-yellow-950/30 text-yellow-300"
+                      : "text-zinc-300",
+                  )}
+                >
+                  <span className="text-zinc-600 shrink-0 pt-px">{entry.time}</span>
+                  <span
+                    className={cn(
+                      "shrink-0 text-[10px] font-bold uppercase w-8 pt-px",
+                      entry.type === "error"
+                        ? "text-red-400"
+                        : entry.type === "warn"
+                        ? "text-yellow-400"
+                        : "text-zinc-500",
+                    )}
+                  >
+                    {entry.type}
+                  </span>
+                  <span className="break-all">{entry.text}</span>
+                </div>
+              ))
+            )}
+            <div ref={consoleBottomRef} />
+          </div>
+        </div>
+      )}
+
+      {/* Console collapsed indicator */}
+      {hasFiles && !consoleOpen && consoleLogs.length > 0 && (
+        <div className="shrink-0 border-t border-border bg-zinc-950/80">
+          <button
+            onClick={() => setConsoleOpen(true)}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
+          >
+            <Terminal className="h-3 w-3" />
+            <span>Console — {consoleLogs.length} message{consoleLogs.length !== 1 ? "s" : ""}</span>
+            {errorCount > 0 && (
+              <span className="text-red-400 font-medium">{errorCount} error{errorCount !== 1 ? "s" : ""}</span>
+            )}
+            {warnCount > 0 && errorCount === 0 && (
+              <span className="text-yellow-400 font-medium">{warnCount} warning{warnCount !== 1 ? "s" : ""}</span>
+            )}
+            <div className="flex-1" />
+            <ChevronUp className="h-3 w-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

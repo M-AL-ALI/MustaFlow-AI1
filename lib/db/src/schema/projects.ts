@@ -9,6 +9,7 @@ export const projectsTable = pgTable("projects", {
   status: text("status").notNull().default("draft"),
   agentMode: text("agent_mode").notNull().default("eco"),
   lastTaskSummary: text("last_task_summary"),
+  summary: text("summary"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
