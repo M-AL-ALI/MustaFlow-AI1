@@ -1,14 +1,45 @@
-import { pgTable, serial, integer, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  serial,
+  integer,
+  text,
+  jsonb,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
+
+export type TaskReport = {
+  userRequest: string;
+  blueprint?: Record<string, unknown> | null;
+  filesCreated: string[];
+  filesChanged: string[];
+  filesRemoved: string[];
+  previewUpdated: boolean;
+  warnings: string[];
+  integrationsNeeded: Array<{
+    name: string;
+    why: string;
+    keysNeeded: string[];
+    environment: "test" | "production";
+  }>;
+  versionId?: number | null;
+  nextRecommendation?: string;
+};
 
 export const agentTasksTable = pgTable("agent_tasks", {
   id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projectsTable.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   kind: text("kind").notNull().default("main"),
   status: text("status").notNull().default("queued"),
+  prompt: text("prompt"),
   result: text("result"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  report: jsonb("report").$type<TaskReport>(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
 });
 

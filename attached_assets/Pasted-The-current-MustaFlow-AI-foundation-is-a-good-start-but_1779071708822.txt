@@ -1,0 +1,372 @@
+The current MustaFlow AI foundation is a good start, but the workspace UI needs modification before we continue.
+
+Do NOT publish yet.
+
+The current layout is not matching the intended MustaFlow AI workflow. Please fix the workspace shape and behavior.
+
+Important:
+Keep MustaFlow AI original. Do not copy Replit exact UI, branding, icons, wording, or protected design. But the workflow should be professional, simple, and similar in capability: AI builder chat, preview, tools/files, publishing, canvas, logs, versions, and integrations.
+
+--------------------------------------------------
+CURRENT ISSUES TO FIX
+--------------------------------------------------
+
+1. AI chat is floating inside the preview area.
+This is wrong.
+
+The AI Builder Chat must be fixed at the bottom of the workspace as the command center.
+It should not cover the preview.
+It should not appear like a random floating bubble inside the app preview.
+
+Correct layout:
+- Main content area above
+- Bottom AI Builder Chat fixed across the project workspace area
+- Preview remains visible and clean above the chat
+
+2. The workspace has too much left navigation width.
+There is a global sidebar and project sidebar. This is okay, but make it cleaner:
+- Global sidebar should be narrow and simple
+- Project sidebar should be collapsible or compact
+- Main preview area should get more space
+- Do not let the sidebars make the preview feel squeezed
+
+3. Preview area is too empty.
+The Preview tab should show a clear generated app preview state.
+
+If no app has been generated yet, show:
+- “No app preview generated yet”
+- “Describe what you want in the AI Builder below”
+- Button: “Start with Plan Mode”
+- Button: “Generate First Draft”
+
+If the user already typed “uber app,” the system should create a starter blueprint or plan automatically.
+
+4. Top tabs need to be stronger.
+The workspace top should include clear tabs:
+- Preview
+- Canvas
+- Tools & Files
+- Publishing
+- Logs
+- Analytics
+- Resources
+- Domains
+- Manage
+
+The Web / iOS / Android selector should be inside the Preview toolbar, not acting like the only top navigation.
+
+5. Preview toolbar should include:
+- Web / iOS / Android selector
+- Desktop / tablet / phone icons
+- Refresh preview
+- Open preview placeholder
+- Current status
+- Last updated
+
+6. The bottom AI Builder Chat needs improvement.
+It should include:
+- Large prompt input
+- Plan Mode toggle
+- Agent mode selector: Lite / Eco / Power / Pro
+- Attach file
+- Attach design
+- Microphone placeholder
+- Send button
+- Current task status
+- Main Agent / Background Agent options when needed
+
+The chat should feel like the main control center of MustaFlow AI.
+
+7. When user creates a project from a prompt like “uber app,” do not just create an empty project.
+Automatically create an initial AI response with:
+- App idea understood
+- Suggested project type
+- Recommended tech stack
+- Pages/screens needed
+- Backend needed
+- Database needed
+- Integrations needed
+- API keys needed
+- Next step options:
+  1. Build first draft
+  2. Plan first
+  3. Edit idea
+  4. Run in background
+
+8. The AI chat should not only answer with text.
+The intended service is:
+User types what they want
+→ MustaFlow AI chooses the correct code
+→ creates files
+→ wires pages
+→ updates preview
+→ saves version
+→ reports what changed
+
+Even if the full code generation engine is still Phase 2, the UI must be shaped around this workflow now.
+
+--------------------------------------------------
+REQUIRED NEW WORKSPACE LAYOUT
+--------------------------------------------------
+
+Please modify the workspace to this structure:
+
+Global left sidebar:
+- Home
+- Projects
+- Knowledge Vault
+- Settings
+- Published
+- Integrations
+- Security
+- Billing
+- Learn
+- Documentation
+
+Project sidebar:
+- Project name
+- Status badge: draft / building / testing / published
+- New Task
+- Plans
+- Tasks
+- Files
+- Integrations
+- Secrets
+- Publishing
+- Security Scan
+- Knowledge Vault
+- Versions
+- Settings
+
+Top workspace tabs:
+- Preview
+- Canvas
+- Tools & Files
+- Publishing
+- Logs
+- Analytics
+- Resources
+- Domains
+- Manage
+
+Main area:
+Shows selected tab.
+
+Bottom:
+Fixed AI Builder Chat.
+
+--------------------------------------------------
+PREVIEW TAB DESIGN
+--------------------------------------------------
+
+Preview tab should have:
+
+Top preview toolbar:
+- Platform selector: Web / iOS / Android
+- Device selector icons
+- Refresh button
+- Open preview placeholder
+- Status badge
+- Last updated
+
+Preview frame:
+For Web:
+- browser frame
+- generated app appears inside
+
+For iOS:
+- iPhone frame
+- generated app screen inside
+
+For Android:
+- Android frame
+- generated app screen inside
+
+Empty state:
+If no generated files exist, show a professional empty state and tell user to use the AI Builder below.
+
+Do not show a random large empty black area without guidance.
+
+--------------------------------------------------
+AI BUILDER CHAT DESIGN
+--------------------------------------------------
+
+Move the AI Builder Chat to the bottom.
+
+It should be fixed and clean.
+
+It should have:
+- Conversation/status area above input if needed
+- Input box
+- Plan toggle
+- Agent mode buttons: Lite / Eco / Power / Pro
+- Attach button
+- Design attach button
+- Send button
+- Small status line: Ready / Planning / Building / Testing / Waiting for approval
+
+When Plan Mode is ON:
+AI should create plan only and ask:
+“Do you want me to build this in Main Agent or run it as a Background Task?”
+
+When Plan Mode is OFF:
+AI can start building first draft, but still must create report and version.
+
+--------------------------------------------------
+PROJECT CREATION BEHAVIOR
+--------------------------------------------------
+
+When user types an idea from home page, like:
+“uber app”
+
+The system should create a project and immediately generate a first interpretation card:
+
+Example:
+Project created: Uber-style Service App
+
+MustaFlow AI understood:
+You want a marketplace app similar to Uber where customers request service and providers accept jobs.
+
+Suggested app modules:
+- Customer app
+- Provider app
+- Admin dashboard
+- Live map
+- Request/job lifecycle
+- Payments
+- Notifications
+- Ratings
+- Authentication
+
+Required integrations:
+- Auth provider
+- Maps
+- Payments
+- Push notifications
+- Database
+- Storage
+
+Next actions:
+- Plan full app
+- Generate first draft
+- Ask questions first
+- Run planning in background
+
+This should appear in the AI Builder chat and/or workspace welcome panel.
+
+--------------------------------------------------
+TOOLS & FILES TAB
+--------------------------------------------------
+
+Tools & Files must be easy to find and should include:
+- File tree
+- Code editor area
+- Shell placeholder
+- Secrets / environment keys
+- Testing keys
+- Production keys
+- Integrations
+- Upload file
+- Attach design
+- Database tools placeholder
+
+Secrets must be masked.
+
+Clearly separate:
+- Development keys
+- Testing keys
+- Production keys
+
+--------------------------------------------------
+CANVAS TAB
+--------------------------------------------------
+
+Canvas should be for visual design:
+- Screen preview
+- Design variations
+- Reimagine design
+- Try different layout
+- Try different vibe
+- Apply selected design
+
+Canvas changes must still go through AI task/version history.
+
+--------------------------------------------------
+PUBLISHING TAB
+--------------------------------------------------
+
+Publishing should include:
+- Web testing deploy
+- Web production deploy
+- iOS preview/TestFlight checklist
+- Android preview/Play Store checklist
+- Custom domain
+- Logs
+- Environment validation
+- Rollback deployment placeholder
+
+Do not allow production publish without:
+- user confirmation
+- test report
+- environment validation
+- rollback point
+
+--------------------------------------------------
+VISUAL IMPROVEMENTS
+--------------------------------------------------
+
+Improve the UI so it looks more like a serious product:
+
+- More space for preview
+- Less wasted empty area
+- Better tab hierarchy
+- Cleaner sidebar spacing
+- Better contrast
+- Better project status display
+- Better empty states
+- Clear “what to do next” prompts
+- AI chat should look important, not like a small floating popup
+- Preview should not be blocked by chat
+
+Keep dark theme but make it polished and original for MustaFlow AI.
+
+--------------------------------------------------
+ACCEPTANCE CRITERIA
+--------------------------------------------------
+
+This UI modification is complete only when:
+
+1. AI chat is fixed at the bottom, not floating inside preview.
+2. Preview area is clean and not blocked.
+3. Web / iOS / Android selector is inside Preview tab.
+4. Top tabs include Preview, Canvas, Tools & Files, Publishing, Logs, Analytics, Resources, Domains, Manage.
+5. Sidebars are cleaner and do not squeeze the workspace too much.
+6. Empty preview state is helpful and professional.
+7. Project created from “uber app” shows a useful app interpretation/blueprint.
+8. AI Builder chat has Plan toggle and Lite/Eco/Power/Pro mode selector.
+9. Tools & Files tab includes file tree, shell placeholder, secrets, integrations.
+10. Publishing tab has testing/production/app store placeholders.
+11. App still runs without crash.
+12. Typecheck/build passes.
+13. API routes still return JSON.
+14. Unknown API routes still return JSON 404.
+15. Final validation report is provided.
+
+--------------------------------------------------
+FINAL REPORT REQUIRED
+--------------------------------------------------
+
+After finishing, provide:
+
+1. What UI files changed
+2. What components were created or updated
+3. Screenshots or description of new layout
+4. Confirmation chat is bottom fixed
+5. Confirmation preview is no longer blocked
+6. Confirmation project creation now shows blueprint/interpretation
+7. Confirmation tabs work
+8. Confirmation app runs
+9. Known limitations
+10. Next recommended phase
+
+Do not publish yet. I need to review this layout first.

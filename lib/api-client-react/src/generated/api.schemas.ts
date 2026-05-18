@@ -180,6 +180,7 @@ export interface ChatMessageInput {
   content: string;
   agentMode: ChatMessageInputAgentMode;
   planMode: boolean;
+  background?: boolean;
 }
 
 export interface ChatExchange {
@@ -209,6 +210,11 @@ export const AgentTaskStatus = {
   canceled: 'canceled',
 } as const;
 
+/**
+ * @nullable
+ */
+export type AgentTaskReport = { [key: string]: unknown } | null;
+
 export interface AgentTask {
   id: number;
   projectId: number;
@@ -216,7 +222,11 @@ export interface AgentTask {
   kind: AgentTaskKind;
   status: AgentTaskStatus;
   /** @nullable */
+  prompt?: string | null;
+  /** @nullable */
   result?: string | null;
+  /** @nullable */
+  report?: AgentTaskReport;
   createdAt: string;
   /** @nullable */
   completedAt?: string | null;
@@ -321,6 +331,28 @@ export interface KnowledgeInput {
   category: KnowledgeInputCategory;
   /** @minLength 1 */
   content: string;
+}
+
+export interface ProjectFileSummary {
+  id: number;
+  path: string;
+  mimeType: string;
+  size: number;
+  updatedAt: string;
+}
+
+export interface ProjectFileContent {
+  id: number;
+  path: string;
+  mimeType: string;
+  content: string;
+  updatedAt: string;
+}
+
+export interface RollbackResult {
+  restoredFiles: number;
+  versionId: number;
+  label: string;
 }
 
 export type ActivityItemKind = typeof ActivityItemKind[keyof typeof ActivityItemKind];

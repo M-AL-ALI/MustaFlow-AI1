@@ -232,6 +232,61 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProjectVersion"
 
+  /projects/{id}/versions/{versionId}/rollback:
+    post:
+      operationId: rollbackVersion
+      tags: [versions]
+      summary: Restore the project files to a saved version snapshot
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: versionId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Rollback applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RollbackResult"
+
+  /projects/{id}/files:
+    get:
+      operationId: listProjectFiles
+      tags: [projects]
+      summary: List generated files for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: List of files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectFileSummary"
+
+  /projects/{id}/files/{fileId}:
+    get:
+      operationId: getProjectFile
+      tags: [projects]
+      summary: Get the contents of one generated file by id
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: fileId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: File contents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFileContent"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/secrets:
     get:
       operationId: listSecrets
@@ -411,6 +466,7 @@ components:
           type: string
           enum: [lite, eco, power, pro]
         planMode: { type: boolean }
+        background: { type: boolean }
 
     ChatExchange:
       type: object
@@ -432,7 +488,11 @@ components:
         status:
           type: string
           enum: [queued, planning, building, testing, needs_approval, completed, failed, canceled]
+        prompt: { type: ["string", "null"] }
         result: { type: ["string", "null"] }
+        report:
+          type: ["object", "null"]
+          additionalProperties: true
         createdAt: { type: string, format: date-time }
         completedAt: { type: ["string", "null"], format: date-time }
 
@@ -507,6 +567,34 @@ components:
           type: string
           enum: [lesson, pattern, fix, diagnostic, note]
         content: { type: string, minLength: 1 }
+
+    ProjectFileSummary:
+      type: object
+      required: [id, path, mimeType, size, updatedAt]
+      properties:
+        id: { type: integer }
+        path: { type: string }
+        mimeType: { type: string }
+        size: { type: integer }
+        updatedAt: { type: string, format: date-time }
+
+    ProjectFileContent:
+      type: object
+      required: [id, path, mimeType, content, updatedAt]
+      properties:
+        id: { type: integer }
+        path: { type: string }
+        mimeType: { type: string }
+        content: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    RollbackResult:
+      type: object
+      required: [restoredFiles, versionId, label]
+      properties:
+        restoredFiles: { type: integer }
+        versionId: { type: integer }
+        label: { type: string }
 
     ActivityItem:
       type: object

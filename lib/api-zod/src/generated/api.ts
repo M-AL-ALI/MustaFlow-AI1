@@ -144,7 +144,8 @@ export const SendMessageParams = zod.object({
 export const SendMessageBody = zod.object({
   "content": zod.string().min(1),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
-  "planMode": zod.boolean()
+  "planMode": zod.boolean(),
+  "background": zod.boolean().optional()
 })
 
 export const SendMessageResponse = zod.object({
@@ -181,7 +182,9 @@ export const ListTasksResponseItem = zod.object({
   "title": zod.string(),
   "kind": zod.enum(['main', 'background']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'completed', 'failed', 'canceled']),
+  "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
+  "report": zod.record(zod.string(), zod.unknown()).nullish(),
   "createdAt": zod.coerce.date(),
   "completedAt": zod.coerce.date().nullish()
 })
@@ -229,6 +232,55 @@ export const CreateVersionParams = zod.object({
 export const CreateVersionBody = zod.object({
   "label": zod.string().min(1),
   "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Restore the project files to a saved version snapshot
+ */
+export const RollbackVersionParams = zod.object({
+  "id": zod.coerce.number(),
+  "versionId": zod.coerce.number()
+})
+
+export const RollbackVersionResponse = zod.object({
+  "restoredFiles": zod.number(),
+  "versionId": zod.number(),
+  "label": zod.string()
+})
+
+
+/**
+ * @summary List generated files for a project
+ */
+export const ListProjectFilesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListProjectFilesResponseItem = zod.object({
+  "id": zod.number(),
+  "path": zod.string(),
+  "mimeType": zod.string(),
+  "size": zod.number(),
+  "updatedAt": zod.coerce.date()
+})
+export const ListProjectFilesResponse = zod.array(ListProjectFilesResponseItem)
+
+
+/**
+ * @summary Get the contents of one generated file by id
+ */
+export const GetProjectFileParams = zod.object({
+  "id": zod.coerce.number(),
+  "fileId": zod.coerce.number()
+})
+
+export const GetProjectFileResponse = zod.object({
+  "id": zod.number(),
+  "path": zod.string(),
+  "mimeType": zod.string(),
+  "content": zod.string(),
+  "updatedAt": zod.coerce.date()
 })
 
 

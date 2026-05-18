@@ -1,0 +1,130 @@
+import { Router, type IRouter } from "express";
+import { and, asc, eq } from "drizzle-orm";
+import { db, projectFilesTable } from "@workspace/db";
+import { requireProjectOwnership } from "../lib/auth";
+import { guessMime } from "../lib/builder";
+
+const router: IRouter = Router();
+
+router.get(
+  "/projects/:id/files",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const rows = await db
+      .select({
+        id: projectFilesTable.id,
+        path: projectFilesTable.path,
+        mimeType: projectFilesTable.mimeType,
+        size: projectFilesTable.content,
+        updatedAt: projectFilesTable.updatedAt,
+      })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId))
+      .orderBy(asc(projectFilesTable.path));
+
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        path: r.path,
+        mimeType: r.mimeType,
+        size: r.size.length,
+        updatedAt: r.updatedAt,
+      })),
+    );
+  },
+);
+
+router.get(
+  "/projects/:id/files/:fileId",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const fileId = Number(req.params.fileId);
+    if (!Number.isFinite(fileId)) {
+      res.status(400).json({ error: "Invalid file id" });
+      return;
+    }
+    const [row] = await db
+      .select()
+      .from(projectFilesTable)
+      .where(
+        and(
+          eq(projectFilesTable.projectId, projectId),
+          eq(projectFilesTable.id, fileId),
+        ),
+      );
+    if (!row) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    res.json({
+      id: row.id,
+      path: row.path,
+      mimeType: row.mimeType,
+      content: row.content,
+      updatedAt: row.updatedAt,
+    });
+  },
+);
+
+// Serves generated project files as the actual preview. Ownership is enforced
+// so a user cannot iframe another user's project by id. The iframe is
+// same-origin, so session cookies / auth headers flow through automatically
+// once a real auth provider is wired in.
+router.get(
+  "/projects/:id/preview/{*splat}",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(404).type("text/plain").send("Not found");
+      return;
+    }
+    const splat = req.params.splat;
+    const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
+    const path = raw === "" ? "index.html" : raw;
+
+    const [row] = await db
+      .select()
+      .from(projectFilesTable)
+      .where(
+        and(
+          eq(projectFilesTable.projectId, projectId),
+          eq(projectFilesTable.path, path),
+        ),
+      );
+    if (!row) {
+      // Fallback to index.html so HTML routing-style requests still work
+      const [fallback] = await db
+        .select()
+        .from(projectFilesTable)
+        .where(
+          and(
+            eq(projectFilesTable.projectId, projectId),
+            eq(projectFilesTable.path, "index.html"),
+          ),
+        );
+      if (!fallback) {
+        res
+          .status(404)
+          .type("text/html")
+          .send(
+            `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">No preview yet</h1><p>Generate your app from the chat to see it here.</p></body></html>`,
+          );
+        return;
+      }
+      res
+        .type("text/html")
+        .setHeader("Cache-Control", "no-store, must-revalidate")
+        .send(fallback.content);
+      return;
+    }
+    res
+      .type(row.mimeType || guessMime(row.path))
+      .setHeader("Cache-Control", "no-store, must-revalidate")
+      .send(row.content);
+  },
+);
+
+export default router;

@@ -12,4 +12,5 @@ export interface ChatMessageInput {
   content: string;
   agentMode: ChatMessageInputAgentMode;
   planMode: boolean;
+  background?: boolean;
 }

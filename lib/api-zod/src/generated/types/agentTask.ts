@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AgentTaskKind } from './agentTaskKind';
+import type { AgentTaskReport } from './agentTaskReport';
 import type { AgentTaskStatus } from './agentTaskStatus';
 
 export interface AgentTask {
@@ -15,7 +16,11 @@ export interface AgentTask {
   kind: AgentTaskKind;
   status: AgentTaskStatus;
   /** @nullable */
+  prompt?: string | null;
+  /** @nullable */
   result?: string | null;
+  /** @nullable */
+  report?: AgentTaskReport;
   createdAt: Date;
   /** @nullable */
   completedAt?: Date | null;

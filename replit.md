@@ -51,11 +51,18 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - No emojis anywhere in the product UI — use lucide-react icons instead.
 - Original branding (not a Replit clone).
 
+## Builder engine (Phase 2)
+
+- `artifacts/api-server/src/lib/builder.ts` — three pipelines: `runBuildPipeline` (initial generation), `runRefinePipeline` (change requests), `runPlanPipeline` (Plan Mode). All use OpenAI JSON-mode; `power`/`pro` route to gpt-5.4, `lite`/`eco` to gpt-5-mini.
+- `artifacts/api-server/src/lib/jobs.ts` — `enqueueJob` uses `setImmediate` for background tasks; `runJob` is shared by main-agent (synchronous) and background-agent paths so background tasks run the *same* pipeline, not a fake auto-complete.
+- Generated apps are static (HTML/CSS/JS + Tailwind/lucide via CDN). They are served from the DB at `GET /api/projects/:id/preview/{*splat}` and iframed in the Preview tab. No npm/build tools run server-side.
+- Every successful build/refine snapshots all current files into `project_versions.filesSnapshot` and writes a `TaskReport` onto `agent_tasks.report`. The report card renders in the chat. Rollback restores the snapshot via `POST /api/projects/:id/versions/:versionId/rollback`.
+
 ## Known limitations
 
-- No authentication/authorization yet — all project endpoints are open. This is intentional for the current single-user prototype milestone; before opening to multiple users, add an auth layer (Clerk or Replit Auth), a `userId` foreign key on `projects`, and an ownership check in every project-scoped route handler.
-- Secrets are stored plaintext in `project_secrets.value_encrypted` (column name is aspirational). Values are masked in API responses, but encrypt at rest before allowing real secrets in.
-- The "build engine" that actually generates app code is a placeholder — tasks auto-complete after a short delay so the UI shows movement.
+- No authentication provider integration yet (Clerk/Replit Auth). The architecture is in place — every project has an `ownerId`, and `requireProjectOwnership` middleware checks ownership on every project-scoped route — but `req.userId` is hard-coded to `"demo-user"` in `artifacts/api-server/src/lib/auth.ts`. Swapping in real auth is mechanical: replace `attachUser` with a real session/JWT verifier that sets `req.userId`.
+- Secrets are stored plaintext in `project_secrets.value_encrypted` (column name is aspirational). Values are never returned by the API — only a masked preview. Encrypt at rest before accepting real production secrets.
+- The preview executes user-generated static HTML in a sandboxed iframe (`sandbox="allow-scripts allow-forms allow-popups allow-same-origin"`). The preview route enforces project ownership, but `allow-same-origin` means the iframe shares the app origin. Acceptable for single-user prototype; before multi-user, either drop `allow-same-origin` or serve previews from a separate subdomain with short-lived signed URLs.
 
 ## Gotchas
 

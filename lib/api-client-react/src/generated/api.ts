@@ -31,11 +31,14 @@ import type {
   KnowledgeEntry,
   KnowledgeInput,
   Project,
+  ProjectFileContent,
+  ProjectFileSummary,
   ProjectInput,
   ProjectUpdate,
   ProjectVersion,
   ProjectVersionInput,
   ProjectsSummary,
+  RollbackResult,
   SecretEntry,
   SecretInput
 } from './api.schemas';
@@ -977,6 +980,237 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getCreateVersionMutationOptions(options));
     }
+
+export const getRollbackVersionUrl = (id: number,
+    versionId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/versions/${versionId}/rollback`
+}
+
+/**
+ * @summary Restore the project files to a saved version snapshot
+ */
+export const rollbackVersion = async (id: number,
+    versionId: number, options?: RequestInit): Promise<RollbackResult> => {
+
+  return customFetch<RollbackResult>(getRollbackVersionUrl(id,versionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRollbackVersionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackVersion>>, TError,{id: number;versionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rollbackVersion>>, TError,{id: number;versionId: number}, TContext> => {
+
+const mutationKey = ['rollbackVersion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rollbackVersion>>, {id: number;versionId: number}> = (props) => {
+          const {id,versionId} = props ?? {};
+
+          return  rollbackVersion(id,versionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RollbackVersionMutationResult = NonNullable<Awaited<ReturnType<typeof rollbackVersion>>>
+
+    export type RollbackVersionMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Restore the project files to a saved version snapshot
+ */
+export const useRollbackVersion = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackVersion>>, TError,{id: number;versionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rollbackVersion>>,
+        TError,
+        {id: number;versionId: number},
+        TContext
+      > => {
+      return useMutation(getRollbackVersionMutationOptions(options));
+    }
+
+export const getListProjectFilesUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files`
+}
+
+/**
+ * @summary List generated files for a project
+ */
+export const listProjectFiles = async (id: number, options?: RequestInit): Promise<ProjectFileSummary[]> => {
+
+  return customFetch<ProjectFileSummary[]>(getListProjectFilesUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListProjectFilesQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/files`
+    ] as const;
+    }
+
+
+export const getListProjectFilesQueryOptions = <TData = Awaited<ReturnType<typeof listProjectFiles>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProjectFiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListProjectFilesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listProjectFiles>>> = ({ signal }) => listProjectFiles(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listProjectFiles>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListProjectFilesQueryResult = NonNullable<Awaited<ReturnType<typeof listProjectFiles>>>
+export type ListProjectFilesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List generated files for a project
+ */
+
+export function useListProjectFiles<TData = Awaited<ReturnType<typeof listProjectFiles>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProjectFiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListProjectFilesQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetProjectFileUrl = (id: number,
+    fileId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files/${fileId}`
+}
+
+/**
+ * @summary Get the contents of one generated file by id
+ */
+export const getProjectFile = async (id: number,
+    fileId: number, options?: RequestInit): Promise<ProjectFileContent> => {
+
+  return customFetch<ProjectFileContent>(getGetProjectFileUrl(id,fileId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectFileQueryKey = (id: number,
+    fileId: number,) => {
+    return [
+    `/api/projects/${id}/files/${fileId}`
+    ] as const;
+    }
+
+
+export const getGetProjectFileQueryOptions = <TData = Awaited<ReturnType<typeof getProjectFile>>, TError = ErrorType<ApiError>>(id: number,
+    fileId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectFile>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectFileQueryKey(id,fileId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectFile>>> = ({ signal }) => getProjectFile(id,fileId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && fileId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectFile>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectFileQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectFile>>>
+export type GetProjectFileQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get the contents of one generated file by id
+ */
+
+export function useGetProjectFile<TData = Awaited<ReturnType<typeof getProjectFile>>, TError = ErrorType<ApiError>>(
+ id: number,
+    fileId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectFile>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectFileQueryOptions(id,fileId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListSecretsUrl = (id: number,) => {
 

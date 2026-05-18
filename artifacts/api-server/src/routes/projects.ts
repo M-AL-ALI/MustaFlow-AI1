@@ -6,6 +6,7 @@ import {
   chatMessagesTable,
   agentTasksTable,
 } from "@workspace/db";
+import { requireProjectOwnership } from "../lib/auth";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -21,16 +22,20 @@ import { buildInitialAssistantMessage } from "../lib/ai";
 
 const router: IRouter = Router();
 
-router.get("/projects", async (_req, res): Promise<void> => {
+router.get("/projects", async (req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(projectsTable)
+    .where(eq(projectsTable.ownerId, req.userId ?? "demo-user"))
     .orderBy(desc(projectsTable.updatedAt));
   res.json(ListProjectsResponse.parse(rows));
 });
 
-router.get("/projects/summary", async (_req, res): Promise<void> => {
-  const rows = await db.select().from(projectsTable);
+router.get("/projects/summary", async (req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(projectsTable)
+    .where(eq(projectsTable.ownerId, req.userId ?? "demo-user"));
 
   const byStatus: Record<string, number> = {};
   const byKind: Record<string, number> = {};
@@ -65,6 +70,7 @@ router.post("/projects", async (req, res): Promise<void> => {
   const [project] = await db
     .insert(projectsTable)
     .values({
+      ownerId: req.userId ?? "demo-user",
       name: projectInput.name,
       description: projectInput.description ?? null,
       kind: projectInput.kind,
@@ -101,7 +107,7 @@ router.post("/projects", async (req, res): Promise<void> => {
   res.status(201).json(GetProjectResponse.parse(project));
 });
 
-router.get("/projects/:id", async (req, res): Promise<void> => {
+router.get("/projects/:id", requireProjectOwnership, async (req, res): Promise<void> => {
   const params = GetProjectParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -121,7 +127,7 @@ router.get("/projects/:id", async (req, res): Promise<void> => {
   res.json(GetProjectResponse.parse(project));
 });
 
-router.patch("/projects/:id", async (req, res): Promise<void> => {
+router.patch("/projects/:id", requireProjectOwnership, async (req, res): Promise<void> => {
   const params = UpdateProjectParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -147,7 +153,7 @@ router.patch("/projects/:id", async (req, res): Promise<void> => {
   res.json(UpdateProjectResponse.parse(project));
 });
 
-router.delete("/projects/:id", async (req, res): Promise<void> => {
+router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promise<void> => {
   const params = DeleteProjectParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
