@@ -1,7 +1,14 @@
 import { pgTable, serial, integer, text, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
-export const SECRET_AUDIT_ACTIONS = ["created", "updated", "deleted", "accessed"] as const;
+export const SECRET_AUDIT_ACTIONS = [
+  "created",
+  "updated",
+  "deleted",
+  "accessed",
+  "verified",
+  "verification_failed",
+] as const;
 export type SecretAuditAction = (typeof SECRET_AUDIT_ACTIONS)[number];
 
 export const secretAuditLogTable = pgTable("secret_audit_log", {

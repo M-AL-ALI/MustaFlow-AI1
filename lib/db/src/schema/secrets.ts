@@ -14,6 +14,8 @@ export const SECRET_CATEGORIES = [
   "email",
   "sms",
   "deployment",
+  "analytics",
+  "monitoring",
   "other",
 ] as const;
 export type SecretCategory = (typeof SECRET_CATEGORIES)[number];

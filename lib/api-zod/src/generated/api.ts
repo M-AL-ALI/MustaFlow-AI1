@@ -346,7 +346,7 @@ export const ListSecretsResponseItem = zod.object({
   "projectId": zod.number(),
   "name": zod.string(),
   "masked": zod.string(),
-  "environment": zod.enum(['development', 'test', 'production']),
+  "environment": zod.enum(['development', 'testing', 'staging', 'production']),
   "createdAt": zod.coerce.date()
 })
 export const ListSecretsResponse = zod.array(ListSecretsResponseItem)
@@ -363,7 +363,7 @@ export const CreateSecretParams = zod.object({
 export const CreateSecretBody = zod.object({
   "name": zod.string().min(1),
   "value": zod.string().min(1),
-  "environment": zod.enum(['development', 'test', 'production'])
+  "environment": zod.enum(['development', 'testing', 'staging', 'production'])
 })
 
 

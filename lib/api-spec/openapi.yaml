@@ -664,7 +664,7 @@ components:
         masked: { type: string }
         environment:
           type: string
-          enum: [development, test, production]
+          enum: [development, testing, staging, production]
         createdAt: { type: string, format: date-time }
 
     SecretInput:
@@ -675,7 +675,7 @@ components:
         value: { type: string, minLength: 1 }
         environment:
           type: string
-          enum: [development, test, production]
+          enum: [development, testing, staging, production]
 
     TaskFeedbackInput:
       type: object

@@ -62,7 +62,7 @@ export function ToolsTab({ projectId }: { projectId: number }) {
 
   const [newSecretName, setNewSecretName] = useState("");
   const [newSecretValue, setNewSecretValue] = useState("");
-  const [secretEnv, setSecretEnv] = useState<"development" | "test" | "production">("development");
+  const [secretEnv, setSecretEnv] = useState<"development" | "testing" | "staging" | "production">("development");
 
   const handleCreateSecret = () => {
     if (!newSecretName || !newSecretValue) return;
@@ -219,10 +219,11 @@ export function ToolsTab({ projectId }: { projectId: number }) {
                 <select
                   className="bg-background border border-border rounded-md px-2 text-sm"
                   value={secretEnv}
-                  onChange={(e) => setSecretEnv(e.target.value as "development" | "test" | "production")}
+                  onChange={(e) => setSecretEnv(e.target.value as "development" | "testing" | "staging" | "production")}
                 >
                   <option value="development">Development</option>
-                  <option value="test">Test</option>
+                  <option value="testing">Testing</option>
+                  <option value="staging">Staging</option>
                   <option value="production">Production</option>
                 </select>
                 <Button
@@ -243,12 +244,13 @@ export function ToolsTab({ projectId }: { projectId: number }) {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {(["development", "test", "production"] as const).map((env) => {
+                  {(["development", "testing", "staging", "production"] as const).map((env) => {
                     const envSecrets = secrets.filter((s) => s.environment === env);
                     if (envSecrets.length === 0) return null;
                     const envConfig = {
                       development: { label: "Development", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
-                      test: { label: "Test", color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20" },
+                      testing: { label: "Testing", color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20" },
+                      staging: { label: "Staging", color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/20" },
                       production: { label: "Production", color: "text-green-400", bg: "bg-green-500/10 border-green-500/20" },
                     }[env];
                     return (
