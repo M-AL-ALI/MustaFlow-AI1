@@ -70,6 +70,17 @@ router.post("/projects", async (req, res): Promise<void> => {
 
   const { initialPrompt, ...projectInput } = parsed.data;
 
+  // ── Mobile generation lock ────────────────────────────────────────────────
+  // Mobile (Expo/React Native) is not enabled. Only static web apps are supported.
+  const MOBILE_KINDS = ["mobile-ios", "mobile-android"];
+  if (MOBILE_KINDS.includes(projectInput.kind)) {
+    res.status(400).json({
+      error:
+        "Mobile generation is not enabled yet. MustaFlow AI currently supports static web apps only.",
+    });
+    return;
+  }
+
   const [project] = await db
     .insert(projectsTable)
     .values({

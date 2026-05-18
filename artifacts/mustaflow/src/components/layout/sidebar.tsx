@@ -11,13 +11,13 @@ import {
   GraduationCap,
   BookOpen,
   HelpCircle,
-
+  LayoutDashboard,
   LogOut,
   ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser, useClerk } from "@clerk/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const NAV_ITEMS = [
   { name: "Home", href: "/", icon: Home },
@@ -79,6 +79,44 @@ function NavGroup({
   );
 }
 
+function AdminNavItem() {
+  const [isAdmin, setIsAdmin] = useState(false);
+  const { isLoaded, isSignedIn } = useUser();
+  const [location] = useLocation();
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+    fetch("/api/admin/me")
+      .then((r) => (r.ok ? (r.json() as Promise<{ isAdmin: boolean }>) : null))
+      .then((data) => {
+        if (data?.isAdmin) setIsAdmin(true);
+      })
+      .catch(() => {});
+  }, [isLoaded, isSignedIn]);
+
+  if (!isAdmin) return null;
+
+  const isActive = location === "/admin" || location.startsWith("/admin");
+
+  return (
+    <div className="px-3 py-1">
+      <Link href="/admin">
+        <div
+          className={cn(
+            "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+            isActive
+              ? "bg-primary/10 text-primary"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+        >
+          <LayoutDashboard className="h-4 w-4" />
+          Admin
+        </div>
+      </Link>
+    </div>
+  );
+}
+
 function UserSection() {
   const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
@@ -102,7 +140,6 @@ function UserSection() {
         onClick={() => setMenuOpen((o) => !o)}
         className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted transition-colors"
       >
-        {/* Avatar */}
         {user.imageUrl ? (
           <img
             src={user.imageUrl}
@@ -162,6 +199,7 @@ export function Sidebar() {
       <div className="flex-1 space-y-4">
         <NavGroup items={NAV_ITEMS} />
         <NavGroup items={SECONDARY_NAV_ITEMS} title="Platform" />
+        <AdminNavItem />
       </div>
 
       {/* Resources + user */}

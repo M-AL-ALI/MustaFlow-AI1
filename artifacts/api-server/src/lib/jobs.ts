@@ -285,6 +285,19 @@ export async function runJob(input: JobInput): Promise<void> {
     return;
   }
 
+  // ── Mobile generation lock ────────────────────────────────────────────────
+  const MOBILE_KINDS = ["mobile-ios", "mobile-android"];
+  if (MOBILE_KINDS.includes(project.kind)) {
+    const msg =
+      "Mobile generation is not enabled yet. MustaFlow AI currently supports static web apps only.";
+    await emitEvent(taskId, "failed", msg);
+    await db
+      .update(agentTasksTable)
+      .set({ status: "failed", result: msg, completedAt: sql`now()` })
+      .where(eq(agentTasksTable.id, taskId));
+    return;
+  }
+
   const knowledgeContext = await loadKnowledgeContext(projectId);
 
   // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
