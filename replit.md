@@ -1,45 +1,70 @@
-# [Project name]
+# MustaFlow AI
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and (eventually) deploys it.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — API server (port 8080, proxied at /api)
+- `pnpm --filter @workspace/mustaflow run dev` — frontend (Vite, port assigned by workflow)
 - `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `pnpm run build` — typecheck + build
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks + Zod schemas
+- `pnpm --filter @workspace/db run push` — push DB schema (dev)
+- `pnpm --filter @workspace/scripts run seed` — seed sample projects (no-op if any exist)
+- Required env: `DATABASE_URL`, `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `SESSION_SECRET`
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- pnpm workspaces, Node 24, TypeScript 5.9
+- API: Express 5, Drizzle ORM + Postgres, Zod validation, pino logging
+- Frontend: React + Vite + Tailwind + shadcn/ui + wouter + TanStack Query
+- AI: OpenAI Chat Completions via the Replit AI integration (gpt-5-nano/mini/5.4 by agent mode)
+- API contract: OpenAPI → Orval (React Query hooks + Zod schemas)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- API contract: `lib/api-spec/openapi.yaml` (regenerate after edits)
+- Generated client hooks: `lib/api-client-react/src/generated/api.ts`
+- Generated Zod schemas: `lib/api-zod/src/generated/api.ts`
+- DB schema: `lib/db/src/schema/*` (projects, messages, tasks, versions, secrets, knowledge)
+- AI prompts & model routing: `artifacts/api-server/src/lib/ai.ts`
+- API routes: `artifacts/api-server/src/routes/*`
+- Frontend pages: `artifacts/mustaflow/src/pages/*`
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- AI calls are non-streaming Chat Completions (Orval can't generate SSE hooks; keeps client + server simple).
+- Plan Mode uses a separate system prompt and `response_format: json_object` so the structured plan can render as a card.
+- Secret values are never returned from the API — only a masked preview (`••••••••XXXX`).
+- Tasks are simulated (status flips to `completed` after a short delay) — the live build engine is a placeholder for a later milestone.
+- Frontend artifact is mounted at `/`; API at `/api`. The shared proxy routes most-specific-first.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Home: hero prompt that creates a project from natural language.
+- Projects dashboard: summary stats, recent activity, project grid.
+- Project workspace: left rail sections, top tab bar (Preview, Canvas, Tools & Files, Publishing, Logs, etc.), fixed bottom AI Builder chat with Plan Mode toggle and Lite/Eco/Power/Pro agent modes.
+- Knowledge Vault: shared learnings across builds.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- No emojis anywhere in the product UI — use lucide-react icons instead.
+- Original branding (not a Replit clone).
+
+## Known limitations
+
+- No authentication/authorization yet — all project endpoints are open. This is intentional for the current single-user prototype milestone; before opening to multiple users, add an auth layer (Clerk or Replit Auth), a `userId` foreign key on `projects`, and an ownership check in every project-scoped route handler.
+- Secrets are stored plaintext in `project_secrets.value_encrypted` (column name is aspirational). Values are masked in API responses, but encrypt at rest before allowing real secrets in.
+- The "build engine" that actually generates app code is a placeholder — tasks auto-complete after a short delay so the UI shows movement.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. It also runs `typecheck:libs`, which will fail if generated types break consumers — fix consumers, don't suppress.
+- Orval mutation hooks take `{ id, data }` at the top level for parameterized routes — never just `{ data }`.
+- Query options always require `queryKey` — pair `useX(id, { query: { enabled, queryKey: getXQueryKey(id) } })`.
+- Never `console.log` in server code — use `req.log` or the singleton `logger`.
 
 ## Pointers
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- See the `pnpm-workspace` skill for monorepo structure, TS references, and codegen
+- See the `ai-integrations-openai` skill for AI integration details

@@ -3,20 +3,33 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: MustaFlow AI API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: projects
+    description: User projects (apps being built)
+  - name: chat
+    description: AI builder chat messages
+  - name: tasks
+    description: Background and main agent tasks
+  - name: versions
+    description: Project versions and rollback points
+  - name: knowledge
+    description: Knowledge Vault entries
+  - name: secrets
+    description: Project secrets (masked)
+  - name: openai
+    description: OpenAI AI chat operations
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +37,486 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List all projects
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: Create a new project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+  /projects/{id}:
+    get:
+      operationId: getProject
+      tags: [projects]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateProject
+      tags: [projects]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204":
+          description: Deleted
+
+  /projects/summary:
+    get:
+      operationId: getProjectsSummary
+      tags: [projects]
+      summary: Dashboard aggregate counts
+      responses:
+        "200":
+          description: Counts of projects by status and type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectsSummary"
+
+  /projects/{id}/messages:
+    get:
+      operationId: listMessages
+      tags: [chat]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Messages in builder chat
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatMessage"
+    post:
+      operationId: sendMessage
+      tags: [chat]
+      summary: Send a message to the AI builder. Returns the saved user + assistant messages.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatMessageInput"
+      responses:
+        "200":
+          description: User and assistant messages persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatExchange"
+
+  /projects/{id}/tasks:
+    get:
+      operationId: listTasks
+      tags: [tasks]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: List of tasks for a project
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentTask"
+    post:
+      operationId: createTask
+      tags: [tasks]
+      summary: Queue a new background agent task
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentTaskInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTask"
+
+  /projects/{id}/versions:
+    get:
+      operationId: listVersions
+      tags: [versions]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectVersion"
+    post:
+      operationId: createVersion
+      tags: [versions]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectVersionInput"
+      responses:
+        "201":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectVersion"
+
+  /projects/{id}/secrets:
+    get:
+      operationId: listSecrets
+      tags: [secrets]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Masked secrets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SecretEntry"
+    post:
+      operationId: createSecret
+      tags: [secrets]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecretInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretEntry"
+
+  /knowledge:
+    get:
+      operationId: listKnowledge
+      tags: [knowledge]
+      responses:
+        "200":
+          description: Knowledge Vault entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KnowledgeEntry"
+    post:
+      operationId: createKnowledge
+      tags: [knowledge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeEntry"
+
+  /activity:
+    get:
+      operationId: getRecentActivity
+      tags: [projects]
+      summary: Recent activity feed across all projects
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
 components:
   schemas:
     HealthStatus:
       type: object
       properties:
+        status: { type: string }
+      required: [status]
+
+    ApiError:
+      type: object
+      properties:
+        error: { type: string }
+      required: [error]
+
+    Project:
+      type: object
+      required: [id, name, kind, status, agentMode, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        description: { type: ["string", "null"] }
+        kind:
+          type: string
+          enum: [web, mobile-ios, mobile-android, fullstack, dashboard, api, design, automation, marketplace, chatbot, spreadsheet]
         status:
           type: string
-      required:
-        - status
+          enum: [draft, building, testing, published, failed]
+        agentMode:
+          type: string
+          enum: [lite, eco, power, pro]
+        lastTaskSummary: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
+    ProjectInput:
+      type: object
+      required: [name, kind]
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+        kind:
+          type: string
+          enum: [web, mobile-ios, mobile-android, fullstack, dashboard, api, design, automation, marketplace, chatbot, spreadsheet]
+        initialPrompt: { type: string }
+
+    ProjectUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        status:
+          type: string
+          enum: [draft, building, testing, published, failed]
+        agentMode:
+          type: string
+          enum: [lite, eco, power, pro]
+
+    ProjectsSummary:
+      type: object
+      required: [total, byStatus, byKind, recent]
+      properties:
+        total: { type: integer }
+        byStatus:
+          type: object
+          additionalProperties: { type: integer }
+        byKind:
+          type: object
+          additionalProperties: { type: integer }
+        recent:
+          type: array
+          items: { $ref: "#/components/schemas/Project" }
+
+    ChatMessage:
+      type: object
+      required: [id, projectId, role, content, agentMode, planMode, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content: { type: string }
+        agentMode:
+          type: string
+          enum: [lite, eco, power, pro]
+        planMode: { type: boolean }
+        plan:
+          type: ["object", "null"]
+          additionalProperties: true
+        createdAt: { type: string, format: date-time }
+
+    ChatMessageInput:
+      type: object
+      required: [content, agentMode, planMode]
+      properties:
+        content: { type: string, minLength: 1 }
+        agentMode:
+          type: string
+          enum: [lite, eco, power, pro]
+        planMode: { type: boolean }
+
+    ChatExchange:
+      type: object
+      required: [userMessage, assistantMessage]
+      properties:
+        userMessage: { $ref: "#/components/schemas/ChatMessage" }
+        assistantMessage: { $ref: "#/components/schemas/ChatMessage" }
+
+    AgentTask:
+      type: object
+      required: [id, projectId, title, kind, status, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        title: { type: string }
+        kind:
+          type: string
+          enum: [main, background]
+        status:
+          type: string
+          enum: [queued, planning, building, testing, needs_approval, completed, failed, canceled]
+        result: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: ["string", "null"], format: date-time }
+
+    AgentTaskInput:
+      type: object
+      required: [title, kind]
+      properties:
+        title: { type: string, minLength: 1 }
+        kind:
+          type: string
+          enum: [main, background]
+        prompt: { type: string }
+
+    ProjectVersion:
+      type: object
+      required: [id, projectId, label, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        label: { type: string }
+        note: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+
+    ProjectVersionInput:
+      type: object
+      required: [label]
+      properties:
+        label: { type: string, minLength: 1 }
+        note: { type: string }
+
+    SecretEntry:
+      type: object
+      required: [id, projectId, name, masked, environment, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        name: { type: string }
+        masked: { type: string }
+        environment:
+          type: string
+          enum: [test, production]
+        createdAt: { type: string, format: date-time }
+
+    SecretInput:
+      type: object
+      required: [name, value, environment]
+      properties:
+        name: { type: string, minLength: 1 }
+        value: { type: string, minLength: 1 }
+        environment:
+          type: string
+          enum: [test, production]
+
+    KnowledgeEntry:
+      type: object
+      required: [id, title, category, content, createdAt]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        category:
+          type: string
+          enum: [lesson, pattern, fix, diagnostic, note]
+        content: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    KnowledgeInput:
+      type: object
+      required: [title, category, content]
+      properties:
+        title: { type: string, minLength: 1 }
+        category:
+          type: string
+          enum: [lesson, pattern, fix, diagnostic, note]
+        content: { type: string, minLength: 1 }
+
+    ActivityItem:
+      type: object
+      required: [id, projectId, projectName, kind, summary, createdAt]
+      properties:
+        id: { type: string }
+        projectId: { type: integer }
+        projectName: { type: string }
+        kind:
+          type: string
+          enum: [message, task, version, project]
+        summary: { type: string }
+        createdAt: { type: string, format: date-time }
