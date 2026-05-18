@@ -1,8 +1,10 @@
 import { Router, type IRouter } from "express";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, isNull, and } from "drizzle-orm";
 import { db, projectsTable, projectFilesTable, projectVersionsTable, deploymentLogsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
+
+const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
 const router: IRouter = Router();
 
@@ -108,10 +110,11 @@ router.post(
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
 
+    // requireProjectOwnership already checks deletedAt — this is defense-in-depth.
     const [project] = await db
       .select()
       .from(projectsTable)
-      .where(eq(projectsTable.id, projectId));
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
     if (!project) {
       res.status(404).json({ error: "Project not found" });
       return;
@@ -133,9 +136,10 @@ router.post(
     const slug: string = project.publicSlug ?? generatePublicSlug(project.name);
 
     const publishedAt = new Date().toISOString();
-    const deploymentLabel = `Published — ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
+    const isRepublish = project.publicSlug !== null;
+    const deploymentLabel = `${isRepublish ? "Republished" : "Published"} — ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
 
-    // Snapshot the files into a version record (this is the frozen public copy)
+    // Snapshot the files into a version record (this is the frozen public copy).
     const [deploymentVersion] = await db
       .insert(projectVersionsTable)
       .values({
@@ -161,13 +165,14 @@ router.post(
       })
       .where(eq(projectsTable.id, projectId));
 
-    const host = req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost";
-    const protocol = (req.headers["x-forwarded-proto"] as string) ?? "http";
-    const publicUrl = `${protocol}://${host}/api/p/${slug}/`;
+    // Primary public URL — platform subdomain (requires wildcard DNS in production).
+    // Internal path URL always works via the API for testing and fallback.
+    const publicUrl = `https://${slug}.${PLATFORM_DOMAIN}/`;
+    const internalPathUrl = `/api/p/${slug}/`;
 
     void writeKnowledge({
-      title: `Published: project ${projectId}`,
-      content: `Project id:${projectId} published by ${req.userId ?? "unknown"}. Slug: ${slug}. Snapshot version id:${deploymentVersion?.id}. ${files.length} file(s) frozen. Public URL: ${publicUrl}`,
+      title: `${isRepublish ? "Republished" : "Published"}: project ${projectId}`,
+      content: `Project id:${projectId} ${isRepublish ? "republished" : "published"} by ${req.userId ?? "unknown"}. Slug: ${slug}. Snapshot version id:${deploymentVersion?.id}. ${files.length} file(s) frozen. Public URL: ${publicUrl}`,
       type: "publish",
       category: "event",
       severity: "info",
@@ -186,19 +191,20 @@ router.post(
         publicUrl,
         filesCount: files.length,
         snapshotVersionId: deploymentVersion?.id ?? null,
-        note: "Published by user.",
+        note: isRepublish ? "Republished by user." : "Published by user.",
       }).catch(() => { /* best-effort */ });
     });
 
     res.json({
+      ok: true,
       projectId,
       status: "published",
       publicSlug: slug,
       publicUrl,
+      internalPathUrl,
       publishedAt,
-      deploymentVersionId: deploymentVersion?.id,
-      deploymentLabel: deploymentVersion?.label,
-      filesSnapshotted: files.length,
+      snapshotVersionId: deploymentVersion?.id,
+      filesPublished: files.length,
       note: "Public URL serves the frozen snapshot. Draft edits do not affect it until you publish again.",
     });
   },
@@ -206,16 +212,23 @@ router.post(
 
 // POST /api/projects/:id/unpublish — clears the published snapshot, reverts to testing.
 // The publicSlug is intentionally preserved so republishing reuses the same public URL.
+// After unpublish: /api/p/:slug/ returns 404 (serveSnapshot gate: no publishedSnapshotId).
 router.post(
   "/projects/:id/unpublish",
   requireProjectOwnership,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
 
+    // Fetch current slug so we can include it in the response (slug is never cleared).
+    const [current] = await db
+      .select({ publicSlug: projectsTable.publicSlug })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
     await db
       .update(projectsTable)
       .set({ status: "testing", publishedSnapshotId: null, updatedAt: sql`now()` })
-      .where(eq(projectsTable.id, projectId));
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
     void writeKnowledge({
       title: `Unpublished: project ${projectId}`,
@@ -233,11 +246,17 @@ router.post(
         userId: req.userId ?? "unknown",
         env: "production",
         status: "unpublished",
-        note: "Unpublished by user.",
+        note: "Unpublished by user. Public URL disabled.",
       }).catch(() => { /* best-effort */ });
     });
 
-    res.json({ projectId, status: "testing", publicUrl: null });
+    res.json({
+      ok: true,
+      projectId,
+      status: "testing",
+      publicSlug: current?.publicSlug ?? null,
+      publicUrlDisabled: true,
+    });
   },
 );
 

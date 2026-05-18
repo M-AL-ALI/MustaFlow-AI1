@@ -399,9 +399,13 @@ export function PublishingTab({ projectId }: { projectId: number }) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<{
+    ok: boolean;
     publicUrl: string;
+    internalPathUrl: string;
     publicSlug: string;
     publishedAt: string;
+    snapshotVersionId?: number;
+    filesPublished?: number;
   } | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
 
@@ -459,12 +463,19 @@ export function PublishingTab({ projectId }: { projectId: number }) {
         throw new Error(err.error ?? `HTTP ${res.status}`);
       }
       const data = (await res.json()) as {
+        ok: boolean;
         publicUrl: string;
+        internalPathUrl: string;
         publicSlug: string;
         publishedAt: string;
+        snapshotVersionId?: number;
+        filesPublished?: number;
       };
       setPublishResult(data);
       setShowConfirm(false);
+      // Refresh domain info (subdomain url is now available) and deployment logs
+      void fetchDomain();
+      void fetchDeployments();
     } catch (err) {
       setPublishError(
         err instanceof Error ? err.message : "Publish failed — please try again.",
@@ -1224,7 +1235,11 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                 </div>
                 <p className="text-[11px] text-muted-foreground">
                   Slug: <span className="font-mono">{publishResult.publicSlug}</span>
+                  {publishResult.filesPublished != null && <span>{" · "}{publishResult.filesPublished} file{publishResult.filesPublished !== 1 ? "s" : ""}</span>}
                   {" · "}Published {new Date(publishResult.publishedAt).toLocaleString()}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Internal path: <span className="font-mono">{publishResult.internalPathUrl}</span>
                 </p>
                 <Button
                   variant="outline"
@@ -1232,6 +1247,8 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                   onClick={async () => {
                     await fetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
                     setPublishResult(null);
+                    void fetchDomain();
+                    void fetchDeployments();
                   }}
                 >
                   Unpublish
