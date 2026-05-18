@@ -9,6 +9,7 @@ import {
   Clock,
   Zap,
   BrainCircuit,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
@@ -54,7 +55,7 @@ export function PreviewTab({ project }: { project: Project }) {
   const [device, setDevice] = useState<DeviceFrame>("desktop");
   const [iframeKey, setIframeKey] = useState(0);
 
-  const { data: files } = useListProjectFiles(project.id, {
+  const { data: files, isLoading: filesLoading } = useListProjectFiles(project.id, {
     query: {
       enabled: !!project.id,
       queryKey: getListProjectFilesQueryKey(project.id),
@@ -62,6 +63,7 @@ export function PreviewTab({ project }: { project: Project }) {
   });
 
   const hasFiles = (files?.length ?? 0) > 0;
+  const isLoading = filesLoading && files === undefined;
   const previewSrc = `/api/projects/${project.id}/preview/?t=${iframeKey}`;
   const refresh = () => setIframeKey((k) => k + 1);
 
@@ -179,7 +181,12 @@ export function PreviewTab({ project }: { project: Project }) {
 
       {/* Preview area */}
       <div className="flex-1 min-h-0 bg-muted/20 overflow-auto flex items-start justify-center p-4">
-        {hasFiles ? (
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+            <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
+            <span className="text-sm">Loading preview…</span>
+          </div>
+        ) : hasFiles ? (
           <div
             className={cn(
               "border border-border rounded-lg shadow-xl overflow-hidden bg-white flex flex-col",
@@ -206,7 +213,8 @@ export function PreviewTab({ project }: { project: Project }) {
             <iframe
               key={iframeKey}
               src={previewSrc}
-              title="Project preview"
+              title="App preview"
+              aria-label="App preview"
               className="flex-1 w-full border-0"
               style={{ minHeight: isFullWidth ? "100%" : sizes.h }}
               sandbox="allow-scripts allow-forms allow-popups allow-same-origin"

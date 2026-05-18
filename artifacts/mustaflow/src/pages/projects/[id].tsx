@@ -10,7 +10,7 @@ import {
   getListVersionsQueryKey,
   getListTasksQueryKey,
 } from "@workspace/api-client-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // used by inner components only
 import { Button } from "@/components/ui/button";
 import {
   Send,
@@ -298,6 +298,7 @@ export default function ProjectWorkspacePage() {
   const [runInBackground, setRunInBackground] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [deviceMode, setDeviceMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
+  const [activeTab, setActiveTab] = useState("preview");
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoAnalyzedRef = useRef(false);
 
@@ -407,15 +408,16 @@ export default function ProjectWorkspacePage() {
           <Cpu className="text-white" style={{ width: 16, height: 16 }} />
         </div>
         {[
-          { Icon: Globe, active: true, title: "Preview" },
-          { Icon: FileCode2, active: false, title: "Files" },
-          { Icon: Blocks, active: false, title: "Integrations" },
-          { Icon: Activity, active: false, title: "Analytics" },
-          { Icon: Settings, active: false, title: "Settings" },
-        ].map(({ Icon, active, title }) => (
+          { Icon: Globe, active: activeTab === "preview", title: "Go to Preview", tab: "preview" },
+          { Icon: FileCode2, active: activeTab === "tools-files", title: "Go to Files", tab: "tools-files" },
+          { Icon: Blocks, active: activeTab === "canvas", title: "Go to Canvas", tab: "canvas" },
+          { Icon: Activity, active: activeTab === "analytics", title: "Go to Analytics", tab: "analytics" },
+          { Icon: Settings, active: activeTab === "manage", title: "Go to Settings", tab: "manage" },
+        ].map(({ Icon, active, title, tab }) => (
           <button
             key={title}
             title={title}
+            onClick={() => setActiveTab(tab)}
             className={cn(
               "w-10 h-10 flex items-center justify-center rounded-xl transition-colors",
               active
@@ -435,138 +437,119 @@ export default function ProjectWorkspacePage() {
       {/* ── Main workspace column ── */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
 
-        {/* ── Top bar + Tab bar ── */}
-        <Tabs defaultValue="preview" className="flex-1 flex flex-col min-h-0 overflow-hidden">
-          {/* Project top bar */}
-          <div className="border-b border-border bg-card shrink-0 flex items-center gap-3 px-4 h-12">
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="w-5 h-5 rounded bg-primary/20 border border-primary/30 flex items-center justify-center">
-                <Globe className="h-3 w-3 text-primary" />
-              </div>
-              <span className="text-sm font-semibold text-foreground truncate max-w-[140px]">{project.name}</span>
-              <span className={cn("text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
-                project.status === "building" ? "bg-primary/10 text-primary border-primary/20"
-                : project.status === "published" ? "bg-green-500/10 text-green-400 border-green-500/20"
-                : project.status === "failed" ? "bg-destructive/10 text-destructive border-destructive/20"
-                : "bg-muted text-muted-foreground border-border"
-              )}>
-                {project.status}
-              </span>
+        {/* ── Top bar ── */}
+        <div className="border-b border-border bg-card shrink-0 flex items-center gap-3 px-4 h-12 z-20 relative">
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-5 h-5 rounded bg-primary/20 border border-primary/30 flex items-center justify-center">
+              <Globe className="h-3 w-3 text-primary" />
             </div>
-            {/* Tabs */}
-            <div className="flex-1 overflow-x-auto min-w-0">
-              <TabsList className="bg-transparent h-auto p-0 gap-0 border-b-0 rounded-none flex">
-                {WORKSPACE_TABS.map((tab) => (
-                  <TabsTrigger
-                    key={tab.value}
-                    value={tab.value}
-                    className="data-[state=active]:bg-background data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-3 py-3 text-xs font-medium text-muted-foreground data-[state=active]:text-foreground whitespace-nowrap transition-colors hover:text-foreground"
-                  >
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </div>
-            {/* Device selector */}
-            <div className="flex items-center gap-0.5 bg-muted rounded-xl p-1 shrink-0">
-              {([
-                { mode: "desktop", Icon: Monitor, label: "Desktop" },
-                { mode: "tablet", Icon: Tablet, label: "Tablet" },
-                { mode: "mobile", Icon: Smartphone, label: "Mobile" },
-              ] as const).map(({ mode, Icon, label }) => (
+            <span className="text-sm font-semibold text-foreground truncate max-w-[140px]">{project.name}</span>
+            <span className={cn("text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
+              project.status === "building" ? "bg-primary/10 text-primary border-primary/20"
+              : project.status === "published" ? "bg-green-500/10 text-green-400 border-green-500/20"
+              : project.status === "failed" ? "bg-destructive/10 text-destructive border-destructive/20"
+              : "bg-muted text-muted-foreground border-border"
+            )}>
+              {project.status}
+            </span>
+          </div>
+          {/* Plain tab buttons — no shadcn Tabs context */}
+          <div className="flex-1 overflow-x-auto min-w-0">
+            <div className="flex items-stretch h-full">
+              {WORKSPACE_TABS.map((tab) => (
                 <button
-                  key={mode}
-                  onClick={() => setDeviceMode(mode)}
-                  title={label}
+                  key={tab.value}
+                  aria-label={`Switch to ${tab.label} tab`}
+                  data-tab={tab.value}
+                  onClick={() => setActiveTab(tab.value)}
                   className={cn(
-                    "px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-[11px] font-medium transition-colors",
-                    deviceMode === mode
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
+                    "px-3 py-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2",
+                    activeTab === tab.value
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <Icon style={{ width: 13, height: 13 }} />
-                  <span className="hidden lg:inline">{label}</span>
+                  {tab.label}
                 </button>
               ))}
             </div>
-            {/* Publish button */}
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold hover:bg-green-500/15 transition-colors shrink-0">
-              <Rocket style={{ width: 12, height: 12 }} /> Publish
-            </button>
           </div>
+          {/* Device selector */}
+          <div className="flex items-center gap-0.5 bg-muted rounded-xl p-1 shrink-0">
+            {([
+              { mode: "desktop", Icon: Monitor, label: "Desktop" },
+              { mode: "tablet", Icon: Tablet, label: "Tablet" },
+              { mode: "mobile", Icon: Smartphone, label: "Mobile" },
+            ] as const).map(({ mode, Icon, label }) => (
+              <button
+                key={mode}
+                onClick={() => setDeviceMode(mode)}
+                aria-label={label}
+                className={cn(
+                  "px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-[11px] font-medium transition-colors",
+                  deviceMode === mode
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon style={{ width: 13, height: 13 }} />
+                <span className="hidden lg:inline">{label}</span>
+              </button>
+            ))}
+          </div>
+          {/* Publish button */}
+          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold hover:bg-green-500/15 transition-colors shrink-0">
+            <Rocket style={{ width: 12, height: 12 }} /> Publish
+          </button>
+        </div>
 
-          {/* Tab content — fills remaining space above chat */}
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <TabsContent value="preview" className="h-full m-0 border-0 outline-none">
-              <div className="flex h-full">
-                <div className="flex-1 min-w-0">
-                  <PreviewTab project={project} />
-                </div>
-                {/* ── What's Next right panel ── */}
-                <div className="w-52 bg-card border-l border-border flex flex-col p-3 gap-3 overflow-y-auto shrink-0">
-                  <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">What's next</div>
-                  {[
-                    { Icon: BrainCircuit, label: "Plan full app", desc: "Blueprint before building", color: "text-violet-400", bg: "bg-violet-500/10 border-violet-500/20",
-                      onClick: () => { setPlanMode(true); } },
-                    { Icon: Zap, label: "Build first draft", desc: "Generate from your prompt", color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20",
-                      onClick: () => { setPlanMode(false); } },
-                    { Icon: Blocks, label: "Add integrations", desc: "Auth, payments, APIs", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20",
-                      onClick: () => {} },
-                    { Icon: Rocket, label: "Publish app", desc: "Go live in one click", color: "text-green-400", bg: "bg-green-500/10 border-green-500/20",
-                      onClick: () => {} },
-                  ].map((action) => (
-                    <button
-                      key={action.label}
-                      onClick={action.onClick}
-                      className={cn("flex items-start gap-2.5 p-2.5 rounded-xl border text-left transition-all hover:scale-[1.01] active:scale-[0.99]", action.bg)}
-                    >
-                      <action.Icon className={cn("h-4 w-4 mt-0.5 shrink-0", action.color)} />
-                      <div className="min-w-0">
-                        <div className={cn("text-xs font-semibold", action.color)}>{action.label}</div>
-                        <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{action.desc}</div>
-                      </div>
-                    </button>
-                  ))}
-                  <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mt-1">Recent versions</div>
-                  {(versions ?? []).slice(0, 5).map((v, i) => (
-                    <div key={v.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 cursor-pointer">
-                      <History className="h-3 w-3 text-muted-foreground shrink-0" />
-                      <span className="text-[11px] text-muted-foreground truncate">{v.label ?? `Version ${v.id}`}</span>
-                      {i === 0 && <span className="ml-auto text-[9px] text-muted-foreground/50 shrink-0">latest</span>}
-                    </div>
-                  ))}
-                  {(versions ?? []).length === 0 && (
-                    <div className="text-[11px] text-muted-foreground/50 italic px-2">No versions yet</div>
-                  )}
-                </div>
+        {/* Tab content — fills remaining space above chat */}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {activeTab === "preview" && (
+            <div className="flex h-full">
+              <div className="flex-1 min-w-0">
+                <PreviewTab project={project} />
               </div>
-            </TabsContent>
-            <TabsContent value="canvas" className="h-full m-0 border-0 outline-none">
-              <CanvasTab projectId={projectId} />
-            </TabsContent>
-            <TabsContent value="tools-files" className="h-full m-0 border-0 outline-none">
-              <ToolsTab projectId={projectId} />
-            </TabsContent>
-            <TabsContent value="publishing" className="h-full m-0 border-0 outline-none">
-              <PublishingTab />
-            </TabsContent>
-            <TabsContent value="logs" className="h-full m-0 border-0 outline-none">
-              <LogsTab projectId={projectId} />
-            </TabsContent>
-            <TabsContent value="analytics" className="h-full m-0 border-0 outline-none">
-              <AnalyticsTab />
-            </TabsContent>
-            <TabsContent value="resources" className="h-full m-0 border-0 outline-none">
-              <ResourcesTab />
-            </TabsContent>
-            <TabsContent value="domains" className="h-full m-0 border-0 outline-none">
-              <DomainsTab />
-            </TabsContent>
-            <TabsContent value="manage" className="h-full m-0 border-0 outline-none">
-              <ManageTab projectId={projectId} />
-            </TabsContent>
-          </div>
+              {/* ── What's Next right panel ── */}
+              <div className="w-52 bg-card border-l border-border flex flex-col p-3 gap-3 overflow-y-auto shrink-0">
+                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">What's next</div>
+                {[
+                  { Icon: BrainCircuit, label: "Plan full app", desc: "Blueprint before building", color: "text-violet-400", bg: "bg-violet-500/10 border-violet-500/20", onClick: () => { setPlanMode(true); } },
+                  { Icon: Zap, label: "Build first draft", desc: "Generate from your prompt", color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20", onClick: () => { setPlanMode(false); } },
+                  { Icon: Blocks, label: "Add integrations", desc: "Auth, payments, APIs", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20", onClick: () => { setActiveTab("tools-files"); } },
+                  { Icon: Rocket, label: "Publish app", desc: "Go live in one click", color: "text-green-400", bg: "bg-green-500/10 border-green-500/20", onClick: () => { setActiveTab("publishing"); } },
+                ].map((action) => (
+                  <button key={action.label} onClick={action.onClick} className={cn("flex items-start gap-2.5 p-2.5 rounded-xl border text-left transition-all hover:scale-[1.01] active:scale-[0.99]", action.bg)}>
+                    <action.Icon className={cn("h-4 w-4 mt-0.5 shrink-0", action.color)} />
+                    <div className="min-w-0">
+                      <div className={cn("text-xs font-semibold", action.color)}>{action.label}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{action.desc}</div>
+                    </div>
+                  </button>
+                ))}
+                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mt-1">Recent versions</div>
+                {(versions ?? []).slice(0, 5).map((v, i) => (
+                  <div key={v.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 cursor-pointer">
+                    <History className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="text-[11px] text-muted-foreground truncate">{v.label ?? `Version ${v.id}`}</span>
+                    {i === 0 && <span className="ml-auto text-[9px] text-muted-foreground/50 shrink-0">latest</span>}
+                  </div>
+                ))}
+                {(versions ?? []).length === 0 && (
+                  <div className="text-[11px] text-muted-foreground/50 italic px-2">No versions yet</div>
+                )}
+              </div>
+            </div>
+          )}
+          {activeTab === "canvas" && <div className="h-full"><CanvasTab projectId={projectId} /></div>}
+          {activeTab === "tools-files" && <div className="h-full"><ToolsTab projectId={projectId} /></div>}
+          {activeTab === "publishing" && <div className="h-full"><PublishingTab /></div>}
+          {activeTab === "logs" && <div className="h-full"><LogsTab projectId={projectId} /></div>}
+          {activeTab === "analytics" && <div className="h-full"><AnalyticsTab /></div>}
+          {activeTab === "resources" && <div className="h-full"><ResourcesTab /></div>}
+          {activeTab === "domains" && <div className="h-full"><DomainsTab /></div>}
+          {activeTab === "manage" && <div className="h-full"><ManageTab projectId={projectId} /></div>}
+        </div>
 
           {/* ── AI Builder Chat ── */}
           <div className="shrink-0 border-t border-border bg-card/95 backdrop-blur-sm flex flex-col" style={{ height: 290 }}>
@@ -765,7 +748,6 @@ export default function ProjectWorkspacePage() {
               </div>
             </div>
           </div>
-        </Tabs>
       </div>
     </div>
   );

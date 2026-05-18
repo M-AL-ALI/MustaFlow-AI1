@@ -97,11 +97,13 @@ export default function HomePage() {
           {CHIPS.map((chip) => (
             <button
               key={chip.name}
+              aria-label={`Build a ${chip.name}`}
               onClick={() => {
-                if (prompt.trim()) {
-                  handleBuild(chip.kind);
+                const template = `Build me a ${chip.name.toLowerCase()}`;
+                if (!prompt.trim()) {
+                  setPrompt(template);
                 } else {
-                  setPrompt(`I want to build a ${chip.name.toLowerCase()} that...`);
+                  handleBuild(chip.kind);
                 }
               }}
               className="flex items-center gap-2 px-4 py-2 rounded-full border border-border bg-card hover:bg-muted hover:border-primary/50 transition-colors text-sm font-medium text-foreground"
