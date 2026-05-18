@@ -2,6 +2,7 @@ import { useParams } from "wouter";
 import {
   useGetProject,
   useListMessages,
+  useListVersions,
   useSendMessage,
   getGetProjectQueryKey,
   getListMessagesQueryKey,
@@ -31,8 +32,17 @@ import {
   ShieldCheck,
   Mic,
   Paintbrush2,
-  PanelLeftClose,
-  PanelLeftOpen,
+  Cpu,
+  Activity,
+  Rocket,
+  ChevronRight,
+  FolderOpen,
+  Code2,
+  FilePen,
+  Sparkles,
+  Monitor,
+  Tablet,
+  Smartphone,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -277,6 +287,9 @@ export default function ProjectWorkspacePage() {
     },
   });
   const sendMessage = useSendMessage();
+  const { data: versions } = useListVersions(projectId, {
+    query: { enabled: !!projectId, queryKey: getListVersionsQueryKey(projectId) },
+  });
   const queryClient = useQueryClient();
 
   const [prompt, setPrompt] = useState("");
@@ -284,7 +297,7 @@ export default function ProjectWorkspacePage() {
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
-  const [projectSidebarOpen, setProjectSidebarOpen] = useState(true);
+  const [deviceMode, setDeviceMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoAnalyzedRef = useRef(false);
 
@@ -388,82 +401,146 @@ export default function ProjectWorkspacePage() {
   return (
     <div className="flex h-full bg-background w-full overflow-hidden text-foreground">
 
-      {/* ── Project sidebar (collapsible) ── */}
-      <div
-        className={cn(
-          "bg-sidebar border-r border-border flex flex-col z-10 shrink-0 transition-all duration-200 overflow-hidden",
-          projectSidebarOpen ? "w-48" : "w-0",
-        )}
-      >
-        {projectSidebarOpen && (
-          <>
-            <div className="px-3 py-3 border-b border-border">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-6 h-6 rounded bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
-                  <Globe className="h-3.5 w-3.5 text-primary" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold truncate text-sidebar-foreground">{project.name}</div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="text-[10px] text-sidebar-foreground/50 capitalize">{project.kind}</span>
-                    <span className={cn("text-[10px] px-1.5 py-px rounded-full font-medium", statusColor)}>
-                      {project.status}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="p-2 space-y-px overflow-y-auto flex-1 text-xs">
-              {PROJECT_NAV.map((item) => (
-                <button
-                  key={item.label}
-                  className="flex items-center gap-2.5 w-full px-2.5 py-1.5 rounded-md hover:bg-sidebar-accent text-left text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors"
-                >
-                  <item.icon className="h-3.5 w-3.5 shrink-0" />
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+      {/* ── Slim icon rail ── */}
+      <div className="w-14 bg-sidebar border-r border-border flex flex-col items-center py-3 gap-1.5 shrink-0 z-10">
+        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center mb-2 shadow-lg shadow-primary/20">
+          <Cpu className="text-white" style={{ width: 16, height: 16 }} />
+        </div>
+        {[
+          { Icon: Globe, active: true, title: "Preview" },
+          { Icon: FileCode2, active: false, title: "Files" },
+          { Icon: Blocks, active: false, title: "Integrations" },
+          { Icon: Activity, active: false, title: "Analytics" },
+          { Icon: Settings, active: false, title: "Settings" },
+        ].map(({ Icon, active, title }) => (
+          <button
+            key={title}
+            title={title}
+            className={cn(
+              "w-10 h-10 flex items-center justify-center rounded-xl transition-colors",
+              active
+                ? "bg-sidebar-accent text-sidebar-foreground"
+                : "text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
+            )}
+          >
+            <Icon style={{ width: 17, height: 17 }} />
+          </button>
+        ))}
+        <div className="flex-1" />
+        <div className="w-8 h-8 rounded-full bg-primary/80 border border-primary/40 flex items-center justify-center text-[11px] font-bold text-white">
+          D
+        </div>
       </div>
 
       {/* ── Main workspace column ── */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
 
-        {/* Tab bar */}
+        {/* ── Top bar + Tab bar ── */}
         <Tabs defaultValue="preview" className="flex-1 flex flex-col min-h-0 overflow-hidden">
-          <div className="border-b border-border bg-card shrink-0 flex items-center">
-            {/* Sidebar toggle */}
-            <button
-              onClick={() => setProjectSidebarOpen((v) => !v)}
-              className="h-full px-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors border-r border-border"
-              title={projectSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
-            >
-              {projectSidebarOpen
-                ? <PanelLeftClose className="h-4 w-4" />
-                : <PanelLeftOpen className="h-4 w-4" />
-              }
-            </button>
-            <div className="flex-1 overflow-x-auto">
+          {/* Project top bar */}
+          <div className="border-b border-border bg-card shrink-0 flex items-center gap-3 px-4 h-12">
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="w-5 h-5 rounded bg-primary/20 border border-primary/30 flex items-center justify-center">
+                <Globe className="h-3 w-3 text-primary" />
+              </div>
+              <span className="text-sm font-semibold text-foreground truncate max-w-[140px]">{project.name}</span>
+              <span className={cn("text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
+                project.status === "building" ? "bg-primary/10 text-primary border-primary/20"
+                : project.status === "published" ? "bg-green-500/10 text-green-400 border-green-500/20"
+                : project.status === "failed" ? "bg-destructive/10 text-destructive border-destructive/20"
+                : "bg-muted text-muted-foreground border-border"
+              )}>
+                {project.status}
+              </span>
+            </div>
+            {/* Tabs */}
+            <div className="flex-1 overflow-x-auto min-w-0">
               <TabsList className="bg-transparent h-auto p-0 gap-0 border-b-0 rounded-none flex">
                 {WORKSPACE_TABS.map((tab) => (
                   <TabsTrigger
                     key={tab.value}
                     value={tab.value}
-                    className="data-[state=active]:bg-background data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-4 py-2.5 text-xs font-medium text-muted-foreground data-[state=active]:text-foreground whitespace-nowrap transition-colors hover:text-foreground"
+                    className="data-[state=active]:bg-background data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-3 py-3 text-xs font-medium text-muted-foreground data-[state=active]:text-foreground whitespace-nowrap transition-colors hover:text-foreground"
                   >
                     {tab.label}
                   </TabsTrigger>
                 ))}
               </TabsList>
             </div>
+            {/* Device selector */}
+            <div className="flex items-center gap-0.5 bg-muted rounded-xl p-1 shrink-0">
+              {([
+                { mode: "desktop", Icon: Monitor, label: "Desktop" },
+                { mode: "tablet", Icon: Tablet, label: "Tablet" },
+                { mode: "mobile", Icon: Smartphone, label: "Mobile" },
+              ] as const).map(({ mode, Icon, label }) => (
+                <button
+                  key={mode}
+                  onClick={() => setDeviceMode(mode)}
+                  title={label}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-[11px] font-medium transition-colors",
+                    deviceMode === mode
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon style={{ width: 13, height: 13 }} />
+                  <span className="hidden lg:inline">{label}</span>
+                </button>
+              ))}
+            </div>
+            {/* Publish button */}
+            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold hover:bg-green-500/15 transition-colors shrink-0">
+              <Rocket style={{ width: 12, height: 12 }} /> Publish
+            </button>
           </div>
 
           {/* Tab content — fills remaining space above chat */}
           <div className="flex-1 min-h-0 overflow-hidden">
             <TabsContent value="preview" className="h-full m-0 border-0 outline-none">
-              <PreviewTab project={project} />
+              <div className="flex h-full">
+                <div className="flex-1 min-w-0">
+                  <PreviewTab project={project} />
+                </div>
+                {/* ── What's Next right panel ── */}
+                <div className="w-52 bg-card border-l border-border flex flex-col p-3 gap-3 overflow-y-auto shrink-0">
+                  <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">What's next</div>
+                  {[
+                    { Icon: BrainCircuit, label: "Plan full app", desc: "Blueprint before building", color: "text-violet-400", bg: "bg-violet-500/10 border-violet-500/20",
+                      onClick: () => { setPlanMode(true); } },
+                    { Icon: Zap, label: "Build first draft", desc: "Generate from your prompt", color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20",
+                      onClick: () => { setPlanMode(false); } },
+                    { Icon: Blocks, label: "Add integrations", desc: "Auth, payments, APIs", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20",
+                      onClick: () => {} },
+                    { Icon: Rocket, label: "Publish app", desc: "Go live in one click", color: "text-green-400", bg: "bg-green-500/10 border-green-500/20",
+                      onClick: () => {} },
+                  ].map((action) => (
+                    <button
+                      key={action.label}
+                      onClick={action.onClick}
+                      className={cn("flex items-start gap-2.5 p-2.5 rounded-xl border text-left transition-all hover:scale-[1.01] active:scale-[0.99]", action.bg)}
+                    >
+                      <action.Icon className={cn("h-4 w-4 mt-0.5 shrink-0", action.color)} />
+                      <div className="min-w-0">
+                        <div className={cn("text-xs font-semibold", action.color)}>{action.label}</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{action.desc}</div>
+                      </div>
+                    </button>
+                  ))}
+                  <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mt-1">Recent versions</div>
+                  {(versions ?? []).slice(0, 5).map((v, i) => (
+                    <div key={v.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 cursor-pointer">
+                      <History className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="text-[11px] text-muted-foreground truncate">{v.label ?? `Version ${v.id}`}</span>
+                      {i === 0 && <span className="ml-auto text-[9px] text-muted-foreground/50 shrink-0">latest</span>}
+                    </div>
+                  ))}
+                  {(versions ?? []).length === 0 && (
+                    <div className="text-[11px] text-muted-foreground/50 italic px-2">No versions yet</div>
+                  )}
+                </div>
+              </div>
             </TabsContent>
             <TabsContent value="canvas" className="h-full m-0 border-0 outline-none">
               <CanvasTab projectId={projectId} />
@@ -491,8 +568,8 @@ export default function ProjectWorkspacePage() {
             </TabsContent>
           </div>
 
-          {/* ── AI Builder Chat — fixed bottom panel, NOT floating ── */}
-          <div className="shrink-0 border-t border-border bg-card flex flex-col" style={{ height: 290 }}>
+          {/* ── AI Builder Chat ── */}
+          <div className="shrink-0 border-t border-border bg-card/95 backdrop-blur-sm flex flex-col" style={{ height: 290 }}>
 
             {/* Messages scroll area */}
             <div
@@ -569,103 +646,122 @@ export default function ProjectWorkspacePage() {
               )}
             </div>
 
-            {/* Input controls */}
-            <div className="shrink-0 border-t border-border/60 px-4 py-2.5 space-y-2">
-              {/* Toolbar row */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {/* Plan Mode */}
-                <button
-                  onClick={() => setPlanMode(!planMode)}
-                  className={cn(
-                    "flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors border",
-                    planMode
-                      ? "bg-secondary/15 text-secondary border-secondary/30"
-                      : "text-muted-foreground border-border hover:border-border hover:text-foreground",
-                  )}
-                >
-                  <CheckSquare className="h-3 w-3" /> Plan Mode
-                </button>
-
-                {/* Background */}
-                <button
-                  onClick={() => setRunInBackground((v) => !v)}
-                  className={cn(
-                    "flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors border",
-                    runInBackground
-                      ? "bg-primary/10 text-primary border-primary/30"
-                      : "text-muted-foreground border-border hover:text-foreground",
-                  )}
-                >
-                  <ServerCog className="h-3 w-3" /> Background
-                </button>
-
-                {/* Status indicator */}
-                <div className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-muted-foreground">
-                  <span
-                    className={cn(
-                      "w-1.5 h-1.5 rounded-full",
-                      sendMessage.isPending ? "bg-primary animate-pulse" : "bg-green-500",
-                    )}
-                  />
-                  {sendMessage.isPending ? "Working…" : "Ready"}
-                </div>
-
-                <div className="ml-auto flex bg-muted rounded-md p-0.5">
-                  {(["lite", "eco", "power", "pro"] as const).map((mode) => (
+            {/* Activity ticker */}
+            <div className="shrink-0 px-4 py-1.5 border-t border-border/40 flex items-center gap-3">
+              {sendMessage.isPending ? (
+                <>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                    </span>
+                    <span className="text-[11px] font-semibold text-primary">AI is working</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar">
+                    {[
+                      { type: "reading_files", Icon: FolderOpen, msg: "Reading files" },
+                      { type: "generating_code", Icon: Code2, msg: "Generating code" },
+                      { type: "editing_files", Icon: FilePen, msg: "Writing files" },
+                    ].map((ev, i, arr) => (
+                      <div key={ev.type} className="flex items-center gap-1 shrink-0">
+                        <div className={cn(
+                          "flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px]",
+                          i === arr.length - 1
+                            ? "bg-primary/15 text-primary border border-primary/25"
+                            : "text-muted-foreground/50",
+                        )}>
+                          <ev.Icon className={cn("h-3 w-3", i === arr.length - 1 && "animate-pulse")} />
+                          {ev.msg}
+                          {i < arr.length - 1 && <CheckCircle2 className="h-3 w-3 text-green-500/60 ml-0.5" />}
+                        </div>
+                        {i < arr.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground/30 shrink-0" />}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                  Ready
+                  <div className="ml-auto flex items-center gap-2">
                     <button
-                      key={mode}
+                      onClick={() => setPlanMode(!planMode)}
                       className={cn(
-                        "px-2 py-0.5 text-[9px] uppercase font-bold rounded-sm transition-colors",
-                        agentMode === mode
-                          ? "bg-background shadow-sm text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
+                        "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
+                        planMode ? "bg-secondary/15 text-secondary border-secondary/30" : "text-muted-foreground border-border hover:text-foreground",
                       )}
-                      onClick={() => setAgentMode(mode)}
                     >
-                      {mode}
+                      <CheckSquare className="h-3 w-3" /> Plan
                     </button>
-                  ))}
+                    <button
+                      onClick={() => setRunInBackground((v) => !v)}
+                      className={cn(
+                        "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
+                        runInBackground ? "bg-primary/10 text-primary border-primary/30" : "text-muted-foreground border-border hover:text-foreground",
+                      )}
+                    >
+                      <ServerCog className="h-3 w-3" /> Background
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
+            </div>
 
-              {/* Input row */}
-              <div className="flex items-end gap-2">
-                <div className="flex items-center gap-1">
-                  <button className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Attach file">
-                    <Paperclip className="h-3.5 w-3.5" />
-                  </button>
-                  <button className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Attach design">
-                    <Paintbrush2 className="h-3.5 w-3.5" />
-                  </button>
-                  <button className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Voice input">
-                    <Mic className="h-3.5 w-3.5" />
-                  </button>
+            {/* Input section — AI avatar + unified input card */}
+            <div className="shrink-0 px-3 py-2">
+              <div className="flex items-start gap-2.5">
+                {/* AI avatar */}
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shrink-0 shadow-lg shadow-primary/20 mt-0.5">
+                  <Sparkles style={{ width: 14, height: 14 }} className="text-white" />
                 </div>
-                <textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder={
-                    planMode
-                      ? "Describe what you want — I'll outline a plan first…"
-                      : "Describe what to build or ask for a change…"
-                  }
-                  rows={2}
-                  className="flex-1 bg-muted border border-border rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                />
-                <Button
-                  size="icon"
-                  className="h-9 w-9 rounded-xl shrink-0 shadow-sm"
-                  onClick={handleSend}
-                  disabled={sendMessage.isPending || !prompt.trim()}
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
+                {/* Input card */}
+                <div className="flex-1 bg-muted border border-border rounded-2xl rounded-tl-sm overflow-hidden">
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder={planMode ? "Describe your app — I'll create a plan first…" : "Describe what to build or ask for a change…"}
+                    rows={2}
+                    className="w-full bg-transparent px-4 pt-3 pb-1 text-sm resize-none focus:outline-none text-foreground placeholder:text-muted-foreground/60"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                    }}
+                  />
+                  <div className="h-px bg-border/40 mx-4" />
+                  <div className="flex items-center gap-2 px-3 py-1.5">
+                    <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Attach file">
+                      <Paperclip className="h-3.5 w-3.5" />
+                    </button>
+                    <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Attach design">
+                      <Paintbrush2 className="h-3.5 w-3.5" />
+                    </button>
+                    <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Voice">
+                      <Mic className="h-3.5 w-3.5" />
+                    </button>
+                    <div className="ml-auto flex items-center gap-2">
+                      <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
+                        {(["lite", "eco", "power", "pro"] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            onClick={() => setAgentMode(mode)}
+                            className={cn(
+                              "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
+                              agentMode === mode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                            )}
+                          >
+                            {mode}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={handleSend}
+                        disabled={sendMessage.isPending || !prompt.trim()}
+                        className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shadow-md shadow-primary/30 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Send style={{ width: 14, height: 14 }} className="text-primary-foreground" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
