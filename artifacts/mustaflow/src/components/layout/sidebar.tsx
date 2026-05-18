@@ -1,4 +1,5 @@
 import { Link, useLocation } from "wouter";
+import logoUrl from "/logo.png";
 import {
   Home,
   FolderKanban,
@@ -9,7 +10,7 @@ import {
   Settings,
   GraduationCap,
   BookOpen,
-  Waves,
+
   LogOut,
   ChevronDown,
 } from "lucide-react";
@@ -152,11 +153,8 @@ export function Sidebar() {
   return (
     <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col shrink-0 overflow-y-auto">
       {/* Logo */}
-      <div className="p-6 flex items-center gap-3 shrink-0">
-        <div className="bg-primary text-primary-foreground p-1.5 rounded-lg">
-          <Waves className="h-5 w-5" />
-        </div>
-        <span className="font-bold text-lg tracking-tight">MustaFlow AI</span>
+      <div className="px-4 py-5 flex justify-center shrink-0">
+        <img src={logoUrl} alt="MustaFlow AI" className="h-20 w-auto object-contain" />
       </div>
 
       {/* Nav */}
