@@ -10,6 +10,7 @@ export type SecretEntryEnvironment = typeof SecretEntryEnvironment[keyof typeof 
 
 
 export const SecretEntryEnvironment = {
+  development: 'development',
   test: 'test',
   production: 'production',
 } as const;

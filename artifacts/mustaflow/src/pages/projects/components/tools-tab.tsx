@@ -11,7 +11,9 @@ import {
   Save,
   History as HistoryIcon,
   RotateCcw,
+  Info,
 } from "lucide-react";
+import { IntegrationsRegistry } from "./integrations-registry";
 import {
   useListSecrets,
   useCreateSecret,
@@ -60,7 +62,7 @@ export function ToolsTab({ projectId }: { projectId: number }) {
 
   const [newSecretName, setNewSecretName] = useState("");
   const [newSecretValue, setNewSecretValue] = useState("");
-  const [secretEnv, setSecretEnv] = useState<"test" | "production">("production");
+  const [secretEnv, setSecretEnv] = useState<"development" | "test" | "production">("development");
 
   const handleCreateSecret = () => {
     if (!newSecretName || !newSecretValue) return;
@@ -217,8 +219,9 @@ export function ToolsTab({ projectId }: { projectId: number }) {
                 <select
                   className="bg-background border border-border rounded-md px-2 text-sm"
                   value={secretEnv}
-                  onChange={(e) => setSecretEnv(e.target.value as "test" | "production")}
+                  onChange={(e) => setSecretEnv(e.target.value as "development" | "test" | "production")}
                 >
+                  <option value="development">Development</option>
                   <option value="test">Test</option>
                   <option value="production">Production</option>
                 </select>
@@ -234,55 +237,50 @@ export function ToolsTab({ projectId }: { projectId: number }) {
                 </div>
               </div>
 
-              <div className="border border-border rounded-lg overflow-hidden bg-card">
-                <div className="grid grid-cols-3 gap-4 p-3 bg-muted border-b border-border font-medium text-sm">
-                  <div>Key</div>
-                  <div>Value</div>
-                  <div>Environment</div>
+              {(!secrets || secrets.length === 0) ? (
+                <div className="border border-border rounded-lg p-8 text-center text-muted-foreground bg-card">
+                  No secrets configured yet. Add your first key above.
                 </div>
-                {secrets?.map((s) => (
-                  <div
-                    key={s.id}
-                    className="grid grid-cols-3 gap-4 p-3 border-b border-border text-sm last:border-0"
-                  >
-                    <div className="font-mono">{s.name}</div>
-                    <div className="font-mono text-muted-foreground">{s.masked}</div>
-                    <div>
-                      <span className="px-2 py-1 bg-secondary/20 text-secondary rounded text-xs">
-                        {s.environment}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-                {(!secrets || secrets.length === 0) && (
-                  <div className="p-8 text-center text-muted-foreground">No secrets configured.</div>
-                )}
+              ) : (
+                <div className="space-y-4">
+                  {(["development", "test", "production"] as const).map((env) => {
+                    const envSecrets = secrets.filter((s) => s.environment === env);
+                    if (envSecrets.length === 0) return null;
+                    const envConfig = {
+                      development: { label: "Development", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
+                      test: { label: "Test", color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20" },
+                      production: { label: "Production", color: "text-green-400", bg: "bg-green-500/10 border-green-500/20" },
+                    }[env];
+                    return (
+                      <div key={env} className="border border-border rounded-lg overflow-hidden bg-card">
+                        <div className={`px-4 py-2 border-b border-border flex items-center gap-2 ${envConfig.bg}`}>
+                          <span className={`text-xs font-semibold uppercase tracking-wider ${envConfig.color}`}>{envConfig.label} Keys</span>
+                          <span className="text-xs text-muted-foreground ml-auto">{envSecrets.length} secret{envSecrets.length !== 1 ? "s" : ""}</span>
+                        </div>
+                        <div className="divide-y divide-border">
+                          {envSecrets.map((s) => (
+                            <div key={s.id} className="grid grid-cols-2 gap-4 p-3 text-sm">
+                              <div className="font-mono text-foreground truncate">{s.name}</div>
+                              <div className="font-mono text-muted-foreground flex items-center gap-1.5">
+                                <Lock className="h-3 w-3 shrink-0" />
+                                {s.masked}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="flex items-start gap-2 text-xs text-muted-foreground mt-2">
+                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                Secret values are never returned by the API. Use Development keys for local testing, Test keys for staging, and Production keys for your live app.
               </div>
             </TabsContent>
 
-            <TabsContent
-              value="integrations"
-              className="h-full m-0 p-4 grid grid-cols-1 md:grid-cols-3 gap-4"
-            >
-              {["OpenAI", "Supabase", "Stripe", "Resend", "Google Maps", "Twilio"].map(
-                (integration) => (
-                  <div
-                    key={integration}
-                    className="border border-border rounded-lg p-4 bg-card flex flex-col items-start gap-4"
-                  >
-                    <div className="h-10 w-10 bg-primary/20 rounded-lg flex items-center justify-center">
-                      <Blocks className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold">{integration}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        The AI Builder will recommend this when your project needs it and tell you which keys to
-                        add in Secrets.
-                      </p>
-                    </div>
-                  </div>
-                ),
-              )}
+            <TabsContent value="integrations" className="h-full m-0 p-4">
+              <IntegrationsRegistry projectId={projectId} />
             </TabsContent>
           </div>
         </Tabs>
