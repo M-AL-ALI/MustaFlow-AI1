@@ -222,6 +222,34 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentTask"
 
+  /projects/{id}/tasks/{taskId}/feedback:
+    patch:
+      operationId: submitTaskFeedback
+      tags: [tasks]
+      summary: Submit thumbs up or down feedback on a task
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskFeedbackInput"
+      responses:
+        "200":
+          description: Feedback recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTask"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/versions:
     get:
       operationId: listVersions
@@ -543,6 +571,12 @@ components:
         report:
           type: ["object", "null"]
           additionalProperties: true
+        userFeedback:
+          type: ["string", "null"]
+          enum: [positive, negative, null]
+        suggestions:
+          type: array
+          items: { type: string }
         createdAt: { type: string, format: date-time }
         completedAt: { type: ["string", "null"], format: date-time }
 
@@ -595,6 +629,14 @@ components:
         environment:
           type: string
           enum: [development, test, production]
+
+    TaskFeedbackInput:
+      type: object
+      required: [feedback]
+      properties:
+        feedback:
+          type: string
+          enum: [positive, negative]
 
     KnowledgeEntry:
       type: object

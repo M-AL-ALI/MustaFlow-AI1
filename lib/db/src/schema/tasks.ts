@@ -16,6 +16,7 @@ export type TaskReport = {
   filesRemoved: string[];
   previewUpdated: boolean;
   warnings: string[];
+  suggestions?: string[];
   integrationsNeeded: Array<{
     name: string;
     why: string;
@@ -37,6 +38,7 @@ export const agentTasksTable = pgTable("agent_tasks", {
   prompt: text("prompt"),
   result: text("result"),
   report: jsonb("report").$type<TaskReport>(),
+  userFeedback: text("user_feedback"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

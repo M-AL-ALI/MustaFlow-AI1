@@ -6,6 +6,8 @@ import {
   ListTasksResponse,
   CreateTaskParams,
   CreateTaskBody,
+  SubmitTaskFeedbackParams,
+  SubmitTaskFeedbackBody,
 } from "@workspace/api-zod";
 import { requireProjectOwnership } from "../lib/auth";
 import { enqueueJob } from "../lib/jobs";
@@ -95,6 +97,33 @@ router.post(
     });
 
     res.status(201).json(task);
+  },
+);
+
+router.patch(
+  "/projects/:id/tasks/:taskId/feedback",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = SubmitTaskFeedbackParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    const parsed = SubmitTaskFeedbackBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const [task] = await db
+      .update(agentTasksTable)
+      .set({ userFeedback: parsed.data.feedback })
+      .where(eq(agentTasksTable.id, params.data.taskId))
+      .returning();
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+    res.json(task);
   },
 );
 

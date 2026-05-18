@@ -204,6 +204,8 @@ export const ListTasksResponseItem = zod.object({
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "report": zod.record(zod.string(), zod.unknown()).nullish(),
+  "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
+  "suggestions": zod.array(zod.string()).optional(),
   "createdAt": zod.coerce.date(),
   "completedAt": zod.coerce.date().nullish()
 })
@@ -224,6 +226,34 @@ export const CreateTaskBody = zod.object({
   "title": zod.string().min(1),
   "kind": zod.enum(['main', 'background']),
   "prompt": zod.string().optional()
+})
+
+
+/**
+ * @summary Submit thumbs up or down feedback on a task
+ */
+export const SubmitTaskFeedbackParams = zod.object({
+  "id": zod.coerce.number(),
+  "taskId": zod.coerce.number()
+})
+
+export const SubmitTaskFeedbackBody = zod.object({
+  "feedback": zod.enum(['positive', 'negative'])
+})
+
+export const SubmitTaskFeedbackResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "title": zod.string(),
+  "kind": zod.enum(['main', 'background']),
+  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'completed', 'failed', 'canceled']),
+  "prompt": zod.string().nullish(),
+  "result": zod.string().nullish(),
+  "report": zod.record(zod.string(), zod.unknown()).nullish(),
+  "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "createdAt": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullish()
 })
 
 

@@ -242,6 +242,17 @@ export const AgentTaskStatus = {
  */
 export type AgentTaskReport = { [key: string]: unknown } | null;
 
+/**
+ * @nullable
+ */
+export type AgentTaskUserFeedback = typeof AgentTaskUserFeedback[keyof typeof AgentTaskUserFeedback] | null;
+
+
+export const AgentTaskUserFeedback = {
+  positive: 'positive',
+  negative: 'negative',
+} as const;
+
 export interface AgentTask {
   id: number;
   projectId: number;
@@ -254,6 +265,9 @@ export interface AgentTask {
   result?: string | null;
   /** @nullable */
   report?: AgentTaskReport;
+  /** @nullable */
+  userFeedback?: AgentTaskUserFeedback;
+  suggestions?: string[];
   createdAt: string;
   /** @nullable */
   completedAt?: string | null;
@@ -322,6 +336,18 @@ export interface SecretInput {
   /** @minLength 1 */
   value: string;
   environment: SecretInputEnvironment;
+}
+
+export type TaskFeedbackInputFeedback = typeof TaskFeedbackInputFeedback[keyof typeof TaskFeedbackInputFeedback];
+
+
+export const TaskFeedbackInputFeedback = {
+  positive: 'positive',
+  negative: 'negative',
+} as const;
+
+export interface TaskFeedbackInput {
+  feedback: TaskFeedbackInputFeedback;
 }
 
 export type KnowledgeEntryCategory = typeof KnowledgeEntryCategory[keyof typeof KnowledgeEntryCategory];

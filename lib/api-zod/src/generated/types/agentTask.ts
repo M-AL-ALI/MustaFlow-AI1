@@ -8,6 +8,7 @@
 import type { AgentTaskKind } from './agentTaskKind';
 import type { AgentTaskReport } from './agentTaskReport';
 import type { AgentTaskStatus } from './agentTaskStatus';
+import type { AgentTaskUserFeedback } from './agentTaskUserFeedback';
 
 export interface AgentTask {
   id: number;
@@ -21,6 +22,9 @@ export interface AgentTask {
   result?: string | null;
   /** @nullable */
   report?: AgentTaskReport;
+  /** @nullable */
+  userFeedback?: AgentTaskUserFeedback;
+  suggestions?: string[];
   createdAt: Date;
   /** @nullable */
   completedAt?: Date | null;

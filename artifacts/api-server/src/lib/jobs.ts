@@ -7,6 +7,7 @@ import {
   projectVersionsTable,
   chatMessagesTable,
   taskEventsTable,
+  knowledgeEntriesTable,
   type TaskReport,
   type FileSnapshotEntry,
 } from "@workspace/db";
@@ -16,6 +17,7 @@ import {
   type BuilderFile,
   type ConversationTurn,
 } from "./builder";
+import { openai } from "@workspace/integrations-openai-ai-server";
 import type { AgentMode } from "./ai";
 import { logger } from "./logger";
 
@@ -114,6 +116,72 @@ async function deleteFiles(
   }
 }
 
+async function loadKnowledgeContext(): Promise<string> {
+  try {
+    const entries = await db
+      .select()
+      .from(knowledgeEntriesTable)
+      .orderBy(knowledgeEntriesTable.createdAt);
+    if (entries.length === 0) return "";
+    return entries
+      .map((e) => `[${e.category}] ${e.title}: ${e.content}`)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
+async function generateFixSuggestions(
+  userPrompt: string,
+  errorMessage: string,
+): Promise<string[]> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-5-mini",
+      max_completion_tokens: 600,
+      messages: [
+        {
+          role: "system",
+          content:
+            'You help debug AI-generated web app builds. Given a user request and a build error, return a JSON object with a "suggestions" array of exactly 3 short, specific, actionable fixes the user can try. Each suggestion must be 1 sentence and start with an action verb. Output ONLY valid JSON: {"suggestions":["...","...","..."]}',
+        },
+        {
+          role: "user",
+          content: `User request: "${userPrompt}"\n\nBuild error: ${errorMessage}`,
+        },
+      ],
+      response_format: { type: "json_object" },
+    });
+    const raw = response.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(raw) as { suggestions?: string[] };
+    if (Array.isArray(parsed.suggestions) && parsed.suggestions.length > 0) {
+      return parsed.suggestions.slice(0, 3);
+    }
+  } catch (err) {
+    logger.warn({ err }, "Failed to generate fix suggestions");
+  }
+  return [
+    "Simplify the request and try rebuilding with fewer features.",
+    "Use Plan Mode first to outline the approach before building.",
+    "Check that all required integrations and secrets are configured.",
+  ];
+}
+
+async function autoWriteFailureLesson(
+  userPrompt: string,
+  errorMessage: string,
+): Promise<void> {
+  try {
+    await db.insert(knowledgeEntriesTable).values({
+      title: `Build failed: "${userPrompt.slice(0, 60)}"`,
+      category: "diagnostic",
+      content: `Attempt failed with error: ${errorMessage.slice(0, 300)}. Review the fix suggestions and adjust the approach before retrying.`,
+    });
+  } catch (err) {
+    logger.warn({ err }, "Failed to auto-write failure lesson to Knowledge Vault");
+  }
+}
+
 export async function runJob(input: JobInput): Promise<void> {
   const { taskId, projectId, kind, userPrompt, agentMode, conversationHistory } = input;
 
@@ -141,6 +209,8 @@ export async function runJob(input: JobInput): Promise<void> {
     return;
   }
 
+  const knowledgeContext = await loadKnowledgeContext();
+
   try {
     let report: TaskReport;
     let assistantSummary: string;
@@ -160,6 +230,7 @@ export async function runJob(input: JobInput): Promise<void> {
         userPrompt,
         agentMode,
         conversationHistory,
+        knowledgeContext: knowledgeContext || undefined,
       });
 
       await emitEvent(
@@ -199,6 +270,7 @@ export async function runJob(input: JobInput): Promise<void> {
         agentMode,
         existingFiles,
         conversationHistory,
+        knowledgeContext: knowledgeContext || undefined,
       });
 
       await emitEvent(
@@ -284,20 +356,30 @@ export async function runJob(input: JobInput): Promise<void> {
     const message =
       err instanceof Error ? err.message : "Unknown builder error";
     await emitEvent(taskId, "failed", message);
+
+    // Generate specific fix suggestions via AI (parallel with DB writes)
+    const [suggestions] = await Promise.all([
+      generateFixSuggestions(userPrompt, message),
+      db
+        .update(agentTasksTable)
+        .set({ status: "failed", result: message, completedAt: sql`now()` })
+        .where(eq(agentTasksTable.id, taskId)),
+      db
+        .update(projectsTable)
+        .set({ status: "failed", updatedAt: sql`now()` })
+        .where(eq(projectsTable.id, projectId)),
+    ]);
+
+    // Store fix suggestions on the task record
     await db
       .update(agentTasksTable)
-      .set({
-        status: "failed",
-        result: message,
-        completedAt: sql`now()`,
-      })
+      .set({ report: { userRequest: userPrompt, filesCreated: [], filesChanged: [], filesRemoved: [], previewUpdated: false, warnings: [], suggestions, integrationsNeeded: [] } })
       .where(eq(agentTasksTable.id, taskId));
-    await db
-      .update(projectsTable)
-      .set({ status: "failed", updatedAt: sql`now()` })
-      .where(eq(projectsTable.id, projectId));
 
-    // Post a visible error message into the chat
+    // Auto-write a diagnostic lesson to the Knowledge Vault
+    void autoWriteFailureLesson(userPrompt, message);
+
+    // Post a rich error message with suggestions into the chat
     try {
       await db.insert(chatMessagesTable).values({
         projectId,
@@ -305,7 +387,7 @@ export async function runJob(input: JobInput): Promise<void> {
         content: `Build failed: ${message}`,
         agentMode,
         planMode: false,
-        plan: { kind: "error", message } as unknown as Record<string, unknown>,
+        plan: { kind: "error", message, suggestions } as unknown as Record<string, unknown>,
       });
     } catch {
       // best-effort

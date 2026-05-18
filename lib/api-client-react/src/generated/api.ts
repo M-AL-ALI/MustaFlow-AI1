@@ -41,7 +41,8 @@ import type {
   RollbackResult,
   SecretEntry,
   SecretInput,
-  TaskEvent
+  TaskEvent,
+  TaskFeedbackInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -925,6 +926,80 @@ export const useCreateTask = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateTaskMutationOptions(options));
+    }
+
+export const getSubmitTaskFeedbackUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}/feedback`
+}
+
+/**
+ * @summary Submit thumbs up or down feedback on a task
+ */
+export const submitTaskFeedback = async (id: number,
+    taskId: number,
+    taskFeedbackInput: TaskFeedbackInput, options?: RequestInit): Promise<AgentTask> => {
+
+  return customFetch<AgentTask>(getSubmitTaskFeedbackUrl(id,taskId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      taskFeedbackInput,)
+  }
+);}
+
+
+
+
+export const getSubmitTaskFeedbackMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitTaskFeedback>>, TError,{id: number;taskId: number;data: BodyType<TaskFeedbackInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitTaskFeedback>>, TError,{id: number;taskId: number;data: BodyType<TaskFeedbackInput>}, TContext> => {
+
+const mutationKey = ['submitTaskFeedback'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitTaskFeedback>>, {id: number;taskId: number;data: BodyType<TaskFeedbackInput>}> = (props) => {
+          const {id,taskId,data} = props ?? {};
+
+          return  submitTaskFeedback(id,taskId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitTaskFeedbackMutationResult = NonNullable<Awaited<ReturnType<typeof submitTaskFeedback>>>
+    export type SubmitTaskFeedbackMutationBody = BodyType<TaskFeedbackInput>
+    export type SubmitTaskFeedbackMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Submit thumbs up or down feedback on a task
+ */
+export const useSubmitTaskFeedback = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitTaskFeedback>>, TError,{id: number;taskId: number;data: BodyType<TaskFeedbackInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitTaskFeedback>>,
+        TError,
+        {id: number;taskId: number;data: BodyType<TaskFeedbackInput>},
+        TContext
+      > => {
+      return useMutation(getSubmitTaskFeedbackMutationOptions(options));
     }
 
 export const getListVersionsUrl = (id: number,) => {

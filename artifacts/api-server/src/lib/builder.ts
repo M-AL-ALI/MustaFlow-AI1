@@ -202,8 +202,9 @@ export async function runBuildPipeline(args: {
   userPrompt: string;
   agentMode: AgentMode;
   conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
 }): Promise<BuilderResult> {
-  const { projectName, projectKind, userPrompt, agentMode, conversationHistory } = args;
+  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: BUILD_SYSTEM_PROMPT },
@@ -212,6 +213,13 @@ export async function runBuildPipeline(args: {
       content: `Project: "${projectName}" (kind: ${projectKind}).`,
     },
   ];
+
+  if (knowledgeContext) {
+    messages.push({
+      role: "system",
+      content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+    });
+  }
 
   // Inject recent conversation turns for context (skip system messages)
   if (conversationHistory && conversationHistory.length > 0) {
@@ -286,13 +294,14 @@ export async function runRefinePipeline(args: {
   agentMode: AgentMode;
   existingFiles: BuilderFile[];
   conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
   report: TaskReport;
   assistantSummary: string;
 }> {
-  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory } = args;
+  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext } = args;
 
   const fileManifest = existingFiles
     .map((f) => `--- ${f.path} (${f.mimeType}) ---\n${f.content}`)
@@ -305,6 +314,13 @@ export async function runRefinePipeline(args: {
       content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}`,
     },
   ];
+
+  if (knowledgeContext) {
+    messages.push({
+      role: "system",
+      content: `LEARNED LESSONS — apply these to every change without being asked:\n${knowledgeContext}`,
+    });
+  }
 
   // Inject recent conversation turns for context
   if (conversationHistory && conversationHistory.length > 0) {

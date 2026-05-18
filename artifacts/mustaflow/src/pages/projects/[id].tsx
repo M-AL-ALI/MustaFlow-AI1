@@ -9,6 +9,7 @@ import {
   getListProjectFilesQueryKey,
   getListVersionsQueryKey,
   getListTasksQueryKey,
+  useSubmitTaskFeedback,
 } from "@workspace/api-client-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // used by inner components only
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,9 @@ import {
   Monitor,
   Tablet,
   Smartphone,
+  ThumbsUp,
+  ThumbsDown,
+  Wrench,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -79,7 +83,7 @@ type ChatPlanPayload =
   | { kind: "report"; report: TaskReport; taskId?: number }
   | { kind: "task-queued"; taskId: number }
   | { kind: "task-done"; taskId: number }
-  | { kind: "error"; message: string }
+  | { kind: "error"; message: string; suggestions?: string[] }
   | Record<string, unknown>;
 
 type StructuredPlan = {
@@ -237,11 +241,46 @@ function PlanCard({
   );
 }
 
-function ErrorCard({ message }: { message: string }) {
+function ErrorCard({
+  message,
+  suggestions,
+  onTryFix,
+}: {
+  message: string;
+  suggestions?: string[];
+  onTryFix?: (text: string) => void;
+}) {
   return (
-    <div className="mt-2 bg-destructive/10 border border-destructive/30 rounded-lg p-2.5 text-xs flex items-start gap-2">
-      <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
-      <span className="text-destructive/90">{message}</span>
+    <div className="mt-2 bg-destructive/10 border border-destructive/30 rounded-xl p-3 text-xs space-y-2.5">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+        <span className="text-destructive/90 leading-relaxed">{message}</span>
+      </div>
+      {suggestions && suggestions.length > 0 && (
+        <div className="space-y-1.5 border-t border-destructive/20 pt-2">
+          <div className="font-semibold text-destructive/80 flex items-center gap-1 text-[10px] uppercase tracking-wider">
+            <Wrench className="h-3 w-3" /> Suggested fixes
+          </div>
+          {suggestions.map((s, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <div className="w-4 h-4 rounded-full bg-destructive/20 text-destructive text-[9px] flex items-center justify-center font-bold shrink-0 mt-0.5">
+                {i + 1}
+              </div>
+              <div className="flex-1 flex items-start gap-2 min-w-0">
+                <span className="text-foreground/80 leading-relaxed flex-1">{s}</span>
+                {onTryFix && (
+                  <button
+                    onClick={() => onTryFix(s)}
+                    className="shrink-0 text-[10px] font-medium text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-2 py-0.5 rounded-lg transition-colors whitespace-nowrap"
+                  >
+                    Try this
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -544,7 +583,17 @@ export default function ProjectWorkspacePage() {
           {activeTab === "canvas" && <div className="h-full"><CanvasTab projectId={projectId} /></div>}
           {activeTab === "tools-files" && <div className="h-full"><ToolsTab projectId={projectId} /></div>}
           {activeTab === "publishing" && <div className="h-full"><PublishingTab /></div>}
-          {activeTab === "logs" && <div className="h-full"><LogsTab projectId={projectId} /></div>}
+          {activeTab === "logs" && (
+            <div className="h-full">
+              <LogsTab
+                projectId={projectId}
+                onTryFix={(text) => {
+                  setPrompt(text);
+                  setActiveTab("preview");
+                }}
+              />
+            </div>
+          )}
           {activeTab === "analytics" && <div className="h-full"><AnalyticsTab /></div>}
           {activeTab === "resources" && <div className="h-full"><ResourcesTab /></div>}
           {activeTab === "domains" && <div className="h-full"><DomainsTab /></div>}
@@ -596,7 +645,11 @@ export default function ProjectWorkspacePage() {
                         </div>
                       )}
                       {isError && (
-                        <ErrorCard message={(planPayload as { message: string }).message} />
+                        <ErrorCard
+                          message={(planPayload as { message: string }).message}
+                          suggestions={(planPayload as { suggestions?: string[] }).suggestions}
+                          onTryFix={(text) => { setPrompt(text); }}
+                        />
                       )}
                       {isPlanCard && (
                         <PlanCard
