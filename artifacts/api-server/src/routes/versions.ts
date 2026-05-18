@@ -7,6 +7,8 @@ import {
   projectFilesTable,
   chatMessagesTable,
   knowledgeEntriesTable,
+  agentTasksTable,
+  taskEventsTable,
 } from "@workspace/db";
 import {
   ListVersionsParams,
@@ -15,8 +17,21 @@ import {
   CreateVersionBody,
 } from "@workspace/api-zod";
 import { requireProjectOwnership } from "../lib/auth";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+async function emitRollbackEvent(
+  taskId: number,
+  eventType: string,
+  message: string,
+): Promise<void> {
+  try {
+    await db.insert(taskEventsTable).values({ taskId, eventType, message, filePath: null });
+  } catch (err) {
+    logger.warn({ err, taskId, eventType }, "Failed to emit rollback task event");
+  }
+}
 
 router.get(
   "/projects/:id/versions",
@@ -107,17 +122,46 @@ router.post(
     }
     const snapshot = version.filesSnapshot ?? [];
 
+    // Create a rollback task row so it appears in Build History with live events
+    const [rollbackTask] = await db
+      .insert(agentTasksTable)
+      .values({
+        projectId,
+        title: `Rollback to "${version.label}"`,
+        kind: "rollback",
+        status: "planning",
+        prompt: `Restore project to version: ${version.label}`,
+      })
+      .returning();
+    const taskId = rollbackTask?.id ?? 0;
+
+    await emitRollbackEvent(taskId, "queued", "Rollback initiated…");
+    await emitRollbackEvent(
+      taskId,
+      "restoring_files",
+      `Restoring ${snapshot.length} file(s) from version "${version.label}"…`,
+    );
+
+    // Bulk delete current files and re-insert snapshot
     await db
       .delete(projectFilesTable)
       .where(eq(projectFilesTable.projectId, projectId));
-    for (const f of snapshot) {
-      await db.insert(projectFilesTable).values({
-        projectId,
-        path: f.path,
-        content: f.content,
-        mimeType: f.mimeType,
-      });
+    if (snapshot.length > 0) {
+      await db.insert(projectFilesTable).values(
+        snapshot.map((f) => ({
+          projectId,
+          path: f.path,
+          content: f.content,
+          mimeType: f.mimeType,
+        })),
+      );
     }
+
+    await emitRollbackEvent(
+      taskId,
+      "updating_preview",
+      "Refreshing preview with restored files…",
+    );
 
     await db.insert(chatMessagesTable).values({
       projectId,
@@ -131,9 +175,19 @@ router.post(
       .update(projectsTable)
       .set({
         updatedAt: sql`now()`,
+        status: "testing",
         lastTaskSummary: `Rolled back to "${version.label}"`,
       })
       .where(eq(projectsTable.id, projectId));
+
+    await emitRollbackEvent(taskId, "completed", "Rollback complete.");
+
+    if (rollbackTask) {
+      await db
+        .update(agentTasksTable)
+        .set({ status: "completed", result: `Rolled back to "${version.label}"`, completedAt: sql`now()` })
+        .where(eq(agentTasksTable.id, rollbackTask.id));
+    }
 
     // Write a rollback signal to the Knowledge Vault so the AI can learn from it
     try {
@@ -150,6 +204,7 @@ router.post(
       restoredFiles: snapshot.length,
       versionId,
       label: version.label,
+      taskId: rollbackTask?.id ?? null,
     });
   },
 );

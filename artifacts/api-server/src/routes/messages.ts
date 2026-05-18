@@ -5,6 +5,7 @@ import {
   projectsTable,
   chatMessagesTable,
   agentTasksTable,
+  taskEventsTable,
 } from "@workspace/db";
 import {
   ListMessagesParams,
@@ -18,8 +19,21 @@ import { runPlanPipeline } from "../lib/builder";
 import type { ConversationTurn } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
 import { enqueueJob, runJob } from "../lib/jobs";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+async function emitPlanEvent(
+  taskId: number,
+  eventType: string,
+  message: string,
+): Promise<void> {
+  try {
+    await db.insert(taskEventsTable).values({ taskId, eventType, message, filePath: null });
+  } catch (err) {
+    logger.warn({ err, taskId, eventType }, "Failed to emit plan task event");
+  }
+}
 
 router.get(
   "/projects/:id/messages",
@@ -105,15 +119,67 @@ router.post(
     let plan: Record<string, unknown> | null = null;
 
     if (planMode) {
-      const result = await runPlanPipeline({
-        projectName: project.name,
-        projectKind: project.kind,
-        userPrompt: content,
-        agentMode: mode,
-        conversationHistory,
-      });
-      assistantContent = result.summary;
-      plan = result.plan;
+      // Create a task row so plan mode is tracked in Build History with live events
+      const [planTask] = await db
+        .insert(agentTasksTable)
+        .values({
+          projectId: project.id,
+          title: `Plan: ${content.slice(0, 60)}`,
+          kind: "plan",
+          status: "planning",
+          prompt: content,
+        })
+        .returning();
+
+      const taskId = planTask?.id ?? 0;
+
+      try {
+        await emitPlanEvent(taskId, "queued", "Plan request received…");
+        await emitPlanEvent(taskId, "planning", "Analysing project and requirements…");
+        await emitPlanEvent(taskId, "generating_blueprint", "Generating structured plan with AI…");
+
+        const result = await runPlanPipeline({
+          projectName: project.name,
+          projectKind: project.kind,
+          userPrompt: content,
+          agentMode: mode,
+          conversationHistory,
+        });
+
+        const planPageCount = Array.isArray(
+          (result.plan as Record<string, unknown> | null)?.["pages"],
+        )
+          ? ((result.plan as Record<string, unknown>)["pages"] as unknown[]).length
+          : 0;
+        await emitPlanEvent(
+          taskId,
+          "completed",
+          planPageCount > 0
+            ? `Plan ready: ${planPageCount} page(s) outlined.`
+            : "Plan ready — review the structured plan above.",
+        );
+
+        if (planTask) {
+          await db
+            .update(agentTasksTable)
+            .set({ status: "completed", result: result.summary, completedAt: sql`now()` })
+            .where(eq(agentTasksTable.id, planTask.id));
+        }
+
+        assistantContent = result.summary;
+        plan = result.plan;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Plan generation failed";
+        await emitPlanEvent(taskId, "failed", msg);
+        if (planTask) {
+          await db
+            .update(agentTasksTable)
+            .set({ status: "failed", result: msg, completedAt: sql`now()` })
+            .where(eq(agentTasksTable.id, planTask.id));
+        }
+        assistantContent = `Plan generation failed: ${msg}`;
+        plan = { kind: "error", message: msg };
+      }
     } else {
       // Determine if this is an initial build or a refinement
       const [existing] = await db

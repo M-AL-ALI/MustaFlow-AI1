@@ -1,0 +1,171 @@
+Good Phase 2 validation report. Do NOT publish yet.
+
+The builder engine progress is good, but MustaFlow AI is not production-ready because these are still blockers:
+
+1. Auth is stubbed with req.userId = "demo-user".
+2. Secrets are stored plaintext.
+3. Publishing tab is partial.
+4. Preview iframe has allow-same-origin and needs stronger sandboxing before multi-user use.
+5. App Store / TestFlight / Google Play publishing checklist is incomplete.
+6. Earlier tasks had missing task events, even though new task events are now working.
+
+Please continue with Phase 2.1: Production Safety and Publishing Completion.
+
+==================================================
+PHASE 2.1 REQUIRED FIXES
+==================================================
+
+1. AUTH / USER OWNERSHIP
+
+Replace the demo-user stub with real auth-ready user ownership.
+
+Minimum:
+- Create proper auth middleware structure.
+- Every project must belong to a real userId.
+- Every API route must validate project ownership.
+- No user can access another user’s projects, files, secrets, versions, tasks, reports, or deployments.
+- If Clerk/Replit Auth is not fully connected yet, make the auth adapter ready and clearly isolated.
+
+Required routes to protect:
+- projects
+- files
+- AI tasks
+- background tasks
+- knowledge vault
+- versions
+- rollback
+- secrets
+- integrations
+- publishing
+- deployments
+- admin routes
+
+Do not leave req.userId = "demo-user" as production behavior.
+
+2. SECRETS SECURITY
+
+Plaintext secrets are not acceptable.
+
+Fix secrets handling:
+- Do not return raw secret values in any API response.
+- Mask secrets everywhere in UI and API.
+- Encrypt secrets at rest if possible.
+- If full encryption is not possible yet, create the encryption service interface and mark the current storage as development-only.
+- Separate development, testing, staging, and production keys.
+- Add warnings if user tries to use test keys in production or production keys in testing.
+- Add audit log when secret is created, updated, or deleted.
+
+Secrets must include:
+- environment: development / testing / staging / production
+- category: auth / payment / maps / ai / database / storage / email / sms / deployment
+- maskedValue
+- createdAt
+- updatedAt
+- lastUsedAt placeholder
+- verificationStatus
+
+3. PUBLISHING TAB FULL PASS
+
+Fix item 19 from PARTIAL to PASS.
+
+Publishing tab must include:
+
+Web:
+- Testing deployment section
+- Production deployment section
+- Testing vs production toggle
+- Custom domain placeholder
+- Deployment logs
+- Rollback deployment
+- Health check status
+
+iOS:
+- Expo preview placeholder
+- TestFlight checklist
+- App Store checklist
+- Apple Developer account requirement
+- Bundle ID placeholder
+- App icon requirement
+- Splash screen requirement
+- Privacy policy requirement
+- App screenshots requirement
+
+Android:
+- Android preview placeholder
+- Google Play checklist
+- Package name placeholder
+- App icon/adaptive icon requirement
+- Privacy policy requirement
+- Play Store screenshots requirement
+
+Before production publish, require:
+- User confirmation
+- Test report
+- Environment validation
+- Secrets validation
+- Rollback point
+- Build status pass
+
+4. PREVIEW SECURITY
+
+Improve preview sandbox security before public/multi-user use.
+
+Current issue:
+- Preview iframe uses allow-same-origin.
+
+Required:
+- Review iframe sandbox permissions.
+- Use safest possible sandbox policy.
+- Do not allow generated preview to access parent app data.
+- Do not expose secrets to preview.
+- Add clear TODO for future isolated container/domain preview system.
+- Add security notes in validation report.
+
+5. TASK EVENTS CONSISTENCY
+
+New tasks have events, but earlier tasks had 0 events.
+
+Fix:
+- Ensure every AI task creates events from the beginning.
+- Plan task must log events.
+- Build task must log events.
+- Change request must log events.
+- Background task must log events.
+- Rollback must log events.
+- Failed task must log error event.
+
+Every task must show:
+- queued
+- planning or reading_files
+- generating_blueprint if applicable
+- generating_code or editing_files
+- testing/validation
+- updating_preview
+- saving_version
+- completed or failed
+
+6. FINAL VALIDATION AFTER FIXES
+
+After Phase 2.1, give me another validation report proving:
+
+- Auth/user ownership is no longer demo-only behavior
+- API routes check ownership
+- Secrets are masked and not returned raw
+- Secrets are encrypted or clearly development-only with encryption-ready service
+- Publishing tab is full PASS
+- Testing/production deployment sections exist
+- iOS and Android app-store checklist sections exist
+- Preview sandbox is safer
+- All new tasks create events
+- Typecheck passes
+- API health works
+- Unknown API route returns JSON 404
+- Builder still generates files
+- Preview still updates
+- Version history still works
+- Rollback still works
+- Nothing was published to production
+
+Do not publish.
+Do not deploy production.
+Wait for my review after Phase 2.1 validation report.

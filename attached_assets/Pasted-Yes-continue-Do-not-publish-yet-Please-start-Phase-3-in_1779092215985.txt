@@ -1,0 +1,225 @@
+Yes, continue. Do not publish yet.
+
+Please start Phase 3 in this exact order. The goal is to turn MustaFlow AI from a strong prototype into a usable multi-user AI app-building platform.
+
+==================================================
+PHASE 3 PRIORITY ORDER
+==================================================
+
+1. Real authentication and user ownership
+2. Export / download generated code
+3. Duplicate project
+4. Real publishing pipeline for web apps
+5. Secrets encryption and preview security hardening
+6. Integrations wired to real keys
+7. Mobile app generation with React Native / Expo
+8. Custom domains
+9. Analytics
+10. Help/resources/docs content
+
+==================================================
+TASK 1 — AUTH / USER OWNERSHIP
+==================================================
+
+This is the first priority.
+
+Current problem:
+- /login is only UI.
+- req.userId is hardcoded as "demo-user".
+- App is single-user only.
+
+Required:
+- Replace demo-user with real auth adapter.
+- Use Clerk or Replit Auth, whichever is safer and faster in this current Replit environment.
+- Every project must belong to a real userId.
+- Every API route must validate project ownership.
+- No user can access another user’s projects, files, secrets, tasks, versions, rollback points, knowledge vault, or deployments.
+
+Protect:
+- Projects
+- Files
+- AI tasks
+- Background tasks
+- Versions
+- Rollback
+- Knowledge Vault
+- Secrets
+- Integrations
+- Publishing
+- Deployments
+- Admin routes
+
+Acceptance:
+- No production code should depend on req.userId = "demo-user".
+- If demo mode is kept, isolate it clearly as DEV_ONLY_DEMO_MODE.
+- Add validation proof in the final report.
+
+==================================================
+TASK 2 — EXPORT / DOWNLOAD GENERATED CODE
+==================================================
+
+Enable the disabled Export Files button.
+
+Users must be able to download their generated project files as a .zip.
+
+Required:
+- Export all project files
+- Preserve folder structure
+- Include README with project summary
+- Include integration checklist
+- Include required environment variables list, but never include actual secret values
+- Include package/setup instructions if applicable
+
+Acceptance:
+- User can click Export Files
+- System generates .zip
+- Download works
+- Zip contains generated files
+- Zip does not include raw secrets
+
+==================================================
+TASK 3 — DUPLICATE PROJECT
+==================================================
+
+Enable Duplicate Project.
+
+Required:
+- Copy project metadata
+- Copy generated files
+- Copy versions summary
+- Copy Knowledge Vault references if safe
+- Do not copy raw secrets by default
+- Ask user whether to copy integration settings without secret values
+
+Acceptance:
+- User can duplicate a project
+- New project opens independently
+- Changes to duplicate do not affect original
+
+==================================================
+TASK 4 — REAL WEB PUBLISHING PIPELINE
+==================================================
+
+The Publish button cannot remain fake.
+
+Build a real first web publishing pipeline.
+
+Recommended simple v1:
+- Publish static/generated web app files to a deployment target available in this environment
+- Or create a deploy-ready package with clear deployment route if direct hosting is not available yet
+
+Publishing must include:
+- Testing deployment
+- Production deployment
+- Environment validation
+- Secret validation
+- Build check
+- Deployment logs
+- Rollback point
+- Public URL field when deployed
+
+Before production publish require:
+- User confirmation
+- Passing test report
+- Environment check
+- Rollback point
+
+Acceptance:
+- Publish button has real behavior
+- Testing publish works or creates a real deploy artifact
+- Production publish requires confirmation
+- Deployment logs are saved
+- Publishing tab status updates
+
+==================================================
+TASK 5 — SECRETS AND PREVIEW SECURITY
+==================================================
+
+Secrets:
+- value_encrypted must not store plaintext for production behavior.
+- Add encryption service.
+- Mask all secrets.
+- Never return raw values.
+- Add audit log for secret create/update/delete.
+- Separate development/testing/staging/production.
+
+Preview:
+- Tighten iframe sandbox.
+- Do not allow generated preview to access parent app.
+- Do not expose secrets to preview.
+- Add plan for separate preview subdomain/container in future.
+
+Acceptance:
+- Raw secret values are not returned in API.
+- Secrets are encrypted or clearly blocked from production until encryption is active.
+- Preview sandbox is safer.
+- Security limitations are documented.
+
+==================================================
+TASK 6 — INTEGRATIONS WIRED TO REAL KEYS
+==================================================
+
+Start with the most important integrations:
+1. OpenAI / AI provider
+2. Stripe
+3. Google Maps
+4. Clerk/Auth
+5. PostgreSQL/Supabase/Neon
+6. Email provider
+7. Push notifications placeholder
+
+Required:
+- User can add required keys in Secrets
+- Integration card can verify key/config where possible
+- AI builder can detect needed integration
+- Generated app can reference integration config safely
+- Test keys and production keys remain separated
+
+Acceptance:
+- At least 2 integrations have real verification flow
+- Generated app can use integration metadata safely
+- No secret exposed to frontend
+
+==================================================
+TASK 7 — MOBILE GENERATION
+==================================================
+
+After web publishing/export is stable, begin React Native / Expo generation.
+
+Required:
+- Expo project template
+- iOS preview path
+- Android preview path
+- Shared app blueprint support
+- App icons/splash screen requirements
+- TestFlight checklist
+- Google Play checklist
+
+Do not rush this before web generation/publishing is stable.
+
+==================================================
+FINAL REPORT REQUIRED
+==================================================
+
+After completing Phase 3 work, provide:
+
+1. What was built
+2. Files changed
+3. Auth implementation details
+4. Ownership protection proof
+5. Export zip proof
+6. Duplicate project proof
+7. Publishing pipeline proof
+8. Secrets/security proof
+9. Preview sandbox proof
+10. Integrations added
+11. Typecheck/build result
+12. API health result
+13. Unknown API JSON 404 result
+14. Known limitations
+15. What is still placeholder
+16. Recommended next phase
+
+Do not publish production yet.
+Do not onboard real users yet.
+Wait for my review.
