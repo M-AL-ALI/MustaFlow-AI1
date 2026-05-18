@@ -188,6 +188,33 @@ export interface ChatExchange {
   assistantMessage: ChatMessage;
 }
 
+export type TaskEventEventType = typeof TaskEventEventType[keyof typeof TaskEventEventType];
+
+
+export const TaskEventEventType = {
+  queued: 'queued',
+  planning: 'planning',
+  reading_files: 'reading_files',
+  generating_code: 'generating_code',
+  editing_files: 'editing_files',
+  testing: 'testing',
+  fixing_errors: 'fixing_errors',
+  updating_preview: 'updating_preview',
+  saving_version: 'saving_version',
+  completed: 'completed',
+  failed: 'failed',
+} as const;
+
+export interface TaskEvent {
+  id: number;
+  taskId: number;
+  eventType: TaskEventEventType;
+  message: string;
+  /** @nullable */
+  filePath?: string | null;
+  createdAt: string;
+}
+
 export type AgentTaskKind = typeof AgentTaskKind[keyof typeof AgentTaskKind];
 
 

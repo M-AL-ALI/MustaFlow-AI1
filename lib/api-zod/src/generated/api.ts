@@ -172,6 +172,25 @@ export const SendMessageResponse = zod.object({
 })
 
 
+/**
+ * @summary Live event stream for a task (poll every 1-2 s)
+ */
+export const ListTaskEventsParams = zod.object({
+  "id": zod.coerce.number(),
+  "taskId": zod.coerce.number()
+})
+
+export const ListTaskEventsResponseItem = zod.object({
+  "id": zod.number(),
+  "taskId": zod.number(),
+  "eventType": zod.enum(['queued', 'planning', 'reading_files', 'generating_code', 'editing_files', 'testing', 'fixing_errors', 'updating_preview', 'saving_version', 'completed', 'failed']),
+  "message": zod.string(),
+  "filePath": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})
+export const ListTaskEventsResponse = zod.array(ListTaskEventsResponseItem)
+
+
 export const ListTasksParams = zod.object({
   "id": zod.coerce.number()
 })

@@ -1,0 +1,290 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  useListTaskEvents,
+  getListTaskEventsQueryKey,
+} from "@workspace/api-client-react";
+import {
+  Clock,
+  BrainCircuit,
+  FolderOpen,
+  Code2,
+  FilePen,
+  FlaskConical,
+  Wrench,
+  RefreshCw,
+  Save,
+  CheckCircle2,
+  XCircle,
+  ChevronDown,
+  X,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+type EventType =
+  | "queued"
+  | "planning"
+  | "reading_files"
+  | "generating_code"
+  | "editing_files"
+  | "testing"
+  | "fixing_errors"
+  | "updating_preview"
+  | "saving_version"
+  | "completed"
+  | "failed";
+
+const EVENT_META: Record<
+  EventType,
+  { icon: React.ElementType; color: string; label: string }
+> = {
+  queued: { icon: Clock, color: "text-muted-foreground", label: "Queued" },
+  planning: { icon: BrainCircuit, color: "text-violet-400", label: "Planning" },
+  reading_files: {
+    icon: FolderOpen,
+    color: "text-blue-400",
+    label: "Reading files",
+  },
+  generating_code: {
+    icon: Code2,
+    color: "text-primary",
+    label: "Generating code",
+  },
+  editing_files: {
+    icon: FilePen,
+    color: "text-yellow-400",
+    label: "Editing files",
+  },
+  testing: {
+    icon: FlaskConical,
+    color: "text-cyan-400",
+    label: "Testing",
+  },
+  fixing_errors: {
+    icon: Wrench,
+    color: "text-orange-400",
+    label: "Fixing errors",
+  },
+  updating_preview: {
+    icon: RefreshCw,
+    color: "text-sky-400",
+    label: "Updating preview",
+  },
+  saving_version: {
+    icon: Save,
+    color: "text-secondary",
+    label: "Saving version",
+  },
+  completed: {
+    icon: CheckCircle2,
+    color: "text-green-400",
+    label: "Completed",
+  },
+  failed: { icon: XCircle, color: "text-destructive", label: "Failed" },
+};
+
+const TERMINAL_STATUSES = new Set(["completed", "failed"]);
+
+interface Props {
+  projectId: number;
+  taskId: number;
+  onDismiss: () => void;
+}
+
+export function ActivityStream({ projectId, taskId, onDismiss }: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [autoDismissed, setAutoDismissed] = useState(false);
+
+  const { data: events = [] } = useListTaskEvents(projectId, taskId, {
+    query: {
+      queryKey: getListTaskEventsQueryKey(projectId, taskId),
+      refetchInterval: (query) => {
+        const data = query.state.data;
+        if (!data || !Array.isArray(data)) return 1500;
+        const last = data[data.length - 1];
+        if (last && TERMINAL_STATUSES.has(last.eventType as string))
+          return false;
+        return 1500;
+      },
+    },
+  });
+
+  const lastEvent = events[events.length - 1];
+  const isTerminal = lastEvent
+    ? TERMINAL_STATUSES.has(lastEvent.eventType as string)
+    : false;
+  const isDone = lastEvent?.eventType === "completed";
+  const isFailed = lastEvent?.eventType === "failed";
+
+  // Auto-scroll to bottom on new events
+  useEffect(() => {
+    if (!collapsed && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [events, collapsed]);
+
+  // Auto-dismiss 6 s after completion
+  useEffect(() => {
+    if (!isDone || autoDismissed) return;
+    const t = setTimeout(() => {
+      setAutoDismissed(true);
+      onDismiss();
+    }, 6000);
+    return () => clearTimeout(t);
+  }, [isDone, autoDismissed, onDismiss]);
+
+  if (autoDismissed) return null;
+
+  return (
+    <div
+      className={cn(
+        "w-full bg-card/95 backdrop-blur-xl border border-border rounded-2xl shadow-2xl overflow-hidden transition-all duration-300",
+        collapsed ? "max-h-10" : "max-h-72",
+      )}
+    >
+      {/* Header */}
+      <div
+        className="flex items-center gap-2 px-3 py-2 border-b border-border cursor-pointer select-none"
+        onClick={() => setCollapsed((v) => !v)}
+      >
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          {isTerminal ? (
+            isDone ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
+            ) : (
+              <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
+            )
+          ) : (
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary" />
+            </span>
+          )}
+          <span className="text-xs font-semibold text-foreground truncate">
+            {isDone
+              ? "Build complete"
+              : isFailed
+              ? "Build failed"
+              : lastEvent?.message ?? "Initializing…"}
+          </span>
+          <span className="text-[10px] text-muted-foreground shrink-0">
+            {events.length} step{events.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setCollapsed((v) => !v);
+            }}
+            className="p-0.5 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 transition-transform",
+                collapsed && "rotate-180",
+              )}
+            />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDismiss();
+            }}
+            className="p-0.5 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Event list */}
+      {!collapsed && (
+        <div
+          ref={scrollRef}
+          className="overflow-y-auto max-h-56 p-2 space-y-0.5 hide-scrollbar"
+        >
+          {events.map((event, idx) => {
+            const meta =
+              EVENT_META[event.eventType as EventType] ??
+              EVENT_META.queued;
+            const Icon = meta.icon;
+            const isLast = idx === events.length - 1;
+            const isActive = isLast && !isTerminal;
+
+            return (
+              <div
+                key={event.id}
+                className={cn(
+                  "flex items-start gap-2.5 px-2 py-1.5 rounded-lg text-xs transition-colors",
+                  isActive
+                    ? "bg-primary/10"
+                    : "hover:bg-muted/30",
+                )}
+              >
+                {/* Icon */}
+                <div className="shrink-0 mt-px">
+                  <Icon
+                    className={cn(
+                      "h-3.5 w-3.5",
+                      isActive ? meta.color + " animate-pulse" : meta.color,
+                      !isActive && "opacity-70",
+                    )}
+                  />
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div
+                    className={cn(
+                      "truncate leading-tight",
+                      isActive
+                        ? "text-foreground font-medium"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {event.message}
+                  </div>
+                  {event.filePath && (
+                    <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/60 truncate">
+                      {event.filePath}
+                    </div>
+                  )}
+                </div>
+
+                {/* Timestamp dot */}
+                <div className="shrink-0 mt-1.5">
+                  <span
+                    className={cn(
+                      "block w-1 h-1 rounded-full",
+                      isActive ? "bg-primary" : "bg-border",
+                    )}
+                  />
+                </div>
+              </div>
+            );
+          })}
+
+          {events.length === 0 && (
+            <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
+              <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
+              Waiting for first event…
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Completion footer */}
+      {!collapsed && isDone && (
+        <div className="px-3 py-1.5 border-t border-border bg-green-500/5 text-[10px] text-green-400 font-medium">
+          Auto-dismissing in a few seconds — or click X to close now.
+        </div>
+      )}
+      {!collapsed && isFailed && (
+        <div className="px-3 py-1.5 border-t border-border bg-destructive/5 text-[10px] text-destructive font-medium">
+          Task failed. Check the chat for details.
+        </div>
+      )}
+    </div>
+  );
+}

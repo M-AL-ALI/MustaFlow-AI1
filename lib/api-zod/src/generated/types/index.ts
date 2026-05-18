@@ -48,3 +48,5 @@ export * from './secretEntry';
 export * from './secretEntryEnvironment';
 export * from './secretInput';
 export * from './secretInputEnvironment';
+export * from './taskEvent';
+export * from './taskEventEventType';

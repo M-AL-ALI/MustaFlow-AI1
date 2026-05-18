@@ -6,6 +6,7 @@ import {
   projectFilesTable,
   projectVersionsTable,
   chatMessagesTable,
+  taskEventsTable,
   type TaskReport,
   type FileSnapshotEntry,
 } from "@workspace/db";
@@ -25,6 +26,24 @@ export interface JobInput {
   kind: JobKind;
   userPrompt: string;
   agentMode: AgentMode;
+}
+
+async function emitEvent(
+  taskId: number,
+  eventType: string,
+  message: string,
+  filePath?: string,
+): Promise<void> {
+  try {
+    await db.insert(taskEventsTable).values({
+      taskId,
+      eventType,
+      message,
+      filePath: filePath ?? null,
+    });
+  } catch (err) {
+    logger.warn({ err, taskId, eventType }, "Failed to emit task event");
+  }
 }
 
 async function loadFiles(projectId: number): Promise<BuilderFile[]> {
@@ -96,6 +115,8 @@ async function deleteFiles(
 export async function runJob(input: JobInput): Promise<void> {
   const { taskId, projectId, kind, userPrompt, agentMode } = input;
 
+  await emitEvent(taskId, "queued", "Task received, starting pipeline…");
+
   await db
     .update(agentTasksTable)
     .set({ status: kind === "build" ? "building" : "planning" })
@@ -106,6 +127,7 @@ export async function runJob(input: JobInput): Promise<void> {
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
   if (!project) {
+    await emitEvent(taskId, "failed", "Project not found.");
     await db
       .update(agentTasksTable)
       .set({
@@ -123,18 +145,50 @@ export async function runJob(input: JobInput): Promise<void> {
     let nextVersionLabel: string;
 
     if (kind === "build") {
+      await emitEvent(taskId, "planning", "Reading project configuration…");
+      await emitEvent(
+        taskId,
+        "generating_code",
+        "Generating app blueprint and code with AI…",
+      );
+
       const result = await runBuildPipeline({
         projectName: project.name,
         projectKind: project.kind,
         userPrompt,
         agentMode,
       });
+
+      await emitEvent(
+        taskId,
+        "generating_code",
+        `Blueprint created: ${result.files.length} file(s) planned.`,
+      );
+
+      await emitEvent(taskId, "editing_files", "Writing generated files…");
+      for (const f of result.files) {
+        await emitEvent(taskId, "editing_files", `Writing ${f.path}`, f.path);
+      }
       await writeFiles(projectId, result.files, true);
+
       report = result.report;
       assistantSummary = result.assistantSummary;
       nextVersionLabel = "Initial build";
     } else {
+      await emitEvent(taskId, "reading_files", "Reading current project files…");
       const existingFiles = await loadFiles(projectId);
+      await emitEvent(
+        taskId,
+        "reading_files",
+        `Loaded ${existingFiles.length} existing file(s).`,
+      );
+
+      await emitEvent(
+        taskId,
+        "generating_code",
+        "Applying change request with AI…",
+      );
+
       const result = await runRefinePipeline({
         projectName: project.name,
         projectKind: project.kind,
@@ -142,17 +196,41 @@ export async function runJob(input: JobInput): Promise<void> {
         agentMode,
         existingFiles,
       });
+
+      await emitEvent(
+        taskId,
+        "editing_files",
+        `AI returned ${result.changedFiles.length} changed file(s).`,
+      );
+
       if (result.changedFiles.length > 0) {
+        for (const f of result.changedFiles) {
+          await emitEvent(
+            taskId,
+            "editing_files",
+            `Updating ${f.path}`,
+            f.path,
+          );
+        }
         await writeFiles(projectId, result.changedFiles, false);
       }
       if (result.removedPaths.length > 0) {
+        for (const p of result.removedPaths) {
+          await emitEvent(taskId, "editing_files", `Removing ${p}`, p);
+        }
         await deleteFiles(projectId, result.removedPaths);
       }
+
       report = result.report;
       assistantSummary = result.assistantSummary;
       nextVersionLabel = userPrompt.slice(0, 40) || "Refinement";
     }
 
+    await emitEvent(
+      taskId,
+      "saving_version",
+      "Saving version rollback point…",
+    );
     const snapshot = await snapshotFilesForVersion(projectId);
     const [version] = await db
       .insert(projectVersionsTable)
@@ -164,6 +242,8 @@ export async function runJob(input: JobInput): Promise<void> {
       })
       .returning();
     report.versionId = version?.id ?? null;
+
+    await emitEvent(taskId, "updating_preview", "Refreshing preview…");
 
     await db
       .update(agentTasksTable)
@@ -184,6 +264,8 @@ export async function runJob(input: JobInput): Promise<void> {
       })
       .where(eq(projectsTable.id, projectId));
 
+    await emitEvent(taskId, "completed", "Task completed.");
+
     // Append a system message so the chat shows the report was produced
     await db.insert(chatMessagesTable).values({
       projectId,
@@ -197,6 +279,7 @@ export async function runJob(input: JobInput): Promise<void> {
     logger.error({ err, taskId, projectId }, "Builder job failed");
     const message =
       err instanceof Error ? err.message : "Unknown builder error";
+    await emitEvent(taskId, "failed", message);
     await db
       .update(agentTasksTable)
       .set({

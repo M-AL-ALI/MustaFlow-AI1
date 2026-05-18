@@ -156,11 +156,15 @@ router.post(
             ? "I generated your app. Open the Preview tab to see it."
             : "I applied your changes. Refresh the Preview tab.");
         plan = refreshed?.report
-          ? ({ kind: "report", report: refreshed.report } as unknown as Record<
+          ? ({
+              kind: "report",
+              report: refreshed.report,
+              taskId: task.id,
+            } as unknown as Record<string, unknown>)
+          : ({ kind: "task-done", taskId: task.id } as unknown as Record<
               string,
               unknown
-            >)
-          : null;
+            >);
       }
     }
 

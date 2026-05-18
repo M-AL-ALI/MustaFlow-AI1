@@ -40,7 +40,8 @@ import type {
   ProjectsSummary,
   RollbackResult,
   SecretEntry,
-  SecretInput
+  SecretInput,
+  TaskEvent
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -700,6 +701,88 @@ export const useSendMessage = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getSendMessageMutationOptions(options));
     }
+
+export const getListTaskEventsUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}/events`
+}
+
+/**
+ * @summary Live event stream for a task (poll every 1-2 s)
+ */
+export const listTaskEvents = async (id: number,
+    taskId: number, options?: RequestInit): Promise<TaskEvent[]> => {
+
+  return customFetch<TaskEvent[]>(getListTaskEventsUrl(id,taskId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTaskEventsQueryKey = (id: number,
+    taskId: number,) => {
+    return [
+    `/api/projects/${id}/tasks/${taskId}/events`
+    ] as const;
+    }
+
+
+export const getListTaskEventsQueryOptions = <TData = Awaited<ReturnType<typeof listTaskEvents>>, TError = ErrorType<ApiError>>(id: number,
+    taskId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTaskEvents>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTaskEventsQueryKey(id,taskId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTaskEvents>>> = ({ signal }) => listTaskEvents(id,taskId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && taskId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTaskEvents>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListTaskEventsQueryResult = NonNullable<Awaited<ReturnType<typeof listTaskEvents>>>
+export type ListTaskEventsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Live event stream for a task (poll every 1-2 s)
+ */
+
+export function useListTaskEvents<TData = Awaited<ReturnType<typeof listTaskEvents>>, TError = ErrorType<ApiError>>(
+ id: number,
+    taskId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTaskEvents>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListTaskEventsQueryOptions(id,taskId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListTasksUrl = (id: number,) => {
 

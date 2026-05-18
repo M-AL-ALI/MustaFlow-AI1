@@ -8,6 +8,7 @@ import secretsRouter from "./secrets";
 import knowledgeRouter from "./knowledge";
 import activityRouter from "./activity";
 import filesRouter from "./files";
+import eventsRouter from "./events";
 import { attachUser } from "../lib/auth";
 
 const router: IRouter = Router();
@@ -22,6 +23,7 @@ router.use(secretsRouter);
 router.use(knowledgeRouter);
 router.use(activityRouter);
 router.use(filesRouter);
+router.use(eventsRouter);
 
 // JSON 404 for any unmatched /api route
 router.use((_req, res) => {

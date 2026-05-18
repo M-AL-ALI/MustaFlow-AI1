@@ -36,6 +36,7 @@ import { CanvasTab } from "./components/canvas-tab";
 import { ToolsTab } from "./components/tools-tab";
 import { PublishingTab } from "./components/publishing-tab";
 import { LogsTab } from "./components/logs-tab";
+import { ActivityStream } from "./components/activity-stream";
 import { cn } from "@/lib/utils";
 
 type TaskReport = {
@@ -183,6 +184,7 @@ export default function ProjectWorkspacePage() {
   const [agentMode, setAgentMode] = useState<"lite" | "eco" | "power" | "pro">("power");
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
+  const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -204,12 +206,16 @@ export default function ProjectWorkspacePage() {
         },
       },
       {
-        onSuccess: () => {
+        onSuccess: (data) => {
           queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
           queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
           queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
           queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
           queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+          // Extract taskId from the assistant plan payload so we can show the activity stream
+          const plan = data?.assistantMessage?.plan as Record<string, unknown> | null | undefined;
+          const tid = plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
+          if (tid) setActiveTaskId(tid);
         },
       },
     );
@@ -376,13 +382,24 @@ export default function ProjectWorkspacePage() {
                 </div>
               );
             })}
-            {sendMessage.isPending && (
+            {sendMessage.isPending && !activeTaskId && (
               <div className="self-start bg-card border border-border rounded-2xl rounded-bl-sm p-3 text-sm shadow-xl flex items-center gap-2">
                 <div className="animate-pulse w-2 h-2 rounded-full bg-primary" />
                 <span className="text-muted-foreground">MustaFlow is working…</span>
               </div>
             )}
           </div>
+
+          {/* Live activity stream — shown whenever there is an active task */}
+          {activeTaskId !== null && (
+            <div className="pointer-events-auto">
+              <ActivityStream
+                projectId={projectId}
+                taskId={activeTaskId}
+                onDismiss={() => setActiveTaskId(null)}
+              />
+            </div>
+          )}
 
           <div className="bg-card border border-border rounded-2xl p-3 shadow-2xl pointer-events-auto backdrop-blur-xl bg-card/95">
             <div className="flex gap-2 mb-2 items-center flex-wrap">

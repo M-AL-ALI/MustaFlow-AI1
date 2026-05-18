@@ -163,6 +163,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChatExchange"
 
+  /projects/{id}/tasks/{taskId}/events:
+    get:
+      operationId: listTaskEvents
+      tags: [tasks]
+      summary: Live event stream for a task (poll every 1-2 s)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Events emitted so far for this task
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskEvent"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/tasks:
     get:
       operationId: listTasks
@@ -474,6 +498,32 @@ components:
       properties:
         userMessage: { $ref: "#/components/schemas/ChatMessage" }
         assistantMessage: { $ref: "#/components/schemas/ChatMessage" }
+
+    TaskEvent:
+      type: object
+      required: [id, taskId, eventType, message, createdAt]
+      properties:
+        id: { type: integer }
+        taskId: { type: integer }
+        eventType:
+          type: string
+          enum:
+            [
+              queued,
+              planning,
+              reading_files,
+              generating_code,
+              editing_files,
+              testing,
+              fixing_errors,
+              updating_preview,
+              saving_version,
+              completed,
+              failed,
+            ]
+        message: { type: string }
+        filePath: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
 
     AgentTask:
       type: object
