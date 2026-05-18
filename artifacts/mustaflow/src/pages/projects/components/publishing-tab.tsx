@@ -744,7 +744,7 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                 {[
                   { label: "Health check", badge: "pending", note: "No active deployment" },
                   { label: "Custom domain", badge: "unconfigured", note: "Configure below" },
-                  { label: "SSL / HTTPS", badge: "pending", note: "Auto-provisioned on publish" },
+                  { label: "SSL / HTTPS", badge: "partial", note: "Requires manual cert setup — not automated" },
                   { label: "Rollback point", badge: "ready", note: "Latest snapshot available" },
                 ].map((row) => (
                   <div key={row.label} className="flex items-center justify-between text-sm">
@@ -864,16 +864,19 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                       DNS {domainInfo.domainStatus === "active" ? "verified" : domainInfo.domainStatus === "error" ? "error" : "pending"}
                     </span>
 
-                    {/* SSL status */}
+                    {/* SSL status — PARTIAL: status field tracked, cert provisioning not automated */}
                     <span className={cn(
                       "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium",
                       domainInfo.sslStatus === "active" && "bg-green-500/15 text-green-400",
-                      domainInfo.sslStatus === "provisioning" && "bg-yellow-500/15 text-yellow-400",
+                      (domainInfo.sslStatus === "provisioning" || domainInfo.sslStatus === "pending") && "bg-yellow-500/15 text-yellow-400",
                       domainInfo.sslStatus === "failed" && "bg-red-500/15 text-red-400",
-                      domainInfo.sslStatus === "pending" && "bg-muted text-muted-foreground",
                     )}>
                       <Lock className="h-3 w-3" />
-                      SSL {domainInfo.sslStatus === "active" ? "active" : domainInfo.sslStatus === "provisioning" ? "provisioning" : domainInfo.sslStatus === "failed" ? "failed" : "pending"}
+                      {domainInfo.sslStatus === "active"
+                        ? "SSL active"
+                        : domainInfo.sslStatus === "failed"
+                        ? "SSL failed"
+                        : "SSL — manual setup required"}
                     </span>
 
                     {/* Verify button */}

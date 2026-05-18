@@ -1,0 +1,139 @@
+Good domain management foundation. Do NOT publish yet.
+
+Before I accept this domain feature, I need full validation proof.
+
+Please verify the full domain system end-to-end.
+
+==================================================
+DOMAIN MANAGEMENT VALIDATION REQUIRED
+==================================================
+
+1. AUTOMATIC PLATFORM SUBDOMAIN
+
+Prove each published project gets a unique platform subdomain.
+
+Example:
+{projectSlug}.mustaflow.app
+
+Confirm:
+- Subdomain appears in Publishing → Domains.
+- Subdomain is copyable.
+- Subdomain uses PLATFORM_DOMAIN.
+- Slug is unique.
+- Slug does not expose raw project ID.
+- Subdomain serves only the published frozen snapshot.
+- Draft changes do not affect subdomain until republish.
+- Unpublish disables the subdomain.
+
+2. WILDCARD DNS REQUIREMENT
+
+Document exactly what must be configured in production:
+
+- PLATFORM_DOMAIN
+- PLATFORM_CNAME_TARGET
+- Wildcard DNS record
+- Example:
+  Type: CNAME
+  Name: *
+  Value: hosted.mustaflow.app
+
+If Replit or the hosting platform requires a different DNS target, document it clearly.
+
+3. CUSTOM DOMAIN SAVE / REMOVE
+
+Prove:
+
+- User can enter custom domain.
+- Hostname validation works.
+- Bad hostname is rejected.
+- User can save custom domain.
+- User can remove custom domain.
+- Custom domain is unique across projects.
+- Another user cannot attach the same custom domain to their project.
+
+4. DNS CNAME INSTRUCTIONS
+
+Publishing tab must show exact DNS instructions:
+
+- Type
+- Name
+- Value
+- Copy button
+- Example for root domain
+- Example for subdomain like app.customerdomain.com
+
+Make the instructions very clear for non-technical users.
+
+5. DNS VERIFICATION
+
+Prove:
+
+- Check DNS button calls POST /domain/verify.
+- Correct CNAME returns verified.
+- Wrong/missing CNAME returns pending/error.
+- Status updates in UI.
+- Verification result is saved.
+
+6. SSL STATUS
+
+Right now SSL status appears as UI status.
+
+Please clarify if SSL is actually automated or only a placeholder.
+
+If placeholder:
+- Mark as PARTIAL.
+- Add clear status: “SSL automation not connected yet.”
+- Add future requirement for automatic SSL provisioning.
+
+Production must eventually support:
+- SSL pending
+- SSL provisioning
+- SSL active
+- SSL failed
+- Certificate renewal
+
+7. CUSTOM DOMAIN ROUTING
+
+Prove:
+
+- Hostname middleware detects stored custom domain.
+- GET / on custom domain serves published index.html.
+- GET /about or another route serves correct file/fallback.
+- /api traffic is not intercepted.
+- Unpublished project returns 404.
+- Deleted project returns 404.
+- Draft files are not served.
+- Secrets, owner data, task logs, Knowledge Vault entries, and private project data are never exposed.
+
+8. SECURITY / OWNERSHIP
+
+Prove:
+
+- Only project owner can save/remove/verify domain.
+- User B cannot modify User A’s domain.
+- Public visitors can only view published snapshot.
+- Public visitors cannot access private API data.
+
+9. FINAL PASS / PARTIAL / FAIL TABLE
+
+Grade:
+
+- Automatic subdomain
+- Unique slug
+- Custom domain save
+- Custom domain remove
+- Custom domain uniqueness
+- DNS instructions
+- DNS verification
+- SSL automation
+- Custom domain routing
+- Public snapshot isolation
+- Unpublish disables public domain
+- Delete disables public domain
+- Ownership protection
+- Typecheck/build
+- API health
+- Unknown API JSON 404
+
+Do not publish production.
+Wait for my review after the validation report.

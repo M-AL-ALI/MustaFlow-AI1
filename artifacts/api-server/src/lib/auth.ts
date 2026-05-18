@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { getAuth } from "@clerk/express";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable } from "@workspace/db";
 import { logger } from "./logger";
 
@@ -101,7 +101,7 @@ export async function requireProjectOwnership(
   const [project] = await db
     .select()
     .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
   if (!project) {
     res.status(404).json({ error: "Project not found" });
     return;

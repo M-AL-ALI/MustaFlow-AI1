@@ -93,7 +93,7 @@ router.patch(
           sslStatus: "pending",
           updatedAt: new Date(),
         })
-        .where(eq(projectsTable.id, projectId));
+        .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
       res.json({
         customDomain: cleaned,
@@ -111,7 +111,7 @@ router.patch(
           sslStatus: "pending",
           updatedAt: new Date(),
         })
-        .where(eq(projectsTable.id, projectId));
+        .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
       res.json({ customDomain: null, domainStatus: "unconfigured" });
     }
@@ -133,7 +133,7 @@ router.delete(
         sslStatus: "pending",
         updatedAt: new Date(),
       })
-      .where(eq(projectsTable.id, projectId));
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
     res.json({ customDomain: null, domainStatus: "unconfigured" });
   },
