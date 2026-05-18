@@ -437,6 +437,9 @@ export function PublishingTab({ projectId }: { projectId: number }) {
     domainStatus: string;
     sslStatus: string;
     isPublished: boolean;
+    verificationToken: string | null;
+    txtName: string | null;
+    txtValue: string | null;
   };
   const [domainInfo, setDomainInfo] = useState<DomainInfo | null>(null);
   const [customDomainInput, setCustomDomainInput] = useState("");
@@ -864,7 +867,7 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                       DNS {domainInfo.domainStatus === "active" ? "verified" : domainInfo.domainStatus === "error" ? "error" : "pending"}
                     </span>
 
-                    {/* SSL status — PARTIAL: status field tracked, cert provisioning not automated */}
+                    {/* SSL status badge */}
                     <span className={cn(
                       "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium",
                       domainInfo.sslStatus === "active" && "bg-green-500/15 text-green-400",
@@ -876,10 +879,12 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                         ? "SSL active"
                         : domainInfo.sslStatus === "failed"
                         ? "SSL failed"
-                        : "SSL — manual setup required"}
+                        : domainInfo.domainStatus === "active"
+                        ? "SSL manual setup required"
+                        : "SSL pending"}
                     </span>
 
-                    {/* Verify button */}
+                    {/* Verify / Re-check button */}
                     {domainInfo.domainStatus !== "active" && (
                       <Button
                         variant="outline"
@@ -896,39 +901,83 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                   </div>
                 )}
 
+                {/* SSL gate warning — DNS verified but SSL is not yet active */}
+                {domainInfo?.customDomain && domainInfo.domainStatus === "active" && domainInfo.sslStatus !== "active" && (
+                  <div className="flex items-start gap-2 text-xs bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2.5">
+                    <AlertTriangle className="h-3.5 w-3.5 text-yellow-400 shrink-0 mt-0.5" />
+                    <span className="text-yellow-300/90">
+                      DNS is verified, but SSL certificate automation is not connected yet. This domain may not be safely available over HTTPS until SSL is configured manually.
+                    </span>
+                  </div>
+                )}
+
                 {/* DNS instructions — shown when a custom domain is saved but not yet verified */}
                 {domainInfo?.customDomain && domainInfo.domainStatus !== "active" && (
-                  <div className="bg-muted/60 border border-border rounded-lg p-3 space-y-2">
+                  <div className="bg-muted/60 border border-border rounded-lg p-3 space-y-3">
                     <p className="text-xs font-medium flex items-center gap-1.5">
                       <Info className="h-3.5 w-3.5 text-muted-foreground" />
                       DNS configuration required
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      Add this CNAME record in your DNS provider (Cloudflare, Route53, Namecheap, etc.):
-                    </p>
-                    <div className="rounded-md bg-background border border-border overflow-hidden text-xs font-mono">
-                      <div className="grid grid-cols-3 gap-px bg-border">
-                        <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Type</div>
-                        <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Name</div>
-                        <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Value</div>
-                      </div>
-                      <div className="grid grid-cols-3 gap-px bg-border">
-                        <div className="bg-card px-2 py-1.5">CNAME</div>
-                        <div className="bg-card px-2 py-1.5 truncate">{domainInfo.customDomain}</div>
-                        <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
-                          <span className="truncate">{domainInfo.cnameTarget}</span>
-                          <CopyUrlButton url={domainInfo.cnameTarget} />
+
+                    {/* CNAME option */}
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-muted-foreground font-medium">Option A — CNAME record</p>
+                      <p className="text-xs text-muted-foreground">
+                        Add this CNAME record in your DNS provider (Cloudflare, Route53, Namecheap, etc.):
+                      </p>
+                      <div className="rounded-md bg-background border border-border overflow-hidden text-xs font-mono">
+                        <div className="grid grid-cols-3 gap-px bg-border">
+                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Type</div>
+                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Name</div>
+                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Value</div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-px bg-border">
+                          <div className="bg-card px-2 py-1.5">CNAME</div>
+                          <div className="bg-card px-2 py-1.5 truncate">{domainInfo.customDomain}</div>
+                          <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
+                            <span className="truncate">{domainInfo.cnameTarget}</span>
+                            <CopyUrlButton url={domainInfo.cnameTarget} />
+                          </div>
                         </div>
                       </div>
                     </div>
+
+                    {/* TXT option */}
+                    {domainInfo.verificationToken && domainInfo.txtName && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs text-muted-foreground font-medium">Option B — TXT ownership record (preferred for security)</p>
+                        <p className="text-xs text-muted-foreground">
+                          Add a TXT record to prove domain ownership without changing your routing:
+                        </p>
+                        <div className="rounded-md bg-background border border-border overflow-hidden text-xs font-mono">
+                          <div className="grid grid-cols-3 gap-px bg-border">
+                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Type</div>
+                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Name</div>
+                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Value</div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-px bg-border">
+                            <div className="bg-card px-2 py-1.5">TXT</div>
+                            <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
+                              <span className="truncate">{domainInfo.txtName}</span>
+                              <CopyUrlButton url={domainInfo.txtName} />
+                            </div>
+                            <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
+                              <span className="truncate">{domainInfo.txtValue}</span>
+                              <CopyUrlButton url={domainInfo.txtValue ?? ""} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <p className="text-xs text-muted-foreground">
-                      DNS changes can take up to 48 hours to propagate. Click "Check DNS" once you've added the record.
+                      DNS changes can take up to 48 hours to propagate. Click "Check DNS" once you've added either record.
                     </p>
                   </div>
                 )}
 
-                {/* Active domain link */}
-                {domainInfo?.customDomain && domainInfo.domainStatus === "active" && (
+                {/* Active domain link — shown in green only when both DNS and SSL are confirmed */}
+                {domainInfo?.customDomain && domainInfo.domainStatus === "active" && domainInfo.sslStatus === "active" && (
                   <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2.5">
                     <CheckCircle2 className="h-4 w-4 text-green-400 shrink-0" />
                     <a
@@ -939,6 +988,17 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                     >
                       https://{domainInfo.customDomain}
                     </a>
+                    <CopyUrlButton url={`https://${domainInfo.customDomain}`} />
+                  </div>
+                )}
+
+                {/* Active domain link (DNS ok, SSL not yet confirmed) */}
+                {domainInfo?.customDomain && domainInfo.domainStatus === "active" && domainInfo.sslStatus !== "active" && (
+                  <div className="flex items-center gap-2 bg-muted border border-border rounded-lg px-3 py-2.5">
+                    <Lock className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm font-mono text-muted-foreground flex-1 truncate">
+                      https://{domainInfo.customDomain}
+                    </span>
                     <CopyUrlButton url={`https://${domainInfo.customDomain}`} />
                   </div>
                 )}

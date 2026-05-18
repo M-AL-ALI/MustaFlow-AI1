@@ -28,6 +28,9 @@ export const projectsTable = pgTable("projects", {
   customDomain: text("custom_domain").unique(),
   domainStatus: text("domain_status").notNull().default("unconfigured"),
   sslStatus: text("ssl_status").notNull().default("pending"),
+  // verificationToken: random hex token used for TXT-based domain ownership proof.
+  // Generated on first domain save. TXT record: _mustaflow.<domain> = mustaflow-verify=<token>
+  verificationToken: text("verification_token"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
