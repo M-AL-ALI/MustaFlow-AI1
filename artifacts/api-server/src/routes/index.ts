@@ -15,9 +15,15 @@ import { attachUser } from "../lib/auth";
 
 const router: IRouter = Router();
 
-// Health is public — mount before the auth middleware
+// Health is always public — mount before auth
 router.use(healthRouter);
 
+// Preview serves published projects publicly (no auth required).
+// Mount BEFORE attachUser so the preview handler controls its own auth logic.
+// /files and /files/:fileId within filesRouter still enforce requireProjectOwnership.
+router.use(filesRouter);
+
+// All remaining routes require a valid Clerk session
 router.use(attachUser);
 router.use(projectsRouter);
 router.use(messagesRouter);
@@ -26,7 +32,6 @@ router.use(versionsRouter);
 router.use(secretsRouter);
 router.use(knowledgeRouter);
 router.use(activityRouter);
-router.use(filesRouter);
 router.use(eventsRouter);
 router.use(exportRouter);
 router.use(duplicateRouter);

@@ -1,0 +1,160 @@
+Good progress. Do NOT publish production yet.
+
+Before I accept Phase 3 as complete, I need a real validation proof report.
+
+Please prove the following with live tests, screenshots, API responses, and file checks.
+
+==================================================
+PHASE 3 VALIDATION REQUIRED
+==================================================
+
+1. AUTH VALIDATION
+
+Prove real Clerk auth works:
+
+- User can sign up.
+- User can sign in.
+- User can sign out.
+- Protected pages redirect to /sign-in when not logged in.
+- Authenticated user can access their own projects.
+- Unauthenticated API request returns JSON 401.
+- User ownership check works.
+- User A cannot access User B’s project, files, secrets, tasks, versions, knowledge vault, export, duplicate, or publish routes.
+
+Important:
+Do not only show the UI. Show API proof too.
+
+Required proof:
+- GET /api/projects while signed out → JSON 401
+- GET /api/projects while signed in → JSON success
+- Try accessing another user’s project → JSON 403
+
+2. EXPORT ZIP VALIDATION
+
+Prove Export ZIP works:
+
+- Click Export Files.
+- Download .zip.
+- Open/list zip contents.
+- Confirm project files are included.
+- Confirm README.md is included.
+- Confirm .env.example is included.
+- Confirm .env.example includes secret NAMES only, not values.
+- Confirm no raw secrets are inside the zip.
+
+3. DUPLICATE PROJECT VALIDATION
+
+Prove Duplicate Project works:
+
+- Duplicate an existing project.
+- Open the duplicate.
+- Confirm files copied.
+- Confirm secrets were NOT copied.
+- Confirm changing the duplicate does not change the original.
+- Confirm duplicate project belongs to the current authenticated user.
+
+4. PUBLISHING VALIDATION
+
+This is very important.
+
+You said:
+POST /api/projects/:id/publish sets status = "published" and returns a publicUrl.
+
+I need proof that this is a real publishing pipeline, not only a database status update.
+
+Please prove:
+
+- Click Confirm Publish.
+- Deployment record is created.
+- Deployment logs are saved.
+- Project status updates.
+- publicUrl is returned.
+- The publicUrl actually opens the generated app in browser.
+- The published URL shows the latest generated project files.
+- Unpublish works.
+- Production publish requires confirmation/checklist.
+
+If publicUrl does NOT actually serve the generated app, mark Publishing as PARTIAL, not complete, and explain what still needs to be implemented.
+
+5. SECRETS SECURITY VALIDATION
+
+You said Phase 2.1 secrets are complete, but earlier it was dev-only passthrough.
+
+Please prove:
+
+- Are secrets truly encrypted at rest now?
+- Or is EncryptionService still dev-only passthrough?
+- Raw secret values are never returned by GET API.
+- Raw secret values are not exported in zip.
+- Secret create/update/delete creates audit log.
+- Dev/testing/staging/production environment separation works.
+
+If secrets are still dev-only passthrough, mark this as PARTIAL and do not call it production-ready.
+
+6. BUILDER ENGINE REGRESSION TEST
+
+Confirm the AI Builder still works after auth/export/duplicate/publish changes.
+
+Test:
+
+Prompt 1:
+Build me a landing page for a towing company with services, booking form, phone button, map section, and professional dark design.
+
+Expected:
+- Blueprint created
+- Files generated
+- Tools & Files shows generated files
+- Preview shows generated app
+- Version saved
+- Report created
+
+Prompt 2:
+Add pricing cards and make the design more premium.
+
+Expected:
+- Correct files changed
+- Preview updates
+- New version saved
+- Report created
+
+7. API / BUILD VALIDATION
+
+Run and report:
+
+- Typecheck result
+- Build result
+- API health result
+- Unknown API route JSON 404 result
+- OpenAPI/codegen result
+- Frontend loads
+- API server loads
+- No console crash
+- No duplicate React/Clerk runtime issue remains
+
+8. FINAL RESULT CLASSIFICATION
+
+For each item, mark:
+
+- PASS
+- PARTIAL
+- FAIL
+
+Items to grade:
+1. Real Auth
+2. User ownership
+3. Export ZIP
+4. Duplicate Project
+5. Real Publishing
+6. Secrets Security
+7. AI Builder still works
+8. Preview still works
+9. Version history still works
+10. Rollback still works
+11. API JSON 404
+12. Typecheck/build
+
+Do not just say “complete.”
+Give proof.
+
+Do not publish production yet.
+Wait for my review.

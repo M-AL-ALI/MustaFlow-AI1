@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
-import { db, projectFilesTable } from "@workspace/db";
+import { db, projectFilesTable, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { guessMime } from "../lib/builder";
 
@@ -68,22 +68,55 @@ router.get(
   },
 );
 
-// Serves generated project files as the actual preview. Ownership is enforced
-// so a user cannot iframe another user's project by id. The iframe is
-// same-origin, so session cookies / auth headers flow through automatically
-// once a real auth provider is wired in.
+// Serves generated project files as the preview.
+// PUBLISHED projects are publicly accessible without authentication — anyone
+// with the URL can open the generated app.
+// UNPUBLISHED projects require the requesting user to be the project owner.
 router.get(
   "/projects/:id/preview/{*splat}",
-  requireProjectOwnership,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     if (!Number.isFinite(projectId)) {
       res.status(404).type("text/plain").send("Not found");
       return;
     }
+
+    // Resolve the project so we can check its publish status and ownership
+    const [project] = await db
+      .select({
+        id: projectsTable.id,
+        status: projectsTable.status,
+        ownerId: projectsTable.ownerId,
+      })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+
+    if (!project) {
+      res
+        .status(404)
+        .type("text/html")
+        .send(
+          `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Project not found</h1></body></html>`,
+        );
+      return;
+    }
+
+    // Only published projects are publicly accessible.
+    // All other statuses require the caller to own the project.
+    if (project.status !== "published") {
+      if (!req.userId) {
+        res.status(401).json({ error: "Unauthenticated" });
+        return;
+      }
+      if (project.ownerId !== req.userId) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+    }
+
     const splat = req.params.splat;
     const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
-    const path = raw === "" ? "index.html" : raw;
+    const filePath = raw === "" ? "index.html" : raw;
 
     const [row] = await db
       .select()
@@ -91,11 +124,12 @@ router.get(
       .where(
         and(
           eq(projectFilesTable.projectId, projectId),
-          eq(projectFilesTable.path, path),
+          eq(projectFilesTable.path, filePath),
         ),
       );
+
     if (!row) {
-      // Fallback to index.html so HTML routing-style requests still work
+      // Fallback to index.html so single-page-app routes resolve correctly
       const [fallback] = await db
         .select()
         .from(projectFilesTable)
@@ -120,6 +154,7 @@ router.get(
         .send(fallback.content);
       return;
     }
+
     res
       .type(row.mimeType || guessMime(row.path))
       .setHeader("Cache-Control", "no-store, must-revalidate")

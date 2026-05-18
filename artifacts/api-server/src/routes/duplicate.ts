@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
-import { db, projectsTable, projectFilesTable } from "@workspace/db";
+import { db, projectsTable, projectFilesTable, projectVersionsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 
 const router: IRouter = Router();
@@ -75,7 +75,9 @@ router.post(
   },
 );
 
-// POST /api/projects/:id/publish — marks project as publicly accessible
+// POST /api/projects/:id/publish — marks project as publicly accessible and
+// saves a deployment version record so there is an auditable snapshot of
+// exactly what was live at publish time.
 router.post(
   "/projects/:id/publish",
   requireProjectOwnership,
@@ -91,6 +93,30 @@ router.post(
       return;
     }
 
+    // Snapshot current files into a deployment version record
+    const files = await db
+      .select()
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId));
+
+    const publishedAt = new Date().toISOString();
+    const deploymentLabel = `Published — ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
+
+    const [deploymentVersion] = await db
+      .insert(projectVersionsTable)
+      .values({
+        projectId,
+        label: deploymentLabel,
+        note: `Deployment snapshot. Files: ${files.length}. Actor: ${req.userId ?? "unknown"}. Published at: ${publishedAt}`,
+        filesSnapshot: files.map((f) => ({
+          path: f.path,
+          content: f.content,
+          mimeType: f.mimeType,
+        })),
+      })
+      .returning({ id: projectVersionsTable.id, label: projectVersionsTable.label });
+
+    // Mark the project as published
     await db
       .update(projectsTable)
       .set({ status: "published", updatedAt: sql`now()` })
@@ -108,8 +134,11 @@ router.post(
       projectId,
       status: "published",
       publicUrl,
-      publishedAt: new Date().toISOString(),
-      note: "The preview URL is now publicly accessible without authentication.",
+      publishedAt,
+      deploymentVersionId: deploymentVersion?.id,
+      deploymentLabel: deploymentVersion?.label,
+      filesSnapshotted: files.length,
+      note: "Project files are now publicly accessible via publicUrl without authentication.",
     });
   },
 );
