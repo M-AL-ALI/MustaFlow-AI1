@@ -19,6 +19,7 @@ import {
   Image,
   Camera,
   UserCheck,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -251,12 +252,44 @@ function ChecklistGroup({
 
 type Platform = "web" | "ios" | "android";
 
-export function PublishingTab() {
+export function PublishingTab({ projectId }: { projectId: number }) {
   const [platform, setPlatform] = useState<Platform>("web");
   const [webEnv, setWebEnv] = useState<"testing" | "production">("testing");
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [logsOpen, setLogsOpen] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState<{
+    publicUrl: string;
+    publishedAt: string;
+  } | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+
+  async function handlePublish() {
+    setIsPublishing(true);
+    setPublishError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/publish`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string };
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        publicUrl: string;
+        publishedAt: string;
+      };
+      setPublishResult(data);
+      setShowConfirm(false);
+    } catch (err) {
+      setPublishError(
+        err instanceof Error ? err.message : "Publish failed — please try again.",
+      );
+    } finally {
+      setIsPublishing(false);
+    }
+  }
 
   const toggle = (id: string) =>
     setChecked((prev) => {
@@ -507,19 +540,62 @@ export function PublishingTab() {
                         This will make your app publicly accessible. A rollback point has been saved automatically.
                       </p>
                     </div>
+                    {publishError && (
+                      <p className="text-xs text-destructive">{publishError}</p>
+                    )}
                     <div className="flex gap-2">
-                      <Button variant="destructive" className="flex-1" disabled>
-                        Confirm Publish
+                      <Button
+                        variant="destructive"
+                        className="flex-1"
+                        onClick={handlePublish}
+                        disabled={isPublishing}
+                      >
+                        {isPublishing && (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        )}
+                        {isPublishing ? "Publishing…" : "Confirm Publish"}
                       </Button>
-                      <Button variant="outline" onClick={() => setShowConfirm(false)}>
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowConfirm(false)}
+                        disabled={isPublishing}
+                      >
                         Cancel
                       </Button>
                     </div>
-                    <p className="text-[11px] text-muted-foreground text-center">
-                      Production deployment pipeline is planned for Phase 3.
-                    </p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {publishResult && (
+              <div className="border border-green-500/20 rounded-xl p-4 bg-green-500/5 space-y-3">
+                <div className="flex items-center gap-2 text-green-500 text-sm font-semibold">
+                  <CheckCircle2 className="h-4 w-4" />
+                  App is live
+                </div>
+                <a
+                  href={publishResult.publicUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 text-sm break-all"
+                >
+                  {publishResult.publicUrl}
+                  <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+                </a>
+                <p className="text-[11px] text-muted-foreground">
+                  Published {new Date(publishResult.publishedAt).toLocaleString()}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    await fetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
+                    setPublishResult(null);
+                  }}
+                >
+                  Unpublish
+                </Button>
               </div>
             )}
 
@@ -527,7 +603,7 @@ export function PublishingTab() {
               <Button variant="outline" className="w-full" disabled>
                 <Server className="h-4 w-4 mr-2" />
                 Deploy to Testing Environment
-                <span className="ml-2 text-[11px] opacity-50">(coming in Phase 3)</span>
+                <span className="ml-2 text-[11px] opacity-50">(internal preview only)</span>
               </Button>
             )}
           </div>

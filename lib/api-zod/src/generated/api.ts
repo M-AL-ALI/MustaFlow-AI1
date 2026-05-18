@@ -367,6 +367,34 @@ export const CreateSecretBody = zod.object({
 })
 
 
+export const DuplicateProjectParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+export const PublishProjectParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const PublishProjectResponse = zod.object({
+  "projectId": zod.number(),
+  "status": zod.string(),
+  "publicUrl": zod.string(),
+  "publishedAt": zod.coerce.date(),
+  "note": zod.string()
+})
+
+
+export const UnpublishProjectParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UnpublishProjectResponse = zod.object({
+  "projectId": zod.number(),
+  "status": zod.string()
+})
+
+
 export const ListKnowledgeResponseItem = zod.object({
   "id": zod.number(),
   "title": zod.string(),

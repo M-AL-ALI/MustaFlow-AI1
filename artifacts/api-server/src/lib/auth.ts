@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import { getAuth } from "@clerk/express";
 import { eq } from "drizzle-orm";
 import { db, projectsTable } from "@workspace/db";
 import { logger } from "./logger";
@@ -18,26 +19,44 @@ export interface AuthAdapter {
   attachUser(req: Request, res: Response, next: NextFunction): void | Promise<void>;
 }
 
-// ─── Development-only adapter ─────────────────────────────────────────────────
+// ─── Clerk adapter (production-ready) ────────────────────────────────────────
+// Reads the Clerk session that clerkMiddleware() has already resolved.
+// Requires @clerk/express clerkMiddleware to be mounted in app.ts first.
+class ClerkAuthAdapter implements AuthAdapter {
+  attachUser(req: Request, res: Response, next: NextFunction): void {
+    const auth = getAuth(req);
+    // sessionClaims.userId handles legacy migrated sessions; auth.userId covers new ones.
+    const userId =
+      (auth?.sessionClaims?.["userId"] as string | undefined) ?? auth?.userId;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthenticated" });
+      return;
+    }
+    req.userId = userId;
+    next();
+  }
+}
+
+// ─── Development-only fallback ────────────────────────────────────────────────
 // Every request is treated as the same demo user.
-// This adapter HARD FAILS in production so it can never be shipped unnoticed.
+// Hard-fails in production — can never be accidentally shipped.
+// Activate by swapping activeAdapter below when running without Clerk.
 class DevOnlyAuthAdapter implements AuthAdapter {
   private static warned = false;
 
   attachUser(req: Request, res: Response, next: NextFunction): void {
     if (process.env.NODE_ENV === "production") {
-      // Safety net: refuse to run with the stub adapter in production.
       res.status(500).json({
         error:
-          "Authentication is not configured. Swap DevOnlyAuthAdapter for a real provider before deploying.",
+          "Authentication is not configured. Replace DevOnlyAuthAdapter with ClerkAuthAdapter.",
       });
       return;
     }
     if (!DevOnlyAuthAdapter.warned) {
       DevOnlyAuthAdapter.warned = true;
       logger.warn(
-        "⚠ DEV-ONLY AUTH: all requests are served as 'demo-user'. " +
-        "Replace DevOnlyAuthAdapter in auth.ts before production launch.",
+        "⚠ DEV-ONLY AUTH: all requests served as 'demo-user'. " +
+          "Replace DevOnlyAuthAdapter in auth.ts before production launch.",
       );
     }
     req.userId = "demo-user";
@@ -46,9 +65,8 @@ class DevOnlyAuthAdapter implements AuthAdapter {
 }
 
 // ─── Active adapter ───────────────────────────────────────────────────────────
-// SWAP THIS to enable real auth:
-//   const activeAdapter: AuthAdapter = new ClerkAuthAdapter();
-const activeAdapter: AuthAdapter = new DevOnlyAuthAdapter();
+// SWAP POINT: change to DevOnlyAuthAdapter for local testing without Clerk.
+const activeAdapter: AuthAdapter = new ClerkAuthAdapter();
 
 // ─────────────────────────────────────────────────────────────────────────────
 

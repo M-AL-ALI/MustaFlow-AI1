@@ -587,7 +587,7 @@ export default function ProjectWorkspacePage() {
           )}
           {activeTab === "canvas" && <div className="h-full"><CanvasTab projectId={projectId} /></div>}
           {activeTab === "tools-files" && <div className="h-full"><ToolsTab projectId={projectId} /></div>}
-          {activeTab === "publishing" && <div className="h-full"><PublishingTab /></div>}
+          {activeTab === "publishing" && <div className="h-full"><PublishingTab projectId={projectId} /></div>}
           {activeTab === "logs" && (
             <div className="h-full">
               <LogsTab

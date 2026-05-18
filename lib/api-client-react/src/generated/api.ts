@@ -27,6 +27,7 @@ import type {
   ChatExchange,
   ChatMessage,
   ChatMessageInput,
+  DuplicateProjectResult,
   HealthStatus,
   KnowledgeEntry,
   KnowledgeInput,
@@ -38,11 +39,13 @@ import type {
   ProjectVersion,
   ProjectVersionInput,
   ProjectsSummary,
+  PublishResult,
   RollbackResult,
   SecretEntry,
   SecretInput,
   TaskEvent,
-  TaskFeedbackInput
+  TaskFeedbackInput,
+  UnpublishProject200
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1505,6 +1508,198 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getCreateSecretMutationOptions(options));
+    }
+
+export const getDuplicateProjectUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/duplicate`
+}
+
+export const duplicateProject = async (id: number, options?: RequestInit): Promise<DuplicateProjectResult> => {
+
+  return customFetch<DuplicateProjectResult>(getDuplicateProjectUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getDuplicateProjectMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof duplicateProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof duplicateProject>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['duplicateProject'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof duplicateProject>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  duplicateProject(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DuplicateProjectMutationResult = NonNullable<Awaited<ReturnType<typeof duplicateProject>>>
+
+    export type DuplicateProjectMutationError = ErrorType<unknown>
+
+    export const useDuplicateProject = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof duplicateProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof duplicateProject>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDuplicateProjectMutationOptions(options));
+    }
+
+export const getPublishProjectUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/publish`
+}
+
+export const publishProject = async (id: number, options?: RequestInit): Promise<PublishResult> => {
+
+  return customFetch<PublishResult>(getPublishProjectUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getPublishProjectMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof publishProject>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['publishProject'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof publishProject>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  publishProject(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PublishProjectMutationResult = NonNullable<Awaited<ReturnType<typeof publishProject>>>
+
+    export type PublishProjectMutationError = ErrorType<unknown>
+
+    export const usePublishProject = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof publishProject>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getPublishProjectMutationOptions(options));
+    }
+
+export const getUnpublishProjectUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/unpublish`
+}
+
+export const unpublishProject = async (id: number, options?: RequestInit): Promise<UnpublishProject200> => {
+
+  return customFetch<UnpublishProject200>(getUnpublishProjectUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getUnpublishProjectMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unpublishProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof unpublishProject>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['unpublishProject'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof unpublishProject>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  unpublishProject(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UnpublishProjectMutationResult = NonNullable<Awaited<ReturnType<typeof unpublishProject>>>
+
+    export type UnpublishProjectMutationError = ErrorType<unknown>
+
+    export const useUnpublishProject = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unpublishProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof unpublishProject>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getUnpublishProjectMutationOptions(options));
     }
 
 export const getListKnowledgeUrl = () => {

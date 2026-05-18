@@ -1,0 +1,153 @@
+Good Phase 2.1 work. Do NOT publish yet.
+
+I understand the six blockers were improved, but I need to be clear:
+
+1. Auth Adapter Pattern is good, but real login/auth is still not implemented.
+2. EncryptionService structure is good, but real encryption is still not active.
+3. Publishing tab UI is improved, but I need confirmation whether real deploy/publish behavior exists or if it is still only UI/checklist.
+4. Preview sandbox was improved — good.
+5. Task events consistency was improved — good.
+6. Typecheck/API health passed — good.
+
+Before we move forward, please give me a short proof report answering:
+
+1. Can a real user sign up/login now?
+2. Is Clerk or Replit Auth actually connected?
+3. Can different users be prevented from accessing each other’s projects?
+4. Are secrets truly encrypted at rest, or still dev-only passthrough?
+5. Does the Publish button actually deploy a generated web app, or is it still checklist/UI only?
+6. Can I export/download generated code as a .zip yet?
+7. Can I duplicate a project yet?
+
+Do not publish production.
+
+==================================================
+NEXT PHASE: PHASE 3A — REAL USER VALUE + MULTI-USER READINESS
+==================================================
+
+Please start Phase 3A in this order:
+
+1. Real Auth
+2. Export / Download generated code
+3. Duplicate Project
+4. Real Web Publishing Pipeline
+5. Real Secrets Encryption
+
+==================================================
+TASK 1 — REAL AUTH
+==================================================
+
+Implement actual authentication using Clerk or Replit Auth.
+
+Requirements:
+- User can sign up/login/logout.
+- API no longer relies on demo-user.
+- Every project has ownerId.
+- Every API route validates ownership.
+- User A cannot access User B’s projects, files, tasks, secrets, versions, knowledge vault, or deployments.
+- Admin routes must be protected separately.
+
+Acceptance proof:
+- Show auth provider used.
+- Show login works.
+- Show logout works.
+- Show project ownership check.
+- Show unauthorized project access returns JSON 403.
+
+==================================================
+TASK 2 — EXPORT / DOWNLOAD GENERATED CODE
+==================================================
+
+Enable Export Files in Manage tab.
+
+Requirements:
+- User can download generated project as .zip.
+- Preserve folder structure.
+- Include README.
+- Include setup instructions.
+- Include required environment variable names.
+- Do NOT include raw secret values.
+
+Acceptance proof:
+- Export button works.
+- Zip downloads.
+- Zip contains generated files.
+- Zip does not contain secrets.
+
+==================================================
+TASK 3 — DUPLICATE PROJECT
+==================================================
+
+Enable Duplicate Project.
+
+Requirements:
+- Copy project metadata.
+- Copy generated files.
+- Copy useful version history summary.
+- Do not copy raw secrets.
+- New project must be independent from original.
+
+Acceptance proof:
+- Duplicate button works.
+- New project opens.
+- Changing duplicate does not change original.
+
+==================================================
+TASK 4 — REAL WEB PUBLISHING PIPELINE
+==================================================
+
+The Publish button must do real work.
+
+Minimum v1:
+- Publish generated static web app to a real deployable output or hosting target.
+- Save deployment record.
+- Save deployment logs.
+- Show published URL if available.
+- Support testing deployment and production deployment.
+- Production publish requires confirmation and passing checklist.
+
+Acceptance proof:
+- Testing publish works.
+- Deployment status updates.
+- Logs are saved.
+- Production publish is gated by confirmation.
+
+==================================================
+TASK 5 — REAL SECRETS ENCRYPTION
+==================================================
+
+Move from dev-only passthrough to real encryption if possible.
+
+Requirements:
+- Secrets encrypted before storage.
+- Raw secret values never returned after save.
+- Masked values only.
+- Audit log on create/update/delete.
+- Separate development/testing/staging/production secrets.
+
+Acceptance proof:
+- Show encryption active or clearly explain what is still blocked.
+- Show raw secret is not returned by GET API.
+- Show audit log entry created.
+
+==================================================
+FINAL PHASE 3A REPORT REQUIRED
+==================================================
+
+After completing Phase 3A, provide:
+
+1. Auth implementation proof
+2. Ownership protection proof
+3. Export zip proof
+4. Duplicate project proof
+5. Publishing pipeline proof
+6. Secrets encryption proof
+7. Typecheck/build result
+8. API health result
+9. Unknown API JSON 404 result
+10. Known limitations
+11. What is still placeholder
+12. Recommended next phase
+
+Do not publish production.
+Wait for my review.

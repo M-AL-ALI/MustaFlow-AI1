@@ -9,12 +9,16 @@ import knowledgeRouter from "./knowledge";
 import activityRouter from "./activity";
 import filesRouter from "./files";
 import eventsRouter from "./events";
+import exportRouter from "./export";
+import duplicateRouter from "./duplicate";
 import { attachUser } from "../lib/auth";
 
 const router: IRouter = Router();
 
-router.use(attachUser);
+// Health is public — mount before the auth middleware
 router.use(healthRouter);
+
+router.use(attachUser);
 router.use(projectsRouter);
 router.use(messagesRouter);
 router.use(tasksRouter);
@@ -24,6 +28,8 @@ router.use(knowledgeRouter);
 router.use(activityRouter);
 router.use(filesRouter);
 router.use(eventsRouter);
+router.use(exportRouter);
+router.use(duplicateRouter);
 
 // JSON 404 for any unmatched /api route
 router.use((_req, res) => {

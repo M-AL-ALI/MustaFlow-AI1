@@ -412,6 +412,25 @@ export interface RollbackResult {
   label: string;
 }
 
+export interface DuplicateProjectResult {
+  id: number;
+  name: string;
+  kind: string;
+  status: string;
+  ownerId: string;
+  filesCount: number;
+  secretsCopied: boolean;
+  note: string;
+}
+
+export interface PublishResult {
+  projectId: number;
+  status: string;
+  publicUrl: string;
+  publishedAt: string;
+  note: string;
+}
+
 export type ActivityItemKind = typeof ActivityItemKind[keyof typeof ActivityItemKind];
 
 
@@ -430,4 +449,9 @@ export interface ActivityItem {
   summary: string;
   createdAt: string;
 }
+
+export type UnpublishProject200 = {
+  projectId: number;
+  status: string;
+};
 
