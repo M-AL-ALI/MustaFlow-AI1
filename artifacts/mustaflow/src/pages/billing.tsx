@@ -53,9 +53,9 @@ export default function BillingPage() {
     setLoading(true);
     try {
       const [balRes, pkgRes, txRes] = await Promise.all([
-        fetch("/api/credits"),
+        fetch("/api/billing/credits"),
         fetch("/api/billing/packages"),
-        fetch("/api/credits/transactions"),
+        fetch("/api/billing/transactions"),
       ]);
 
       if (balRes.ok) setBalance((await balRes.json()) as CreditsBalance);

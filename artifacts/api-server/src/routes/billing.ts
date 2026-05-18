@@ -11,7 +11,9 @@
 
 import { Router, type IRouter } from "express";
 import { createHmac } from "crypto";
-import { grantCredits } from "./credits";
+import { eq, desc } from "drizzle-orm";
+import { db, userCreditsTable, creditTransactionsTable } from "@workspace/db";
+import { grantCredits, getOrCreateCredits } from "./credits";
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
@@ -25,26 +27,26 @@ export const CREDIT_PACKAGES = [
   {
     id: "starter",
     label: "Starter Pack",
-    credits: 50,
+    credits: 500,
     priceUsd: 5,
     priceId: process.env.STRIPE_PRICE_STARTER ?? null,
-    description: "50 build credits — good for 10–50 builds depending on agent mode",
+    description: "500 build credits — good for everyday building",
   },
   {
     id: "builder",
     label: "Builder Pack",
-    credits: 150,
-    priceUsd: 12,
+    credits: 2500,
+    priceUsd: 20,
     priceId: process.env.STRIPE_PRICE_BUILDER ?? null,
-    description: "150 build credits — 20% bonus vs. Starter",
+    description: "2,500 build credits — best value for active builders",
   },
   {
     id: "power",
     label: "Power Pack",
-    credits: 500,
-    priceUsd: 35,
+    credits: 10000,
+    priceUsd: 65,
     priceId: process.env.STRIPE_PRICE_POWER ?? null,
-    description: "500 build credits — 30% bonus vs. Starter",
+    description: "10,000 build credits — for power users and teams",
   },
 ] as const;
 
@@ -143,6 +145,27 @@ billingWebhookRouter.post("/billing/webhook", handleStripeWebhook);
 
 // ── Auth-required billing router ──────────────────────────────────────────────
 const router: IRouter = Router();
+
+// GET /api/billing/credits — current credit balance (alias for /api/credits)
+router.get("/billing/credits", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  const credits = await getOrCreateCredits(userId);
+  res.json({ userId: credits.userId, balance: credits.balance, updatedAt: credits.updatedAt });
+});
+
+// GET /api/billing/transactions — transaction history (alias for /api/credits/transactions)
+router.get("/billing/transactions", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  const rows = await db
+    .select()
+    .from(creditTransactionsTable)
+    .where(eq(creditTransactionsTable.userId, userId))
+    .orderBy(desc(creditTransactionsTable.createdAt))
+    .limit(50);
+  res.json({ transactions: rows });
+});
 
 // GET /api/billing/packages
 router.get("/billing/packages", (_req, res): void => {
