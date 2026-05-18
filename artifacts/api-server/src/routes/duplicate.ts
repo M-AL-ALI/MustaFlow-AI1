@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, projectsTable, projectFilesTable, projectVersionsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+import { writeKnowledge } from "../lib/knowledge";
 
 const router: IRouter = Router();
 
@@ -26,7 +27,6 @@ router.post(
       .from(projectFilesTable)
       .where(eq(projectFilesTable.projectId, projectId));
 
-    // Create the duplicate project
     const [newProject] = await db
       .insert(projectsTable)
       .values({
@@ -45,7 +45,6 @@ router.post(
       return;
     }
 
-    // Copy files
     if (files.length > 0) {
       await db.insert(projectFilesTable).values(
         files.map((f) => ({
@@ -62,6 +61,16 @@ router.post(
       .set({ updatedAt: sql`now()` })
       .where(eq(projectsTable.id, newProject.id));
 
+    void writeKnowledge({
+      title: `Project duplicated: "${original.name}" → "${newProject.name}"`,
+      content: `User duplicated project "${original.name}" (id:${projectId}) into new project id:${newProject.id}. ${files.length} file(s) copied. Secrets were NOT copied.`,
+      type: "duplicate",
+      category: "event",
+      severity: "info",
+      projectId: newProject.id,
+      userId: req.userId,
+    });
+
     res.status(201).json({
       id: newProject.id,
       name: newProject.name,
@@ -75,9 +84,10 @@ router.post(
   },
 );
 
-// POST /api/projects/:id/publish — marks project as publicly accessible and
-// saves a deployment version record so there is an auditable snapshot of
-// exactly what was live at publish time.
+// POST /api/projects/:id/publish — snapshots files as a deployment record,
+// sets publishedSnapshotId, marks status=published.
+// The public URL is /api/p/:projectId/ — served from the snapshot (not live files).
+// Draft changes after publish are NOT visible until the user publishes again.
 router.post(
   "/projects/:id/publish",
   requireProjectOwnership,
@@ -93,21 +103,28 @@ router.post(
       return;
     }
 
-    // Snapshot current files into a deployment version record
     const files = await db
       .select()
       .from(projectFilesTable)
       .where(eq(projectFilesTable.projectId, projectId));
 
+    if (files.length === 0) {
+      res.status(400).json({
+        error: "Cannot publish a project with no generated files. Build the app first.",
+      });
+      return;
+    }
+
     const publishedAt = new Date().toISOString();
     const deploymentLabel = `Published — ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
 
+    // Snapshot the files into a version record (this is the frozen public copy)
     const [deploymentVersion] = await db
       .insert(projectVersionsTable)
       .values({
         projectId,
         label: deploymentLabel,
-        note: `Deployment snapshot. Files: ${files.length}. Actor: ${req.userId ?? "unknown"}. Published at: ${publishedAt}`,
+        note: `Deployment snapshot. ${files.length} file(s). Actor: ${req.userId ?? "unknown"}. Published: ${publishedAt}`,
         filesSnapshot: files.map((f) => ({
           path: f.path,
           content: f.content,
@@ -116,19 +133,31 @@ router.post(
       })
       .returning({ id: projectVersionsTable.id, label: projectVersionsTable.label });
 
-    // Mark the project as published
+    // Mark the project published and store which snapshot is live
     await db
       .update(projectsTable)
-      .set({ status: "published", updatedAt: sql`now()` })
+      .set({
+        status: "published",
+        publishedSnapshotId: deploymentVersion?.id ?? null,
+        updatedAt: sql`now()`,
+      })
       .where(eq(projectsTable.id, projectId));
 
-    const host =
-      req.headers["x-forwarded-host"] ??
-      req.headers.host ??
-      "localhost";
-    const protocol =
-      (req.headers["x-forwarded-proto"] as string) ?? "http";
-    const publicUrl = `${protocol}://${host}/api/projects/${projectId}/preview/`;
+    const host = req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost";
+    const protocol = (req.headers["x-forwarded-proto"] as string) ?? "http";
+    // Public URL uses the /p/ route — served from snapshot, no auth required
+    const publicUrl = `${protocol}://${host}/api/p/${projectId}/`;
+
+    void writeKnowledge({
+      title: `Published: project ${projectId}`,
+      content: `Project id:${projectId} published by ${req.userId ?? "unknown"}. Snapshot version id:${deploymentVersion?.id}. ${files.length} file(s) frozen. Public URL: ${publicUrl}`,
+      type: "publish",
+      category: "event",
+      severity: "info",
+      projectId,
+      userId: req.userId,
+      relatedVersionId: deploymentVersion?.id,
+    });
 
     res.json({
       projectId,
@@ -138,12 +167,12 @@ router.post(
       deploymentVersionId: deploymentVersion?.id,
       deploymentLabel: deploymentVersion?.label,
       filesSnapshotted: files.length,
-      note: "Project files are now publicly accessible via publicUrl without authentication.",
+      note: "Public URL serves the frozen snapshot. Draft edits do not affect it until you publish again.",
     });
   },
 );
 
-// POST /api/projects/:id/unpublish — reverts project to testing status
+// POST /api/projects/:id/unpublish — clears the published snapshot, reverts to testing
 router.post(
   "/projects/:id/unpublish",
   requireProjectOwnership,
@@ -152,10 +181,20 @@ router.post(
 
     await db
       .update(projectsTable)
-      .set({ status: "testing", updatedAt: sql`now()` })
+      .set({ status: "testing", publishedSnapshotId: null, updatedAt: sql`now()` })
       .where(eq(projectsTable.id, projectId));
 
-    res.json({ projectId, status: "testing" });
+    void writeKnowledge({
+      title: `Unpublished: project ${projectId}`,
+      content: `Project id:${projectId} unpublished by ${req.userId ?? "unknown"}. Public URL is now inactive.`,
+      type: "publish",
+      category: "event",
+      severity: "info",
+      projectId,
+      userId: req.userId,
+    });
+
+    res.json({ projectId, status: "testing", publicUrl: null });
   },
 );
 

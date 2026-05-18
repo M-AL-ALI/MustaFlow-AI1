@@ -17,7 +17,7 @@ The intended user journey is: Login → create project → build app → preview
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks + Zod schemas after editing openapi.yaml
 - `pnpm --filter @workspace/db run push` — push DB schema (dev)
 - `pnpm --filter @workspace/scripts run seed` — seed sample projects (no-op if any exist)
-- Required env: `DATABASE_URL`, `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `SESSION_SECRET`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`
+- Required env: `DATABASE_URL`, `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `SESSION_SECRET`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `ENCRYPTION_KEY`
 
 ## Stack
 
@@ -36,7 +36,8 @@ The intended user journey is: Login → create project → build app → preview
 - DB schema: `lib/db/src/schema/*` (projects, messages, tasks, versions, secrets, knowledge)
 - AI prompts & model routing: `artifacts/api-server/src/lib/ai.ts`
 - Auth adapter: `artifacts/api-server/src/lib/auth.ts` (swap point: ClerkAuthAdapter ↔ DevOnlyAuthAdapter)
-- Encryption service: `artifacts/api-server/src/lib/encryption.ts` (swap point: passthrough → AES-256-GCM)
+- Encryption service: `artifacts/api-server/src/lib/encryption.ts` (AES-256-GCM active; reads ENCRYPTION_KEY env var)
+- Knowledge vault helper: `artifacts/api-server/src/lib/knowledge.ts` (writeKnowledge — best-effort, non-fatal)
 - API routes: `artifacts/api-server/src/routes/*`
 - Frontend pages: `artifacts/mustaflow/src/pages/*`
 
@@ -49,6 +50,8 @@ The intended user journey is: Login → create project → build app → preview
 - Generated apps are static (HTML/CSS/JS + Tailwind/lucide via CDN). They are served from the DB at `GET /api/projects/:id/preview/{*splat}` and iframed in the Preview tab. No npm/build tools run server-side.
 - Every successful build/refine snapshots all current files into `project_versions.filesSnapshot` and writes a `TaskReport` onto `agent_tasks.report`. The report card renders in the chat. Rollback restores the snapshot via `POST /api/projects/:id/versions/:versionId/rollback`.
 - Frontend artifact is mounted at `/`; API at `/api`. The shared proxy routes most-specific-first.
+- Projects are soft-deleted (`deleted_at` column). All project-scoped data is retained server-side. All list/get queries filter `deleted_at IS NULL`.
+- Publishing freezes a snapshot into `project_versions` and stores its ID in `projects.published_snapshot_id`. The public URL `/api/p/:id/` serves from the snapshot — draft edits are invisible until next publish. Unpublish clears `published_snapshot_id` and the public URL returns 404.
 
 ## Product
 
@@ -56,9 +59,9 @@ The intended user journey is: Login → create project → build app → preview
 - Sign-in / Sign-up: Clerk-hosted pages at /sign-in and /sign-up, themed to match the dark UI.
 - Projects dashboard: summary stats, recent activity, project grid (auth-gated).
 - Project workspace: left rail sections, top tab bar (Preview, Canvas, Tools & Files, Publishing, Logs, etc.), fixed bottom AI Builder chat with Plan Mode toggle and Lite/Eco/Power/Pro agent modes.
-- Manage tab: Export (ZIP download), Duplicate, Delete (UI only).
-- Publishing tab: web publish pipeline (v1 — marks status=published, returns preview URL). iOS/Android publishing is UI-only placeholder.
-- Knowledge Vault: shared learnings across builds.
+- Manage tab: Rename/edit project name+description, Export (ZIP download), Duplicate, Delete (2-step confirmation → soft delete → redirect to /projects).
+- Publishing tab: web publish pipeline — freezes snapshot, sets publishedSnapshotId, returns truly public `/api/p/:id/` URL. iOS/Android publishing is UI-only placeholder.
+- Knowledge Vault: shared learnings across builds. Auto-populated after every build, refine, rollback, publish, duplicate. Entries have projectId, type, severity, approvedForReuse.
 - Sidebar: shows signed-in user name/avatar and sign-out button.
 
 ## User preferences
@@ -78,24 +81,35 @@ The intended user journey is: Login → create project → build app → preview
 - Clerk is the active auth provider. `ClerkAuthAdapter` reads `getAuth(req).userId` from the Clerk session cookie.
 - `DevOnlyAuthAdapter` exists as a swap point (sets userId = "demo-user") for local testing without Clerk. Never active in production.
 - `requireProjectOwnership` middleware runs on every project-scoped route: returns 401 if not authenticated, 403 if the project belongs to a different user.
-- Health endpoint (`/api/healthz`) is intentionally public — mounted before `attachUser`.
+- Health endpoint (`/api/healthz`) and public project route (`/api/p/:id/`) are mounted before `attachUser`.
+- Unknown route prefixes return JSON 404 before the auth wall (routes/index.ts prefix guard).
 - Frontend: `ClerkProvider` with `publishableKeyFromHost` (supports custom domains), `proxyUrl` from env (empty in dev, auto-set in prod), dark-themed sign-in/sign-up pages.
+
+## Encryption (Phase 3B)
+
+- `AES256GcmEncryptionService` is active — reads `ENCRYPTION_KEY` (32-byte base64 env var).
+- Encrypted format: `v1:<base64-iv>:<base64-ciphertext>:<base64-tag>`.
+- Migration: values that don't start with `v1:` are treated as legacy plaintext on decrypt (backward compatible).
+- In production: missing `ENCRYPTION_KEY` throws at startup. In dev: falls back to passthrough with a warning.
+- `ENCRYPTION_KEY` is stored as a shared env var (not a secret — auto-generated, not user-provided).
 
 ## Export, Duplicate, Publish (Phase 3)
 
 - `GET /api/projects/:id/export` — ownership-checked, streams a ZIP (fflate) of all project files + README + .env.example (secret names only, no values).
-- `POST /api/projects/:id/duplicate` — copies metadata + files; skips secrets; scopes new project to requesting user.
-- `POST /api/projects/:id/publish` — sets status="published", returns preview URL. v1 uses the existing preview route as the public URL. Future milestone: CDN deploy.
-- `POST /api/projects/:id/unpublish` — reverts status to "testing".
+- `POST /api/projects/:id/duplicate` — copies metadata + files; skips secrets; scopes new project to requesting user. Writes a Knowledge Vault entry.
+- `POST /api/projects/:id/publish` — snapshots current files into a `project_versions` row, stores the version ID in `projects.published_snapshot_id`, marks status=published, returns `/api/p/:id/` as the public URL. Writes a Knowledge Vault entry.
+- `POST /api/projects/:id/unpublish` — clears `publishedSnapshotId`, reverts status to "testing". Public URL returns 404.
+- `GET /api/p/:projectId/{*splat}` — public route (no auth); serves from the frozen snapshot. Returns 404 HTML if not published.
+- `DELETE /api/projects/:id` — soft-deletes (sets `deleted_at`); returns 200 `{ deleted: true }`.
+- `PATCH /api/projects/:id` — updates name, description, agentMode, status.
 
 ## Known limitations (honest status)
 
-- **Secrets encryption**: `DevOnlyPassthroughEncryption` is active — secrets are stored as plaintext in `project_secrets.value_encrypted`. The column name is aspirational. Raw values are never returned by the API (masked only). Real AES-256-GCM encryption is the next security milestone. Do NOT let users store real production secrets until this is resolved.
-- **Publishing v1**: "Publish" sets a status flag and returns the existing auth-protected preview URL. It does not push to a CDN or create a truly public unauthenticated URL yet. The preview route still requires project ownership for serving. Real static hosting (Replit Deploy, S3, Cloudflare Pages) is Phase 4.
-- **Delete project**: UI button exists but is disabled — no DELETE endpoint implemented yet.
 - **Mobile generation**: Intentionally absent from the UI. The builder only produces static HTML/CSS/JS. Expo/React Native support is a future milestone.
 - **Preview iframe**: `allow-same-origin` removed (Phase 2.1). Preview is sandboxed with `allow-scripts allow-forms allow-popups`. Safe for multi-user.
 - **Clerk dev keys**: The "Development mode" banner on the sign-in page is expected in development. Production keys are auto-provisioned by Replit on deploy.
+- **Publishing v1 (no CDN)**: The public URL `/api/p/:id/` is served by the API server from DB-stored snapshot content. It is truly public (no auth). A real CDN/static-hosting push is Phase 4.
+- **Project hard-delete recovery**: Soft-deleted projects are invisible in the UI and cannot be self-served recovered. An admin SQL query is needed to restore them.
 
 ## Gotchas
 
@@ -105,6 +119,8 @@ The intended user journey is: Login → create project → build app → preview
 - Never `console.log` in server code — use `req.log` or the singleton `logger`.
 - Auth is cookie-based for web. Do NOT add `getToken()`, `setAuthTokenGetter`, or `Authorization: Bearer` to browser fetch calls — Clerk's session cookie handles it automatically.
 - `tailwindcss({ optimize: false })` is required in vite.config.ts for Clerk themes to render correctly in production builds (Tailwind v4 + @clerk/themes nested @layer import issue).
+- The `or` import from drizzle-orm is used in `jobs.ts` `loadKnowledgeContext` — do not remove it.
+- All project queries must include `isNull(projectsTable.deletedAt)` (or use the `activeProjects` const in projects.ts). Never query projects without this filter.
 
 ## Pointers
 

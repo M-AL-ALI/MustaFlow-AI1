@@ -1,46 +1,124 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Encryption Service
+// Encryption Service — AES-256-GCM
 //
-// This module provides encrypt/decrypt for secret values stored in the database.
+// Encrypted format:  v1:<base64-iv>:<base64-ciphertext>:<base64-tag>
 //
-// CURRENT IMPLEMENTATION: Development-only passthrough (plaintext).
-//   Values are stored as-is. This is marked DEV-ONLY and must be replaced
-//   with real encryption before accepting real user secrets.
+// Migration: values that do NOT start with "v1:" are treated as legacy
+// plaintext (created before encryption was active). On decrypt they are
+// returned as-is; on the next update they will be re-encrypted automatically.
 //
-// TODO (before production):
-//   Replace passthrough with AES-256-GCM encryption using a KMS-managed key.
-//   Recommended approach:
-//     1. Store ENCRYPTION_KEY as a 32-byte base64 env var (use Replit Secrets).
-//     2. Generate a random 12-byte IV per encrypt call.
-//     3. Encode as `<base64-iv>.<base64-ciphertext>.<base64-tag>`.
-//     4. Migrate existing rows with a one-time encrypted-column backfill script.
+// Environment:
+//   ENCRYPTION_KEY  — 32-byte random key, base64-encoded (44 chars).
+//                     Generate once: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+//                     Store in Replit Secrets / env var, never commit.
 //
-// The interface is defined here so callers (secrets route) never import Node
-// crypto directly — swapping the implementation is a one-file change.
+// The interface is stable so callers never import Node crypto directly —
+// swapping implementations is a one-file change.
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { logger } from "./logger";
+
+const ALGORITHM = "aes-256-gcm";
+const IV_BYTES = 12;
+const TAG_BYTES = 16;
+const VERSION_PREFIX = "v1:";
 
 export interface EncryptionService {
   encrypt(plaintext: string): string;
   decrypt(ciphertext: string): string;
-  isDevelopmentOnly: boolean;
+  readonly isDevelopmentOnly: boolean;
 }
+
+// ─── AES-256-GCM implementation ──────────────────────────────────────────────
+
+class AES256GcmEncryptionService implements EncryptionService {
+  readonly isDevelopmentOnly = false;
+  private readonly key: Buffer;
+
+  constructor(base64Key: string) {
+    this.key = Buffer.from(base64Key, "base64");
+    if (this.key.byteLength !== 32) {
+      throw new Error(
+        `ENCRYPTION_KEY must be 32 bytes (got ${this.key.byteLength}). ` +
+          "Generate with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
+      );
+    }
+  }
+
+  encrypt(plaintext: string): string {
+    const iv = randomBytes(IV_BYTES);
+    const cipher = createCipheriv(ALGORITHM, this.key, iv);
+    const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `${VERSION_PREFIX}${iv.toString("base64")}:${ct.toString("base64")}:${tag.toString("base64")}`;
+  }
+
+  decrypt(stored: string): string {
+    // Legacy plaintext — was stored before encryption was active
+    if (!stored.startsWith(VERSION_PREFIX)) {
+      return stored;
+    }
+    const parts = stored.slice(VERSION_PREFIX.length).split(":");
+    if (parts.length !== 3) {
+      throw new Error("Malformed encrypted value — expected v1:<iv>:<ct>:<tag>");
+    }
+    const [ivB64, ctB64, tagB64] = parts as [string, string, string];
+    const iv = Buffer.from(ivB64, "base64");
+    const ct = Buffer.from(ctB64, "base64");
+    const tag = Buffer.from(tagB64, "base64");
+    const decipher = createDecipheriv(ALGORITHM, this.key, iv);
+    decipher.setAuthTag(tag);
+    return decipher.update(ct) + decipher.final("utf8");
+  }
+}
+
+// ─── Dev-only passthrough (never shipped to production) ──────────────────────
 
 class DevOnlyPassthroughEncryption implements EncryptionService {
   readonly isDevelopmentOnly = true;
 
   encrypt(plaintext: string): string {
-    // DEV ONLY: no encryption. Replace before production.
     return plaintext;
   }
 
   decrypt(ciphertext: string): string {
-    // DEV ONLY: no decryption. Replace before production.
+    // If a real key was active before, values start with "v1:". Passthrough
+    // just returns the raw string — the caller will see garbled output, which
+    // is the correct signal that ENCRYPTION_KEY is missing.
     return ciphertext;
   }
 }
 
-// SWAP POINT: replace with AES256GcmEncryptionService before production launch.
-export const encryptionService: EncryptionService = new DevOnlyPassthroughEncryption();
+// ─── Active service ───────────────────────────────────────────────────────────
+
+function buildEncryptionService(): EncryptionService {
+  const rawKey = process.env.ENCRYPTION_KEY;
+  if (!rawKey) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "ENCRYPTION_KEY environment variable is required in production. " +
+          "Generate a 32-byte key and add it to Replit Secrets.",
+      );
+    }
+    logger.warn(
+      "ENCRYPTION_KEY not set — falling back to plaintext storage. " +
+        "Set ENCRYPTION_KEY before accepting real user secrets.",
+    );
+    return new DevOnlyPassthroughEncryption();
+  }
+  try {
+    const svc = new AES256GcmEncryptionService(rawKey);
+    logger.info("AES-256-GCM encryption active");
+    return svc;
+  } catch (err) {
+    if (process.env.NODE_ENV === "production") throw err;
+    logger.error({ err }, "Invalid ENCRYPTION_KEY — falling back to plaintext");
+    return new DevOnlyPassthroughEncryption();
+  }
+}
+
+export const encryptionService: EncryptionService = buildEncryptionService();
 
 /** Mask a plaintext value for safe display: `••••••••XXXX` (last 4 chars). */
 export function maskValue(value: string): string {

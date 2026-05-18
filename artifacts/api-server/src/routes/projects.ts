@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -22,11 +22,14 @@ import { buildInitialAssistantMessage } from "../lib/ai";
 
 const router: IRouter = Router();
 
+// Active projects only — soft-deleted rows are excluded from all user-facing queries.
+const activeProjects = isNull(projectsTable.deletedAt);
+
 router.get("/projects", async (req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(projectsTable)
-    .where(eq(projectsTable.ownerId, req.userId ?? "demo-user"))
+    .where(and(eq(projectsTable.ownerId, req.userId ?? "demo-user"), activeProjects))
     .orderBy(desc(projectsTable.updatedAt));
   res.json(ListProjectsResponse.parse(rows));
 });
@@ -35,7 +38,7 @@ router.get("/projects/summary", async (req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(projectsTable)
-    .where(eq(projectsTable.ownerId, req.userId ?? "demo-user"));
+    .where(and(eq(projectsTable.ownerId, req.userId ?? "demo-user"), activeProjects));
 
   const byStatus: Record<string, number> = {};
   const byKind: Record<string, number> = {};
@@ -117,7 +120,7 @@ router.get("/projects/:id", requireProjectOwnership, async (req, res): Promise<v
   const [project] = await db
     .select()
     .from(projectsTable)
-    .where(eq(projectsTable.id, params.data.id));
+    .where(and(eq(projectsTable.id, params.data.id), activeProjects));
 
   if (!project) {
     res.status(404).json({ error: "Project not found" });
@@ -142,7 +145,7 @@ router.patch("/projects/:id", requireProjectOwnership, async (req, res): Promise
   const [project] = await db
     .update(projectsTable)
     .set({ ...parsed.data, updatedAt: sql`now()` })
-    .where(eq(projectsTable.id, params.data.id))
+    .where(and(eq(projectsTable.id, params.data.id), activeProjects))
     .returning();
 
   if (!project) {
@@ -153,6 +156,9 @@ router.patch("/projects/:id", requireProjectOwnership, async (req, res): Promise
   res.json(UpdateProjectResponse.parse(project));
 });
 
+// Soft delete — sets deletedAt instead of removing the row.
+// All project-scoped data (files, secrets, versions, etc.) is retained for
+// potential recovery but the project disappears from all user-facing queries.
 router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promise<void> => {
   const params = DeleteProjectParams.safeParse(req.params);
   if (!params.success) {
@@ -161,8 +167,9 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
   }
 
   const [project] = await db
-    .delete(projectsTable)
-    .where(eq(projectsTable.id, params.data.id))
+    .update(projectsTable)
+    .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
+    .where(and(eq(projectsTable.id, params.data.id), activeProjects))
     .returning();
 
   if (!project) {
@@ -170,7 +177,7 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
     return;
   }
 
-  res.sendStatus(204);
+  res.status(200).json({ deleted: true, projectId: project.id });
 });
 
 // Used by activity feed - keep references so unused-import linter doesn't trip

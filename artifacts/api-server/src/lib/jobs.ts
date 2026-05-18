@@ -1,4 +1,4 @@
-import { eq, sql, and, inArray, desc } from "drizzle-orm";
+import { eq, sql, and, inArray, desc, or } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -20,6 +20,7 @@ import {
 import { openai } from "@workspace/integrations-openai-ai-server";
 import type { AgentMode } from "./ai";
 import { logger } from "./logger";
+import { writeKnowledge } from "./knowledge";
 
 export type JobKind = "build" | "refine";
 
@@ -129,12 +130,19 @@ async function deleteFiles(
   );
 }
 
-async function loadKnowledgeContext(): Promise<string> {
+async function loadKnowledgeContext(projectId: number): Promise<string> {
   try {
     const entries = await db
       .select()
       .from(knowledgeEntriesTable)
-      .orderBy(knowledgeEntriesTable.createdAt);
+      .where(
+        or(
+          eq(knowledgeEntriesTable.approvedForReuse, true),
+          eq(knowledgeEntriesTable.projectId, projectId),
+        ),
+      )
+      .orderBy(knowledgeEntriesTable.createdAt)
+      .limit(40);
     if (entries.length === 0) return "";
     return entries
       .map((e) => `[${e.category}] ${e.title}: ${e.content}`)
@@ -183,16 +191,18 @@ async function generateFixSuggestions(
 async function autoWriteFailureLesson(
   userPrompt: string,
   errorMessage: string,
+  projectId: number,
+  userId?: string,
 ): Promise<void> {
-  try {
-    await db.insert(knowledgeEntriesTable).values({
-      title: `Build failed: "${userPrompt.slice(0, 60)}"`,
-      category: "diagnostic",
-      content: `Attempt failed with error: ${errorMessage.slice(0, 300)}. Review the fix suggestions and adjust the approach before retrying.`,
-    });
-  } catch (err) {
-    logger.warn({ err }, "Failed to auto-write failure lesson to Knowledge Vault");
-  }
+  await writeKnowledge({
+    title: `Build failed: "${userPrompt.slice(0, 60)}"`,
+    category: "diagnostic",
+    content: `Attempt failed with error: ${errorMessage.slice(0, 300)}. Review the fix suggestions and adjust the approach before retrying.`,
+    type: "build",
+    severity: "error",
+    projectId,
+    userId,
+  });
 }
 
 /**
@@ -224,10 +234,13 @@ async function maybeEscalateWarnings(
     );
 
     if (repeated.length > 0) {
-      await db.insert(knowledgeEntriesTable).values({
-        title: `Recurring warning: "${repeated[0].slice(0, 60)}"`,
+      await writeKnowledge({
+        title: `Recurring warning: "${repeated[0]!.slice(0, 60)}"`,
         category: "lesson",
-        content: `This warning has appeared across multiple builds for this project: ${repeated.join("; ")}. Proactively address it in future builds.`,
+        content: `This warning has appeared across multiple builds for project ${projectId}: ${repeated.join("; ")}. Proactively address it in future builds.`,
+        type: "refine",
+        severity: "warning",
+        projectId,
       });
       logger.info({ projectId, repeated }, "Escalated recurring warning to Knowledge Vault");
     }
@@ -263,7 +276,7 @@ export async function runJob(input: JobInput): Promise<void> {
     return;
   }
 
-  const knowledgeContext = await loadKnowledgeContext();
+  const knowledgeContext = await loadKnowledgeContext(projectId);
 
   try {
     let report: TaskReport;
@@ -398,8 +411,20 @@ export async function runJob(input: JobInput): Promise<void> {
 
     await emitEvent(taskId, "completed", "Task completed.");
 
-    // Fire-and-forget: escalate any recurring warnings to the Knowledge Vault
+    // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
     void maybeEscalateWarnings(projectId, report.warnings ?? []);
+    void writeKnowledge({
+      title: `${kind === "build" ? "Build" : "Refinement"} completed: "${userPrompt.slice(0, 60)}"`,
+      content: `${assistantSummary.slice(0, 400)} — Files created: ${report.filesCreated.length}, changed: ${report.filesChanged.length}, removed: ${report.filesRemoved.length}. Warnings: ${report.warnings?.length ?? 0}.`,
+      type: kind,
+      category: kind === "build" ? "build" : "refinement",
+      severity: (report.warnings?.length ?? 0) > 0 ? "warning" : "info",
+      projectId,
+      userId: project.ownerId,
+      relatedTaskId: taskId,
+      relatedVersionId: version?.id,
+      tags: report.integrationsNeeded?.map((i) => i.name),
+    });
 
     // Append a system message so the chat shows the report was produced
     await db.insert(chatMessagesTable).values({
@@ -436,7 +461,7 @@ export async function runJob(input: JobInput): Promise<void> {
       .where(eq(agentTasksTable.id, taskId));
 
     // Auto-write a diagnostic lesson to the Knowledge Vault
-    void autoWriteFailureLesson(userPrompt, message);
+    void autoWriteFailureLesson(userPrompt, message, projectId, project.ownerId);
 
     // Post a rich error message with suggestions into the chat
     try {
