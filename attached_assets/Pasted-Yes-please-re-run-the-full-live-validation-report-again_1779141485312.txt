@@ -1,0 +1,132 @@
+Yes, please re-run the full live validation report against the current codebase.
+
+Do not start new features yet.
+Do not publish production yet.
+
+I need proof that the current app is stable after Phase 4 + domain management.
+
+Please validate:
+
+1. Auth / Clerk
+- Sign in works
+- Sign out works
+- Protected pages redirect correctly
+- User ownership works
+- Wrong owner gets JSON 403
+
+2. AI Builder
+- User can create a project from a prompt
+- AI creates blueprint
+- AI generates files
+- Preview shows generated app
+- Change request updates files and preview
+- Live activity stream works
+- Version history works
+- Rollback works
+- Knowledge Vault auto-saves
+
+3. Export / Duplicate / Delete / Rename
+- Export ZIP works
+- ZIP does not include secrets
+- Duplicate project works
+- Duplicate does not copy raw secrets
+- Delete project soft-deletes
+- Rename project works
+
+4. Secrets
+- AES-256-GCM encryption active
+- ENCRYPTION_KEY is present
+- Secrets stored encrypted, not plaintext
+- GET secrets returns masked only
+- Secret audit logs work
+- Secret verification works
+- Dev/testing/staging/production separation works
+
+5. Publishing
+- Public slug publishing works
+- Public URL does not expose project ID
+- Public URL works signed out/incognito
+- Published site serves frozen snapshot
+- Draft changes do not affect public site until republish
+- Republish updates public snapshot
+- Unpublish disables public access
+- Deployment logs/history work
+- Production publish gate works
+- Build credits are enforced
+
+6. Domain Management
+- Automatic platform subdomain works
+- Subdomain uses PLATFORM_DOMAIN
+- Custom domain save/remove works
+- Bad domain validation works
+- DNS CNAME instructions show clearly
+- DNS verify endpoint works
+- DNS status updates
+- SSL status is clearly labeled as real or placeholder
+- Custom domain routing serves only published snapshot
+- /api traffic is not intercepted
+- Deleted/unpublished projects return 404
+- Public visitors cannot access private project data
+
+7. Security / Limits / Admin
+- Rate limits work and return JSON 429
+- Admin dashboard is protected
+- Non-admin cannot access admin
+- API health works
+- Unknown API route returns JSON 404
+- No API route returns HTML error by mistake
+
+8. Public Pages
+- Terms page works
+- Privacy page works
+- Help page works
+- Links appear correctly
+
+9. Typecheck / Build
+- Typecheck passes
+- Codegen passes
+- API server runs
+- Frontend runs
+- No console crash
+- No React/Clerk duplicate runtime issue
+
+Final report must include PASS / PARTIAL / FAIL for:
+
+- Auth
+- Ownership
+- AI Builder
+- Preview
+- Activity stream
+- Version history
+- Rollback
+- Knowledge Vault
+- Export ZIP
+- Duplicate project
+- Delete project
+- Rename project
+- Secrets encryption
+- Secret audit log
+- Secret verification
+- Build credits
+- Public publishing
+- Public slug
+- Domain management
+- DNS verification
+- SSL status
+- Rate limits
+- Admin dashboard
+- Terms/privacy/help
+- Typecheck/build
+- API JSON errors
+- Mobile generation still disabled
+
+Also provide:
+- screenshots or clear UI proof
+- API response examples
+- DB proof for encryption/snapshots/domains
+- known limitations
+- what is still placeholder
+- recommendation for next phase
+
+Do not publish production.
+Wait for my review.
