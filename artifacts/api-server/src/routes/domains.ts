@@ -13,6 +13,7 @@ import { promises as dns } from "dns";
 import { randomBytes } from "crypto";
 import { db, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+import { activateSslForProject } from "./ssl";
 
 const router: IRouter = Router();
 
@@ -273,21 +274,34 @@ router.post(
       const method = txtVerified ? "txt" : cnameVerified ? "cname" : null;
 
       if (verified) {
+        // Mark domain as verified and record the timestamp.
         await db
           .update(projectsTable)
           .set({
             domainStatus: "active",
             sslStatus: "provisioning",
+            domainVerifiedAt: new Date(),
             updatedAt: new Date(),
           })
           .where(eq(projectsTable.id, projectId));
+
+        // Auto-trigger Cloudflare SSL activation in the background.
+        // If CF vars are not set, activateSslForProject returns cfRequired:true (non-fatal).
+        const [projectForSsl] = await db
+          .select({ cfHostnameId: projectsTable.cfHostnameId })
+          .from(projectsTable)
+          .where(eq(projectsTable.id, projectId));
+
+        void activateSslForProject(projectId, domain, projectForSsl?.cfHostnameId).catch(
+          () => { /* best-effort — errors stored in ssl_error column */ },
+        );
 
         res.json({
           verified: true,
           method,
           domainStatus: "active",
           sslStatus: "provisioning",
-          message: `Domain ownership confirmed via ${method === "txt" ? "TXT record" : "CNAME"}. SSL requires manual certificate setup — see your infrastructure team.`,
+          message: `Domain ownership confirmed via ${method === "txt" ? "TXT record" : "CNAME"}. SSL activation has been triggered automatically.`,
         });
       } else {
         // Build a specific, actionable error message

@@ -11,13 +11,22 @@ import filesRouter from "./files";
 import eventsRouter from "./events";
 import exportRouter from "./export";
 import duplicateRouter from "./duplicate";
+import publishRouter from "./publish";
 import publicRouter from "./public";
 import readinessRouter from "./readiness";
 import deploymentsRouter from "./deployments";
 import creditsRouter from "./credits";
 import domainsRouter from "./domains";
+import sslRouter, { sslWebhookRouter } from "./ssl";
+import adminRouter from "./admin";
+import billingRouter, { billingWebhookRouter } from "./billing";
 import { attachUser } from "../lib/auth";
-import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
+import {
+  aiBuilderLimiter,
+  publishLimiter,
+  exportLimiter,
+  generalLimiter,
+} from "../lib/rateLimit";
 
 const router: IRouter = Router();
 
@@ -25,12 +34,10 @@ const router: IRouter = Router();
 router.use(generalLimiter);
 
 // ── Public routes (no auth) ───────────────────────────────────────────────────
-// Health check
 router.use(healthRouter);
-
-// Published project snapshot — /api/p/:projectId/{*splat}
-// No auth required; serves frozen snapshot for published projects.
 router.use(publicRouter);
+router.use(sslWebhookRouter);       // POST /domain/ssl-webhook (Cloudflare → us)
+router.use(billingWebhookRouter);   // POST /billing/webhook    (Stripe → us)
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
@@ -44,6 +51,9 @@ const KNOWN_PREFIXES = [
   "/activity",
   "/events",
   "/credits",
+  "/domain",
+  "/admin",
+  "/billing",
 ];
 
 router.use((req, res, next) => {
@@ -67,6 +77,7 @@ router.post("/projects/:id/publish", publishLimiter);
 router.post("/projects/:id/unpublish", publishLimiter);
 router.post("/projects/:id/duplicate", exportLimiter);
 router.get("/projects/:id/export", exportLimiter);
+router.post("/billing/checkout", exportLimiter);
 
 router.use(projectsRouter);
 router.use(messagesRouter);
@@ -79,10 +90,14 @@ router.use(filesRouter);
 router.use(eventsRouter);
 router.use(exportRouter);
 router.use(duplicateRouter);
+router.use(publishRouter);
 router.use(readinessRouter);
 router.use(deploymentsRouter);
 router.use(creditsRouter);
 router.use(domainsRouter);
+router.use(sslRouter);
+router.use(adminRouter);
+router.use(billingRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

@@ -31,6 +31,15 @@ export const projectsTable = pgTable("projects", {
   // verificationToken: random hex token used for TXT-based domain ownership proof.
   // Generated on first domain save. TXT record: _mustaflow.<domain> = mustaflow-verify=<token>
   verificationToken: text("verification_token"),
+  // Cloudflare for SaaS — custom hostname SSL automation.
+  // cfHostnameId: stored after ssl-activate creates the CF custom hostname.
+  // domainVerifiedAt: when DNS ownership was confirmed.
+  // sslVerifiedAt: when Cloudflare reported SSL as active.
+  // sslError: last error message from Cloudflare (cleared on next activation attempt).
+  cfHostnameId: text("cf_hostname_id"),
+  domainVerifiedAt: timestamp("domain_verified_at", { withTimezone: true }),
+  sslVerifiedAt: timestamp("ssl_verified_at", { withTimezone: true }),
+  sslError: text("ssl_error"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

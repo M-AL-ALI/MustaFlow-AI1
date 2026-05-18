@@ -18,6 +18,7 @@ import TermsPage from "./pages/terms";
 import PrivacyPage from "./pages/privacy";
 import HelpPage from "./pages/help";
 import AdminPage from "./pages/admin";
+import BillingPage from "./pages/billing";
 
 // Components
 import { AppLayout } from "./components/layout/app-layout";
@@ -259,6 +260,13 @@ function ClerkProviderWithRoutes() {
               <Protected>
                 <AppLayout>
                   <AdminPage />
+                </AppLayout>
+              </Protected>
+            </Route>
+            <Route path="/billing">
+              <Protected>
+                <AppLayout>
+                  <BillingPage />
                 </AppLayout>
               </Protected>
             </Route>

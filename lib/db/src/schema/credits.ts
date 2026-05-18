@@ -14,6 +14,7 @@ export const CREDIT_TRANSACTION_TYPES = [
   "refine",
   "plan",
   "manual_adjustment",
+  "purchase",
 ] as const;
 export type CreditTransactionType = (typeof CREDIT_TRANSACTION_TYPES)[number];
 
