@@ -427,6 +427,23 @@ export function PublishingTab({ projectId }: { projectId: number }) {
   const [themeColor, setThemeColor] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
 
+  // Domain management state
+  type DomainInfo = {
+    subdomain: string | null;
+    subdomainUrl: string | null;
+    cnameTarget: string;
+    platformDomain: string;
+    customDomain: string | null;
+    domainStatus: string;
+    sslStatus: string;
+    isPublished: boolean;
+  };
+  const [domainInfo, setDomainInfo] = useState<DomainInfo | null>(null);
+  const [customDomainInput, setCustomDomainInput] = useState("");
+  const [domainSaving, setDomainSaving] = useState(false);
+  const [domainVerifying, setDomainVerifying] = useState(false);
+  const [domainError, setDomainError] = useState<string | null>(null);
+
   async function handlePublish() {
     setIsPublishing(true);
     setPublishError(null);
@@ -507,6 +524,64 @@ export function PublishingTab({ projectId }: { projectId: number }) {
     } catch { /* ignore */ }
   }, [projectId]);
 
+  const fetchDomain = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/domain`);
+      if (res.ok) {
+        const data = (await res.json()) as DomainInfo;
+        setDomainInfo(data);
+        setCustomDomainInput(data.customDomain ?? "");
+      }
+    } catch { /* ignore */ }
+  }, [projectId]);
+
+  const saveDomain = async () => {
+    setDomainSaving(true);
+    setDomainError(null);
+    try {
+      const cleaned = customDomainInput.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const res = await fetch(`/api/projects/${projectId}/domain`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customDomain: cleaned || null }),
+      });
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string };
+        setDomainError(err.error ?? "Failed to save domain.");
+      } else {
+        await fetchDomain();
+      }
+    } catch {
+      setDomainError("Failed to save domain. Please try again.");
+    } finally {
+      setDomainSaving(false);
+    }
+  };
+
+  const verifyDomain = async () => {
+    setDomainVerifying(true);
+    setDomainError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/domain/verify`, { method: "POST" });
+      const data = (await res.json()) as { message?: string; verified?: boolean };
+      if (!res.ok || data.verified === false) {
+        setDomainError(data.message ?? "DNS verification failed.");
+      }
+      await fetchDomain();
+    } catch {
+      setDomainError("Verification check failed. Please try again.");
+    } finally {
+      setDomainVerifying(false);
+    }
+  };
+
+  const removeDomain = async () => {
+    await fetch(`/api/projects/${projectId}/domain`, { method: "DELETE" });
+    setCustomDomainInput("");
+    setDomainError(null);
+    await fetchDomain();
+  };
+
   const saveSiteSettings = async () => {
     setSavingSettings(true);
     try {
@@ -528,7 +603,8 @@ export function PublishingTab({ projectId }: { projectId: number }) {
     void fetchReadiness();
     void fetchDeployments();
     void fetchSiteSettings();
-  }, [fetchReadiness, fetchDeployments, fetchSiteSettings]);
+    void fetchDomain();
+  }, [fetchReadiness, fetchDeployments, fetchSiteSettings, fetchDomain]);
 
   const webChecklist = webEnv === "testing" ? WEB_TESTING_CHECKLIST : WEB_PRODUCTION_CHECKLIST;
   const webRequired = webChecklist.flatMap((s) => s.items).filter((i) => i.required);
@@ -693,25 +769,177 @@ export function PublishingTab({ projectId }: { projectId: number }) {
               </div>
             </div>
 
-            {/* Custom domain */}
-            <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+            {/* Domain Management */}
+            <div className="border border-border rounded-xl p-5 bg-card space-y-5">
               <h3 className="font-semibold text-sm flex items-center gap-2">
                 <Globe className="h-4 w-4 text-muted-foreground" />
-                Custom Domain
+                Domains
               </h3>
-              <div className="flex gap-2">
-                <input
-                  disabled
-                  placeholder="yourdomain.com"
-                  className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm text-muted-foreground placeholder:text-muted-foreground/50"
-                />
-                <Button variant="outline" size="sm" disabled>
-                  Configure
-                </Button>
+
+              {/* Auto-subdomain */}
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Your Subdomain</p>
+                <div className="flex items-center gap-2 bg-muted rounded-lg px-3 py-2.5">
+                  <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  {domainInfo?.subdomain ? (
+                    <>
+                      <span className="text-sm font-mono flex-1 truncate">{domainInfo.subdomain}</span>
+                      <a
+                        href={domainInfo.subdomainUrl ?? "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <ArrowUpRight className="h-3.5 w-3.5" />
+                      </a>
+                      <CopyUrlButton url={domainInfo.subdomainUrl ?? domainInfo.subdomain} />
+                    </>
+                  ) : (
+                    <span className="text-sm text-muted-foreground italic">Generated on first publish</span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Automatically assigned. Available as soon as you publish.
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Custom domains are available after your first production publish.
-              </p>
+
+              <div className="border-t border-border" />
+
+              {/* Custom domain */}
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Custom Domain</p>
+
+                <div className="flex gap-2">
+                  <input
+                    value={customDomainInput}
+                    onChange={(e) => setCustomDomainInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void saveDomain(); }}
+                    placeholder="app.yourdomain.com"
+                    className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void saveDomain()}
+                    disabled={domainSaving}
+                    className="shrink-0"
+                  >
+                    {domainSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    <span className="ml-1.5">Save</span>
+                  </Button>
+                  {domainInfo?.customDomain && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void removeDomain()}
+                      className="shrink-0 text-destructive hover:text-destructive"
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+
+                {domainError && (
+                  <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>{domainError}</span>
+                  </div>
+                )}
+
+                {/* Status badges */}
+                {domainInfo?.customDomain && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {/* Domain status */}
+                    <span className={cn(
+                      "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium",
+                      domainInfo.domainStatus === "active" && "bg-green-500/15 text-green-400",
+                      domainInfo.domainStatus === "pending_verification" && "bg-yellow-500/15 text-yellow-400",
+                      domainInfo.domainStatus === "error" && "bg-red-500/15 text-red-400",
+                      domainInfo.domainStatus === "unconfigured" && "bg-muted text-muted-foreground",
+                    )}>
+                      {domainInfo.domainStatus === "active" && <CheckCircle2 className="h-3 w-3" />}
+                      {domainInfo.domainStatus === "pending_verification" && <RefreshCw className="h-3 w-3" />}
+                      {domainInfo.domainStatus === "error" && <XCircle className="h-3 w-3" />}
+                      {domainInfo.domainStatus === "unconfigured" && <Circle className="h-3 w-3" />}
+                      DNS {domainInfo.domainStatus === "active" ? "verified" : domainInfo.domainStatus === "error" ? "error" : "pending"}
+                    </span>
+
+                    {/* SSL status */}
+                    <span className={cn(
+                      "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium",
+                      domainInfo.sslStatus === "active" && "bg-green-500/15 text-green-400",
+                      domainInfo.sslStatus === "provisioning" && "bg-yellow-500/15 text-yellow-400",
+                      domainInfo.sslStatus === "failed" && "bg-red-500/15 text-red-400",
+                      domainInfo.sslStatus === "pending" && "bg-muted text-muted-foreground",
+                    )}>
+                      <Lock className="h-3 w-3" />
+                      SSL {domainInfo.sslStatus === "active" ? "active" : domainInfo.sslStatus === "provisioning" ? "provisioning" : domainInfo.sslStatus === "failed" ? "failed" : "pending"}
+                    </span>
+
+                    {/* Verify button */}
+                    {domainInfo.domainStatus !== "active" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void verifyDomain()}
+                        disabled={domainVerifying}
+                        className="h-7 text-xs"
+                      >
+                        {domainVerifying
+                          ? <><Loader2 className="h-3 w-3 animate-spin mr-1" />Checking…</>
+                          : <><RefreshCw className="h-3 w-3 mr-1" />Check DNS</>}
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                {/* DNS instructions — shown when a custom domain is saved but not yet verified */}
+                {domainInfo?.customDomain && domainInfo.domainStatus !== "active" && (
+                  <div className="bg-muted/60 border border-border rounded-lg p-3 space-y-2">
+                    <p className="text-xs font-medium flex items-center gap-1.5">
+                      <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                      DNS configuration required
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Add this CNAME record in your DNS provider (Cloudflare, Route53, Namecheap, etc.):
+                    </p>
+                    <div className="rounded-md bg-background border border-border overflow-hidden text-xs font-mono">
+                      <div className="grid grid-cols-3 gap-px bg-border">
+                        <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Type</div>
+                        <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Name</div>
+                        <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Value</div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-px bg-border">
+                        <div className="bg-card px-2 py-1.5">CNAME</div>
+                        <div className="bg-card px-2 py-1.5 truncate">{domainInfo.customDomain}</div>
+                        <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
+                          <span className="truncate">{domainInfo.cnameTarget}</span>
+                          <CopyUrlButton url={domainInfo.cnameTarget} />
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      DNS changes can take up to 48 hours to propagate. Click "Check DNS" once you've added the record.
+                    </p>
+                  </div>
+                )}
+
+                {/* Active domain link */}
+                {domainInfo?.customDomain && domainInfo.domainStatus === "active" && (
+                  <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2.5">
+                    <CheckCircle2 className="h-4 w-4 text-green-400 shrink-0" />
+                    <a
+                      href={`https://${domainInfo.customDomain}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-mono text-green-400 hover:underline flex-1 truncate"
+                    >
+                      https://{domainInfo.customDomain}
+                    </a>
+                    <CopyUrlButton url={`https://${domainInfo.customDomain}`} />
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Site metadata */}

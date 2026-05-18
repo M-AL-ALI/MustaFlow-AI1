@@ -116,6 +116,8 @@ The intended user journey is: Login → create project → build app → preview
 - **Terms / Privacy / Help**: static pages at `/terms`, `/privacy`, `/help`. Sidebar footer links + Help Center in RESOURCES section.
 - **Encryption key rotation**: `scripts/src/rotate-encryption-key.ts` — operator runbook + re-encryption script using `pool` from `@workspace/db`.
 - **Orval codegen conflict fix**: `GetPublishReadinessParams` was generated in both `lib/api-zod/src/generated/api.ts` (Zod schema) and `types/` (TypeScript type). Resolved by deleting the redundant type file, removing its barrel re-export, and adding an explicit tie-breaker in `lib/api-zod/src/index.ts`.
+- **Domain management**: `projects.customDomain` (unique), `projects.domainStatus`, `projects.sslStatus` columns. `GET/PATCH/DELETE /api/projects/:id/domain` + `POST /api/projects/:id/domain/verify` (DNS CNAME check via `dns.promises.resolveCname`). Auto-subdomain: `{publicSlug}.mustaflow.app`. Custom-domain hostname middleware mounted in `app.ts` before `/api` — intercepts GET requests whose `Host` header matches a stored `customDomain` and serves the published snapshot directly (active in production once DNS is configured; no-op in Replit dev). Snapshot serving logic extracted to `artifacts/api-server/src/lib/serveSnapshot.ts` (shared by public route + custom domain middleware). Publishing tab "Domains" section: read-only subdomain display, custom domain input, DNS CNAME instructions table, domain/SSL status badges, "Check DNS" button.
+- Env vars: `PLATFORM_DOMAIN` (default `mustaflow.app`), `PLATFORM_CNAME_TARGET` (default `hosted.mustaflow.app`) — set these in production to match real infrastructure.
 
 ## Known limitations (honest status)
 

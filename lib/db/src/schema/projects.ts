@@ -21,6 +21,13 @@ export const projectsTable = pgTable("projects", {
   siteTitle: text("site_title"),
   metaDescription: text("meta_description"),
   themeColor: text("theme_color"),
+  // Custom domain management.
+  // customDomain: user-supplied FQDN (e.g. "app.example.com"). Null = not configured.
+  // domainStatus: unconfigured | pending_verification | active | error
+  // sslStatus: pending | provisioning | active | failed
+  customDomain: text("custom_domain").unique(),
+  domainStatus: text("domain_status").notNull().default("unconfigured"),
+  sslStatus: text("ssl_status").notNull().default("pending"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

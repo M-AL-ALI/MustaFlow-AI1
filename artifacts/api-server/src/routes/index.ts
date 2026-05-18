@@ -15,6 +15,7 @@ import publicRouter from "./public";
 import readinessRouter from "./readiness";
 import deploymentsRouter from "./deployments";
 import creditsRouter from "./credits";
+import domainsRouter from "./domains";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -81,6 +82,7 @@ router.use(duplicateRouter);
 router.use(readinessRouter);
 router.use(deploymentsRouter);
 router.use(creditsRouter);
+router.use(domainsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

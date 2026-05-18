@@ -14,6 +14,7 @@ import {
   getClerkProxyHost,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
+import { customDomainMiddleware } from "./middlewares/customDomainMiddleware";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
@@ -55,6 +56,11 @@ app.use(
     ),
   })),
 );
+
+// Custom-domain middleware: intercepts GET requests whose Host header matches
+// a project's configured custom domain and serves the published snapshot directly.
+// Must be mounted before /api so platform traffic is never affected.
+app.use(customDomainMiddleware);
 
 app.use("/api", router);
 
