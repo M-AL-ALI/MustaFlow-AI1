@@ -1,6 +1,12 @@
 # MustaFlow AI
 
-An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and (eventually) deploys it.
+An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
+
+## Scope — Web First
+
+The builder generates **static web apps** (HTML/CSS/JS + Tailwind + Lucide via CDN). Mobile (Expo/React Native) is a future milestone and is intentionally not exposed in the UI. Do not add mobile project kinds or mobile generation prompts until the Phase 4 mobile milestone is approved.
+
+The intended user journey is: Login → create project → build app → preview → export/download → duplicate → publish to testing → promote to production.
 
 ## Run & Operate
 
@@ -8,16 +14,17 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/mustaflow run dev` — frontend (Vite, port assigned by workflow)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks + Zod schemas
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks + Zod schemas after editing openapi.yaml
 - `pnpm --filter @workspace/db run push` — push DB schema (dev)
 - `pnpm --filter @workspace/scripts run seed` — seed sample projects (no-op if any exist)
-- Required env: `DATABASE_URL`, `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `SESSION_SECRET`
+- Required env: `DATABASE_URL`, `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `SESSION_SECRET`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`
 
 ## Stack
 
 - pnpm workspaces, Node 24, TypeScript 5.9
 - API: Express 5, Drizzle ORM + Postgres, Zod validation, pino logging
-- Frontend: React + Vite + Tailwind + shadcn/ui + wouter + TanStack Query
+- Frontend: React + Vite + Tailwind v4 + shadcn/ui + wouter + TanStack Query
+- Auth: Clerk (ClerkAuthAdapter active; `clerkMiddleware` in app.ts; `getAuth(req)` in routes)
 - AI: OpenAI Chat Completions via the Replit AI integration (gpt-5-nano/mini/5.4 by agent mode)
 - API contract: OpenAPI → Orval (React Query hooks + Zod schemas)
 
@@ -28,6 +35,8 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - Generated Zod schemas: `lib/api-zod/src/generated/api.ts`
 - DB schema: `lib/db/src/schema/*` (projects, messages, tasks, versions, secrets, knowledge)
 - AI prompts & model routing: `artifacts/api-server/src/lib/ai.ts`
+- Auth adapter: `artifacts/api-server/src/lib/auth.ts` (swap point: ClerkAuthAdapter ↔ DevOnlyAuthAdapter)
+- Encryption service: `artifacts/api-server/src/lib/encryption.ts` (swap point: passthrough → AES-256-GCM)
 - API routes: `artifacts/api-server/src/routes/*`
 - Frontend pages: `artifacts/mustaflow/src/pages/*`
 
@@ -36,33 +45,57 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - AI calls are non-streaming Chat Completions (Orval can't generate SSE hooks; keeps client + server simple).
 - Plan Mode uses a separate system prompt and `response_format: json_object` so the structured plan can render as a card.
 - Secret values are never returned from the API — only a masked preview (`••••••••XXXX`).
-- Tasks are simulated (status flips to `completed` after a short delay) — the live build engine is a placeholder for a later milestone.
+- Auth is cookie-based for web (Clerk session cookie). No bearer tokens needed on the frontend — do NOT add getToken() or Authorization headers to browser API calls.
+- Generated apps are static (HTML/CSS/JS + Tailwind/lucide via CDN). They are served from the DB at `GET /api/projects/:id/preview/{*splat}` and iframed in the Preview tab. No npm/build tools run server-side.
+- Every successful build/refine snapshots all current files into `project_versions.filesSnapshot` and writes a `TaskReport` onto `agent_tasks.report`. The report card renders in the chat. Rollback restores the snapshot via `POST /api/projects/:id/versions/:versionId/rollback`.
 - Frontend artifact is mounted at `/`; API at `/api`. The shared proxy routes most-specific-first.
 
 ## Product
 
-- Home: hero prompt that creates a project from natural language.
-- Projects dashboard: summary stats, recent activity, project grid.
+- Home: public hero prompt — authenticated users redirect to /projects; unauthenticated see the landing page.
+- Sign-in / Sign-up: Clerk-hosted pages at /sign-in and /sign-up, themed to match the dark UI.
+- Projects dashboard: summary stats, recent activity, project grid (auth-gated).
 - Project workspace: left rail sections, top tab bar (Preview, Canvas, Tools & Files, Publishing, Logs, etc.), fixed bottom AI Builder chat with Plan Mode toggle and Lite/Eco/Power/Pro agent modes.
+- Manage tab: Export (ZIP download), Duplicate, Delete (UI only).
+- Publishing tab: web publish pipeline (v1 — marks status=published, returns preview URL). iOS/Android publishing is UI-only placeholder.
 - Knowledge Vault: shared learnings across builds.
+- Sidebar: shows signed-in user name/avatar and sign-out button.
 
 ## User preferences
 
 - No emojis anywhere in the product UI — use lucide-react icons instead.
 - Original branding (not a Replit clone).
+- Web-first: do not add mobile generation to the UI until Phase 4 mobile milestone is explicitly approved.
 
 ## Builder engine (Phase 2)
 
 - `artifacts/api-server/src/lib/builder.ts` — three pipelines: `runBuildPipeline` (initial generation), `runRefinePipeline` (change requests), `runPlanPipeline` (Plan Mode). All use OpenAI JSON-mode; `power`/`pro` route to gpt-5.4, `lite`/`eco` to gpt-5-mini.
-- `artifacts/api-server/src/lib/jobs.ts` — `enqueueJob` uses `setImmediate` for background tasks; `runJob` is shared by main-agent (synchronous) and background-agent paths so background tasks run the *same* pipeline, not a fake auto-complete.
-- Generated apps are static (HTML/CSS/JS + Tailwind/lucide via CDN). They are served from the DB at `GET /api/projects/:id/preview/{*splat}` and iframed in the Preview tab. No npm/build tools run server-side.
-- Every successful build/refine snapshots all current files into `project_versions.filesSnapshot` and writes a `TaskReport` onto `agent_tasks.report`. The report card renders in the chat. Rollback restores the snapshot via `POST /api/projects/:id/versions/:versionId/rollback`.
+- `artifacts/api-server/src/lib/jobs.ts` — `enqueueJob` uses `setImmediate` for background tasks; `runJob` is shared by main-agent (synchronous) and background-agent paths so background tasks run the same pipeline, not a fake auto-complete.
+- Generated apps are static (HTML/CSS/JS + Tailwind/lucide via CDN). No npm/build tools run server-side.
 
-## Known limitations
+## Auth (Phase 3)
 
-- No authentication provider integration yet (Clerk/Replit Auth). The architecture is in place — every project has an `ownerId`, and `requireProjectOwnership` middleware checks ownership on every project-scoped route — but `req.userId` is hard-coded to `"demo-user"` in `artifacts/api-server/src/lib/auth.ts`. Swapping in real auth is mechanical: replace `attachUser` with a real session/JWT verifier that sets `req.userId`.
-- Secrets are stored plaintext in `project_secrets.value_encrypted` (column name is aspirational). Values are never returned by the API — only a masked preview. Encrypt at rest before accepting real production secrets.
-- The preview executes user-generated static HTML in a sandboxed iframe (`sandbox="allow-scripts allow-forms allow-popups allow-same-origin"`). The preview route enforces project ownership, but `allow-same-origin` means the iframe shares the app origin. Acceptable for single-user prototype; before multi-user, either drop `allow-same-origin` or serve previews from a separate subdomain with short-lived signed URLs.
+- Clerk is the active auth provider. `ClerkAuthAdapter` reads `getAuth(req).userId` from the Clerk session cookie.
+- `DevOnlyAuthAdapter` exists as a swap point (sets userId = "demo-user") for local testing without Clerk. Never active in production.
+- `requireProjectOwnership` middleware runs on every project-scoped route: returns 401 if not authenticated, 403 if the project belongs to a different user.
+- Health endpoint (`/api/healthz`) is intentionally public — mounted before `attachUser`.
+- Frontend: `ClerkProvider` with `publishableKeyFromHost` (supports custom domains), `proxyUrl` from env (empty in dev, auto-set in prod), dark-themed sign-in/sign-up pages.
+
+## Export, Duplicate, Publish (Phase 3)
+
+- `GET /api/projects/:id/export` — ownership-checked, streams a ZIP (fflate) of all project files + README + .env.example (secret names only, no values).
+- `POST /api/projects/:id/duplicate` — copies metadata + files; skips secrets; scopes new project to requesting user.
+- `POST /api/projects/:id/publish` — sets status="published", returns preview URL. v1 uses the existing preview route as the public URL. Future milestone: CDN deploy.
+- `POST /api/projects/:id/unpublish` — reverts status to "testing".
+
+## Known limitations (honest status)
+
+- **Secrets encryption**: `DevOnlyPassthroughEncryption` is active — secrets are stored as plaintext in `project_secrets.value_encrypted`. The column name is aspirational. Raw values are never returned by the API (masked only). Real AES-256-GCM encryption is the next security milestone. Do NOT let users store real production secrets until this is resolved.
+- **Publishing v1**: "Publish" sets a status flag and returns the existing auth-protected preview URL. It does not push to a CDN or create a truly public unauthenticated URL yet. The preview route still requires project ownership for serving. Real static hosting (Replit Deploy, S3, Cloudflare Pages) is Phase 4.
+- **Delete project**: UI button exists but is disabled — no DELETE endpoint implemented yet.
+- **Mobile generation**: Intentionally absent from the UI. The builder only produces static HTML/CSS/JS. Expo/React Native support is a future milestone.
+- **Preview iframe**: `allow-same-origin` removed (Phase 2.1). Preview is sandboxed with `allow-scripts allow-forms allow-popups`. Safe for multi-user.
+- **Clerk dev keys**: The "Development mode" banner on the sign-in page is expected in development. Production keys are auto-provisioned by Replit on deploy.
 
 ## Gotchas
 
@@ -70,8 +103,11 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - Orval mutation hooks take `{ id, data }` at the top level for parameterized routes — never just `{ data }`.
 - Query options always require `queryKey` — pair `useX(id, { query: { enabled, queryKey: getXQueryKey(id) } })`.
 - Never `console.log` in server code — use `req.log` or the singleton `logger`.
+- Auth is cookie-based for web. Do NOT add `getToken()`, `setAuthTokenGetter`, or `Authorization: Bearer` to browser fetch calls — Clerk's session cookie handles it automatically.
+- `tailwindcss({ optimize: false })` is required in vite.config.ts for Clerk themes to render correctly in production builds (Tailwind v4 + @clerk/themes nested @layer import issue).
 
 ## Pointers
 
 - See the `pnpm-workspace` skill for monorepo structure, TS references, and codegen
 - See the `ai-integrations-openai` skill for AI integration details
+- See the `clerk-auth` skill for Clerk wiring details

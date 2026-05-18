@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { 
   Monitor, 
-  Smartphone, 
   LayoutDashboard, 
   Paintbrush, 
   BarChart, 
@@ -19,9 +18,10 @@ import { useState } from "react";
 import { useCreateProject, useListProjects, getListProjectsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
+// Mobile generation is intentionally excluded — the builder produces static
+// HTML/CSS/JS. Expo/React Native output is a future milestone.
 const CHIPS = [
   { name: "Website", icon: Monitor, kind: "web" },
-  { name: "Mobile App", icon: Smartphone, kind: "mobile-ios" },
   { name: "Dashboard", icon: LayoutDashboard, kind: "dashboard" },
   { name: "Design", icon: Paintbrush, kind: "design" },
   { name: "Data Viz", icon: BarChart, kind: "dashboard" },
