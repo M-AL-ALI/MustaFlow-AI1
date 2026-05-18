@@ -39,6 +39,11 @@ export type BuilderResult = {
   assistantSummary: string;
 };
 
+export type ConversationTurn = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 const PREVIEW_NOTE = `IMPORTANT preview-runtime constraints:
 - This is a static preview. Generate only safe, self-contained files: HTML, CSS, vanilla JS (or React via CDN inside <script type="text/babel">), images via public CDNs.
 - ALWAYS produce an index.html. Multi-page apps use additional .html files with relative links (e.g. <a href="./about.html">).
@@ -109,37 +114,88 @@ function modelFor(mode: AgentMode): string {
   return MODEL_FOR_MODE[mode] ?? MODEL_FOR_MODE.eco;
 }
 
+async function callWithRetry(
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  model: string,
+  maxTokens: number,
+  label: string,
+): Promise<Record<string, unknown>> {
+  let lastError: Error = new Error("Unknown error");
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await openai.chat.completions.create({
+        model,
+        max_completion_tokens: maxTokens,
+        messages,
+        response_format: { type: "json_object" },
+      });
+
+      const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
+      try {
+        return JSON.parse(raw) as Record<string, unknown>;
+      } catch (parseErr) {
+        logger.warn(
+          { attempt, raw: raw.slice(0, 300), label },
+          "JSON parse failed, will retry",
+        );
+        lastError = new Error(
+          `AI returned malformed JSON on attempt ${attempt + 1}. Retrying…`,
+        );
+        if (attempt === 0) {
+          // Add a correction nudge to the message array for the second attempt
+          messages = [
+            ...messages,
+            {
+              role: "assistant" as const,
+              content: "(previous response was not valid JSON)",
+            },
+            {
+              role: "user" as const,
+              content:
+                "Your previous response was not valid JSON. Please respond with ONLY valid JSON matching the schema — no markdown, no code fences, no extra text.",
+            },
+          ];
+        }
+      }
+    } catch (apiErr) {
+      lastError =
+        apiErr instanceof Error ? apiErr : new Error(String(apiErr));
+      logger.error({ err: apiErr, attempt, label }, "OpenAI API call failed");
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+
+  throw lastError;
+}
+
 export async function runBuildPipeline(args: {
   projectName: string;
   projectKind: string;
   userPrompt: string;
   agentMode: AgentMode;
+  conversationHistory?: ConversationTurn[];
 }): Promise<BuilderResult> {
-  const { projectName, projectKind, userPrompt, agentMode } = args;
-  const messages = [
-    { role: "system" as const, content: BUILD_SYSTEM_PROMPT },
+  const { projectName, projectKind, userPrompt, agentMode, conversationHistory } = args;
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: BUILD_SYSTEM_PROMPT },
     {
-      role: "system" as const,
+      role: "system",
       content: `Project: "${projectName}" (kind: ${projectKind}).`,
     },
-    { role: "user" as const, content: userPrompt },
   ];
 
-  const response = await openai.chat.completions.create({
-    model: modelFor(agentMode),
-    max_completion_tokens: 16000,
-    messages,
-    response_format: { type: "json_object" },
-  });
-
-  const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = JSON.parse(raw) as Record<string, unknown>;
-  } catch (err) {
-    logger.error({ err, raw: raw.slice(0, 500) }, "Builder JSON parse failed");
-    throw new Error("AI builder returned malformed output. Please try again.");
+  // Inject recent conversation turns for context (skip system messages)
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
   }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 16000, "build");
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -193,12 +249,7 @@ export async function runBuildPipeline(args: {
     nextRecommendation,
   };
 
-  return {
-    blueprint,
-    files,
-    report,
-    assistantSummary: summary,
-  };
+  return { blueprint, files, report, assistantSummary: summary };
 }
 
 export async function runRefinePipeline(args: {
@@ -207,43 +258,37 @@ export async function runRefinePipeline(args: {
   userPrompt: string;
   agentMode: AgentMode;
   existingFiles: BuilderFile[];
+  conversationHistory?: ConversationTurn[];
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
   report: TaskReport;
   assistantSummary: string;
 }> {
-  const { projectName, projectKind, userPrompt, agentMode, existingFiles } =
-    args;
+  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory } = args;
 
   const fileManifest = existingFiles
     .map((f) => `--- ${f.path} (${f.mimeType}) ---\n${f.content}`)
     .join("\n\n");
 
-  const messages = [
-    { role: "system" as const, content: REFINE_SYSTEM_PROMPT },
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: REFINE_SYSTEM_PROMPT },
     {
-      role: "system" as const,
+      role: "system",
       content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}`,
     },
-    { role: "user" as const, content: userPrompt },
   ];
 
-  const response = await openai.chat.completions.create({
-    model: modelFor(agentMode),
-    max_completion_tokens: 16000,
-    messages,
-    response_format: { type: "json_object" },
-  });
-
-  const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = JSON.parse(raw) as Record<string, unknown>;
-  } catch (err) {
-    logger.error({ err, raw: raw.slice(0, 500) }, "Refine JSON parse failed");
-    throw new Error("AI builder returned malformed output. Please try again.");
+  // Inject recent conversation turns for context
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
   }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 16000, "refine");
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
   const changedFiles: BuilderFile[] = rawFiles
@@ -301,12 +346,7 @@ export async function runRefinePipeline(args: {
     nextRecommendation,
   };
 
-  return {
-    changedFiles,
-    removedPaths,
-    report,
-    assistantSummary: summary,
-  };
+  return { changedFiles, removedPaths, report, assistantSummary: summary };
 }
 
 export async function runPlanPipeline(args: {
@@ -314,31 +354,33 @@ export async function runPlanPipeline(args: {
   projectKind: string;
   userPrompt: string;
   agentMode: AgentMode;
+  conversationHistory?: ConversationTurn[];
 }): Promise<{ summary: string; plan: Record<string, unknown> | null }> {
-  const { projectName, projectKind, userPrompt, agentMode } = args;
-  const messages = [
-    { role: "system" as const, content: PLAN_SYSTEM_PROMPT },
+  const { projectName, projectKind, userPrompt, agentMode, conversationHistory } = args;
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: PLAN_SYSTEM_PROMPT },
     {
-      role: "system" as const,
+      role: "system",
       content: `Project: "${projectName}" (kind: ${projectKind}).`,
     },
-    { role: "user" as const, content: userPrompt },
   ];
 
-  const response = await openai.chat.completions.create({
-    model: modelFor(agentMode),
-    max_completion_tokens: 6000,
-    messages,
-    response_format: { type: "json_object" },
-  });
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-4)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
 
-  const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
+  messages.push({ role: "user", content: userPrompt });
+
   let plan: Record<string, unknown> | null = null;
   try {
-    plan = JSON.parse(raw) as Record<string, unknown>;
+    plan = await callWithRetry(messages, modelFor(agentMode), 6000, "plan");
   } catch {
     plan = null;
   }
+
   const summary =
     typeof plan?.summary === "string"
       ? plan.summary

@@ -14,6 +14,7 @@ import {
   runBuildPipeline,
   runRefinePipeline,
   type BuilderFile,
+  type ConversationTurn,
 } from "./builder";
 import type { AgentMode } from "./ai";
 import { logger } from "./logger";
@@ -26,6 +27,7 @@ export interface JobInput {
   kind: JobKind;
   userPrompt: string;
   agentMode: AgentMode;
+  conversationHistory?: ConversationTurn[];
 }
 
 async function emitEvent(
@@ -113,7 +115,7 @@ async function deleteFiles(
 }
 
 export async function runJob(input: JobInput): Promise<void> {
-  const { taskId, projectId, kind, userPrompt, agentMode } = input;
+  const { taskId, projectId, kind, userPrompt, agentMode, conversationHistory } = input;
 
   await emitEvent(taskId, "queued", "Task received, starting pipeline…");
 
@@ -157,6 +159,7 @@ export async function runJob(input: JobInput): Promise<void> {
         projectKind: project.kind,
         userPrompt,
         agentMode,
+        conversationHistory,
       });
 
       await emitEvent(
@@ -195,6 +198,7 @@ export async function runJob(input: JobInput): Promise<void> {
         userPrompt,
         agentMode,
         existingFiles,
+        conversationHistory,
       });
 
       await emitEvent(
@@ -292,6 +296,20 @@ export async function runJob(input: JobInput): Promise<void> {
       .update(projectsTable)
       .set({ status: "failed", updatedAt: sql`now()` })
       .where(eq(projectsTable.id, projectId));
+
+    // Post a visible error message into the chat
+    try {
+      await db.insert(chatMessagesTable).values({
+        projectId,
+        role: "assistant",
+        content: `Build failed: ${message}`,
+        agentMode,
+        planMode: false,
+        plan: { kind: "error", message } as unknown as Record<string, unknown>,
+      });
+    } catch {
+      // best-effort
+    }
   }
 }
 

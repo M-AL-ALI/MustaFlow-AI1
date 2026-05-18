@@ -68,7 +68,22 @@ type ChatPlanPayload =
   | { kind: "report"; report: TaskReport; taskId?: number }
   | { kind: "task-queued"; taskId: number }
   | { kind: "task-done"; taskId: number }
+  | { kind: "error"; message: string }
   | Record<string, unknown>;
+
+type StructuredPlan = {
+  summary?: string;
+  goal?: string;
+  approach?: string;
+  pages?: string[];
+  backend?: string[];
+  database?: string[];
+  integrations?: string[];
+  keysNeeded?: string[];
+  filesAffected?: string[];
+  risks?: string[];
+  testPlan?: string[];
+};
 
 function ReportCard({ report }: { report: TaskReport }) {
   return (
@@ -133,25 +148,89 @@ function ReportCard({ report }: { report: TaskReport }) {
 }
 
 function PlanCard({
+  plan,
   onMain,
   onBackground,
   disabled,
 }: {
+  plan: StructuredPlan | null;
   onMain: () => void;
   onBackground: () => void;
   disabled: boolean;
 }) {
+  const PlanSection = ({
+    label,
+    items,
+    color = "text-foreground",
+  }: {
+    label: string;
+    items?: string[];
+    color?: string;
+  }) => {
+    if (!items || items.length === 0) return null;
+    return (
+      <div>
+        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">{label}</div>
+        <div className="space-y-0.5">
+          {items.map((item, i) => (
+            <div key={i} className={cn("text-[11px] flex items-start gap-1", color)}>
+              <span className="mt-0.5 opacity-50">•</span>
+              <span>{item}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
-      <div className="font-semibold text-foreground">Run this plan?</div>
-      <div className="flex gap-2">
+    <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-3">
+      <div className="flex items-center gap-2 font-semibold text-foreground">
+        <BrainCircuit className="h-3.5 w-3.5 text-secondary" />
+        Plan ready
+      </div>
+
+      {plan && (
+        <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
+          {plan.goal && (
+            <div className="text-[11px] text-muted-foreground bg-muted rounded p-2 leading-relaxed">
+              {plan.goal}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <PlanSection label="Pages / Screens" items={plan.pages} />
+            <PlanSection label="Backend / API" items={plan.backend} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <PlanSection label="Database" items={plan.database} />
+            <PlanSection label="Integrations" items={plan.integrations} />
+          </div>
+          {plan.keysNeeded && plan.keysNeeded.length > 0 && (
+            <PlanSection label="API Keys needed" items={plan.keysNeeded} color="text-yellow-400" />
+          )}
+          {plan.risks && plan.risks.length > 0 && (
+            <PlanSection label="Risks" items={plan.risks} color="text-orange-400" />
+          )}
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-1 border-t border-border">
         <Button size="sm" className="flex-1 h-7 text-xs" onClick={onMain} disabled={disabled}>
-          Main Agent
+          Build now
         </Button>
         <Button size="sm" variant="secondary" className="flex-1 h-7 text-xs" onClick={onBackground} disabled={disabled}>
           <ServerCog className="h-3 w-3 mr-1" /> Background
         </Button>
       </div>
+    </div>
+  );
+}
+
+function ErrorCard({ message }: { message: string }) {
+  return (
+    <div className="mt-2 bg-destructive/10 border border-destructive/30 rounded-lg p-2.5 text-xs flex items-start gap-2">
+      <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+      <span className="text-destructive/90">{message}</span>
     </div>
   );
 }
@@ -206,12 +285,37 @@ export default function ProjectWorkspacePage() {
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [projectSidebarOpen, setProjectSidebarOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const autoAnalyzedRef = useRef(false);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, activeTaskId]);
+
+  // Auto-generate a plan analysis when a project opens with no messages yet
+  useEffect(() => {
+    if (!project || messages === undefined || autoAnalyzedRef.current) return;
+    if (messages.length > 0) { autoAnalyzedRef.current = true; return; }
+    if (sendMessage.isPending) return;
+    autoAnalyzedRef.current = true;
+    sendMessage.mutate(
+      {
+        id: projectId,
+        data: {
+          content: `Analyze this project idea and create a structured plan: "${project.name}". Identify the recommended pages/screens, tech stack, backend requirements, database, integrations needed, API keys required, risks, and suggested next steps. Be specific and concrete.`,
+          agentMode: "eco",
+          planMode: true,
+          background: false,
+        },
+      },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+        },
+      },
+    );
+  }, [project, messages, projectId, sendMessage, queryClient]);
 
   const send = useCallback((content: string, opts?: { planMode?: boolean; background?: boolean }) => {
     if (!content.trim()) return;
@@ -394,11 +498,14 @@ export default function ProjectWorkspacePage() {
               className="flex-1 overflow-y-auto px-4 py-2 space-y-2 min-h-0 hide-scrollbar"
               ref={scrollRef}
             >
-              {messages?.slice(-8).map((msg) => {
-                const plan = msg.plan as ChatPlanPayload | null | undefined;
-                const isReport = plan && (plan as { kind?: string }).kind === "report";
-                const isQueued = plan && (plan as { kind?: string }).kind === "task-queued";
-                const isPlan = msg.planMode && msg.role === "assistant";
+              {messages?.slice(-12).map((msg) => {
+                const planPayload = msg.plan as ChatPlanPayload | null | undefined;
+                const payloadKind = planPayload && typeof planPayload === "object" ? (planPayload as { kind?: string }).kind : undefined;
+                const isReport = payloadKind === "report";
+                const isQueued = payloadKind === "task-queued";
+                const isError = payloadKind === "error";
+                const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
+                const structuredPlan = isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
                 return (
                   <div
                     key={msg.id}
@@ -409,24 +516,30 @@ export default function ProjectWorkspacePage() {
                   >
                     <div
                       className={cn(
-                        "max-w-[75%] px-3 py-2 rounded-xl text-xs",
+                        "max-w-[80%] px-3 py-2 rounded-xl text-xs",
                         msg.role === "user"
                           ? "bg-primary text-primary-foreground rounded-br-sm"
+                          : isError
+                          ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
                           : "bg-muted text-foreground rounded-bl-sm border border-border",
                       )}
                     >
                       <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
                       {isReport && (
-                        <ReportCard report={(plan as { kind: "report"; report: TaskReport }).report} />
+                        <ReportCard report={(planPayload as { kind: "report"; report: TaskReport }).report} />
                       )}
                       {isQueued && (
                         <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
                           <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary" />
-                          Background task #{(plan as { taskId: number }).taskId} running…
+                          Background task #{(planPayload as { taskId: number }).taskId} running…
                         </div>
                       )}
-                      {isPlan && !isReport && (
+                      {isError && (
+                        <ErrorCard message={(planPayload as { message: string }).message} />
+                      )}
+                      {isPlanCard && (
                         <PlanCard
+                          plan={structuredPlan}
                           onMain={() => runPlanned(msg.content, false)}
                           onBackground={() => runPlanned(msg.content, true)}
                           disabled={sendMessage.isPending}

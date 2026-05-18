@@ -15,6 +15,7 @@ import {
 } from "@workspace/api-zod";
 import { type AgentMode } from "../lib/ai";
 import { runPlanPipeline } from "../lib/builder";
+import type { ConversationTurn } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
 import { enqueueJob, runJob } from "../lib/jobs";
 
@@ -66,7 +67,25 @@ router.post(
     const mode = agentMode as AgentMode;
     const runInBackground = Boolean(parsed.data.background);
 
-    // Save user message first
+    // Load recent conversation history for AI context (last 8 user/assistant turns)
+    const recentMessages = await db
+      .select({
+        role: chatMessagesTable.role,
+        content: chatMessagesTable.content,
+      })
+      .from(chatMessagesTable)
+      .where(eq(chatMessagesTable.projectId, project.id))
+      .orderBy(asc(chatMessagesTable.createdAt));
+
+    const conversationHistory: ConversationTurn[] = recentMessages
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }))
+      .slice(-8);
+
+    // Save user message
     const [userMessage] = await db
       .insert(chatMessagesTable)
       .values({
@@ -91,6 +110,7 @@ router.post(
         projectKind: project.kind,
         userPrompt: content,
         agentMode: mode,
+        conversationHistory,
       });
       assistantContent = result.summary;
       plan = result.plan;
@@ -130,6 +150,7 @@ router.post(
           kind,
           userPrompt: content,
           agentMode: mode,
+          conversationHistory,
         });
         assistantContent = `I've queued this in the Background Agent. Task #${task.id} is running and I'll post the report back here when it's done.`;
         plan = { kind: "task-queued", taskId: task.id } as unknown as Record<
@@ -137,13 +158,13 @@ router.post(
           unknown
         >;
       } else {
-        // Synchronous main-agent run so the user sees the result immediately
         await runJob({
           taskId: task.id,
           projectId: project.id,
           kind,
           userPrompt: content,
           agentMode: mode,
+          conversationHistory,
         });
 
         const [refreshed] = await db
