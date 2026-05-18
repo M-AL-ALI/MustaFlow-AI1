@@ -52,7 +52,34 @@ const PREVIEW_NOTE = `IMPORTANT preview-runtime constraints:
 - All <img> src must be absolute https URLs (use https://images.unsplash.com/... or https://picsum.photos/...). Never reference local image files.
 - Keep total output under 16,000 characters across all files combined. Pages should be polished and complete, but concise.
 - Forms should validate client-side and show a friendly success state — do NOT post to real servers.
-- Do not use emojis in copy. Use lucide icons via class="lucide" or inline SVG instead.`;
+- Do not use emojis in copy. Use lucide icons via class="lucide" or inline SVG instead.
+
+MAP / LOCATION APPS:
+- For ALL map/location previews, use Leaflet.js + OpenStreetMap — works without any API key:
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  Container: <div id="map" style="height:420px;width:100%;border-radius:12px"></div>
+  Init: const map=L.map('map').setView([40.7128,-74.006],13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© <a href="https://osm.org/copyright">OpenStreetMap</a>'}).addTo(map);
+- Custom markers: const icon=L.divIcon({html:'<div style="background:#6d28d9;width:12px;height:12px;border-radius:50%;border:2px solid white"></div>',iconSize:[12,12]});
+  L.marker([lat,lng],{icon}).addTo(map).bindPopup('Label text');
+- Route line: L.polyline([[lat1,lng1],[lat2,lng2]],{color:'#6d28d9',weight:4}).addTo(map);
+- Service radius: L.circle([lat,lng],{radius:2000,color:'#6d28d9',fillOpacity:0.1}).addTo(map);
+- Always use realistic lat/lng coordinates appropriate to the app's context (city, country).
+- For production apps needing Google Maps, Mapbox, or Apple Maps, populate integrationsNeeded — the static preview always uses Leaflet/OSM regardless.
+- NEVER hardcode real API keys in generated code. Use placeholder comments: /* API_KEY from project secrets */
+
+BRAND / LOGO GENERATION:
+- When user requests brand assets (logo, icon, favicon, brand kit, color palette, typography):
+  Store all brand files in a brand/ subdirectory.
+  - brand/logo.svg: Clean horizontal logo, viewBox="0 0 240 60", simple shapes + text only, no external fonts
+  - brand/icon.svg: Square icon mark, viewBox="0 0 60 60", works at small sizes
+  - brand/logo-reversed.svg: White/light version for dark backgrounds
+  - brand/brand.css: CSS custom properties: --brand-primary, --brand-secondary, --brand-accent, --brand-bg, --brand-text, --brand-font-heading, --brand-font-body; plus 5-6 named color swatches
+  - brand/preview.html: Self-contained brand board (Tailwind CDN) showing logo, icon, all colors with hex labels, typography sample, usage examples (light bg + dark bg)
+  - brand/favicon.svg: 32x32 minimal version of the icon
+  SVG must use only: rect, circle, ellipse, path, polygon, text. No external resources. Keep files under 3000 chars each.`;
+
 
 const BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, beautiful, working web projects from a single user request. You speak no prose in this mode — your only output is valid JSON.
 

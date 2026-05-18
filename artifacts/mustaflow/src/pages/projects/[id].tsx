@@ -38,6 +38,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
 import { CanvasTab } from "./components/canvas-tab";
+import { IntegrationSetupCard } from "./components/integration-setup-card";
 import { ToolsTab } from "./components/tools-tab";
 import { PublishingTab } from "./components/publishing-tab";
 import { LogsTab } from "./components/logs-tab";
@@ -118,16 +119,16 @@ function ReportCard({ report }: { report: TaskReport }) {
       )}
       {report.integrationsNeeded && report.integrationsNeeded.length > 0 && (
         <div className="space-y-1 pt-1.5 border-t border-border">
-          <div className="font-semibold text-foreground flex items-center gap-1">
-            <KeyRound className="h-3 w-3" /> Integrations recommended
+          <div className="font-semibold text-foreground flex items-center gap-1 text-[11px]">
+            <KeyRound className="h-3 w-3" /> Integrations required
           </div>
-          {report.integrationsNeeded.slice(0, 2).map((i, idx) => (
-            <div key={idx} className="bg-muted rounded p-1.5">
-              <div className="font-semibold text-[10px]">
-                {i.name} <span className="text-muted-foreground">({i.environment})</span>
-              </div>
-              <div className="text-muted-foreground text-[10px]">{i.why}</div>
-            </div>
+          {report.integrationsNeeded.map((i, idx) => (
+            <IntegrationSetupCard
+              key={idx}
+              integrationName={i.name}
+              why={i.why}
+              keysNeeded={i.keysNeeded}
+            />
           ))}
         </div>
       )}
@@ -465,7 +466,7 @@ export default function ProjectWorkspacePage() {
               <PreviewTab project={project} />
             </TabsContent>
             <TabsContent value="canvas" className="h-full m-0 border-0 outline-none">
-              <CanvasTab />
+              <CanvasTab projectId={projectId} />
             </TabsContent>
             <TabsContent value="tools-files" className="h-full m-0 border-0 outline-none">
               <ToolsTab projectId={projectId} />
