@@ -14,6 +14,13 @@ export const projectsTable = pgTable("projects", {
   // When set, the public route serves files from that snapshot instead of live files.
   // Null = not published. Updated on every publish, cleared on unpublish.
   publishedSnapshotId: integer("published_snapshot_id"),
+  // publicSlug: human-readable slug used in the public URL (/api/p/:slug/).
+  // Generated on first publish; preserved on republish; never cleared on unpublish.
+  publicSlug: text("public_slug").unique(),
+  // Published site metadata — editable from the Publishing tab.
+  siteTitle: text("site_title"),
+  metaDescription: text("meta_description"),
+  themeColor: text("theme_color"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

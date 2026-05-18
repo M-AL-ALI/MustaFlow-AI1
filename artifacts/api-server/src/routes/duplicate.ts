@@ -1,10 +1,23 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
-import { db, projectsTable, projectFilesTable, projectVersionsTable } from "@workspace/db";
+import { db, projectsTable, projectFilesTable, projectVersionsTable, deploymentLogsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
 
 const router: IRouter = Router();
+
+// Generates a URL-safe slug from a project name + random suffix.
+// Format: <slugified-name>-<6-random-chars>
+// Does NOT expose the project's integer ID.
+function generatePublicSlug(name: string): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 24);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return base ? `${base}-${rand}` : rand;
+}
 
 // POST /api/projects/:id/duplicate — copies a project (files included, secrets excluded)
 router.post(
@@ -86,7 +99,8 @@ router.post(
 
 // POST /api/projects/:id/publish — snapshots files as a deployment record,
 // sets publishedSnapshotId, marks status=published.
-// The public URL is /api/p/:projectId/ — served from the snapshot (not live files).
+// Public URL: /api/p/:publicSlug/ — slug-based, does not expose project ID.
+// Slug is generated on first publish and preserved on republish.
 // Draft changes after publish are NOT visible until the user publishes again.
 router.post(
   "/projects/:id/publish",
@@ -115,6 +129,9 @@ router.post(
       return;
     }
 
+    // Generate slug on first publish; preserve existing slug on republish.
+    const slug: string = project.publicSlug ?? generatePublicSlug(project.name);
+
     const publishedAt = new Date().toISOString();
     const deploymentLabel = `Published — ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
 
@@ -133,24 +150,24 @@ router.post(
       })
       .returning({ id: projectVersionsTable.id, label: projectVersionsTable.label });
 
-    // Mark the project published and store which snapshot is live
+    // Mark the project published, store which snapshot is live, and save the slug.
     await db
       .update(projectsTable)
       .set({
         status: "published",
         publishedSnapshotId: deploymentVersion?.id ?? null,
+        publicSlug: slug,
         updatedAt: sql`now()`,
       })
       .where(eq(projectsTable.id, projectId));
 
     const host = req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost";
     const protocol = (req.headers["x-forwarded-proto"] as string) ?? "http";
-    // Public URL uses the /p/ route — served from snapshot, no auth required
-    const publicUrl = `${protocol}://${host}/api/p/${projectId}/`;
+    const publicUrl = `${protocol}://${host}/api/p/${slug}/`;
 
     void writeKnowledge({
       title: `Published: project ${projectId}`,
-      content: `Project id:${projectId} published by ${req.userId ?? "unknown"}. Snapshot version id:${deploymentVersion?.id}. ${files.length} file(s) frozen. Public URL: ${publicUrl}`,
+      content: `Project id:${projectId} published by ${req.userId ?? "unknown"}. Slug: ${slug}. Snapshot version id:${deploymentVersion?.id}. ${files.length} file(s) frozen. Public URL: ${publicUrl}`,
       type: "publish",
       category: "event",
       severity: "info",
@@ -159,9 +176,24 @@ router.post(
       relatedVersionId: deploymentVersion?.id,
     });
 
+    setImmediate(() => {
+      void db.insert(deploymentLogsTable).values({
+        projectId,
+        userId: req.userId ?? "unknown",
+        env: "production",
+        status: "passed",
+        publicSlug: slug,
+        publicUrl,
+        filesCount: files.length,
+        snapshotVersionId: deploymentVersion?.id ?? null,
+        note: "Published by user.",
+      }).catch(() => { /* best-effort */ });
+    });
+
     res.json({
       projectId,
       status: "published",
+      publicSlug: slug,
       publicUrl,
       publishedAt,
       deploymentVersionId: deploymentVersion?.id,
@@ -172,7 +204,8 @@ router.post(
   },
 );
 
-// POST /api/projects/:id/unpublish — clears the published snapshot, reverts to testing
+// POST /api/projects/:id/unpublish — clears the published snapshot, reverts to testing.
+// The publicSlug is intentionally preserved so republishing reuses the same public URL.
 router.post(
   "/projects/:id/unpublish",
   requireProjectOwnership,
@@ -186,12 +219,22 @@ router.post(
 
     void writeKnowledge({
       title: `Unpublished: project ${projectId}`,
-      content: `Project id:${projectId} unpublished by ${req.userId ?? "unknown"}. Public URL is now inactive.`,
+      content: `Project id:${projectId} unpublished by ${req.userId ?? "unknown"}. Public URL is now inactive. Slug preserved for next publish.`,
       type: "publish",
       category: "event",
       severity: "info",
       projectId,
       userId: req.userId,
+    });
+
+    setImmediate(() => {
+      void db.insert(deploymentLogsTable).values({
+        projectId,
+        userId: req.userId ?? "unknown",
+        env: "production",
+        status: "unpublished",
+        note: "Unpublished by user.",
+      }).catch(() => { /* best-effort */ });
     });
 
     res.json({ projectId, status: "testing", publicUrl: null });

@@ -7,3 +7,5 @@ export * from "./files";
 export * from "./secrets";
 export * from "./secret-audit";
 export * from "./knowledge";
+export * from "./deployments";
+export * from "./credits";

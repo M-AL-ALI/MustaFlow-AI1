@@ -103,13 +103,29 @@ The intended user journey is: Login → create project → build app → preview
 - `DELETE /api/projects/:id` — soft-deletes (sets `deleted_at`); returns 200 `{ deleted: true }`.
 - `PATCH /api/projects/:id` — updates name, description, agentMode, status.
 
+## Phase 4 — Public Launch Hardening
+
+- **Public slugs**: `projects.publicSlug` column (UUID-based). `/api/p/:slug/` serves the published snapshot by slug; integer ID still accepted for legacy. Slug generated at first publish, preserved on republish.
+- **Publish readiness gate**: `GET /api/projects/:id/publish-readiness?env=testing|production` — runs structured checks (required secrets set, at least one file, last build succeeded). Blocking failures prevent publish in the frontend UI.
+- **Secret verification**: `POST /api/projects/:id/secrets/:secretId/verify` — server-side connectivity probe per secret category (HTTP ping for API keys, etc.). Status stored as `verificationStatus` on `SecretEntry`.
+- **Published site settings**: `projects.siteTitle`, `projects.metaDescription`, `projects.themeColor` columns. `PATCH /api/projects/:id` supports them. Publishing tab exposes a site settings panel.
+- **Deployment logs**: `deployment_logs` table + `GET /api/projects/:id/deployments` — records every publish/unpublish/duplicate with env, actor, and notes. Publishing tab shows full deployment history.
+- **Rate limits**: `express-rate-limit` on AI (10/min), publish/export (5/min), global (300/15 min). JSON 429 responses.
+- **Billing/Credits**: `user_credits` + `credit_transactions` tables. New users auto-provision 100 starter credits. `GET /api/credits`, `GET /api/credits/transactions`. Credit pre-flight check in `runJob` — fails task immediately if balance < cost. Post-success deduction (non-fatal). Costs: lite=1, eco=2, power=5, pro=10.
+- **Admin dashboard**: `/admin` page (auth-gated, placeholder — real admin RBAC is a future milestone).
+- **Terms / Privacy / Help**: static pages at `/terms`, `/privacy`, `/help`. Sidebar footer links + Help Center in RESOURCES section.
+- **Encryption key rotation**: `scripts/src/rotate-encryption-key.ts` — operator runbook + re-encryption script using `pool` from `@workspace/db`.
+- **Orval codegen conflict fix**: `GetPublishReadinessParams` was generated in both `lib/api-zod/src/generated/api.ts` (Zod schema) and `types/` (TypeScript type). Resolved by deleting the redundant type file, removing its barrel re-export, and adding an explicit tie-breaker in `lib/api-zod/src/index.ts`.
+
 ## Known limitations (honest status)
 
 - **Mobile generation**: Intentionally absent from the UI. The builder only produces static HTML/CSS/JS. Expo/React Native support is a future milestone.
 - **Preview iframe**: `allow-same-origin` removed (Phase 2.1). Preview is sandboxed with `allow-scripts allow-forms allow-popups`. Safe for multi-user.
 - **Clerk dev keys**: The "Development mode" banner on the sign-in page is expected in development. Production keys are auto-provisioned by Replit on deploy.
-- **Publishing v1 (no CDN)**: The public URL `/api/p/:id/` is served by the API server from DB-stored snapshot content. It is truly public (no auth). A real CDN/static-hosting push is Phase 4.
+- **Publishing v1 (no CDN)**: The public URL `/api/p/:slug/` is served by the API server from DB-stored snapshot content. It is truly public (no auth). A real CDN/static-hosting push is Phase 5.
 - **Project hard-delete recovery**: Soft-deleted projects are invisible in the UI and cannot be self-served recovered. An admin SQL query is needed to restore them.
+- **Credits billing**: Credits are enforced in the builder but top-up/purchase flow is a future milestone (Stripe). Users who run out must be manually granted credits via the `grantCredits` helper or a direct SQL update.
+- **Admin dashboard**: The `/admin` page is a placeholder. Real admin RBAC (role column, server-side guard) is a future milestone.
 
 ## Gotchas
 

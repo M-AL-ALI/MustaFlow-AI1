@@ -419,6 +419,93 @@ paths:
                   projectId: { type: integer }
                   status: { type: string }
 
+  /projects/{id}/publish-readiness:
+    get:
+      operationId: getPublishReadiness
+      tags: [projects]
+      summary: Automated pre-publish readiness checks
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - in: query
+          name: env
+          schema: { type: string, enum: [testing, production], default: testing }
+      responses:
+        "200":
+          description: Readiness result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResult"
+
+  /projects/{id}/secrets/{secretId}/verify:
+    post:
+      operationId: verifySecret
+      tags: [secrets]
+      summary: Attempt automated verification of a secret value
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: secretId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretVerifyResult"
+
+  /projects/{id}/deployments:
+    get:
+      operationId: listDeployments
+      tags: [projects]
+      summary: Deployment history for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Deployment history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deployments]
+                properties:
+                  deployments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DeploymentLog"
+
+  /credits:
+    get:
+      operationId: getUserCredits
+      tags: [credits]
+      summary: Get current user credit balance
+      responses:
+        "200":
+          description: User credit info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserCredit"
+
+  /credits/transactions:
+    get:
+      operationId: listCreditTransactions
+      tags: [credits]
+      summary: List credit transactions for current user
+      responses:
+        "200":
+          description: Transaction list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transactions]
+                properties:
+                  transactions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CreditTransaction"
+
   /knowledge:
     get:
       operationId: listKnowledge
@@ -496,6 +583,10 @@ components:
           enum: [lite, eco, power, pro]
         lastTaskSummary: { type: ["string", "null"] }
         summary: { type: ["string", "null"] }
+        publicSlug: { type: ["string", "null"] }
+        siteTitle: { type: ["string", "null"] }
+        metaDescription: { type: ["string", "null"] }
+        themeColor: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -521,6 +612,9 @@ components:
         agentMode:
           type: string
           enum: [lite, eco, power, pro]
+        siteTitle: { type: string }
+        metaDescription: { type: string }
+        themeColor: { type: string }
 
     ProjectsSummary:
       type: object
@@ -665,6 +759,9 @@ components:
         environment:
           type: string
           enum: [development, testing, staging, production]
+        verificationStatus: { type: string }
+        category: { type: ["string", "null"] }
+        envWarning: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
 
     SecretInput:
@@ -754,6 +851,7 @@ components:
       properties:
         projectId: { type: integer }
         status: { type: string }
+        publicSlug: { type: string }
         publicUrl: { type: string }
         publishedAt: { type: string, format: date-time }
         note: { type: string }
@@ -769,4 +867,77 @@ components:
           type: string
           enum: [message, task, version, project]
         summary: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    ReadinessCheck:
+      type: object
+      required: [id, label, description, status, severity]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        description: { type: string }
+        status:
+          type: string
+          enum: [pass, fail, warning, info]
+        severity:
+          type: string
+          enum: [blocking, warning, info]
+        message: { type: string }
+
+    ReadinessResult:
+      type: object
+      required: [env, canPublish, checks]
+      properties:
+        env: { type: string }
+        canPublish: { type: boolean }
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReadinessCheck"
+
+    SecretVerifyResult:
+      type: object
+      required: [secretId, status, message]
+      properties:
+        secretId: { type: integer }
+        status:
+          type: string
+          enum: [verified, verification_failed, manual_required]
+        message: { type: string }
+
+    DeploymentLog:
+      type: object
+      required: [id, projectId, userId, env, status, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        userId: { type: string }
+        env: { type: string }
+        status: { type: string }
+        publicSlug: { type: ["string", "null"] }
+        publicUrl: { type: ["string", "null"] }
+        filesCount: { type: ["integer", "null"] }
+        snapshotVersionId: { type: ["integer", "null"] }
+        note: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+
+    UserCredit:
+      type: object
+      required: [userId, balance, updatedAt]
+      properties:
+        userId: { type: string }
+        balance: { type: integer }
+        updatedAt: { type: string, format: date-time }
+
+    CreditTransaction:
+      type: object
+      required: [id, userId, type, amount, balanceAfter, createdAt]
+      properties:
+        id: { type: integer }
+        userId: { type: string }
+        projectId: { type: ["integer", "null"] }
+        type: { type: string }
+        amount: { type: integer }
+        description: { type: ["string", "null"] }
+        balanceAfter: { type: integer }
         createdAt: { type: string, format: date-time }

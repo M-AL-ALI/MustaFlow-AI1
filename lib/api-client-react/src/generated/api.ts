@@ -28,9 +28,12 @@ import type {
   ChatMessage,
   ChatMessageInput,
   DuplicateProjectResult,
+  GetPublishReadinessParams,
   HealthStatus,
   KnowledgeEntry,
   KnowledgeInput,
+  ListCreditTransactions200,
+  ListDeployments200,
   Project,
   ProjectFileContent,
   ProjectFileSummary,
@@ -40,12 +43,15 @@ import type {
   ProjectVersionInput,
   ProjectsSummary,
   PublishResult,
+  ReadinessResult,
   RollbackResult,
   SecretEntry,
   SecretInput,
+  SecretVerifyResult,
   TaskEvent,
   TaskFeedbackInput,
-  UnpublishProject200
+  UnpublishProject200,
+  UserCredit
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1701,6 +1707,398 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getUnpublishProjectMutationOptions(options));
     }
+
+export const getGetPublishReadinessUrl = (id: number,
+    params?: GetPublishReadinessParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/publish-readiness?${stringifiedParams}` : `/api/projects/${id}/publish-readiness`
+}
+
+/**
+ * @summary Automated pre-publish readiness checks
+ */
+export const getPublishReadiness = async (id: number,
+    params?: GetPublishReadinessParams, options?: RequestInit): Promise<ReadinessResult> => {
+
+  return customFetch<ReadinessResult>(getGetPublishReadinessUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPublishReadinessQueryKey = (id: number,
+    params?: GetPublishReadinessParams,) => {
+    return [
+    `/api/projects/${id}/publish-readiness`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetPublishReadinessQueryOptions = <TData = Awaited<ReturnType<typeof getPublishReadiness>>, TError = ErrorType<unknown>>(id: number,
+    params?: GetPublishReadinessParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPublishReadiness>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPublishReadinessQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPublishReadiness>>> = ({ signal }) => getPublishReadiness(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPublishReadiness>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPublishReadinessQueryResult = NonNullable<Awaited<ReturnType<typeof getPublishReadiness>>>
+export type GetPublishReadinessQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Automated pre-publish readiness checks
+ */
+
+export function useGetPublishReadiness<TData = Awaited<ReturnType<typeof getPublishReadiness>>, TError = ErrorType<unknown>>(
+ id: number,
+    params?: GetPublishReadinessParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPublishReadiness>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPublishReadinessQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getVerifySecretUrl = (id: number,
+    secretId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/secrets/${secretId}/verify`
+}
+
+/**
+ * @summary Attempt automated verification of a secret value
+ */
+export const verifySecret = async (id: number,
+    secretId: number, options?: RequestInit): Promise<SecretVerifyResult> => {
+
+  return customFetch<SecretVerifyResult>(getVerifySecretUrl(id,secretId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getVerifySecretMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifySecret>>, TError,{id: number;secretId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifySecret>>, TError,{id: number;secretId: number}, TContext> => {
+
+const mutationKey = ['verifySecret'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifySecret>>, {id: number;secretId: number}> = (props) => {
+          const {id,secretId} = props ?? {};
+
+          return  verifySecret(id,secretId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifySecretMutationResult = NonNullable<Awaited<ReturnType<typeof verifySecret>>>
+
+    export type VerifySecretMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Attempt automated verification of a secret value
+ */
+export const useVerifySecret = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifySecret>>, TError,{id: number;secretId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof verifySecret>>,
+        TError,
+        {id: number;secretId: number},
+        TContext
+      > => {
+      return useMutation(getVerifySecretMutationOptions(options));
+    }
+
+export const getListDeploymentsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/deployments`
+}
+
+/**
+ * @summary Deployment history for a project
+ */
+export const listDeployments = async (id: number, options?: RequestInit): Promise<ListDeployments200> => {
+
+  return customFetch<ListDeployments200>(getListDeploymentsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDeploymentsQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/deployments`
+    ] as const;
+    }
+
+
+export const getListDeploymentsQueryOptions = <TData = Awaited<ReturnType<typeof listDeployments>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDeployments>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDeploymentsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDeployments>>> = ({ signal }) => listDeployments(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDeployments>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDeploymentsQueryResult = NonNullable<Awaited<ReturnType<typeof listDeployments>>>
+export type ListDeploymentsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Deployment history for a project
+ */
+
+export function useListDeployments<TData = Awaited<ReturnType<typeof listDeployments>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDeployments>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDeploymentsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetUserCreditsUrl = () => {
+
+
+
+
+  return `/api/credits`
+}
+
+/**
+ * @summary Get current user credit balance
+ */
+export const getUserCredits = async ( options?: RequestInit): Promise<UserCredit> => {
+
+  return customFetch<UserCredit>(getGetUserCreditsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetUserCreditsQueryKey = () => {
+    return [
+    `/api/credits`
+    ] as const;
+    }
+
+
+export const getGetUserCreditsQueryOptions = <TData = Awaited<ReturnType<typeof getUserCredits>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getUserCredits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetUserCreditsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUserCredits>>> = ({ signal }) => getUserCredits({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getUserCredits>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetUserCreditsQueryResult = NonNullable<Awaited<ReturnType<typeof getUserCredits>>>
+export type GetUserCreditsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get current user credit balance
+ */
+
+export function useGetUserCredits<TData = Awaited<ReturnType<typeof getUserCredits>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getUserCredits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetUserCreditsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListCreditTransactionsUrl = () => {
+
+
+
+
+  return `/api/credits/transactions`
+}
+
+/**
+ * @summary List credit transactions for current user
+ */
+export const listCreditTransactions = async ( options?: RequestInit): Promise<ListCreditTransactions200> => {
+
+  return customFetch<ListCreditTransactions200>(getListCreditTransactionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCreditTransactionsQueryKey = () => {
+    return [
+    `/api/credits/transactions`
+    ] as const;
+    }
+
+
+export const getListCreditTransactionsQueryOptions = <TData = Awaited<ReturnType<typeof listCreditTransactions>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCreditTransactions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCreditTransactionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCreditTransactions>>> = ({ signal }) => listCreditTransactions({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCreditTransactions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCreditTransactionsQueryResult = NonNullable<Awaited<ReturnType<typeof listCreditTransactions>>>
+export type ListCreditTransactionsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List credit transactions for current user
+ */
+
+export function useListCreditTransactions<TData = Awaited<ReturnType<typeof listCreditTransactions>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCreditTransactions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCreditTransactionsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListKnowledgeUrl = () => {
 

@@ -28,6 +28,10 @@ export const ListProjectsResponseItem = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
   "summary": zod.string().nullish(),
+  "publicSlug": zod.string().nullish(),
+  "siteTitle": zod.string().nullish(),
+  "metaDescription": zod.string().nullish(),
+  "themeColor": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -61,6 +65,10 @@ export const GetProjectResponse = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
   "summary": zod.string().nullish(),
+  "publicSlug": zod.string().nullish(),
+  "siteTitle": zod.string().nullish(),
+  "metaDescription": zod.string().nullish(),
+  "themeColor": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -74,7 +82,10 @@ export const UpdateProjectBody = zod.object({
   "name": zod.string().optional(),
   "description": zod.string().optional(),
   "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']).optional(),
-  "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']).optional()
+  "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']).optional(),
+  "siteTitle": zod.string().optional(),
+  "metaDescription": zod.string().optional(),
+  "themeColor": zod.string().optional()
 })
 
 export const UpdateProjectResponse = zod.object({
@@ -86,6 +97,10 @@ export const UpdateProjectResponse = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
   "summary": zod.string().nullish(),
+  "publicSlug": zod.string().nullish(),
+  "siteTitle": zod.string().nullish(),
+  "metaDescription": zod.string().nullish(),
+  "themeColor": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -112,6 +127,10 @@ export const GetProjectsSummaryResponse = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
   "summary": zod.string().nullish(),
+  "publicSlug": zod.string().nullish(),
+  "siteTitle": zod.string().nullish(),
+  "metaDescription": zod.string().nullish(),
+  "themeColor": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))
@@ -347,6 +366,9 @@ export const ListSecretsResponseItem = zod.object({
   "name": zod.string(),
   "masked": zod.string(),
   "environment": zod.enum(['development', 'testing', 'staging', 'production']),
+  "verificationStatus": zod.string().optional(),
+  "category": zod.string().nullish(),
+  "envWarning": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListSecretsResponse = zod.array(ListSecretsResponseItem)
@@ -379,6 +401,7 @@ export const PublishProjectParams = zod.object({
 export const PublishProjectResponse = zod.object({
   "projectId": zod.number(),
   "status": zod.string(),
+  "publicSlug": zod.string().optional(),
   "publicUrl": zod.string(),
   "publishedAt": zod.coerce.date(),
   "note": zod.string()
@@ -392,6 +415,99 @@ export const UnpublishProjectParams = zod.object({
 export const UnpublishProjectResponse = zod.object({
   "projectId": zod.number(),
   "status": zod.string()
+})
+
+
+/**
+ * @summary Automated pre-publish readiness checks
+ */
+export const GetPublishReadinessParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const getPublishReadinessQueryEnvDefault = `testing`;
+
+export const GetPublishReadinessQueryParams = zod.object({
+  "env": zod.enum(['testing', 'production']).default(getPublishReadinessQueryEnvDefault)
+})
+
+export const GetPublishReadinessResponse = zod.object({
+  "env": zod.string(),
+  "canPublish": zod.boolean(),
+  "checks": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "description": zod.string(),
+  "status": zod.enum(['pass', 'fail', 'warning', 'info']),
+  "severity": zod.enum(['blocking', 'warning', 'info']),
+  "message": zod.string().optional()
+}))
+})
+
+
+/**
+ * @summary Attempt automated verification of a secret value
+ */
+export const VerifySecretParams = zod.object({
+  "id": zod.coerce.number(),
+  "secretId": zod.coerce.number()
+})
+
+export const VerifySecretResponse = zod.object({
+  "secretId": zod.number(),
+  "status": zod.enum(['verified', 'verification_failed', 'manual_required']),
+  "message": zod.string()
+})
+
+
+/**
+ * @summary Deployment history for a project
+ */
+export const ListDeploymentsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListDeploymentsResponse = zod.object({
+  "deployments": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "userId": zod.string(),
+  "env": zod.string(),
+  "status": zod.string(),
+  "publicSlug": zod.string().nullish(),
+  "publicUrl": zod.string().nullish(),
+  "filesCount": zod.number().nullish(),
+  "snapshotVersionId": zod.number().nullish(),
+  "note": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Get current user credit balance
+ */
+export const GetUserCreditsResponse = zod.object({
+  "userId": zod.string(),
+  "balance": zod.number(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary List credit transactions for current user
+ */
+export const ListCreditTransactionsResponse = zod.object({
+  "transactions": zod.array(zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "projectId": zod.number().nullish(),
+  "type": zod.string(),
+  "amount": zod.number(),
+  "description": zod.string().nullish(),
+  "balanceAfter": zod.number(),
+  "createdAt": zod.coerce.date()
+}))
 })
 
 

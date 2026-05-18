@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,9 @@ import {
   History as HistoryIcon,
   RotateCcw,
   Info,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
 } from "lucide-react";
 import { IntegrationsRegistry } from "./integrations-registry";
 import {
@@ -27,6 +30,55 @@ import {
   useRollbackVersion,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+
+function SecretVerifyButton({
+  secretId,
+  projectId,
+  initialStatus,
+}: {
+  secretId: number;
+  projectId: number;
+  initialStatus: string;
+}) {
+  const [status, setStatus] = useState(initialStatus ?? "unverified");
+  const [loading, setLoading] = useState(false);
+
+  const verify = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/secrets/${secretId}/verify`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { status: string };
+        setStatus(data.status);
+      }
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [projectId, secretId]);
+
+  const icon =
+    status === "verified" ? (
+      <CheckCircle2 className="h-3 w-3 text-green-500" />
+    ) : status === "verification_failed" ? (
+      <XCircle className="h-3 w-3 text-destructive" />
+    ) : (
+      <AlertCircle className="h-3 w-3 text-muted-foreground" />
+    );
+
+  return (
+    <div className="flex items-center gap-1.5 shrink-0">
+      {icon}
+      <button
+        onClick={() => void verify()}
+        disabled={loading}
+        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 whitespace-nowrap"
+      >
+        {loading ? "Checking…" : "Verify"}
+      </button>
+    </div>
+  );
+}
 
 export function ToolsTab({ projectId }: { projectId: number }) {
   const queryClient = useQueryClient();
@@ -261,12 +313,17 @@ export function ToolsTab({ projectId }: { projectId: number }) {
                         </div>
                         <div className="divide-y divide-border">
                           {envSecrets.map((s) => (
-                            <div key={s.id} className="grid grid-cols-2 gap-4 p-3 text-sm">
-                              <div className="font-mono text-foreground truncate">{s.name}</div>
-                              <div className="font-mono text-muted-foreground flex items-center gap-1.5">
+                            <div key={s.id} className="flex items-center gap-3 p-3 text-sm min-w-0">
+                              <div className="font-mono text-foreground truncate flex-1 min-w-0">{s.name}</div>
+                              <div className="font-mono text-muted-foreground flex items-center gap-1.5 shrink-0">
                                 <Lock className="h-3 w-3 shrink-0" />
                                 {s.masked}
                               </div>
+                              <SecretVerifyButton
+                                secretId={s.id}
+                                projectId={projectId}
+                                initialStatus={s.verificationStatus ?? "unverified"}
+                              />
                             </div>
                           ))}
                         </div>

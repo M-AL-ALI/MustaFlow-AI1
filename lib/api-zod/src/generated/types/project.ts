@@ -21,6 +21,14 @@ export interface Project {
   lastTaskSummary?: string | null;
   /** @nullable */
   summary?: string | null;
+  /** @nullable */
+  publicSlug?: string | null;
+  /** @nullable */
+  siteTitle?: string | null;
+  /** @nullable */
+  metaDescription?: string | null;
+  /** @nullable */
+  themeColor?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

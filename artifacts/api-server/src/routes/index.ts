@@ -12,9 +12,16 @@ import eventsRouter from "./events";
 import exportRouter from "./export";
 import duplicateRouter from "./duplicate";
 import publicRouter from "./public";
+import readinessRouter from "./readiness";
+import deploymentsRouter from "./deployments";
+import creditsRouter from "./credits";
 import { attachUser } from "../lib/auth";
+import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
 const router: IRouter = Router();
+
+// ── General rate limit — broad safety net for all API requests ────────────────
+router.use(generalLimiter);
 
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 // Health check
@@ -35,6 +42,7 @@ const KNOWN_PREFIXES = [
   "/knowledge",
   "/activity",
   "/events",
+  "/credits",
 ];
 
 router.use((req, res, next) => {
@@ -51,6 +59,14 @@ router.use((req, res, next) => {
 
 // ── Auth wall — all routes below require a valid Clerk session ────────────────
 router.use(attachUser);
+
+// ── Specific rate limits ──────────────────────────────────────────────────────
+router.post("/projects/:id/messages", aiBuilderLimiter);
+router.post("/projects/:id/publish", publishLimiter);
+router.post("/projects/:id/unpublish", publishLimiter);
+router.post("/projects/:id/duplicate", exportLimiter);
+router.get("/projects/:id/export", exportLimiter);
+
 router.use(projectsRouter);
 router.use(messagesRouter);
 router.use(tasksRouter);
@@ -62,6 +78,9 @@ router.use(filesRouter);
 router.use(eventsRouter);
 router.use(exportRouter);
 router.use(duplicateRouter);
+router.use(readinessRouter);
+router.use(deploymentsRouter);
+router.use(creditsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

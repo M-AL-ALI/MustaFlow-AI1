@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Globe,
   Smartphone,
@@ -20,9 +20,32 @@ import {
   Camera,
   UserCheck,
   Loader2,
+  Copy,
+  Check,
+  XCircle,
+  Info,
+  Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+function CopyUrlButton({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="shrink-0 p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+      onClick={() => {
+        void navigator.clipboard.writeText(url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      title="Copy URL"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
 
 type ChecklistItem = {
   id: string;
@@ -250,6 +273,122 @@ function ChecklistGroup({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+// ── Readiness gate types & components ────────────────────────────────────────
+
+type ReadinessCheck = {
+  id: string;
+  label: string;
+  description: string;
+  status: "pass" | "fail" | "warning" | "info";
+  severity: "blocking" | "warning" | "info";
+  message?: string;
+};
+
+type ReadinessResult = {
+  env: string;
+  canPublish: boolean;
+  checks: ReadinessCheck[];
+};
+
+function ReadinessCheckRow({ check }: { check: ReadinessCheck }) {
+  const icon = {
+    pass: <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />,
+    fail: <XCircle className="h-3.5 w-3.5 text-destructive" />,
+    warning: <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />,
+    info: <Info className="h-3.5 w-3.5 text-muted-foreground" />,
+  }[check.status] ?? <Circle className="h-3.5 w-3.5 text-muted-foreground" />;
+
+  return (
+    <div className="flex items-start gap-2.5">
+      <div className="mt-0.5 shrink-0">{icon}</div>
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-medium flex items-center gap-2 flex-wrap">
+          {check.label}
+          {check.severity === "blocking" && check.status === "fail" && (
+            <span className="text-[9px] bg-destructive/15 text-destructive px-1.5 py-0.5 rounded font-semibold uppercase tracking-wide">
+              Required
+            </span>
+          )}
+        </div>
+        {check.message && (
+          <div className="text-[11px] text-muted-foreground mt-0.5">{check.message}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReadinessGate({
+  readiness,
+  loading,
+  onRefresh,
+}: {
+  readiness: ReadinessResult | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  if (loading && !readiness) {
+    return (
+      <div className="border border-border rounded-xl p-4 bg-card flex items-center gap-2 text-xs text-muted-foreground animate-pulse">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Checking publish readiness…
+      </div>
+    );
+  }
+  if (!readiness) return null;
+
+  const blockingFailed = readiness.checks.filter(
+    (c) => c.severity === "blocking" && c.status === "fail",
+  );
+  const warnings = readiness.checks.filter((c) => c.status === "warning");
+
+  return (
+    <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm">Publish Readiness</h3>
+        <button
+          onClick={onRefresh}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+          Refresh
+        </button>
+      </div>
+      <div className="space-y-2">
+        {readiness.checks.map((check) => (
+          <ReadinessCheckRow key={check.id} check={check} />
+        ))}
+      </div>
+      {!readiness.canPublish && blockingFailed.length > 0 && (
+        <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>
+            {blockingFailed.length} required gate{blockingFailed.length !== 1 ? "s" : ""} must
+            pass before publishing.
+          </span>
+        </div>
+      )}
+      {readiness.canPublish && warnings.length > 0 && (
+        <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>
+            {warnings.length} warning{warnings.length !== 1 ? "s" : ""} — you can publish, but
+            review them first.
+          </span>
+        </div>
+      )}
+      {readiness.canPublish && warnings.length === 0 && (
+        <div className="flex items-center gap-2 text-xs text-green-600">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          All gates passed — ready to publish.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 type Platform = "web" | "ios" | "android";
 
 export function PublishingTab({ projectId }: { projectId: number }) {
@@ -261,9 +400,32 @@ export function PublishingTab({ projectId }: { projectId: number }) {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<{
     publicUrl: string;
+    publicSlug: string;
     publishedAt: string;
   } | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
+
+  // Readiness gate state
+  const [readiness, setReadiness] = useState<ReadinessResult | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+
+  // Deployment history state
+  const [deployments, setDeployments] = useState<
+    Array<{
+      id: number;
+      env: string;
+      status: string;
+      publicUrl: string | null;
+      filesCount: number | null;
+      createdAt: string;
+    }>
+  >([]);
+
+  // Site settings state
+  const [siteTitle, setSiteTitle] = useState("");
+  const [metaDescription, setMetaDescription] = useState("");
+  const [themeColor, setThemeColor] = useState("");
+  const [savingSettings, setSavingSettings] = useState(false);
 
   async function handlePublish() {
     setIsPublishing(true);
@@ -278,6 +440,7 @@ export function PublishingTab({ projectId }: { projectId: number }) {
       }
       const data = (await res.json()) as {
         publicUrl: string;
+        publicSlug: string;
         publishedAt: string;
       };
       setPublishResult(data);
@@ -298,6 +461,74 @@ export function PublishingTab({ projectId }: { projectId: number }) {
       else next.add(id);
       return next;
     });
+
+  const fetchReadiness = useCallback(async () => {
+    if (platform !== "web") return;
+    setReadinessLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/publish-readiness?env=${webEnv}`);
+      if (res.ok) setReadiness((await res.json()) as ReadinessResult);
+    } catch { /* ignore */ }
+    finally { setReadinessLoading(false); }
+  }, [projectId, webEnv, platform]);
+
+  const fetchDeployments = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/deployments`);
+      if (res.ok) {
+        const data = (await res.json()) as {
+          deployments: Array<{
+            id: number;
+            env: string;
+            status: string;
+            publicUrl: string | null;
+            filesCount: number | null;
+            createdAt: string;
+          }>;
+        };
+        setDeployments(data.deployments ?? []);
+      }
+    } catch { /* ignore */ }
+  }, [projectId]);
+
+  const fetchSiteSettings = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}`);
+      if (res.ok) {
+        const data = (await res.json()) as {
+          siteTitle?: string | null;
+          metaDescription?: string | null;
+          themeColor?: string | null;
+        };
+        setSiteTitle(data.siteTitle ?? "");
+        setMetaDescription(data.metaDescription ?? "");
+        setThemeColor(data.themeColor ?? "");
+      }
+    } catch { /* ignore */ }
+  }, [projectId]);
+
+  const saveSiteSettings = async () => {
+    setSavingSettings(true);
+    try {
+      await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          siteTitle: siteTitle || null,
+          metaDescription: metaDescription || null,
+          themeColor: themeColor || null,
+        }),
+      });
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchReadiness();
+    void fetchDeployments();
+    void fetchSiteSettings();
+  }, [fetchReadiness, fetchDeployments, fetchSiteSettings]);
 
   const webChecklist = webEnv === "testing" ? WEB_TESTING_CHECKLIST : WEB_PRODUCTION_CHECKLIST;
   const webRequired = webChecklist.flatMap((s) => s.items).filter((i) => i.required);
@@ -483,6 +714,72 @@ export function PublishingTab({ projectId }: { projectId: number }) {
               </p>
             </div>
 
+            {/* Site metadata */}
+            <div className="border border-border rounded-xl p-4 bg-card space-y-4">
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                Published Site Metadata
+              </h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                    Site Title
+                  </label>
+                  <input
+                    value={siteTitle}
+                    onChange={(e) => setSiteTitle(e.target.value)}
+                    placeholder="My Awesome App"
+                    className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                    Meta Description
+                  </label>
+                  <textarea
+                    value={metaDescription}
+                    onChange={(e) => setMetaDescription(e.target.value)}
+                    placeholder="A brief description for search engines and social sharing…"
+                    rows={2}
+                    className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                    Theme Color
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={themeColor || "#000000"}
+                      onChange={(e) => setThemeColor(e.target.value)}
+                      className="h-9 w-12 rounded border border-border cursor-pointer bg-muted p-0.5"
+                    />
+                    <input
+                      value={themeColor}
+                      onChange={(e) => setThemeColor(e.target.value)}
+                      placeholder="#3b82f6"
+                      className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void saveSiteSettings()}
+                  disabled={savingSettings}
+                  className="w-full"
+                >
+                  {savingSettings ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                  ) : (
+                    <Save className="h-3.5 w-3.5 mr-2" />
+                  )}
+                  Save Settings
+                </Button>
+              </div>
+            </div>
+
             {/* Deployment logs */}
             <div className="border border-border rounded-xl overflow-hidden bg-card">
               <button
@@ -497,11 +794,59 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                 )}
               </button>
               {logsOpen && (
-                <div className="bg-zinc-950 font-mono text-xs text-zinc-500 p-4 border-t border-border min-h-[80px] flex items-center justify-center">
-                  No deployments yet. Logs will appear here after your first publish.
-                </div>
+                deployments.length === 0 ? (
+                  <div className="bg-zinc-950 font-mono text-xs text-zinc-500 p-4 border-t border-border min-h-[80px] flex items-center justify-center">
+                    No deployments yet. Logs will appear here after your first publish.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border border-t border-border">
+                    {deployments.map((d) => (
+                      <div key={d.id} className="flex items-center gap-3 px-4 py-2.5 text-xs">
+                        <span
+                          className={cn(
+                            "shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold",
+                            d.status === "passed"
+                              ? "bg-green-500/15 text-green-600"
+                              : d.status === "failed"
+                                ? "bg-destructive/15 text-destructive"
+                                : d.status === "unpublished"
+                                  ? "bg-muted text-muted-foreground"
+                                  : "bg-yellow-500/15 text-yellow-600",
+                          )}
+                        >
+                          {d.status}
+                        </span>
+                        <span className="text-muted-foreground font-mono shrink-0 uppercase tracking-wide">
+                          {d.env}
+                        </span>
+                        {d.publicUrl && (
+                          <a
+                            href={d.publicUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary truncate hover:underline min-w-0"
+                          >
+                            {d.publicUrl}
+                          </a>
+                        )}
+                        <span className="ml-auto text-muted-foreground shrink-0">
+                          {new Date(d.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )
               )}
             </div>
+
+            {/* Readiness gate */}
+            {platform === "web" && (
+              <ReadinessGate
+                readiness={readiness}
+                loading={readinessLoading}
+                onRefresh={() => void fetchReadiness()}
+              />
+            )}
 
             {/* Checklist */}
             <div className="space-y-3">
@@ -526,7 +871,7 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                 {!showConfirm ? (
                   <Button
                     className="w-full"
-                    disabled={!webReadyToPublish}
+                    disabled={!webReadyToPublish || readiness?.canPublish === false}
                     onClick={() => setShowConfirm(true)}
                   >
                     <Globe className="h-4 w-4 mr-2" />
@@ -574,17 +919,21 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                   <CheckCircle2 className="h-4 w-4" />
                   App is live
                 </div>
-                <a
-                  href={publishResult.publicUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 text-sm break-all"
-                >
-                  {publishResult.publicUrl}
-                  <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
-                </a>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={publishResult.publicUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 text-primary hover:text-primary/80 text-sm break-all min-w-0"
+                  >
+                    <span className="truncate">{publishResult.publicUrl}</span>
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+                  </a>
+                  <CopyUrlButton url={publishResult.publicUrl} />
+                </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Published {new Date(publishResult.publishedAt).toLocaleString()}
+                  Slug: <span className="font-mono">{publishResult.publicSlug}</span>
+                  {" · "}Published {new Date(publishResult.publishedAt).toLocaleString()}
                 </p>
                 <Button
                   variant="outline"
@@ -600,11 +949,24 @@ export function PublishingTab({ projectId }: { projectId: number }) {
             )}
 
             {webEnv === "testing" && (
-              <Button variant="outline" className="w-full" disabled>
-                <Server className="h-4 w-4 mr-2" />
-                Deploy to Testing Environment
-                <span className="ml-2 text-[11px] opacity-50">(internal preview only)</span>
-              </Button>
+              <div className="space-y-2">
+                {publishError && (
+                  <p className="text-xs text-destructive">{publishError}</p>
+                )}
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={!webReadyToPublish || isPublishing}
+                  onClick={() => void handlePublish()}
+                >
+                  {isPublishing ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Server className="h-4 w-4 mr-2" />
+                  )}
+                  {isPublishing ? "Publishing…" : "Publish to Testing"}
+                </Button>
+              </div>
             )}
           </div>
         )}

@@ -51,7 +51,7 @@ async function writeAuditLog(opts: {
   projectId: number;
   secretId: number | null;
   secretName: string;
-  action: "created" | "updated" | "deleted" | "accessed";
+  action: "created" | "updated" | "deleted" | "accessed" | "verified" | "verification_failed";
   actorId: string;
   metadata?: Record<string, unknown>;
 }): Promise<void> {
@@ -227,6 +227,102 @@ router.patch(
     });
 
     res.json(toEntry(row));
+  },
+);
+
+// POST /api/projects/:id/secrets/:secretId/verify
+// Attempt automated verification of a secret. Supported: OpenAI keys, Stripe key format.
+router.post(
+  "/projects/:id/secrets/:secretId/verify",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const secretId = Number(req.params.secretId);
+    if (!Number.isFinite(secretId)) {
+      res.status(400).json({ error: "Invalid secret id" });
+      return;
+    }
+
+    const [row] = await db
+      .select()
+      .from(secretsTable)
+      .where(eq(secretsTable.id, secretId));
+
+    if (!row || row.projectId !== projectId) {
+      res.status(404).json({ error: "Secret not found" });
+      return;
+    }
+
+    let plaintext: string;
+    try {
+      plaintext = encryptionService.decrypt(row.valueEncrypted);
+    } catch {
+      res.status(422).json({ error: "Could not decrypt secret for verification." });
+      return;
+    }
+
+    let status: "verified" | "verification_failed" | "manual_required" = "manual_required";
+    let message = "Automatic verification is not supported for this secret type. Please verify manually.";
+
+    const nameLower = row.name.toLowerCase();
+
+    if (nameLower.includes("openai") || plaintext.startsWith("sk-")) {
+      try {
+        const oRes = await fetch("https://api.openai.com/v1/models", {
+          headers: { Authorization: `Bearer ${plaintext}` },
+        });
+        if (oRes.ok) {
+          status = "verified";
+          message = "OpenAI key is valid and active.";
+        } else if (oRes.status === 401) {
+          status = "verification_failed";
+          message = "OpenAI key is invalid or revoked (HTTP 401).";
+        } else {
+          status = "manual_required";
+          message = `OpenAI returned HTTP ${oRes.status} — please verify manually.`;
+        }
+      } catch {
+        status = "manual_required";
+        message = "Could not reach OpenAI to verify — check network connectivity.";
+      }
+    } else if (
+      nameLower.includes("stripe") ||
+      plaintext.startsWith("sk_live_") ||
+      plaintext.startsWith("sk_test_") ||
+      plaintext.startsWith("rk_live_") ||
+      plaintext.startsWith("rk_test_")
+    ) {
+      const isValidFormat = /^(sk|rk)_(live|test)_[a-zA-Z0-9]{20,}$/.test(plaintext);
+      if (isValidFormat) {
+        status = "verified";
+        message = "Stripe key format is valid. (Live API call not performed.)";
+      } else {
+        status = "verification_failed";
+        message = "This does not match the expected Stripe key format (sk_live_... or sk_test_...).";
+      }
+    }
+
+    const [updated] = await db
+      .update(secretsTable)
+      .set({ verificationStatus: status, updatedAt: sql`now()` })
+      .where(eq(secretsTable.id, secretId))
+      .returning();
+
+    void writeAuditLog({
+      projectId,
+      secretId,
+      secretName: row.name,
+      action: status === "verified" ? "verified" : (status === "verification_failed" ? "verification_failed" : "accessed"),
+      actorId: req.userId ?? "unknown",
+      metadata: { status, message },
+    });
+
+    res.json({
+      secretId,
+      status,
+      message,
+      entry: updated ? toEntry(updated) : null,
+    });
   },
 );
 

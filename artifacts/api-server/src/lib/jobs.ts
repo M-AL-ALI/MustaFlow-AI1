@@ -21,6 +21,15 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import type { AgentMode } from "./ai";
 import { logger } from "./logger";
 import { writeKnowledge } from "./knowledge";
+import { getOrCreateCredits, deductCredits } from "../routes/credits";
+
+/** Credit cost per AI call, keyed by agentMode. */
+const CREDIT_COST: Record<string, number> = {
+  lite: 1,
+  eco: 2,
+  power: 5,
+  pro: 10,
+};
 
 export type JobKind = "build" | "refine";
 
@@ -278,6 +287,21 @@ export async function runJob(input: JobInput): Promise<void> {
 
   const knowledgeContext = await loadKnowledgeContext(projectId);
 
+  // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
+  const creditCost = CREDIT_COST[agentMode] ?? 1;
+  if (project.ownerId) {
+    const credits = await getOrCreateCredits(project.ownerId);
+    if (credits.balance < creditCost) {
+      const msg = `Insufficient credits. This ${agentMode} build costs ${creditCost} credit(s) but your balance is ${credits.balance}. Top up in Billing to continue.`;
+      await emitEvent(taskId, "failed", msg);
+      await db
+        .update(agentTasksTable)
+        .set({ status: "failed", result: msg, completedAt: sql`now()` })
+        .where(eq(agentTasksTable.id, taskId));
+      return;
+    }
+  }
+
   try {
     let report: TaskReport;
     let assistantSummary: string;
@@ -410,6 +434,15 @@ export async function runJob(input: JobInput): Promise<void> {
       .where(eq(projectsTable.id, projectId));
 
     await emitEvent(taskId, "completed", "Task completed.");
+
+    // --- Deduct credits after a successful AI build/refine ---
+    if (project.ownerId) {
+      void deductCredits(project.ownerId, creditCost, {
+        type: kind,
+        description: `${kind === "build" ? "Build" : "Refine"} (${agentMode}) — project ${projectId}`,
+        projectId,
+      }).catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
+    }
 
     // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
     void maybeEscalateWarnings(projectId, report.warnings ?? []);

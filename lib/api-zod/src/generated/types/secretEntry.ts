@@ -13,5 +13,10 @@ export interface SecretEntry {
   name: string;
   masked: string;
   environment: SecretEntryEnvironment;
+  verificationStatus?: string;
+  /** @nullable */
+  category?: string | null;
+  /** @nullable */
+  envWarning?: string | null;
   createdAt: Date;
 }

@@ -9,6 +9,7 @@
 export interface PublishResult {
   projectId: number;
   status: string;
+  publicSlug?: string;
   publicUrl: string;
   publishedAt: Date;
   note: string;

@@ -63,6 +63,14 @@ export interface Project {
   lastTaskSummary?: string | null;
   /** @nullable */
   summary?: string | null;
+  /** @nullable */
+  publicSlug?: string | null;
+  /** @nullable */
+  siteTitle?: string | null;
+  /** @nullable */
+  metaDescription?: string | null;
+  /** @nullable */
+  themeColor?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -118,6 +126,9 @@ export interface ProjectUpdate {
   description?: string;
   status?: ProjectUpdateStatus;
   agentMode?: ProjectUpdateAgentMode;
+  siteTitle?: string;
+  metaDescription?: string;
+  themeColor?: string;
 }
 
 export type ProjectsSummaryByStatus = {[key: string]: number};
@@ -321,6 +332,11 @@ export interface SecretEntry {
   name: string;
   masked: string;
   environment: SecretEntryEnvironment;
+  verificationStatus?: string;
+  /** @nullable */
+  category?: string | null;
+  /** @nullable */
+  envWarning?: string | null;
   createdAt: string;
 }
 
@@ -428,6 +444,7 @@ export interface DuplicateProjectResult {
 export interface PublishResult {
   projectId: number;
   status: string;
+  publicSlug?: string;
   publicUrl: string;
   publishedAt: string;
   note: string;
@@ -452,8 +469,115 @@ export interface ActivityItem {
   createdAt: string;
 }
 
+export type ReadinessCheckStatus = typeof ReadinessCheckStatus[keyof typeof ReadinessCheckStatus];
+
+
+export const ReadinessCheckStatus = {
+  pass: 'pass',
+  fail: 'fail',
+  warning: 'warning',
+  info: 'info',
+} as const;
+
+export type ReadinessCheckSeverity = typeof ReadinessCheckSeverity[keyof typeof ReadinessCheckSeverity];
+
+
+export const ReadinessCheckSeverity = {
+  blocking: 'blocking',
+  warning: 'warning',
+  info: 'info',
+} as const;
+
+export interface ReadinessCheck {
+  id: string;
+  label: string;
+  description: string;
+  status: ReadinessCheckStatus;
+  severity: ReadinessCheckSeverity;
+  message?: string;
+}
+
+export interface ReadinessResult {
+  env: string;
+  canPublish: boolean;
+  checks: ReadinessCheck[];
+}
+
+export type SecretVerifyResultStatus = typeof SecretVerifyResultStatus[keyof typeof SecretVerifyResultStatus];
+
+
+export const SecretVerifyResultStatus = {
+  verified: 'verified',
+  verification_failed: 'verification_failed',
+  manual_required: 'manual_required',
+} as const;
+
+export interface SecretVerifyResult {
+  secretId: number;
+  status: SecretVerifyResultStatus;
+  message: string;
+}
+
+export interface DeploymentLog {
+  id: number;
+  projectId: number;
+  userId: string;
+  env: string;
+  status: string;
+  /** @nullable */
+  publicSlug?: string | null;
+  /** @nullable */
+  publicUrl?: string | null;
+  /** @nullable */
+  filesCount?: number | null;
+  /** @nullable */
+  snapshotVersionId?: number | null;
+  /** @nullable */
+  note?: string | null;
+  createdAt: string;
+}
+
+export interface UserCredit {
+  userId: string;
+  balance: number;
+  updatedAt: string;
+}
+
+export interface CreditTransaction {
+  id: number;
+  userId: string;
+  /** @nullable */
+  projectId?: number | null;
+  type: string;
+  amount: number;
+  /** @nullable */
+  description?: string | null;
+  balanceAfter: number;
+  createdAt: string;
+}
+
 export type UnpublishProject200 = {
   projectId: number;
   status: string;
+};
+
+export type GetPublishReadinessParams = {
+env?: GetPublishReadinessEnv;
+};
+
+export type GetPublishReadinessEnv = typeof GetPublishReadinessEnv[keyof typeof GetPublishReadinessEnv];
+
+
+export const GetPublishReadinessEnv = {
+  testing: 'testing',
+  production: 'production',
+} as const;
+
+export type ListDeployments200 = {
+  deployments: DeploymentLog[];
+};
+
+export type ListCreditTransactions200 = {
+  transactions: CreditTransaction[];
 };
 

@@ -14,6 +14,10 @@ import ProjectsPage from "./pages/projects";
 import ProjectWorkspacePage from "./pages/projects/[id]";
 import KnowledgePage from "./pages/knowledge";
 import SettingsPage from "./pages/settings";
+import TermsPage from "./pages/terms";
+import PrivacyPage from "./pages/privacy";
+import HelpPage from "./pages/help";
+import AdminPage from "./pages/admin";
 
 // Components
 import { AppLayout } from "./components/layout/app-layout";
@@ -250,6 +254,30 @@ function ClerkProviderWithRoutes() {
                   <SettingsPage />
                 </AppLayout>
               </Protected>
+            </Route>
+            <Route path="/admin">
+              <Protected>
+                <AppLayout>
+                  <AdminPage />
+                </AppLayout>
+              </Protected>
+            </Route>
+
+            {/* ── Public info pages ── */}
+            <Route path="/terms">
+              <AppLayout>
+                <TermsPage />
+              </AppLayout>
+            </Route>
+            <Route path="/privacy">
+              <AppLayout>
+                <PrivacyPage />
+              </AppLayout>
+            </Route>
+            <Route path="/help">
+              <AppLayout>
+                <HelpPage />
+              </AppLayout>
             </Route>
 
             <Route component={NotFound} />

@@ -10,6 +10,7 @@ import {
   Settings,
   GraduationCap,
   BookOpen,
+  HelpCircle,
 
   LogOut,
   ChevronDown,
@@ -34,7 +35,7 @@ const SECONDARY_NAV_ITEMS = [
 
 const TERTIARY_NAV_ITEMS = [
   { name: "Learn", href: "/learn", icon: GraduationCap },
-  { name: "Documentation", href: "/docs", icon: BookOpen },
+  { name: "Help Center", href: "/help", icon: HelpCircle },
 ];
 
 function NavGroup({
@@ -154,7 +155,7 @@ export function Sidebar() {
     <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col shrink-0 overflow-y-auto">
       {/* Logo */}
       <div className="px-4 py-5 flex justify-center shrink-0">
-        <img src={logoUrl} alt="MustaFlow AI" className="h-20 w-auto object-contain" />
+        <img src={logoUrl} alt="MustaFlow AI" className="h-28 w-auto object-contain" />
       </div>
 
       {/* Nav */}
@@ -166,6 +167,13 @@ export function Sidebar() {
       {/* Resources + user */}
       <div className="mt-auto">
         <NavGroup items={TERTIARY_NAV_ITEMS} title="Resources" />
+        <div className="px-6 py-2 flex items-center gap-3 text-[10px] text-muted-foreground/60">
+          <a href="/terms" className="hover:text-muted-foreground transition-colors">Terms</a>
+          <span>·</span>
+          <a href="/privacy" className="hover:text-muted-foreground transition-colors">Privacy</a>
+          <span>·</span>
+          <a href="/help" className="hover:text-muted-foreground transition-colors">Help</a>
+        </div>
         <UserSection />
       </div>
     </div>

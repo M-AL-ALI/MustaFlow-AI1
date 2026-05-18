@@ -13,4 +13,7 @@ export interface ProjectUpdate {
   description?: string;
   status?: ProjectUpdateStatus;
   agentMode?: ProjectUpdateAgentMode;
+  siteTitle?: string;
+  metaDescription?: string;
+  themeColor?: string;
 }
