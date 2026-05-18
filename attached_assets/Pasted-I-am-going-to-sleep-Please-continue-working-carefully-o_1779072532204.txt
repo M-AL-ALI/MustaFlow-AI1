@@ -1,0 +1,870 @@
+I am going to sleep. Please continue working carefully on MustaFlow AI while I am away.
+
+Do NOT publish to production yet.
+Do NOT submit anything final until I review the validation report.
+Do NOT remove working features.
+Do NOT create duplicate systems.
+Do NOT copy Replit branding, logo, exact UI, wording, icons, or protected design.
+Keep MustaFlow AI original.
+
+The goal:
+MustaFlow AI is an AI app-building service platform. Users should be able to type what they want to build, and the AI should plan it, design it, choose the correct code, generate project files, wire pages, show live preview, recommend needed integrations/API keys, test, save versions, and create reports.
+
+This app is not just a chatbot. The AI chat must be the real coding/building command center.
+
+==================================================
+MAIN PRIORITIES WHILE I AM AWAY
+==================================================
+
+Please complete these tasks in this order:
+
+1. Fix the workspace layout shape.
+2. Add live AI build activity/progress stream.
+3. Improve Project Workspace design with 2 polished variations if needed.
+4. Build real AI Builder Engine MVP, not just placeholder chat.
+5. Make Preview show generated app output.
+6. Improve Tools & Files, Secrets, Integrations, Publishing.
+7. Add Brand Studio for logos/icons/app icons.
+8. Add Maps/Location integration planning support.
+9. Add Knowledge Vault, version history, rollback proof.
+10. Run full validation and give me a full report.
+
+==================================================
+TASK 1 — FIX WORKSPACE LAYOUT
+==================================================
+
+The current layout still needs modification.
+
+Current issue:
+The AI chat looks like it is floating inside the preview area. That is wrong.
+
+Required layout:
+
+Global left sidebar:
+- Home
+- Projects
+- Published Apps
+- Knowledge Vault
+- Integrations
+- Security
+- Billing
+- Settings
+- Learn
+- Documentation
+
+Project sidebar:
+- Project name
+- Project status badge
+- New Task
+- Plans
+- Tasks
+- Files
+- Integrations
+- Secrets
+- Database
+- Publishing
+- Security Scan
+- Knowledge Vault
+- Versions
+- Settings
+
+Top workspace tabs:
+- Preview
+- Canvas
+- Tools & Files
+- Publishing
+- Logs
+- Analytics
+- Resources
+- Domains
+- Manage
+
+Main area:
+Shows the selected tab content.
+
+Bottom:
+Fixed AI Builder Chat command center.
+
+Important:
+- AI chat must be fixed at the bottom.
+- Preview must not be blocked by chat.
+- Sidebars must be compact and clean.
+- Main preview area should have enough space.
+- Web / iOS / Android selector belongs inside the Preview tab toolbar.
+- The workspace must look polished, serious, modern, and easy for non-technical users.
+
+==================================================
+TASK 2 — AI BUILDER CHAT
+==================================================
+
+The bottom AI Builder Chat must be the main control center.
+
+It must include:
+- Prompt input
+- Plan Mode toggle
+- Agent mode selector: Lite / Eco / Power / Pro
+- Attach file button
+- Attach design button
+- Microphone placeholder
+- Send button
+- Current status: Ready / Planning / Building / Testing / Waiting for approval / Completed / Failed
+- Main Agent / Background Agent option when Plan Mode finishes
+
+Agent modes:
+- Lite: small edits, fast, low-cost
+- Eco: default mode for most tasks
+- Power: complex app building, integrations, debugging
+- Pro: future/advanced mode, limited use
+
+Default should be Eco.
+Power should be recommended only for complex tasks.
+
+Plan Mode:
+When Plan Mode is ON:
+- Do not change files.
+- Create a plan only.
+- List pages/screens needed.
+- List backend/API needed.
+- List database tables needed.
+- List integrations needed.
+- List API keys needed.
+- List risks.
+- List test plan.
+- Ask: “Do you want me to build this in Main Agent or run it as a Background Task?”
+
+When Plan Mode is OFF:
+- AI can begin building directly.
+- Still create a version, activity stream, and final report.
+
+==================================================
+TASK 3 — LIVE AI BUILD ACTIVITY STREAM
+==================================================
+
+Add a live AI task activity stream so the user can see the AI building live.
+
+The activity stream should show steps like:
+
+- Reading project files…
+- Understanding request…
+- Creating app blueprint…
+- Generating pages…
+- Creating components…
+- Updating navigation…
+- Adding database model…
+- Checking required integrations…
+- Running typecheck…
+- Fixing import error…
+- Updating preview…
+- Saving version…
+- Creating rollback point…
+- Task completed.
+
+Each event should save to database or project state.
+
+Create task event fields:
+- id
+- taskId
+- projectId
+- eventType
+- message
+- status
+- filePath optional
+- createdAt
+
+Statuses:
+- queued
+- planning
+- reading_files
+- generating_blueprint
+- generating_code
+- editing_files
+- testing
+- fixing_errors
+- updating_preview
+- saving_version
+- needs_approval
+- completed
+- failed
+
+The UI should display this as a live timeline or activity panel in the workspace.
+
+Important:
+Do not only show a final chatbot answer. MustaFlow AI must show live work progress.
+
+==================================================
+TASK 4 — REAL AI BUILDER ENGINE MVP
+==================================================
+
+The current code-generation engine cannot remain a placeholder.
+
+Build Phase 2: Real AI Builder Engine MVP.
+
+Minimum goal:
+User types an app or website idea, and MustaFlow AI creates actual generated project files and shows the result in Preview.
+
+Example user prompts:
+- “Build me a landing page for a towing company.”
+- “Create a booking website for a cleaning service.”
+- “Build an Uber-like mechanic service app.”
+- “Create a dashboard with customer list and analytics.”
+- “Build a restaurant website with menu and ordering button.”
+
+The AI builder pipeline must be:
+
+User prompt
+→ App Blueprint
+→ File Generation
+→ Save Project Files
+→ Preview Build
+→ Validation/Test
+→ Save Version
+→ Final Report
+
+Create an App Blueprint object with:
+- projectName
+- projectType
+- targetPlatforms
+- pages/screens
+- navigation
+- components
+- data needed
+- backend needs
+- integrations needed
+- API keys needed
+- styling/theme
+- user roles if any
+- testing checklist
+
+For Phase 2, start with real web app/website generation first.
+
+Generated files should include examples like:
+- src/App.tsx
+- src/pages/Home.tsx
+- src/pages/Services.tsx
+- src/pages/Booking.tsx
+- src/pages/Dashboard.tsx
+- src/components/Navbar.tsx
+- src/components/Footer.tsx
+- src/components/Hero.tsx
+- src/components/ServiceCards.tsx
+- src/components/BookingForm.tsx
+- src/styles/theme.css or Tailwind-style classes
+- project metadata
+
+The generated files must:
+- Appear in Tools & Files
+- Be viewable in file tree
+- Be saved to the project
+- Be included in version history
+- Be used by Preview
+
+==================================================
+TASK 5 — PREVIEW MUST SHOW GENERATED RESULT
+==================================================
+
+The Preview tab must not be empty.
+
+Preview tab needs:
+- Web / iOS / Android selector
+- Browser frame for Web
+- iPhone-style frame for iOS
+- Android-style frame for Android
+- Refresh preview button
+- Open preview placeholder
+- Current status
+- Last updated timestamp
+
+If no generated app exists, show useful empty state:
+- “No app preview generated yet.”
+- “Describe what you want in the AI Builder below.”
+- Buttons:
+  - Start with Plan Mode
+  - Generate First Draft
+
+If generated files exist:
+- Show the generated app output.
+- When user asks for changes, update preview after changes.
+
+For Phase 2:
+If full runtime execution is not ready, use a safe controlled React/template preview renderer. Do not execute dangerous arbitrary code.
+
+==================================================
+TASK 6 — CHANGE REQUESTS MUST EDIT CORRECT FILES
+==================================================
+
+When user asks:
+
+- “Make the button blue.”
+- “Add pricing section.”
+- “Add booking form.”
+- “Make it look more professional.”
+- “Add dashboard page.”
+- “Add map to the home page.”
+- “Create login screen.”
+- “Add provider screen.”
+
+The AI must:
+1. Understand the change.
+2. Identify affected files.
+3. Create mini plan.
+4. Apply changes to correct files.
+5. Save new version.
+6. Refresh preview.
+7. Add activity events.
+8. Give final report.
+
+Do not just reply with instructions. It must modify actual project files.
+
+==================================================
+TASK 7 — PROJECT CREATION FROM HOME PROMPT
+==================================================
+
+When user types an idea from the home page, like:
+
+“uber app”
+
+The system should create a project and immediately generate a smart interpretation card.
+
+Example:
+
+Project created: Uber-style Service App
+
+MustaFlow AI understood:
+You want a service marketplace app where customers request service and providers accept jobs.
+
+Suggested modules:
+- Customer app
+- Provider app
+- Admin dashboard
+- Live map
+- Request/job lifecycle
+- Payments
+- Push notifications
+- Ratings
+- Authentication
+
+Required integrations:
+- Auth provider
+- Maps
+- Payments
+- Push notifications
+- Database
+- Storage
+
+Next actions:
+- Plan full app
+- Generate first draft
+- Ask questions first
+- Run planning in background
+
+This should appear in the AI Builder chat and workspace welcome panel.
+
+==================================================
+TASK 8 — TOOLS & FILES
+==================================================
+
+Improve Tools & Files tab.
+
+It must include:
+- File tree
+- Code editor/viewer
+- Shell / terminal placeholder
+- Secrets manager
+- Environment variables
+- Testing keys
+- Production keys
+- Integrations
+- Upload file
+- Attach design
+- Database tools placeholder
+- API routes placeholder
+
+Secrets manager must clearly separate:
+- Development keys
+- Testing keys
+- Production keys
+
+Secret values must be masked after saving.
+Never expose full secret keys on frontend.
+
+Example masked value:
+sk_test_****************
+
+==================================================
+TASK 9 — INTEGRATIONS REGISTRY
+==================================================
+
+Add or improve integrations registry.
+
+Categories needed:
+
+AI Providers:
+- OpenAI
+- Anthropic
+- Gemini
+- Custom model placeholder
+
+Auth:
+- Clerk
+- Auth0
+- Supabase Auth
+- Firebase Auth
+
+Database:
+- PostgreSQL
+- Neon
+- Supabase
+- Firebase
+- MySQL placeholder
+
+Storage:
+- S3
+- Cloudflare R2
+- Supabase Storage
+- Firebase Storage
+
+Payments:
+- Stripe
+- Stripe Connect
+- RevenueCat placeholder
+
+Maps/Location:
+- Google Maps
+- Apple Maps / MapKit
+- MapKit JS
+- Mapbox placeholder
+- OpenStreetMap placeholder
+
+Email/SMS:
+- SendGrid
+- Mailgun
+- Resend
+- Twilio
+
+Notifications:
+- Expo Push
+- Firebase Cloud Messaging
+- APNs placeholder
+
+Analytics/Monitoring:
+- Sentry
+- PostHog
+- Google Analytics
+- DataDog placeholder
+
+Code/Deployment:
+- GitHub
+- Vercel
+- Render
+- Fly.io
+- Railway
+- AWS placeholder
+- Docker placeholder
+
+App Stores:
+- Apple Developer
+- App Store Connect
+- TestFlight
+- Google Play Console
+
+Design:
+- Figma import placeholder
+- Image/design upload
+- Brand kit
+- AI logo/icon generation
+
+For each integration show:
+- Name
+- Category
+- Status
+- Required keys
+- Testing support
+- Production support
+- Setup checklist
+- Verify button placeholder
+
+The AI must be able to tell the user:
+- Which key is needed
+- Where to get it
+- Whether it is test or production
+- Where to paste it
+- How to verify it works
+
+==================================================
+TASK 10 — MAPS / LOCATION SUPPORT
+==================================================
+
+MustaFlow AI must support map/location app planning and generation.
+
+Map features to support:
+- Web map preview
+- iOS map preview
+- Android map preview
+- Markers/pins
+- Custom marker icons
+- Places search
+- Address autocomplete
+- Geocoding
+- Reverse geocoding
+- Routes/directions
+- ETA
+- Live location tracking
+- Provider/customer map markers
+- Service radius
+- Nearby provider search
+- Route polyline
+- Location permission guidance
+
+When user asks for map-based app, AI must detect needed integrations.
+
+Example:
+If user asks for Uber-like app, delivery app, towing app, mechanic app, booking with location, store locator, or route tracking, AI should recommend:
+- Google Maps for web/Android
+- Apple Maps / MapKit for iOS
+- Places autocomplete
+- Directions/routes
+- Geocoding
+- Location permissions
+- Push notifications if live tracking
+- Database tables for location/job data
+
+Add setup checklist:
+- Required API/key
+- Where to get it
+- Testing or production
+- Where to add it in Secrets
+- Verification steps
+
+==================================================
+TASK 11 — BRAND STUDIO FOR LOGOS AND ICONS
+==================================================
+
+Add AI Brand Studio inside Canvas/Design.
+
+MustaFlow AI should help users create professional:
+- Logos
+- App icons
+- Favicons
+- iOS icon sets
+- Android adaptive icons
+- Splash screens
+- Color palettes
+- Typography
+- Brand kit
+- Light/dark logo versions
+- Social media preview assets
+
+Brand Studio UI should include:
+- Brand prompt input
+- Generate logo variations placeholder
+- Generate app icon placeholder
+- Generate color palette
+- Generate typography suggestion
+- Save selected brand asset
+- Apply brand kit to app
+- Export requirements checklist
+
+Important:
+If actual image generation is not wired yet, build the UI, data model, and provider-ready architecture. Make it clear it is ready for image generation integration.
+
+Add warning:
+Do not copy famous brands, trademarks, or protected logos.
+
+==================================================
+TASK 12 — CANVAS DESIGN MODE
+==================================================
+
+Canvas tab should help user visually design the app.
+
+Canvas should include:
+- Screen list
+- Selected screen preview
+- Design prompt
+- Design variation cards
+- Reimagine screen button
+- Apply selected design button
+- Save design version button
+- Brand Studio section
+
+Canvas changes must still go through:
+- AI task
+- Version history
+- Activity stream
+- Final report
+
+==================================================
+TASK 13 — PUBLISHING
+==================================================
+
+Improve Publishing tab.
+
+Publishing sections:
+- Overview
+- Web Testing Deploy
+- Web Production Deploy
+- iOS Preview
+- iOS TestFlight Checklist
+- iOS App Store Checklist
+- Android Preview
+- Google Play Checklist
+- Custom Domain
+- Environment Variables
+- Deployment Logs
+- Rollback Deployment
+- Health Checks
+
+Production publishing must require:
+- User confirmation
+- Test report
+- Environment validation
+- Secret validation
+- Rollback point
+
+Do not publish production automatically.
+
+==================================================
+TASK 14 — KNOWLEDGE VAULT
+==================================================
+
+Knowledge Vault is very important.
+
+Save:
+- User prompts
+- AI plans
+- AI summaries
+- AI reports
+- Code changes
+- Design changes
+- Bug reports
+- Fix reports
+- Failed attempts
+- Successful fixes
+- Test results
+- Deployment reports
+- Rollback points
+- Lessons learned
+- User approvals
+- Integration problems
+- Security warnings
+- Reusable patterns
+
+Fields:
+- id
+- projectId
+- userId
+- type
+- title
+- summary
+- details
+- relatedTaskId
+- relatedVersionId
+- tags
+- severity
+- approvedForReuse
+- createdAt
+
+Important:
+Learning should be project-level and approved lesson-level. Do not create uncontrolled global learning from private user data.
+
+==================================================
+TASK 15 — VERSION HISTORY AND ROLLBACK
+==================================================
+
+Every AI build or change must create a version.
+
+Version fields:
+- versionId
+- projectId
+- taskId
+- timestamp
+- user request
+- agent mode used
+- plan used
+- files changed
+- before/after summary
+- test result
+- rollback available
+- created by AI/user/system
+
+File version fields:
+- file path
+- previous content
+- new content
+- change summary
+- diff placeholder
+- timestamp
+
+Rollback:
+- User must approve rollback.
+- Rollback restores previous file contents.
+- Rollback creates a new version.
+- Rollback action is logged.
+
+For Phase 2, rollback must actually restore saved generated files, not just show a placeholder.
+
+==================================================
+TASK 16 — SECURITY AND AUTH GAP
+==================================================
+
+Known limitation:
+No auth yet. This must be addressed before public use.
+
+If full auth is too much for this overnight task, at minimum:
+- Add auth-ready architecture.
+- Add userId ownership structure.
+- Add route guards/placeholders.
+- Add TODO clearly in validation report.
+
+Preferred:
+- Add Clerk or Replit Auth if available and safe.
+- Every project belongs to a user.
+- Every API route validates project ownership.
+
+Secrets:
+Current plaintext secrets are not acceptable for real service.
+
+At minimum:
+- Mask secrets in all responses.
+- Never expose secret values after save.
+- Add encryption-ready structure.
+- Separate dev/test/prod keys.
+- Document the remaining security gap.
+
+==================================================
+TASK 17 — API REQUIREMENTS
+==================================================
+
+All API routes must return JSON.
+
+Unknown API routes must return JSON 404, not HTML.
+
+Required checks:
+- GET /api/health
+- GET /api/healthz
+- Unknown API route returns JSON 404
+
+Do not break existing routes.
+
+==================================================
+TASK 18 — ACCEPTANCE CRITERIA
+==================================================
+
+This work is complete only if:
+
+1. Workspace layout is fixed.
+2. AI chat is fixed at bottom, not floating in preview.
+3. Preview is clean and not blocked.
+4. Top tabs work: Preview, Canvas, Tools & Files, Publishing, Logs, Analytics, Resources, Domains, Manage.
+5. Web / iOS / Android selector exists inside Preview.
+6. Live AI activity stream exists.
+7. User prompt can generate a real blueprint.
+8. User prompt can generate real project files.
+9. Files appear in Tools & Files.
+10. Preview shows generated app output.
+11. User can request a change.
+12. AI changes correct files.
+13. Preview updates after change.
+14. Version history records generation/change.
+15. Rollback restores previous generated file contents.
+16. Plan Mode creates plan only and does not change files.
+17. Main Agent builds directly.
+18. Background Agent runs real builder pipeline, not fake auto-complete.
+19. Reports are created after every task.
+20. Knowledge Vault saves task/fix/report entries.
+21. Secrets remain masked.
+22. Integrations registry exists.
+23. Maps/location support checklist exists.
+24. Brand Studio UI exists.
+25. Publishing tab has testing/production/app-store flow.
+26. API routes return JSON.
+27. Unknown API routes return JSON 404.
+28. Typecheck passes.
+29. App runs without crash.
+30. No duplicate systems were created.
+31. Final validation report is provided.
+
+==================================================
+TASK 19 — TEST PROMPTS TO RUN
+==================================================
+
+Please test with these prompts:
+
+Test 1:
+“Build me a landing page for a towing company.”
+
+Expected:
+- Blueprint created
+- Files generated
+- Preview shows towing landing page
+- Version saved
+- Report created
+
+Test 2:
+“Add a booking form and make the design more professional.”
+
+Expected:
+- Correct files changed
+- Booking form appears in preview
+- New version saved
+- Report created
+
+Test 3:
+“Build an Uber-like mechanic service app.”
+
+Expected:
+- Blueprint identifies customer app, provider app, admin dashboard, map, payments, notifications, auth, database
+- It should not try to fully build massive app in one unsafe step
+- It should recommend phased build
+- It should ask for Main Agent or Background Agent if Plan Mode is on
+
+Test 4:
+“Add live map and route tracking.”
+
+Expected:
+- AI detects Google Maps / Apple Maps / MapKit needs
+- Lists required keys
+- Adds map placeholder or map component safely
+- Tells where to add keys
+
+Test 5:
+“Create a logo and app icon for this project.”
+
+Expected:
+- Brand Studio opens or creates brand asset task
+- Provides logo/icon generation flow placeholder
+- Saves brand kit metadata
+
+==================================================
+FINAL REPORT REQUIRED BEFORE I WAKE UP
+==================================================
+
+When finished, provide a full report with:
+
+1. Summary of what was completed.
+2. What files were changed.
+3. What components were added/updated.
+4. What backend routes were added/updated.
+5. What database/schema/models were added.
+6. How the real AI Builder pipeline works now.
+7. How live activity stream works.
+8. How Preview renders generated app.
+9. How Tools & Files displays generated files.
+10. How version history and rollback were tested.
+11. How Knowledge Vault saves reports/lessons.
+12. How Brand Studio works or what is still placeholder.
+13. How Maps/Location integration support works.
+14. How Publishing tab works.
+15. Test results for all 5 test prompts.
+16. Typecheck/build result.
+17. API health route result.
+18. Unknown API JSON 404 result.
+19. Screenshots or description of final UI.
+20. Known limitations.
+21. Security gaps still remaining.
+22. Recommended next phase.
+23. Confirmation that nothing was published to production.
+
+Do not just say “done.”
+Do not publish.
+Do not submit production.
+Wait for my review after the validation report.
