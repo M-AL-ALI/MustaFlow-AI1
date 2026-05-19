@@ -61,8 +61,9 @@ import {
   RotateCcw,
   Pencil,
   X,
+  Puzzle,
 } from "lucide-react";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
 import { CanvasTab } from "./components/canvas-tab";
@@ -96,6 +97,7 @@ type TaskReport = {
   nextRecommendation?: string;
   knowledgeApplied?: Array<{ title: string; category: string }>;
   nativeFeatures?: string[];
+  modulesWired?: Array<{ id: string; name: string; secretsConsumed: string[] }>;
 };
 
 type ChatPlanPayload =
@@ -176,6 +178,26 @@ function ReportCard({ report, onViewFile }: { report: TaskReport; onViewFile?: (
               why={i.why}
               keysNeeded={i.keysNeeded}
             />
+          ))}
+        </div>
+      )}
+      {report.modulesWired && report.modulesWired.length > 0 && (
+        <div className="space-y-1 pt-1.5 border-t border-border">
+          <div className="font-semibold text-foreground flex items-center gap-1 text-[11px]">
+            <Puzzle className="h-3 w-3 text-primary" /> Modules wired
+          </div>
+          {report.modulesWired.map((m, i) => (
+            <div key={i} className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[9px] font-medium text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0">
+                {m.id}
+              </span>
+              <span className="text-[11px] text-foreground">{m.name}</span>
+              {m.secretsConsumed.length > 0 && (
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  ({m.secretsConsumed.join(", ")})
+                </span>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -378,6 +400,32 @@ export default function ProjectWorkspacePage() {
   }, []);
 
   const isMobileLayout = windowWidth < 768;
+
+  // Derive active module IDs from the most recent completed task report
+  const wiredModuleIds = useMemo<string[] | undefined>(() => {
+    if (!messages) return undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === "assistant") {
+        try {
+          const payload = JSON.parse(msg.content) as ChatPlanPayload;
+          if (
+            typeof payload === "object" &&
+            payload !== null &&
+            "kind" in payload &&
+            (payload as { kind: string }).kind === "report"
+          ) {
+            const rpt = (payload as { kind: "report"; report: TaskReport }).report;
+            if (rpt?.modulesWired && rpt.modulesWired.length > 0) {
+              return rpt.modulesWired.map((m) => m.id);
+            }
+            return [];
+          }
+        } catch { /* non-JSON message, skip */ }
+      }
+    }
+    return undefined;
+  }, [messages]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -1276,8 +1324,14 @@ export default function ProjectWorkspacePage() {
             {activeTab === "tools-files" && (
               <ToolsTab
                 projectId={projectId}
+                projectKind={project?.kind}
+                wiredModuleIds={wiredModuleIds}
                 prefillSecretName={prefillSecretName}
                 defaultTab={prefillSecretName ? "secrets" : undefined}
+                onSendMessage={(text) => {
+                  setActiveTab("preview");
+                  send(text);
+                }}
               />
             )}
             {activeTab === "publishing" && <PublishingTab projectId={projectId} kind={project.kind} />}

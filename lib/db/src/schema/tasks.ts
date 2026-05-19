@@ -28,6 +28,7 @@ export type TaskReport = {
   nextRecommendation?: string;
   knowledgeApplied?: Array<{ title: string; category: string }>;
   nativeFeatures?: string[];
+  modulesWired?: Array<{ id: string; name: string; secretsConsumed: string[] }>;
 };
 
 export const agentTasksTable = pgTable("agent_tasks", {

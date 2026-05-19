@@ -1065,6 +1065,456 @@ export async function runRefinePipeline(args: {
   return { changedFiles, removedPaths, report, assistantSummary: summary };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Mobile Module Registry
+// Each module defines the keywords that trigger it, the secrets it needs,
+// the npm packages it introduces, and a system prompt chunk that teaches the
+// AI exactly how to wire it correctly.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type MobileModule = {
+  id: string;
+  name: string;
+  description: string;
+  requiredSecrets: string[];
+  intentKeywords: string[];
+  packageDependencies: string[];
+  systemPromptChunk: string;
+};
+
+export const MOBILE_MODULES: MobileModule[] = [
+  {
+    id: "auth",
+    name: "Authentication (Clerk)",
+    description: "User sign-in, sign-up, and session management via Clerk Expo SDK.",
+    requiredSecrets: ["CLERK_PUBLISHABLE_KEY"],
+    intentKeywords: ["login", "sign in", "sign up", "signup", "auth", "authentication", "user account", "password", "register", "logout", "session"],
+    packageDependencies: ["@clerk/clerk-expo", "expo-secure-store"],
+    systemPromptChunk: `AUTHENTICATION MODULE (Clerk):
+- Install: @clerk/clerk-expo, expo-secure-store
+- In app/_layout.tsx: wrap everything in <ClerkProvider publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
+  - tokenCache uses expo-secure-store: const tokenCache = { async getToken(k){return SecureStore.getItemAsync(k)}, async saveToken(k,v){return SecureStore.setItemAsync(k,v)} }
+- Sign-in screen: import { useSignIn } from "@clerk/clerk-expo"; use signIn.create({ identifier, password }) inside try/catch
+- Sign-up screen: import { useSignUp } from "@clerk/clerk-expo"; use signUp.create({ emailAddress, password }) then signUp.prepareEmailAddressVerification
+- Auth guard: import { useAuth } from "@clerk/clerk-expo"; const { isSignedIn } = useAuth(); redirect to /sign-in if not signed in
+- User profile: import { useUser } from "@clerk/clerk-expo"; const { user } = useUser();
+- Sign out: import { useClerk } from "@clerk/clerk-expo"; const { signOut } = useClerk();
+- NEVER hardcode the publishable key — always use process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
+- Add EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY to app.json extra.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`,
+  },
+  {
+    id: "payments",
+    name: "In-App Purchases (RevenueCat)",
+    description: "Subscription paywalls, purchase flows, and entitlement checks via RevenueCat.",
+    requiredSecrets: ["REVENUECAT_API_KEY"],
+    intentKeywords: ["subscription", "payment", "purchase", "paywall", "premium", "pro plan", "billing", "buy", "revenuecat", "in-app purchase", "monetize", "pricing"],
+    packageDependencies: ["@revenuecat/purchases-react-native"],
+    systemPromptChunk: `PAYMENTS MODULE (RevenueCat):
+- Install: @revenuecat/purchases-react-native
+- Initialize in app/_layout.tsx useEffect: Purchases.configure({ apiKey: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY ?? "" })
+- Paywall screen pattern:
+  const [offerings, setOfferings] = useState<PurchasesOfferings | null>(null);
+  useEffect(() => { void Purchases.getOfferings().then(setOfferings); }, []);
+  const handlePurchase = async (pkg: PurchasesPackage) => {
+    try { await Purchases.purchasePackage(pkg); } catch (e) { if (!e.userCancelled) throw e; }
+  };
+- Entitlement check: const { customerInfo } = await Purchases.getCustomerInfo();
+  const hasPro = customerInfo.entitlements.active["pro"] !== undefined;
+- Restore purchases button: await Purchases.restorePurchases()
+- Import types: import Purchases, { type PurchasesOfferings, type PurchasesPackage } from "@revenuecat/purchases-react-native"
+- NEVER hardcode the API key — use process.env.EXPO_PUBLIC_REVENUECAT_API_KEY`,
+  },
+  {
+    id: "push",
+    name: "Push Notifications (Expo Notifications)",
+    description: "FCM and APNS push notifications with Expo Notifications SDK.",
+    requiredSecrets: [],
+    intentKeywords: ["push notification", "notification", "alert", "notify", "fcm", "apns", "push", "remind", "badge"],
+    packageDependencies: ["expo-notifications", "expo-device"],
+    systemPromptChunk: `PUSH NOTIFICATIONS MODULE (Expo Notifications):
+- Install: expo-notifications, expo-device
+- In app.json add: { "expo": { "plugins": ["expo-notifications"], "notification": { "icon": "./assets/notification-icon.png", "color": "#ffffff" } } }
+- Registration flow in a hook (hooks/usePushNotifications.ts):
+  import * as Notifications from "expo-notifications";
+  import * as Device from "expo-device";
+  Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false }) });
+  async function registerForPushNotificationsAsync() {
+    if (!Device.isDevice) return null;
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    const finalStatus = existing !== "granted" ? (await Notifications.requestPermissionsAsync()).status : existing;
+    if (finalStatus !== "granted") return null;
+    return (await Notifications.getExpoPushTokenAsync()).data;
+  }
+- Listen for notifications: Notifications.addNotificationReceivedListener and Notifications.addNotificationResponseReceivedListener
+- Local notification (for testing): await Notifications.scheduleNotificationAsync({ content: { title, body }, trigger: null })
+- Store the Expo push token server-side to send server-driven push via Expo Push API`,
+  },
+  {
+    id: "realtime-db",
+    name: "Real-time Database (Supabase)",
+    description: "Typed queries, real-time subscriptions, and Row Level Security via Supabase.",
+    requiredSecrets: ["SUPABASE_URL", "SUPABASE_ANON_KEY"],
+    intentKeywords: ["real-time", "realtime", "database", "supabase", "live data", "feed", "subscribe", "sync", "backend", "postgres", "data"],
+    packageDependencies: ["@supabase/supabase-js", "@react-native-async-storage/async-storage", "react-native-url-polyfill"],
+    systemPromptChunk: `REAL-TIME DATABASE MODULE (Supabase):
+- Install: @supabase/supabase-js, @react-native-async-storage/async-storage, react-native-url-polyfill
+- Create lib/supabase.ts:
+  import "react-native-url-polyfill/auto";
+  import AsyncStorage from "@react-native-async-storage/async-storage";
+  import { createClient } from "@supabase/supabase-js";
+  export const supabase = createClient(
+    process.env.EXPO_PUBLIC_SUPABASE_URL ?? "",
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    { auth: { storage: AsyncStorage, autoRefreshToken: true, persistSession: true, detectSessionInUrl: false } }
+  );
+- Query pattern: const { data, error } = await supabase.from("table").select("*").order("created_at", { ascending: false });
+- Real-time subscription:
+  const channel = supabase.channel("table-changes").on("postgres_changes", { event: "*", schema: "public", table: "tableName" }, (payload) => {
+    // handle payload.new, payload.old
+  }).subscribe();
+  return () => { void supabase.removeChannel(channel); };
+- Row Level Security note: /*
+  RLS is enabled on all tables. Users can only access their own rows.
+  Example policy: CREATE POLICY "Users can read own rows" ON table FOR SELECT USING (auth.uid() = user_id);
+  Run these in the Supabase SQL editor before using the client.
+*/
+- NEVER hardcode credentials — use process.env.EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY`,
+  },
+  {
+    id: "analytics",
+    name: "Analytics (Amplitude)",
+    description: "Event tracking wired to key user actions via Amplitude React Native SDK.",
+    requiredSecrets: ["AMPLITUDE_API_KEY"],
+    intentKeywords: ["analytics", "tracking", "events", "amplitude", "posthog", "mixpanel", "user behavior", "conversion", "funnel", "metrics", "track"],
+    packageDependencies: ["@amplitude/analytics-react-native", "expo-application"],
+    systemPromptChunk: `ANALYTICS MODULE (Amplitude):
+- Install: @amplitude/analytics-react-native, expo-application
+- Initialize in app/_layout.tsx:
+  import { init, track, setUserId } from "@amplitude/analytics-react-native";
+  useEffect(() => { void init(process.env.EXPO_PUBLIC_AMPLITUDE_API_KEY ?? "", undefined, { trackingOptions: { ipAddress: false } }); }, []);
+- Track key events at every meaningful user action:
+  track("screen_view", { screen: "Home" });
+  track("button_tapped", { button: "subscribe" });
+  track("purchase_completed", { plan: "pro", price: 9.99 });
+  track("error_occurred", { error: errorMessage, screen: currentScreen });
+- Set user identity after login: setUserId(user.id);
+- Unset on logout: setUserId(undefined);
+- NEVER hardcode the API key — use process.env.EXPO_PUBLIC_AMPLITUDE_API_KEY`,
+  },
+  {
+    id: "deep-links",
+    name: "Deep Links & Universal Links (Expo Linking)",
+    description: "Share links, invites, and referral flows using Expo Linking and app schemes.",
+    requiredSecrets: [],
+    intentKeywords: ["deep link", "universal link", "share link", "invite", "referral", "share", "open url", "linking", "dynamic link", "branch"],
+    packageDependencies: ["expo-linking"],
+    systemPromptChunk: `DEEP LINKS MODULE (Expo Linking):
+- Install: expo-linking (included with Expo SDK)
+- In app.json, set the URL scheme: { "expo": { "scheme": "myapp", "ios": { "associatedDomains": ["applinks:yourdomain.com"] }, "android": { "intentFilters": [{ "action": "VIEW", "data": [{ "scheme": "myapp" }], "category": ["BROWSABLE", "DEFAULT"] }] } } }
+- Create a URL: const url = Linking.createURL("/invite", { queryParams: { ref: userId } });
+- Handle incoming links in app/_layout.tsx:
+  const url = Linking.useURL();
+  useEffect(() => {
+    if (!url) return;
+    const { path, queryParams } = Linking.parse(url);
+    if (path === "invite" && queryParams?.ref) { /* handle referral */ }
+  }, [url]);
+- Share a deep link: import { Share } from "react-native"; await Share.share({ message: \`Join me on MyApp: \${url}\` });
+- Test on device: open myapp:// in the phone's browser`,
+  },
+  {
+    id: "offline",
+    name: "Offline Support (AsyncStorage + Expo SQLite)",
+    description: "AsyncStorage caching and SQLite for offline-first data persistence.",
+    requiredSecrets: [],
+    intentKeywords: ["offline", "cache", "works offline", "local storage", "sqlite", "no internet", "persist", "sync", "local first", "asyncstorage"],
+    packageDependencies: ["@react-native-async-storage/async-storage", "expo-sqlite"],
+    systemPromptChunk: `OFFLINE SUPPORT MODULE (AsyncStorage + Expo SQLite):
+- Install: @react-native-async-storage/async-storage, expo-sqlite
+- Simple key-value cache with AsyncStorage:
+  import AsyncStorage from "@react-native-async-storage/async-storage";
+  async function cacheData(key: string, data: unknown) { await AsyncStorage.setItem(key, JSON.stringify(data)); }
+  async function getCached<T>(key: string): Promise<T | null> {
+    const raw = await AsyncStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  }
+- SQLite for structured offline data:
+  import * as SQLite from "expo-sqlite";
+  const db = SQLite.openDatabaseSync("app.db");
+  db.execSync("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, title TEXT, synced INTEGER DEFAULT 0)");
+  function insertItem(title: string) { db.runSync("INSERT INTO items (title) VALUES (?)", [title]); }
+  function getAllItems() { return db.getAllSync<{ id: number; title: string; synced: number }>("SELECT * FROM items"); }
+- Sync strategy: when connectivity is restored, send all rows WHERE synced=0 to the server, then mark synced=1
+- Network detection: import NetInfo from "@react-native-community/netinfo"; const state = await NetInfo.fetch(); if (state.isConnected) { /* sync */ }`,
+  },
+  {
+    id: "camera-media",
+    name: "Camera & Media (Expo Camera + ImagePicker)",
+    description: "Camera capture, photo/video picking, and media upload flows.",
+    requiredSecrets: [],
+    intentKeywords: ["camera", "photo", "image", "video", "media", "gallery", "picture", "upload photo", "take photo", "scan", "qr", "barcode", "capture"],
+    packageDependencies: ["expo-camera", "expo-image-picker", "expo-media-library"],
+    systemPromptChunk: `CAMERA & MEDIA MODULE (Expo Camera + ImagePicker):
+- Install: expo-camera, expo-image-picker, expo-media-library
+- In app.json plugins: ["expo-camera", "expo-image-picker", "expo-media-library"]
+- Camera component pattern:
+  import { CameraView, useCameraPermissions } from "expo-camera";
+  const [permission, requestPermission] = useCameraPermissions();
+  if (!permission?.granted) return <Button title="Grant Camera" onPress={requestPermission} />;
+  <CameraView style={{ flex: 1 }} facing="back" ref={cameraRef}>
+    <Button title="Take Photo" onPress={async () => { const photo = await cameraRef.current?.takePictureAsync(); }} />
+  </CameraView>
+- Image picker (gallery):
+  import * as ImagePicker from "expo-image-picker";
+  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, quality: 0.8 });
+  if (!result.canceled) { const uri = result.assets[0]?.uri; /* upload or display */ }
+- Upload to server: const formData = new FormData(); formData.append("file", { uri, name: "photo.jpg", type: "image/jpeg" } as unknown as Blob);
+  await fetch("/api/upload", { method: "POST", body: formData });
+- Save to gallery: import * as MediaLibrary from "expo-media-library"; await MediaLibrary.saveToLibraryAsync(uri);`,
+  },
+];
+
+/**
+ * Detect which mobile modules are needed for a given user prompt.
+ * Uses a lightweight AI call (gpt-5-mini) to classify intent.
+ * Returns the list of module IDs detected. Best-effort — falls back to
+ * keyword matching if the AI call fails.
+ */
+const REMOVAL_KEYWORDS = [
+  "remove", "disable", "uninstall", "strip", "delete", "turn off",
+  "get rid of", "take out", "drop", "clean up", "no longer need",
+];
+
+function isRemovalIntent(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  return REMOVAL_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+export async function detectMobileModules(
+  userPrompt: string,
+  existingModuleIds: string[] = [],
+): Promise<{ toAdd: string[]; toRemove: string[] }> {
+  const promptLower = userPrompt.toLowerCase();
+  const isRemoving = isRemovalIntent(promptLower);
+
+  // Fast keyword pass — collect candidates
+  const keywordMatches = MOBILE_MODULES
+    .filter((m) => m.intentKeywords.some((kw) => promptLower.includes(kw)))
+    .map((m) => m.id);
+
+  // If removal intent: matched modules are being removed, not added
+  if (isRemoving && keywordMatches.length > 0) {
+    return {
+      toAdd: existingModuleIds.filter((id) => !keywordMatches.includes(id)),
+      toRemove: keywordMatches,
+    };
+  }
+
+  // If we already matched via keywords or the prompt is short, skip the AI call
+  if (keywordMatches.length > 0 || userPrompt.length < 30) {
+    return {
+      toAdd: [...new Set([...keywordMatches, ...existingModuleIds])],
+      toRemove: [],
+    };
+  }
+
+  try {
+    const moduleList = MOBILE_MODULES.map((m) => `${m.id}: ${m.name} — ${m.description}`).join("\n");
+    const response = await openai.chat.completions.create({
+      model: "gpt-5-mini",
+      max_completion_tokens: 200,
+      messages: [
+        {
+          role: "system",
+          content: `You are a mobile app module detector. Given a user request, identify which modules to add or remove. Return ONLY a JSON object: {"add": ["module-id", ...], "remove": ["module-id", ...]}. Return empty arrays if none apply.\n\nAvailable modules:\n${moduleList}`,
+        },
+        { role: "user", content: userPrompt },
+      ],
+      response_format: { type: "json_object" },
+    });
+    const raw = response.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(raw) as { add?: string[]; remove?: string[] };
+    const validId = (id: string) => MOBILE_MODULES.some((m) => m.id === id);
+    const aiAdd = Array.isArray(parsed.add) ? parsed.add.filter(validId) : [];
+    const aiRemove = Array.isArray(parsed.remove) ? parsed.remove.filter(validId) : [];
+    return {
+      toAdd: [...new Set([...keywordMatches, ...aiAdd, ...existingModuleIds.filter((id) => !aiRemove.includes(id))])],
+      toRemove: [...new Set(aiRemove)],
+    };
+  } catch (err) {
+    logger.warn({ err }, "Module detection AI call failed — using keyword matches only");
+    return {
+      toAdd: [...new Set([...keywordMatches, ...existingModuleIds])],
+      toRemove: [],
+    };
+  }
+}
+
+const AUTH_EXPO_AUTH_SESSION_CHUNK = `AUTHENTICATION MODULE (Expo Auth Session — no Clerk key configured):
+- Install: expo-auth-session, expo-crypto, expo-web-browser
+- Use Expo Auth Session for OAuth (Google, GitHub, etc.) or a custom JWT backend
+- Initialization in app/_layout.tsx:
+  import * as WebBrowser from "expo-web-browser";
+  WebBrowser.maybeCompleteAuthSession();
+- Google OAuth example (hooks/useGoogleAuth.ts):
+  import * as Google from "expo-auth-session/providers/google";
+  const [request, response, promptAsync] = Google.useAuthRequest({ clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? "" });
+  useEffect(() => {
+    if (response?.type === "success") {
+      const { authentication } = response;
+      // Store token: authentication?.accessToken
+    }
+  }, [response]);
+  const signIn = () => { void promptAsync(); };
+- Session context (contexts/AuthContext.tsx): store token in expo-secure-store, expose useAuth() hook
+- Protected route: check token in app/_layout.tsx; redirect to /sign-in if missing
+- Sign out: clear SecureStore token + reset navigation to /sign-in
+- If CLERK_PUBLISHABLE_KEY is added later, migrate to @clerk/clerk-expo without UI changes
+- NEVER hardcode credentials — use process.env.EXPO_PUBLIC_* env vars`;
+
+/**
+ * Build the combined system prompt chunk for the detected modules.
+ * Includes "wire these" for modules to add, and "remove these" for modules to remove.
+ * Auth module branches to Clerk or Expo Auth Session based on configured secrets.
+ */
+function buildModulePromptChunks(
+  detected: { toAdd: string[]; toRemove: string[] },
+  configuredSecretNames?: string[],
+): string {
+  const parts: string[] = [];
+
+  if (detected.toAdd.length > 0) {
+    const hasClerkKey = configuredSecretNames?.includes("CLERK_PUBLISHABLE_KEY") ?? false;
+    const chunks = MOBILE_MODULES
+      .filter((m) => detected.toAdd.includes(m.id))
+      .map((m) => {
+        if (m.id === "auth") {
+          return hasClerkKey ? m.systemPromptChunk : AUTH_EXPO_AUTH_SESSION_CHUNK;
+        }
+        return m.systemPromptChunk;
+      });
+    if (chunks.length > 0) {
+      parts.push(`ACTIVE POWER MODULES — wire these into the generated app:\n\n${chunks.join("\n\n")}`);
+    }
+  }
+
+  if (detected.toRemove.length > 0) {
+    const removeNames = detected.toRemove
+      .map((id) => MOBILE_MODULES.find((m) => m.id === id)?.name ?? id)
+      .join(", ");
+    parts.push(
+      `MODULES TO REMOVE — the user explicitly asked to remove these integrations:\n` +
+      `${removeNames}\n` +
+      `Delete all related code, imports, providers, and dependencies for these modules. ` +
+      `Do NOT re-add or mention them.`,
+    );
+  }
+
+  return parts.length > 0 ? `\n${parts.join("\n\n")}` : "";
+}
+
+/**
+ * Validate that all packages imported by TypeScript/TSX files appear in package.json.
+ * Auto-corrects missing packages for known module dependencies.
+ * Returns the corrected package.json content (or unchanged if nothing was missing).
+ */
+function autoCorrectPackageJson(files: BuilderFile[], detectedModuleIds: string[]): BuilderFile[] {
+  const pkgFile = files.find((f) => f.path === "package.json");
+  if (!pkgFile) return files;
+
+  let pkg: Record<string, unknown>;
+  try {
+    pkg = JSON.parse(pkgFile.content) as Record<string, unknown>;
+  } catch {
+    return files;
+  }
+
+  const deps: Record<string, string> = {
+    ...((pkg.dependencies as Record<string, string>) ?? {}),
+    ...((pkg.devDependencies as Record<string, string>) ?? {}),
+  };
+
+  // Collect all packages that active modules require
+  const requiredPackages: Record<string, string> = {};
+  for (const modId of detectedModuleIds) {
+    const mod = MOBILE_MODULES.find((m) => m.id === modId);
+    if (!mod) continue;
+    for (const pkg of mod.packageDependencies) {
+      if (!deps[pkg]) {
+        requiredPackages[pkg] = "*";
+      }
+    }
+  }
+
+  const KNOWN_VERSIONS: Record<string, string> = {
+    "@clerk/clerk-expo": "^2.0.0",
+    "expo-secure-store": "~13.0.0",
+    "@revenuecat/purchases-react-native": "^8.0.0",
+    "expo-notifications": "~0.28.0",
+    "expo-device": "~6.0.0",
+    "@supabase/supabase-js": "^2.0.0",
+    "@react-native-async-storage/async-storage": "^1.23.0",
+    "react-native-url-polyfill": "^2.0.0",
+    "@amplitude/analytics-react-native": "^1.0.0",
+    "expo-application": "~5.9.0",
+    "expo-linking": "~6.3.0",
+    "expo-sqlite": "~14.0.0",
+    "expo-camera": "~15.0.0",
+    "expo-image-picker": "~15.0.0",
+    "expo-media-library": "~16.0.0",
+    "expo-av": "~14.0.0",
+    "expo-file-system": "~17.0.0",
+    "react-native-reanimated": "~3.10.0",
+    "react-native-gesture-handler": "~2.16.0",
+    "expo-haptics": "~13.0.0",
+    "expo-clipboard": "~6.0.0",
+  };
+
+  // Resolve versions for module-required packages
+  for (const [pkgName] of Object.entries(requiredPackages)) {
+    requiredPackages[pkgName] = KNOWN_VERSIONS[pkgName] ?? "*";
+  }
+
+  // Scan TypeScript/TSX source files for bare package imports not yet in package.json
+  const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx"]);
+  const importRe = /from ['"]([^'"./][^'"]*)['"]/g;
+  for (const f of files) {
+    const ext = f.path.slice(f.path.lastIndexOf("."));
+    if (!SOURCE_EXTS.has(ext)) continue;
+    let match: RegExpExecArray | null;
+    importRe.lastIndex = 0;
+    while ((match = importRe.exec(f.content)) !== null) {
+      const specifier = match[1];
+      // Normalise scoped (@scope/pkg) and plain (pkg) bare specifiers to their package name
+      const pkgName = specifier.startsWith("@")
+        ? specifier.split("/").slice(0, 2).join("/")
+        : specifier.split("/")[0];
+      if (!pkgName || pkgName in deps || pkgName in requiredPackages) continue;
+      if (pkgName in KNOWN_VERSIONS) {
+        requiredPackages[pkgName] = KNOWN_VERSIONS[pkgName];
+      }
+    }
+  }
+
+  if (Object.keys(requiredPackages).length === 0) return files;
+
+  const updatedDeps = {
+    ...((pkg.dependencies as Record<string, string>) ?? {}),
+    ...requiredPackages,
+  };
+
+  const updatedPkg = { ...pkg, dependencies: updatedDeps };
+  const updatedContent = JSON.stringify(updatedPkg, null, 2);
+
+  logger.info({ added: Object.keys(requiredPackages) }, "Auto-corrected package.json: added module dependencies");
+
+  return files.map((f) =>
+    f.path === "package.json"
+      ? { ...f, content: updatedContent }
+      : f,
+  );
+}
+
 const MOBILE_PREVIEW_NOTE = `MOBILE WEB PREVIEW (index.html) — REQUIRED:
 You MUST include an index.html file that is a beautiful, realistic web preview of the mobile app.
 - Render inside a mobile phone frame: max-w-[390px] mx-auto, dark phone shell around the content
@@ -1195,9 +1645,22 @@ export async function runMobileBuildPipeline(args: {
   agentMode: AgentMode;
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
+  activeModuleIds?: string[];
+  configuredSecretNames?: string[];
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<MobileBuilderResult> {
-  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext, onEvent } = args;
+  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext, activeModuleIds, configuredSecretNames, onEvent } = args;
+
+  // Intent detection — classify which power modules are needed
+  await onEvent?.("planning", "Detecting required power modules…");
+  const detectedModules = await detectMobileModules(userPrompt, activeModuleIds ?? []);
+  if (detectedModules.toAdd.length > 0) {
+    const moduleNames = detectedModules.toAdd.map((id) => MOBILE_MODULES.find((m) => m.id === id)?.name ?? id).join(", ");
+    await onEvent?.("planning", `Power modules detected: ${moduleNames}`);
+  }
+
+  const modulePromptChunks = buildModulePromptChunks(detectedModules, configuredSecretNames);
+  const detectedModuleIds = detectedModules.toAdd;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: MOBILE_BUILD_SYSTEM_PROMPT },
@@ -1209,6 +1672,10 @@ export async function runMobileBuildPipeline(args: {
       role: "system",
       content: `LEARNED LESSONS — apply these:\n${knowledgeContext}`,
     });
+  }
+
+  if (modulePromptChunks) {
+    messages.push({ role: "system", content: modulePromptChunks });
   }
 
   messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
@@ -1299,6 +1766,12 @@ export async function runMobileBuildPipeline(args: {
     });
   }
 
+  // Auto-correct package.json to include module dependencies
+  if (detectedModuleIds.length > 0) {
+    await onEvent?.("validating_output", "Verifying module packages in package.json…");
+    files = autoCorrectPackageJson(files, detectedModuleIds);
+  }
+
   const aiWarnings = Array.isArray(parsed.warnings)
     ? parsed.warnings.filter((w): w is string => typeof w === "string")
     : [];
@@ -1314,6 +1787,11 @@ export async function runMobileBuildPipeline(args: {
       ? parsed.nextRecommendation
       : "Open the Preview tab to see the web preview, then scan the QR code with Expo Go on your device.";
 
+  const modulesWired = detectedModuleIds.map((id) => {
+    const mod = MOBILE_MODULES.find((m) => m.id === id);
+    return { id, name: mod?.name ?? id, secretsConsumed: mod?.requiredSecrets ?? [] };
+  });
+
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: blueprint as unknown as Record<string, unknown>,
@@ -1325,6 +1803,7 @@ export async function runMobileBuildPipeline(args: {
     integrationsNeeded: blueprint.integrationsNeeded ?? [],
     nextRecommendation,
     nativeFeatures: blueprint.nativeFeatures?.length ? blueprint.nativeFeatures : undefined,
+    modulesWired: modulesWired.length > 0 ? modulesWired : undefined,
   };
 
   return { blueprint, files, report, assistantSummary: summary };
@@ -1338,14 +1817,22 @@ export async function runMobileRefinePipeline(args: {
   existingFiles: BuilderFile[];
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
+  activeModuleIds?: string[];
+  configuredSecretNames?: string[];
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
   report: TaskReport;
   assistantSummary: string;
+  detectedModuleIds: string[];
 }> {
-  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext, onEvent } = args;
+  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext, activeModuleIds, configuredSecretNames, onEvent } = args;
+
+  // Intent detection — detect modules to add or remove for this refine request
+  const detectedModules = await detectMobileModules(userPrompt, activeModuleIds ?? []);
+  const modulePromptChunks = buildModulePromptChunks(detectedModules, configuredSecretNames);
+  const detectedModuleIds = detectedModules.toAdd;
 
   const fileManifest = makeCompactManifest(existingFiles, userPrompt);
 
@@ -1359,6 +1846,10 @@ export async function runMobileRefinePipeline(args: {
       role: "system",
       content: `LEARNED LESSONS — apply these:\n${knowledgeContext}`,
     });
+  }
+
+  if (modulePromptChunks) {
+    messages.push({ role: "system", content: modulePromptChunks });
   }
 
   messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
@@ -1421,6 +1912,25 @@ export async function runMobileRefinePipeline(args: {
     ? parsed.nativeFeatures.filter((f): f is string => typeof f === "string")
     : undefined;
 
+  // Auto-correct package.json for any newly detected modules
+  if (detectedModuleIds.length > 0) {
+    const allFiles = [...existingFiles];
+    for (const cf of changedFiles) {
+      const idx = allFiles.findIndex((f) => f.path === cf.path);
+      if (idx >= 0) allFiles[idx] = cf; else allFiles.push(cf);
+    }
+    const corrected = autoCorrectPackageJson(allFiles, detectedModuleIds);
+    const correctedPkg = corrected.find((f) => f.path === "package.json");
+    const existingPkg = changedFiles.find((f) => f.path === "package.json");
+    if (correctedPkg && !existingPkg) changedFiles.push(correctedPkg);
+    else if (correctedPkg && existingPkg) existingPkg.content = correctedPkg.content;
+  }
+
+  const modulesWired = detectedModuleIds.map((id) => {
+    const mod = MOBILE_MODULES.find((m) => m.id === id);
+    return { id, name: mod?.name ?? id, secretsConsumed: mod?.requiredSecrets ?? [] };
+  });
+
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: null,
@@ -1432,9 +1942,10 @@ export async function runMobileRefinePipeline(args: {
     integrationsNeeded,
     nextRecommendation,
     nativeFeatures: nativeFeatures?.length ? nativeFeatures : undefined,
+    modulesWired: modulesWired.length > 0 ? modulesWired : undefined,
   };
 
-  return { changedFiles, removedPaths, report, assistantSummary: summary };
+  return { changedFiles, removedPaths, report, assistantSummary: summary, detectedModuleIds };
 }
 
 /**

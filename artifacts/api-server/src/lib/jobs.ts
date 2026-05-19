@@ -527,6 +527,28 @@ export async function runJob(input: JobInput): Promise<void> {
 
     const isMobileProject = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind);
 
+    // For mobile projects: load last successful task's wired modules + project secret names once,
+    // so both build and refine pipelines have durable module context.
+    let activeModuleIds: string[] = [];
+    let configuredSecretNames: string[] = [];
+    if (isMobileProject) {
+      const [lastTask, projectSecrets] = await Promise.all([
+        db
+          .select({ report: agentTasksTable.report })
+          .from(agentTasksTable)
+          .where(and(eq(agentTasksTable.projectId, projectId), eq(agentTasksTable.status, "completed")))
+          .orderBy(desc(agentTasksTable.completedAt))
+          .limit(1),
+        db
+          .select({ name: secretsTable.name })
+          .from(secretsTable)
+          .where(eq(secretsTable.projectId, projectId)),
+      ]);
+      const lastReport = lastTask[0]?.report as TaskReport | null;
+      activeModuleIds = lastReport?.modulesWired?.map((m) => m.id) ?? [];
+      configuredSecretNames = projectSecrets.map((s) => s.name);
+    }
+
     if (kind === "build") {
       await emitEvent(taskId, "planning", "Reading project configuration…");
       await emitEvent(
@@ -545,6 +567,9 @@ export async function runJob(input: JobInput): Promise<void> {
             agentMode,
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
+            activeModuleIds,
+            configuredSecretNames,
+            onEvent: async (type, message) => emitEvent(taskId, type, message),
           })
         : await runBuildPipeline({
             projectName: project.name,
@@ -595,6 +620,9 @@ export async function runJob(input: JobInput): Promise<void> {
             existingFiles,
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
+            activeModuleIds,
+            configuredSecretNames,
+            onEvent: async (type, message) => emitEvent(taskId, type, message),
           })
         : await runRefinePipeline({
             projectName: project.name,
@@ -730,6 +758,24 @@ export async function runJob(input: JobInput): Promise<void> {
       ],
       diffSummary,
     });
+
+    // Mobile-specific: write Knowledge Vault entries capturing which modules were wired
+    if (isMobileProject && report.modulesWired && report.modulesWired.length > 0) {
+      const moduleNames = report.modulesWired.map((m) => m.name).join(", ");
+      const secretsConsumed = [...new Set(report.modulesWired.flatMap((m) => m.secretsConsumed))];
+      void writeKnowledge({
+        title: `Mobile modules wired: ${moduleNames.slice(0, 60)}`,
+        content: `${kind === "build" ? "Build" : "Refine"} for "${userPrompt.slice(0, 80)}" wired ${report.modulesWired.length} power module(s): ${moduleNames}. Secrets consumed: ${secretsConsumed.length > 0 ? secretsConsumed.join(", ") : "none"}. Warnings: ${report.warnings?.length ?? 0}.`,
+        type: kind,
+        category: "mobile_module",
+        severity: "info",
+        projectId,
+        userId: project.ownerId,
+        relatedTaskId: taskId,
+        relatedVersionId: version?.id,
+        tags: [...report.modulesWired.map((m) => m.id), "mobile", "expo"],
+      });
+    }
 
     // Append a system message so the chat shows the report was produced
     await db.insert(chatMessagesTable).values({

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   FolderTree,
   FileCode2,
@@ -14,6 +15,11 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
+  Puzzle,
+  ToggleLeft,
+  ToggleRight,
+  KeyRound,
+  Package,
 } from "lucide-react";
 import { IntegrationsRegistry } from "./integrations-registry";
 import { VersionTimeline } from "./version-timeline";
@@ -29,6 +35,73 @@ import {
   getListVersionsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+
+const MOBILE_MODULES = [
+  {
+    id: "auth",
+    name: "Authentication",
+    provider: "Clerk",
+    description: "User sign-in, sign-up, and session management.",
+    requiredSecrets: ["CLERK_PUBLISHABLE_KEY"],
+    packageDependencies: ["@clerk/clerk-expo", "expo-secure-store"],
+  },
+  {
+    id: "payments",
+    name: "In-App Purchases",
+    provider: "RevenueCat",
+    description: "Subscription paywalls, purchase flows, and entitlement checks.",
+    requiredSecrets: ["REVENUECAT_API_KEY"],
+    packageDependencies: ["@revenuecat/purchases-react-native"],
+  },
+  {
+    id: "push",
+    name: "Push Notifications",
+    provider: "Expo Notifications",
+    description: "FCM and APNS push notifications with registration flow.",
+    requiredSecrets: [],
+    packageDependencies: ["expo-notifications", "expo-device"],
+  },
+  {
+    id: "realtime-db",
+    name: "Real-time Database",
+    provider: "Supabase",
+    description: "Typed queries, real-time subscriptions, and Row Level Security.",
+    requiredSecrets: ["SUPABASE_URL", "SUPABASE_ANON_KEY"],
+    packageDependencies: ["@supabase/supabase-js"],
+  },
+  {
+    id: "analytics",
+    name: "Analytics",
+    provider: "Amplitude",
+    description: "Event tracking wired to key user actions.",
+    requiredSecrets: ["AMPLITUDE_API_KEY"],
+    packageDependencies: ["@amplitude/analytics-react-native"],
+  },
+  {
+    id: "deep-links",
+    name: "Deep Links",
+    provider: "Expo Linking",
+    description: "Share links, invites, and referral flows.",
+    requiredSecrets: [],
+    packageDependencies: ["expo-linking"],
+  },
+  {
+    id: "offline",
+    name: "Offline Support",
+    provider: "AsyncStorage + SQLite",
+    description: "Local caching and SQLite for offline-first apps.",
+    requiredSecrets: [],
+    packageDependencies: ["@react-native-async-storage/async-storage", "expo-sqlite"],
+  },
+  {
+    id: "camera-media",
+    name: "Camera & Media",
+    provider: "Expo Camera",
+    description: "Camera capture, photo/video picking, and media upload.",
+    requiredSecrets: [],
+    packageDependencies: ["expo-camera", "expo-image-picker"],
+  },
+];
 
 function SecretVerifyButton({
   secretId,
@@ -79,21 +152,254 @@ function SecretVerifyButton({
   );
 }
 
-export function ToolsTab({
+function ModuleLibrary({
   projectId,
-  prefillSecretName,
-  defaultTab,
+  secrets,
+  wiredModuleIds,
+  onSendMessage,
 }: {
   projectId: number;
+  secrets: Array<{ name: string; id: number }>;
+  wiredModuleIds?: string[];
+  onSendMessage?: (text: string) => void;
+}) {
+  const secretNames = new Set(secrets.map((s) => s.name));
+  const [activeModules, setActiveModules] = useState<Set<string>>(
+    () => new Set(wiredModuleIds ?? []),
+  );
+
+  // Sync when parent derives wired modules from a newly completed task report
+  useEffect(() => {
+    if (wiredModuleIds) {
+      setActiveModules(new Set(wiredModuleIds));
+    }
+  }, [wiredModuleIds?.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [addSecretFor, setAddSecretFor] = useState<string | null>(null);
+  const [newSecretName, setNewSecretName] = useState("");
+  const [newSecretValue, setNewSecretValue] = useState("");
+  const createSecret = useCreateSecret();
+  const queryClient = useQueryClient();
+
+  const getModuleStatus = (mod: typeof MOBILE_MODULES[0]): "active" | "inactive" | "needs-secret" => {
+    if (!activeModules.has(mod.id)) {
+      if (mod.requiredSecrets.length > 0 && !mod.requiredSecrets.every((s) => secretNames.has(s))) {
+        return "needs-secret";
+      }
+      return "inactive";
+    }
+    return "active";
+  };
+
+  const handleToggle = (mod: typeof MOBILE_MODULES[0]) => {
+    const status = getModuleStatus(mod);
+
+    if (status === "needs-secret") {
+      setAddSecretFor(mod.id);
+      setNewSecretName(mod.requiredSecrets.find((s) => !secretNames.has(s)) ?? "");
+      return;
+    }
+
+    if (status === "active") {
+      setActiveModules((prev) => {
+        const next = new Set(prev);
+        next.delete(mod.id);
+        return next;
+      });
+      if (onSendMessage) {
+        onSendMessage(`Remove the ${mod.name} (${mod.provider}) integration cleanly. Remove all related imports, initialization code, and screens added for this module.`);
+      }
+    } else {
+      setActiveModules((prev) => new Set([...prev, mod.id]));
+      const secretsList = mod.requiredSecrets.length > 0
+        ? ` using the API key stored in ${mod.requiredSecrets.join(", ")}`
+        : "";
+      if (onSendMessage) {
+        onSendMessage(`Wire in ${mod.name} (${mod.provider}) for this app${secretsList}. Follow the official ${mod.provider} Expo SDK patterns: correct imports, initialization in app/_layout.tsx, typed hooks, error boundaries, and loading states. Add all required packages to package.json.`);
+      }
+    }
+  };
+
+  const handleAddSecret = (modId: string) => {
+    if (!newSecretName || !newSecretValue) return;
+    createSecret.mutate(
+      { id: projectId, data: { name: newSecretName, value: newSecretValue, environment: "development" } },
+      {
+        onSuccess: () => {
+          setNewSecretName("");
+          setNewSecretValue("");
+          setAddSecretFor(null);
+          queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
+          const mod = MOBILE_MODULES.find((m) => m.id === modId);
+          if (mod && onSendMessage) {
+            const secretsList = mod.requiredSecrets.join(", ");
+            onSendMessage(`Wire in ${mod.name} (${mod.provider}) for this app using the API key stored in ${secretsList}. Follow the official ${mod.provider} Expo SDK patterns.`);
+          }
+          setActiveModules((prev) => new Set([...prev, modId]));
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs text-muted-foreground">
+        Toggle modules to auto-wire them into your app. The AI builder will add the correct SDK code, imports, and initialization.
+      </div>
+
+      {MOBILE_MODULES.map((mod) => {
+        const status = getModuleStatus(mod);
+        const isActive = status === "active";
+        const needsSecret = status === "needs-secret";
+        const isExpanded = addSecretFor === mod.id;
+
+        return (
+          <div
+            key={mod.id}
+            className={`border rounded-lg overflow-hidden transition-colors ${
+              isActive
+                ? "border-primary/40 bg-primary/5"
+                : needsSecret
+                  ? "border-yellow-500/30 bg-yellow-500/5"
+                  : "border-border bg-card"
+            }`}
+          >
+            <div className="flex items-start gap-3 p-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-foreground">{mod.name}</span>
+                  <span className="text-[10px] text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded font-mono">
+                    {mod.provider}
+                  </span>
+                  {isActive && (
+                    <Badge variant="default" className="text-[10px] h-4 px-1.5 bg-primary/20 text-primary border-primary/30">
+                      Active
+                    </Badge>
+                  )}
+                  {!isActive && !needsSecret && (
+                    <Badge variant="outline" className="text-[10px] h-4 px-1.5 text-muted-foreground border-border">
+                      Inactive
+                    </Badge>
+                  )}
+                  {needsSecret && (
+                    <Badge variant="outline" className="text-[10px] h-4 px-1.5 text-yellow-500 border-yellow-500/30">
+                      Needs secret
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">{mod.description}</p>
+                {mod.requiredSecrets.length > 0 && (
+                  <div className="flex items-center gap-1 mt-1 flex-wrap">
+                    <KeyRound className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                    {mod.requiredSecrets.map((s) => (
+                      <span
+                        key={s}
+                        className={`text-[10px] font-mono px-1 py-0.5 rounded ${
+                          secretNames.has(s)
+                            ? "text-green-400 bg-green-500/10"
+                            : "text-yellow-400 bg-yellow-500/10"
+                        }`}
+                      >
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {mod.packageDependencies.length > 0 && (
+                  <div className="flex items-center gap-1 mt-1 flex-wrap">
+                    <Package className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                    {mod.packageDependencies.slice(0, 2).map((p) => (
+                      <span key={p} className="text-[10px] font-mono text-muted-foreground">
+                        {p}
+                      </span>
+                    ))}
+                    {mod.packageDependencies.length > 2 && (
+                      <span className="text-[10px] text-muted-foreground">+{mod.packageDependencies.length - 2} more</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => handleToggle(mod)}
+                className={`shrink-0 mt-0.5 transition-colors ${
+                  isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                }`}
+                title={isActive ? "Remove module" : needsSecret ? "Add required secret first" : "Wire in module"}
+              >
+                {isActive ? (
+                  <ToggleRight className="h-6 w-6" />
+                ) : (
+                  <ToggleLeft className="h-6 w-6" />
+                )}
+              </button>
+            </div>
+
+            {isExpanded && (
+              <div className="px-3 pb-3 pt-0 border-t border-border bg-background/50 space-y-2">
+                <p className="text-xs text-yellow-400 pt-2">
+                  Add the required secret to enable this module:
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Key name"
+                    value={newSecretName}
+                    onChange={(e) => setNewSecretName(e.target.value)}
+                    className="h-8 text-xs font-mono"
+                  />
+                  <Input
+                    placeholder="Value"
+                    type="password"
+                    value={newSecretValue}
+                    onChange={(e) => setNewSecretValue(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => handleAddSecret(mod.id)}
+                    disabled={!newSecretName || !newSecretValue || createSecret.isPending}
+                    className="h-8 text-xs whitespace-nowrap"
+                  >
+                    {createSecret.isPending ? "Saving…" : "Save & wire"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setAddSecretFor(null)}
+                    className="h-8 text-xs"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function ToolsTab({
+  projectId,
+  projectKind,
+  wiredModuleIds,
+  prefillSecretName,
+  defaultTab,
+  onSendMessage,
+}: {
+  projectId: number;
+  projectKind?: string;
+  wiredModuleIds?: string[];
   prefillSecretName?: string | null;
   defaultTab?: string;
+  onSendMessage?: (text: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const isMobile = projectKind === "mobile-cross" || projectKind === "mobile-ios" || projectKind === "mobile-android";
+
   const [innerTab, setInnerTab] = useState<string>(
     prefillSecretName ? "secrets" : (defaultTab ?? "files"),
   );
 
-  // Files
   const { data: files } = useListProjectFiles(projectId, {
     query: { enabled: !!projectId, queryKey: getListProjectFilesQueryKey(projectId) },
   });
@@ -110,12 +416,10 @@ export function ToolsTab({
     },
   });
 
-  // Versions
   const { data: versions, isLoading: versionsLoading } = useListVersions(projectId, {
     query: { enabled: !!projectId, queryKey: getListVersionsQueryKey(projectId) },
   });
 
-  // Secrets
   const { data: secrets } = useListSecrets(projectId, {
     query: { enabled: !!projectId, queryKey: getListSecretsQueryKey(projectId) },
   });
@@ -153,7 +457,7 @@ export function ToolsTab({
     <div className="flex h-full flex-col">
       <div className="border-b border-border p-2 bg-card flex-1 overflow-hidden">
         <Tabs value={innerTab} onValueChange={setInnerTab} className="w-full h-full flex flex-col">
-          <TabsList className="bg-muted">
+          <TabsList className="bg-muted flex-wrap h-auto gap-y-1">
             <TabsTrigger value="files">
               <FolderTree className="h-4 w-4 mr-2" /> Files
             </TabsTrigger>
@@ -169,6 +473,11 @@ export function ToolsTab({
             <TabsTrigger value="integrations">
               <Blocks className="h-4 w-4 mr-2" /> Integrations
             </TabsTrigger>
+            {isMobile && (
+              <TabsTrigger value="modules">
+                <Puzzle className="h-4 w-4 mr-2" /> Modules
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <div className="mt-4 flex-1 h-[calc(100vh-280px)] overflow-y-auto">
@@ -321,6 +630,17 @@ export function ToolsTab({
             <TabsContent value="integrations" className="h-full m-0 p-4">
               <IntegrationsRegistry projectId={projectId} secrets={secrets ?? []} />
             </TabsContent>
+
+            {isMobile && (
+              <TabsContent value="modules" className="h-full m-0 p-4">
+                <ModuleLibrary
+                  projectId={projectId}
+                  secrets={secrets ?? []}
+                  wiredModuleIds={wiredModuleIds}
+                  onSendMessage={onSendMessage}
+                />
+              </TabsContent>
+            )}
           </div>
         </Tabs>
       </div>
