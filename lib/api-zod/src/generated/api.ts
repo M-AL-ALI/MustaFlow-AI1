@@ -638,6 +638,40 @@ export const GetUserCreditsResponse = zod.object({
 
 
 /**
+ * @summary List available credit purchase packages
+ */
+export const ListBillingPackagesResponse = zod.object({
+  "stripeConfigured": zod.boolean(),
+  "packages": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "credits": zod.number(),
+  "priceUsd": zod.number(),
+  "description": zod.string(),
+  "available": zod.boolean()
+}))
+})
+
+
+/**
+ * @summary Create a Stripe checkout session for a credit package
+ */
+export const CreateBillingCheckoutBody = zod.object({
+  "packageId": zod.string(),
+  "successUrl": zod.string(),
+  "cancelUrl": zod.string()
+})
+
+export const CreateBillingCheckoutResponse = zod.object({
+  "checkoutUrl": zod.string().optional(),
+  "sessionId": zod.string().optional(),
+  "setupRequired": zod.boolean().optional(),
+  "message": zod.string().optional(),
+  "error": zod.string().optional()
+})
+
+
+/**
  * @summary List credit transactions for current user
  */
 export const ListCreditTransactionsResponse = zod.object({

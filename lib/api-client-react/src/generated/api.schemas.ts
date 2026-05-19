@@ -654,6 +654,34 @@ export interface CreditTransaction {
   createdAt: string;
 }
 
+export interface BillingPackage {
+  id: string;
+  label: string;
+  credits: number;
+  priceUsd: number;
+  description: string;
+  available: boolean;
+}
+
+export interface BillingPackagesResult {
+  stripeConfigured: boolean;
+  packages: BillingPackage[];
+}
+
+export interface BillingCheckoutInput {
+  packageId: string;
+  successUrl: string;
+  cancelUrl: string;
+}
+
+export interface BillingCheckoutResult {
+  checkoutUrl?: string;
+  sessionId?: string;
+  setupRequired?: boolean;
+  message?: string;
+  error?: string;
+}
+
 export type DeleteWorkspace200 = {
   deleted: boolean;
 };

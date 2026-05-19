@@ -26,6 +26,8 @@ tags:
     description: OpenAI AI chat operations
   - name: workspaces
     description: User workspaces (containers for projects)
+  - name: credits
+    description: User credits and billing
 paths:
   /healthz:
     get:
@@ -641,6 +643,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserCredit"
 
+  /billing/packages:
+    get:
+      operationId: listBillingPackages
+      tags: [credits]
+      summary: List available credit purchase packages
+      responses:
+        "200":
+          description: Available credit packages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPackagesResult"
+
+  /billing/checkout:
+    post:
+      operationId: createBillingCheckout
+      tags: [credits]
+      summary: Create a Stripe checkout session for a credit package
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingCheckoutInput"
+      responses:
+        "200":
+          description: Checkout session or setup-required response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingCheckoutResult"
+
   /credits/transactions:
     get:
       operationId: listCreditTransactions
@@ -1244,3 +1278,41 @@ components:
         description: { type: ["string", "null"] }
         balanceAfter: { type: integer }
         createdAt: { type: string, format: date-time }
+
+    BillingPackage:
+      type: object
+      required: [id, label, credits, priceUsd, description, available]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        credits: { type: integer }
+        priceUsd: { type: number }
+        description: { type: string }
+        available: { type: boolean }
+
+    BillingPackagesResult:
+      type: object
+      required: [stripeConfigured, packages]
+      properties:
+        stripeConfigured: { type: boolean }
+        packages:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingPackage"
+
+    BillingCheckoutInput:
+      type: object
+      required: [packageId, successUrl, cancelUrl]
+      properties:
+        packageId: { type: string }
+        successUrl: { type: string }
+        cancelUrl: { type: string }
+
+    BillingCheckoutResult:
+      type: object
+      properties:
+        checkoutUrl: { type: string }
+        sessionId: { type: string }
+        setupRequired: { type: boolean }
+        message: { type: string }
+        error: { type: string }

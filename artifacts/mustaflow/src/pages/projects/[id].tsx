@@ -31,6 +31,7 @@ import {
   ServerCog,
   CheckCircle2,
   AlertTriangle,
+  CreditCard,
   KeyRound,
   ShieldCheck,
   Mic,
@@ -338,12 +339,24 @@ function ErrorCard({
   suggestions?: string[];
   onTryFix?: (text: string) => void;
 }) {
+  const isInsufficientCredits = message.startsWith("Insufficient credits");
   return (
     <div className="mt-2 bg-destructive/10 border border-destructive/30 rounded-xl p-3 text-xs space-y-2.5">
       <div className="flex items-start gap-2">
         <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
         <span className="text-destructive/90 leading-relaxed">{message}</span>
       </div>
+      {isInsufficientCredits && (
+        <div className="border-t border-destructive/20 pt-2">
+          <a
+            href="/settings?tab=credits"
+            className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-2.5 py-1 rounded-lg transition-colors"
+          >
+            <CreditCard className="h-3 w-3" />
+            Top up credits
+          </a>
+        </div>
+      )}
       {suggestions && suggestions.length > 0 && (
         <div className="space-y-1.5 border-t border-destructive/20 pt-2">
           <div className="font-semibold text-destructive/80 flex items-center gap-1 text-[10px] uppercase tracking-wider">
