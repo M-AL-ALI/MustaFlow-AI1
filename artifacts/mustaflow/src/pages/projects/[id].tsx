@@ -412,6 +412,7 @@ export default function ProjectWorkspacePage() {
   const [windowWidth, setWindowWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1200));
   const [chatDrawerOpen, setChatDrawerOpen] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const filesScrollRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
   const autoAnalyzedRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -421,6 +422,11 @@ export default function ProjectWorkspacePage() {
   const pendingIsPlanRef = useRef(false);
   const [pendingIsPlan, setPendingIsPlan] = useState(false);
   const seenPageMapEventIdsRef = useRef<Set<number>>(new Set());
+  // Whether chat was scrolled to (or near) the bottom — controls auto-scroll behaviour
+  const chatAtBottomRef = useRef(true);
+  // Mirror of leftPanelTab as a ref so pagehide/unmount callbacks can read the current
+  // value synchronously without depending on React state (which may be stale in closures).
+  const leftPanelTabRef = useRef<"chat" | "files" | "history">("chat");
 
   // Track window width for responsive layout
   useEffect(() => {
@@ -454,6 +460,63 @@ export default function ProjectWorkspacePage() {
     }
   }, [projectId]);
 
+  // Persist Chat/Files scroll for the currently-active tab.
+  // Called on tab switch, component unmount, and page hide so the position
+  // survives both navigation and full-page refresh.
+  const saveCurrentScroll = useCallback((tab: "chat" | "files" | "history") => {
+    const ref = tab === "chat" ? scrollRef : tab === "files" ? filesScrollRef : null;
+    if (ref?.current) {
+      try {
+        localStorage.setItem(`mustaflow_scroll_${projectId}_${tab}`, String(ref.current.scrollTop));
+      } catch { /* ignore */ }
+    }
+  }, [projectId]);
+
+  const switchLeftPanel = useCallback((newTab: "chat" | "files" | "history") => {
+    setLeftPanelTab((currentTab) => {
+      saveCurrentScroll(currentTab);
+      leftPanelTabRef.current = newTab;
+      return newTab;
+    });
+  }, [saveCurrentScroll]);
+
+  // Keep leftPanelTabRef in sync whenever state changes via direct setLeftPanelTab
+  // (e.g. the project-switch reset effect).
+  useEffect(() => {
+    leftPanelTabRef.current = leftPanelTab;
+  }, [leftPanelTab]);
+
+  // Save active tab's scroll on unmount (SPA navigation away from this project page)
+  // and on pagehide (hard refresh / tab close).
+  // Uses leftPanelTabRef so the callback always reads the current tab synchronously.
+  useEffect(() => {
+    const onPageHide = () => saveCurrentScroll(leftPanelTabRef.current);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      saveCurrentScroll(leftPanelTabRef.current);
+    };
+  }, [saveCurrentScroll]);
+
+  useEffect(() => {
+    const restoreRef = leftPanelTab === "chat" ? scrollRef : leftPanelTab === "files" ? filesScrollRef : null;
+    if (!restoreRef) return;
+    requestAnimationFrame(() => {
+      const el = restoreRef.current;
+      if (!el) return;
+      try {
+        const saved = localStorage.getItem(`mustaflow_scroll_${projectId}_${leftPanelTab}`);
+        if (saved !== null) {
+          const top = Number.isFinite(Number(saved)) ? Number(saved) : 0;
+          el.scrollTop = top;
+          if (leftPanelTab === "chat") {
+            chatAtBottomRef.current = el.scrollHeight - top - el.clientHeight < 80;
+          }
+        }
+      } catch { /* ignore */ }
+    });
+  }, [leftPanelTab, projectId]);
+
   const isMobileLayout = windowWidth < 768;
 
   // Derive active module IDs from the most recent completed task report
@@ -483,7 +546,7 @@ export default function ProjectWorkspacePage() {
   }, [messages]);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (chatAtBottomRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, activeTaskId]);
@@ -554,6 +617,7 @@ export default function ProjectWorkspacePage() {
     opts?: { planMode?: boolean; background?: boolean; agentMode?: AgentMode },
   ) => {
     if (!content.trim()) return;
+    chatAtBottomRef.current = true;
     setPendingBuildStartedAt(new Date());
     const effectiveMode = opts?.agentMode ?? agentMode;
     const effectivePlanMode = opts?.planMode ?? planMode;
@@ -661,7 +725,7 @@ export default function ProjectWorkspacePage() {
   useEffect(() => {
     if (chatPrefill !== null) {
       setPrompt(chatPrefill);
-      setLeftPanelTab("chat");
+      switchLeftPanel("chat");
       setActiveTab("preview");
       setChatPrefill(null);
     }
@@ -875,7 +939,7 @@ export default function ProjectWorkspacePage() {
               return (
                 <button
                   key={t}
-                  onClick={() => setLeftPanelTab(t)}
+                  onClick={() => switchLeftPanel(t)}
                   className={cn(
                     "flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-medium transition-colors border-b-2",
                     leftPanelTab === t
@@ -988,6 +1052,11 @@ export default function ProjectWorkspacePage() {
           {/* Messages + controls (hidden in history mode) */}
           {!showChatHistory && <><div
             ref={scrollRef}
+            onScroll={() => {
+              const el = scrollRef.current;
+              if (!el) return;
+              chatAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            }}
             className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
           >
             {creditsSuccess && (
@@ -1109,7 +1178,7 @@ export default function ProjectWorkspacePage() {
                   <span className="text-[10px] text-muted-foreground font-medium">Ready</span>
                   {files.length > 0 && (
                     <button
-                      onClick={() => setLeftPanelTab("files")}
+                      onClick={() => switchLeftPanel("files")}
                       className="text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
                     >
                       {files.length} file{files.length !== 1 ? "s" : ""}
@@ -1117,7 +1186,7 @@ export default function ProjectWorkspacePage() {
                   )}
                   {versions && versions.length > 0 && (
                     <button
-                      onClick={() => setLeftPanelTab("history")}
+                      onClick={() => switchLeftPanel("history")}
                       className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
                       title="View checkpoint history"
                     >
@@ -1194,7 +1263,7 @@ export default function ProjectWorkspacePage() {
                 </span>
                 <span className="ml-auto text-[10px] text-muted-foreground">Click to open in Code tab</span>
               </div>
-              <div className="flex-1 overflow-y-auto py-1">
+              <div ref={filesScrollRef} className="flex-1 overflow-y-auto py-1">
                 {files.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
                     <FileCode2 className="h-8 w-8 opacity-25" />
@@ -1223,10 +1292,11 @@ export default function ProjectWorkspacePage() {
           {/* ── HISTORY TAB ── */}
           {leftPanelTab === "history" && (
             <HistoryTab
+              key={projectId}
               projectId={projectId}
               onRetry={(text) => {
                 setPrompt(text);
-                setLeftPanelTab("chat");
+                switchLeftPanel("chat");
               }}
             />
           )}
@@ -1368,12 +1438,12 @@ export default function ProjectWorkspacePage() {
                 })()}
                 onFixPrompt={(text) => {
                   setPrompt(text);
-                  setLeftPanelTab("chat");
+                  switchLeftPanel("chat");
                   if (isMobileLayout) setChatDrawerOpen(true);
                   setTimeout(() => promptInputRef.current?.focus(), 50);
                 }}
                 onAutoSendPrompt={(text) => {
-                  setLeftPanelTab("chat");
+                  switchLeftPanel("chat");
                   if (isMobileLayout) setChatDrawerOpen(true);
                   send(text);
                 }}
@@ -1390,7 +1460,7 @@ export default function ProjectWorkspacePage() {
                 onSwitchToPreview={() => setActiveTab("preview")}
                 onSwitchToCode={() => setActiveTab("code")}
                 onSwitchToChat={(prefill) => {
-                  setLeftPanelTab("chat");
+                  switchLeftPanel("chat");
                   if (isMobileLayout) setChatDrawerOpen(true);
                   if (prefill) {
                     // Auto-send so the build starts immediately without the user

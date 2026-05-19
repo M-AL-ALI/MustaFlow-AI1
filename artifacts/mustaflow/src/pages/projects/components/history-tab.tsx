@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   useListKnowledge,
   useUpdateKnowledge,
@@ -426,6 +426,8 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
   // Pagination: accumulated entries across pages
   const [page, setPage] = useState(0);
   const [accumulated, setAccumulated] = useState<KnowledgeEntry[]>([]);
+  const historyScrollRef = useRef<HTMLDivElement>(null);
+  const scrollKey = `mustaflow_scroll_${projectId}_history`;
 
   // Reset pagination when filters change
   const resetPagination = () => {
@@ -478,6 +480,48 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
   });
 
   const grouped = groupByDate(filtered);
+
+  // Guard: true once the saved scroll has been successfully applied after content renders.
+  const scrollRestoredRef = useRef(false);
+
+  // Save on pagehide (hard refresh / tab close) and on unmount (SPA navigation / tab switch).
+  useEffect(() => {
+    const save = () => {
+      try {
+        localStorage.setItem(scrollKey, String(historyScrollRef.current?.scrollTop ?? 0));
+      } catch { /* ignore */ }
+    };
+    window.addEventListener("pagehide", save);
+    return () => {
+      window.removeEventListener("pagehide", save);
+      save();
+    };
+  // scrollKey is stable for the component lifetime (projectId is fixed via key={projectId})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Restore saved scroll after entries have loaded and rendered.
+  // Runs every time `accumulated.length` grows so the offset is re-attempted once content is tall
+  // enough. The guard ref prevents re-applying after the user has intentionally scrolled.
+  useEffect(() => {
+    if (scrollRestoredRef.current) return;
+    const el = historyScrollRef.current;
+    if (!el) return;
+    try {
+      const raw = localStorage.getItem(scrollKey);
+      if (raw === null) { scrollRestoredRef.current = true; return; }
+      const top = Number.isFinite(Number(raw)) ? Number(raw) : 0;
+      if (top === 0) { scrollRestoredRef.current = true; return; }
+      requestAnimationFrame(() => {
+        if (!el || scrollRestoredRef.current) return;
+        el.scrollTop = top;
+        if (el.scrollTop >= top - 2) {
+          scrollRestoredRef.current = true;
+        }
+      });
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accumulated.length]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -535,7 +579,7 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
       </div>
 
       {/* Timeline */}
-      <div className="flex-1 overflow-y-auto py-3 px-3 space-y-4">
+      <div ref={historyScrollRef} className="flex-1 overflow-y-auto py-3 px-3 space-y-4">
         {isLoading && accumulated.length === 0 && (
           <div className="flex items-center justify-center h-24 text-muted-foreground text-[11px]">
             Loading history…
