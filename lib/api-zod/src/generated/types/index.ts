@@ -42,6 +42,7 @@ export * from './project';
 export * from './projectAgentMode';
 export * from './projectFileContent';
 export * from './projectFileSummary';
+export * from './projectFileUpdate';
 export * from './projectInput';
 export * from './projectInputKind';
 export * from './projectKind';

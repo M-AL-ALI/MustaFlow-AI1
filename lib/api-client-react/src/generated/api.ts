@@ -40,6 +40,7 @@ import type {
   Project,
   ProjectFileContent,
   ProjectFileSummary,
+  ProjectFileUpdate,
   ProjectInput,
   ProjectUpdate,
   ProjectVersion,
@@ -1740,6 +1741,80 @@ export function useGetProjectFile<TData = Awaited<ReturnType<typeof getProjectFi
 
 
 
+
+export const getUpdateProjectFileUrl = (id: number,
+    fileId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files/${fileId}`
+}
+
+/**
+ * @summary Update the contents of a generated file
+ */
+export const updateProjectFile = async (id: number,
+    fileId: number,
+    projectFileUpdate: ProjectFileUpdate, options?: RequestInit): Promise<ProjectFileContent> => {
+
+  return customFetch<ProjectFileContent>(getUpdateProjectFileUrl(id,fileId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      projectFileUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdateProjectFileMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProjectFile>>, TError,{id: number;fileId: number;data: BodyType<ProjectFileUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateProjectFile>>, TError,{id: number;fileId: number;data: BodyType<ProjectFileUpdate>}, TContext> => {
+
+const mutationKey = ['updateProjectFile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProjectFile>>, {id: number;fileId: number;data: BodyType<ProjectFileUpdate>}> = (props) => {
+          const {id,fileId,data} = props ?? {};
+
+          return  updateProjectFile(id,fileId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateProjectFileMutationResult = NonNullable<Awaited<ReturnType<typeof updateProjectFile>>>
+    export type UpdateProjectFileMutationBody = BodyType<ProjectFileUpdate>
+    export type UpdateProjectFileMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Update the contents of a generated file
+ */
+export const useUpdateProjectFile = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProjectFile>>, TError,{id: number;fileId: number;data: BodyType<ProjectFileUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateProjectFile>>,
+        TError,
+        {id: number;fileId: number;data: BodyType<ProjectFileUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateProjectFileMutationOptions(options));
+    }
 
 export const getListSecretsUrl = (id: number,) => {
 

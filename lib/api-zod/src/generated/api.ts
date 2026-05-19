@@ -441,6 +441,27 @@ export const GetProjectFileResponse = zod.object({
 })
 
 
+/**
+ * @summary Update the contents of a generated file
+ */
+export const UpdateProjectFileParams = zod.object({
+  "id": zod.coerce.number(),
+  "fileId": zod.coerce.number()
+})
+
+export const UpdateProjectFileBody = zod.object({
+  "content": zod.string()
+})
+
+export const UpdateProjectFileResponse = zod.object({
+  "id": zod.number(),
+  "path": zod.string(),
+  "mimeType": zod.string(),
+  "content": zod.string(),
+  "updatedAt": zod.coerce.date()
+})
+
+
 export const ListSecretsParams = zod.object({
   "id": zod.coerce.number()
 })

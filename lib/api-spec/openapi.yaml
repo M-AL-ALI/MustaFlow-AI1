@@ -424,6 +424,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateProjectFile
+      tags: [projects]
+      summary: Update the contents of a generated file
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: fileId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectFileUpdate"
+      responses:
+        "200":
+          description: Updated file contents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFileContent"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /projects/{id}/secrets:
     get:
@@ -966,6 +992,12 @@ components:
         mimeType: { type: string }
         content: { type: string }
         updatedAt: { type: string, format: date-time }
+
+    ProjectFileUpdate:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string }
 
     RollbackResult:
       type: object

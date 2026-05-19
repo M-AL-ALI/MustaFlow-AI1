@@ -483,6 +483,10 @@ export interface ProjectFileContent {
   updatedAt: string;
 }
 
+export interface ProjectFileUpdate {
+  content: string;
+}
+
 export interface RollbackResult {
   restoredFiles: number;
   versionId: number;

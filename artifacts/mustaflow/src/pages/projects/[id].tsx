@@ -64,7 +64,6 @@ import { PublishingTab } from "./components/publishing-tab";
 import { LogsTab } from "./components/logs-tab";
 import { AnalyticsTab } from "./components/analytics-tab";
 import { ResourcesTab } from "./components/resources-tab";
-import { DomainsTab } from "./components/domains-tab";
 import { ManageTab } from "./components/manage-tab";
 import { ActivityStream } from "./components/activity-stream";
 import { cn } from "@/lib/utils";
@@ -397,7 +396,6 @@ const WORKSPACE_TABS = [
   { label: "Logs", value: "logs" },
   { label: "Analytics", value: "analytics" },
   { label: "Resources", value: "resources" },
-  { label: "Domains", value: "domains" },
   { label: "Manage", value: "manage" },
 ];
 
@@ -598,7 +596,9 @@ export default function ProjectWorkspacePage() {
         <div className="w-px h-5 bg-border shrink-0" />
         <div className="flex-1 overflow-x-auto min-w-0">
           <div className="flex items-stretch h-12">
-            {WORKSPACE_TABS.map((tab) => (
+            {WORKSPACE_TABS.filter((tab) =>
+              tab.value !== "analytics" || project.status === "published",
+            ).map((tab) => (
               <button
                 key={tab.value}
                 onClick={() => setActiveTab(tab.value)}
@@ -1099,9 +1099,8 @@ export default function ProjectWorkspacePage() {
                 }}
               />
             )}
-            {activeTab === "analytics" && <AnalyticsTab />}
+            {activeTab === "analytics" && <AnalyticsTab project={project} />}
             {activeTab === "resources" && <ResourcesTab />}
-            {activeTab === "domains" && <DomainsTab />}
             {activeTab === "manage" && <ManageTab projectId={projectId} />}
           </div>
         </div>
