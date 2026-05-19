@@ -347,28 +347,6 @@ export function CreateProjectModal({
                 </p>
               </div>
 
-<<<<<<< HEAD
-              {/* Project type */}
-              <div className="space-y-1.5">
-                <Label>Project type</Label>
-                <div className="grid grid-cols-3 gap-2">
-                  {PROJECT_TYPES.map(({ label, kind: k, icon: Icon }) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setKind(k)}
-                      className={cn(
-                        "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-[11px] font-medium transition-colors",
-                        kind === k
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
-                      )}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {label}
-                    </button>
-                  ))}
-=======
               {/* Project type — web only; mobile is always mobile-cross */}
               {platformTab === "web" && (
                 <div className="space-y-1.5">
@@ -391,7 +369,6 @@ export function CreateProjectModal({
                       </button>
                     ))}
                   </div>
->>>>>>> ce914fa (feat: Mobile App Builder Foundation (Phase 4A))
                 </div>
               )}
 
