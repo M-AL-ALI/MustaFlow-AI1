@@ -1321,3 +1321,157 @@ export const GetRecentActivityResponseItem = zod.object({
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
 
 
+/**
+ * @summary Get raw (plain text) content of a project file by id
+ */
+export const GetProjectFileRawParams = zod.object({
+  "id": zod.coerce.number(),
+  "fileId": zod.coerce.number()
+})
+
+
+/**
+ * @summary SSE live event stream for a task (text/event-stream)
+ */
+export const StreamTaskEventsParams = zod.object({
+  "id": zod.coerce.number(),
+  "taskId": zod.coerce.number()
+})
+
+
+/**
+ * @summary Stripe webhook endpoint (public — called by Stripe)
+ */
+export const StripeWebhookResponse = zod.object({
+  "ok": zod.boolean().optional(),
+  "processed": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Current credit balance (billing alias for /credits)
+ */
+export const GetBillingCreditsResponse = zod.object({
+  "userId": zod.string(),
+  "balance": zod.number(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Transaction history (billing alias for /credits/transactions)
+ */
+export const ListBillingTransactionsResponse = zod.object({
+  "transactions": zod.array(zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "projectId": zod.number().nullish(),
+  "type": zod.string(),
+  "amount": zod.number(),
+  "description": zod.string().nullish(),
+  "balanceAfter": zod.number(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Current user admin status and role
+ */
+export const GetAdminMeResponse = zod.object({
+  "userId": zod.string(),
+  "role": zod.string(),
+  "isAdmin": zod.boolean(),
+  "grantedViaEnv": zod.boolean(),
+  "grantedBy": zod.string().nullish()
+})
+
+
+/**
+ * @summary Platform-wide aggregate stats
+ */
+export const GetAdminStatsResponse = zod.object({
+  "projects": zod.object({
+  "total": zod.number(),
+  "published": zod.number()
+}),
+  "users": zod.object({
+  "withCredits": zod.number(),
+  "withRoles": zod.number()
+}),
+  "transactions": zod.number(),
+  "deployments": zod.number()
+})
+
+
+/**
+ * @summary Structured launch readiness checklist
+ */
+export const GetAdminLaunchReadinessResponse = zod.object({
+  "ready": zod.boolean(),
+  "blockingFailCount": zod.number(),
+  "totalChecks": zod.number(),
+  "passed": zod.number(),
+  "partial": zod.number(),
+  "failed": zod.number(),
+  "checks": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "status": zod.enum(['pass', 'fail', 'partial']),
+  "note": zod.string(),
+  "blocking": zod.boolean()
+}))
+})
+
+
+/**
+ * @summary List all role grants
+ */
+export const ListAdminRolesResponse = zod.object({
+  "roles": zod.array(zod.object({
+  "userId": zod.string(),
+  "role": zod.string(),
+  "grantedBy": zod.string().nullish(),
+  "createdAt": zod.coerce.date().nullish(),
+  "updatedAt": zod.coerce.date().nullish()
+}))
+})
+
+
+/**
+ * @summary Grant or update a role for a user
+ */
+
+
+
+export const GrantAdminRoleBody = zod.object({
+  "userId": zod.string().min(1),
+  "role": zod.enum(['user', 'admin', 'owner'])
+})
+
+export const GrantAdminRoleResponse = zod.object({
+  "ok": zod.boolean(),
+  "role": zod.object({
+  "userId": zod.string(),
+  "role": zod.string(),
+  "grantedBy": zod.string().nullish(),
+  "createdAt": zod.coerce.date().nullish(),
+  "updatedAt": zod.coerce.date().nullish()
+})
+})
+
+
+/**
+ * @summary Revoke a role grant — user reverts to default "user" role
+ */
+export const RevokeAdminRoleParams = zod.object({
+  "userId": zod.coerce.string()
+})
+
+export const RevokeAdminRoleResponse = zod.object({
+  "ok": zod.boolean(),
+  "userId": zod.string(),
+  "note": zod.string().optional()
+})
+
+

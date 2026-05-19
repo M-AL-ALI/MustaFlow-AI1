@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import {
   ShieldCheck,
   Users,
@@ -14,167 +14,120 @@ import {
   UserPlus,
   UserMinus,
 } from "lucide-react";
+import {
+  useGetAdminMe,
+  useGetAdminStats,
+  useGetAdminLaunchReadiness,
+  useListAdminRoles,
+  useGrantAdminRole,
+  useRevokeAdminRole,
+  getGetAdminMeQueryKey,
+  getGetAdminStatsQueryKey,
+  getGetAdminLaunchReadinessQueryKey,
+  getListAdminRolesQueryKey,
+} from "@workspace/api-client-react";
 
-interface AdminCheck {
-  id: string;
-  label: string;
-  status: "pass" | "fail" | "partial";
-  note: string;
-  blocking: boolean;
-}
+import type {
+  AdminLaunchCheck,
+  AdminRole,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 
-interface LaunchReadiness {
-  ready: boolean;
-  blockingFailCount: number;
-  totalChecks: number;
-  passed: number;
-  partial: number;
-  failed: number;
-  checks: AdminCheck[];
-}
-
-interface AdminStats {
-  projects: { total: number; published: number };
-  users: { withCredits: number; withRoles: number };
-  transactions: number;
-  deployments: number;
-}
-
-interface AdminMe {
-  userId: string;
-  role: string;
-  isAdmin: boolean;
-  grantedViaEnv: boolean;
-  grantedBy: string | null;
-}
-
-interface RoleGrant {
-  userId: string;
-  role: string;
-  grantedBy: string | null;
-  createdAt?: string;
-  updatedAt?: string;
+function isHttpError(err: unknown): err is { status: number; data: unknown; message: string } {
+  return (
+    err != null &&
+    typeof err === "object" &&
+    "status" in err &&
+    typeof (err as { status: unknown }).status === "number"
+  );
 }
 
 export default function AdminPage() {
-  const [me, setMe] = useState<AdminMe | null>(null);
-  const [forbidden, setForbidden] = useState(false);
-  const [stats, setStats] = useState<AdminStats | null>(null);
-  const [readiness, setReadiness] = useState<LaunchReadiness | null>(null);
-  const [roles, setRoles] = useState<RoleGrant[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [readinessLoading, setReadinessLoading] = useState(false);
-  const [rolesLoading, setRolesLoading] = useState(false);
+  const queryClient = useQueryClient();
+
+  const meQuery = useGetAdminMe();
+  const statsQuery = useGetAdminStats();
+  const readinessQuery = useGetAdminLaunchReadiness();
+  const rolesQuery = useListAdminRoles();
+
+  const grantRoleMutation = useGrantAdminRole();
+  const revokeRoleMutation = useRevokeAdminRole();
 
   const [roleUserId, setRoleUserId] = useState("");
   const [roleValue, setRoleValue] = useState<"admin" | "owner" | "user">("admin");
-  const [roleGranting, setRoleGranting] = useState(false);
   const [roleError, setRoleError] = useState<string | null>(null);
   const [roleSuccess, setRoleSuccess] = useState<string | null>(null);
 
-  const fetchRoles = useCallback(async () => {
-    setRolesLoading(true);
-    try {
-      const r = await fetch("/api/admin/roles");
-      if (r.ok) {
-        const data = (await r.json()) as { roles: RoleGrant[] };
-        setRoles(data.roles ?? []);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setRolesLoading(false);
-    }
-  }, []);
+  const me = meQuery.data;
+  const stats = statsQuery.data;
+  const readiness = readinessQuery.data;
+  const roles = rolesQuery.data?.roles ?? [];
+  const loading = statsQuery.isPending;
+  const readinessLoading = readinessQuery.isPending || readinessQuery.isFetching;
+  const rolesLoading = rolesQuery.isPending || rolesQuery.isFetching;
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const meRes = await fetch("/api/admin/me");
-      if (meRes.status === 403 || meRes.status === 401) {
-        setForbidden(true);
-        return;
-      }
-      if (meRes.ok) {
-        setMe((await meRes.json()) as AdminMe);
-      }
+  const isForbidden =
+    isHttpError(meQuery.error) &&
+    (meQuery.error.status === 401 || meQuery.error.status === 403);
 
-      const statsRes = await fetch("/api/admin/stats");
-      if (statsRes.ok) setStats((await statsRes.json()) as AdminStats);
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  function refreshAll() {
+    void queryClient.invalidateQueries({ queryKey: getGetAdminMeQueryKey() });
+    void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() });
+    void queryClient.invalidateQueries({ queryKey: getGetAdminLaunchReadinessQueryKey() });
+    void queryClient.invalidateQueries({ queryKey: getListAdminRolesQueryKey() });
+  }
 
-  const fetchReadiness = useCallback(async () => {
-    setReadinessLoading(true);
-    try {
-      const r = await fetch("/api/admin/launch-readiness");
-      if (r.ok) setReadiness((await r.json()) as LaunchReadiness);
-    } catch {
-      // ignore
-    } finally {
-      setReadinessLoading(false);
-    }
-  }, []);
+  function refreshReadiness() {
+    void queryClient.invalidateQueries({ queryKey: getGetAdminLaunchReadinessQueryKey() });
+  }
 
-  useEffect(() => {
-    void fetchAll();
-    void fetchReadiness();
-    void fetchRoles();
-  }, [fetchAll, fetchReadiness, fetchRoles]);
-
-  const handleGrantRole = async () => {
+  async function handleGrantRole() {
     if (!roleUserId.trim()) {
       setRoleError("User ID is required.");
       return;
     }
-    setRoleGranting(true);
     setRoleError(null);
     setRoleSuccess(null);
-    try {
-      const res = await fetch("/api/admin/roles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: roleUserId.trim(), role: roleValue }),
-      });
-      if (!res.ok) {
-        const err = (await res.json()) as { error?: string };
-        setRoleError(err.error ?? "Failed to update role");
-        return;
-      }
-      setRoleSuccess(`Role "${roleValue}" granted to ${roleUserId.trim()}`);
-      setRoleUserId("");
-      void fetchRoles();
-    } catch {
-      setRoleError("Request failed");
-    } finally {
-      setRoleGranting(false);
-    }
-  };
+    grantRoleMutation.mutate(
+      { data: { userId: roleUserId.trim(), role: roleValue } },
+      {
+        onSuccess: () => {
+          setRoleSuccess(`Role "${roleValue}" granted to ${roleUserId.trim()}`);
+          setRoleUserId("");
+          void queryClient.invalidateQueries({ queryKey: getListAdminRolesQueryKey() });
+        },
+        onError: (err) => {
+          const msg = isHttpError(err)
+            ? ((err.data as { error?: string })?.error ?? err.message)
+            : "Failed to update role";
+          setRoleError(msg);
+        },
+      },
+    );
+  }
 
-  const handleRevokeRole = async (userId: string) => {
-    try {
-      await fetch(`/api/admin/roles/${encodeURIComponent(userId)}`, { method: "DELETE" });
-      void fetchRoles();
-    } catch {
-      // ignore
-    }
-  };
+  function handleRevokeRole(userId: string) {
+    revokeRoleMutation.mutate(
+      { userId },
+      {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: getListAdminRolesQueryKey() });
+        },
+      },
+    );
+  }
 
-  const readinessCheck = (id: string): AdminCheck | undefined =>
+  const readinessCheck = (id: string): AdminLaunchCheck | undefined =>
     readiness?.checks.find((c) => c.id === id);
 
-  const checkToStatus = (check?: AdminCheck): "ok" | "warn" | "error" => {
+  const checkToStatus = (check?: AdminLaunchCheck): "ok" | "warn" | "error" => {
     if (!check) return "warn";
     if (check.status === "pass") return "ok";
     if (check.status === "fail") return "error";
     return "warn";
   };
 
-  if (forbidden) {
+  if (isForbidden) {
     return (
       <div className="max-w-2xl mx-auto px-6 py-16 text-center space-y-4">
         <div className="flex justify-center">
@@ -204,7 +157,7 @@ export default function AdminPage() {
           </div>
         </div>
         <button
-          onClick={() => { void fetchAll(); void fetchReadiness(); void fetchRoles(); }}
+          onClick={refreshAll}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <RefreshCw className="h-3.5 w-3.5" />
@@ -269,7 +222,7 @@ export default function AdminPage() {
               </>
             )}
             <button
-              onClick={() => void fetchReadiness()}
+              onClick={refreshReadiness}
               className="text-muted-foreground hover:text-foreground"
             >
               <RefreshCw className={`h-3 w-3 ${readinessLoading ? "animate-spin" : ""}`} />
@@ -333,11 +286,11 @@ export default function AdminPage() {
             </select>
             <button
               onClick={() => void handleGrantRole()}
-              disabled={roleGranting || !roleUserId.trim()}
+              disabled={grantRoleMutation.isPending || !roleUserId.trim()}
               className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <UserPlus className="h-3.5 w-3.5" />
-              {roleGranting ? "Saving…" : "Grant Role"}
+              {grantRoleMutation.isPending ? "Saving…" : "Grant Role"}
             </button>
           </div>
           {roleError && <p className="text-sm text-destructive">{roleError}</p>}
@@ -352,7 +305,7 @@ export default function AdminPage() {
 
         {roles.length > 0 && (
           <div className="divide-y divide-border">
-            {roles.map((r) => (
+            {roles.map((r: AdminRole) => (
               <div
                 key={r.userId}
                 className="flex items-center justify-between px-4 py-3 text-sm"
@@ -379,7 +332,7 @@ export default function AdminPage() {
                   </div>
                 </div>
                 <button
-                  onClick={() => void handleRevokeRole(r.userId)}
+                  onClick={() => handleRevokeRole(r.userId)}
                   title="Revoke role"
                   className="p-1.5 rounded hover:bg-destructive/10 transition-colors text-muted-foreground hover:text-destructive"
                 >
@@ -465,7 +418,7 @@ export default function AdminPage() {
   );
 }
 
-function ReadinessRow({ check }: { check: AdminCheck }) {
+function ReadinessRow({ check }: { check: AdminLaunchCheck }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="px-4 py-2.5 text-sm">
@@ -572,4 +525,3 @@ function AdminItem({
     </div>
   );
 }
-

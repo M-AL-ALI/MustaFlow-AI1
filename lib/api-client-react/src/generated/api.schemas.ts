@@ -886,6 +886,85 @@ export interface BillingCheckoutResult {
   error?: string;
 }
 
+export interface AdminMe {
+  userId: string;
+  role: string;
+  isAdmin: boolean;
+  grantedViaEnv: boolean;
+  /** @nullable */
+  grantedBy?: string | null;
+}
+
+export type AdminStatsProjects = {
+  total: number;
+  published: number;
+};
+
+export type AdminStatsUsers = {
+  withCredits: number;
+  withRoles: number;
+};
+
+export interface AdminStats {
+  projects: AdminStatsProjects;
+  users: AdminStatsUsers;
+  transactions: number;
+  deployments: number;
+}
+
+export type AdminLaunchCheckStatus = typeof AdminLaunchCheckStatus[keyof typeof AdminLaunchCheckStatus];
+
+
+export const AdminLaunchCheckStatus = {
+  pass: 'pass',
+  fail: 'fail',
+  partial: 'partial',
+} as const;
+
+export interface AdminLaunchCheck {
+  id: string;
+  label: string;
+  status: AdminLaunchCheckStatus;
+  note: string;
+  blocking: boolean;
+}
+
+export interface AdminLaunchReadiness {
+  ready: boolean;
+  blockingFailCount: number;
+  totalChecks: number;
+  passed: number;
+  partial: number;
+  failed: number;
+  checks: AdminLaunchCheck[];
+}
+
+export interface AdminRole {
+  userId: string;
+  role: string;
+  /** @nullable */
+  grantedBy?: string | null;
+  /** @nullable */
+  createdAt?: string | null;
+  /** @nullable */
+  updatedAt?: string | null;
+}
+
+export type AdminRoleInputRole = typeof AdminRoleInputRole[keyof typeof AdminRoleInputRole];
+
+
+export const AdminRoleInputRole = {
+  user: 'user',
+  admin: 'admin',
+  owner: 'owner',
+} as const;
+
+export interface AdminRoleInput {
+  /** @minLength 1 */
+  userId: string;
+  role: AdminRoleInputRole;
+}
+
 export type DeleteWorkspace200 = {
   deleted: boolean;
 };
@@ -963,5 +1042,29 @@ export type DeleteKnowledge200 = {
 
 export type ListMobileBuilds200 = {
   builds: MobileBuildLog[];
+};
+
+export type StripeWebhook200 = {
+  ok?: boolean;
+  processed?: boolean;
+};
+
+export type ListBillingTransactions200 = {
+  transactions: CreditTransaction[];
+};
+
+export type ListAdminRoles200 = {
+  roles: AdminRole[];
+};
+
+export type GrantAdminRole200 = {
+  ok: boolean;
+  role: AdminRole;
+};
+
+export type RevokeAdminRole200 = {
+  ok: boolean;
+  userId: string;
+  note?: string;
 };
 

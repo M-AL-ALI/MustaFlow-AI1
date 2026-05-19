@@ -30,6 +30,10 @@ tags:
     description: User credits and billing
   - name: builds
     description: EAS mobile cloud builds (iOS / Android)
+  - name: admin
+    description: Admin-only platform management endpoints
+  - name: billing
+    description: Billing aliases and Stripe webhook
 paths:
   /healthz:
     get:
@@ -1041,6 +1045,215 @@ paths:
                 items:
                   $ref: "#/components/schemas/ActivityItem"
 
+  /projects/{id}/files/{fileId}/raw:
+    get:
+      operationId: getProjectFileRaw
+      tags: [projects]
+      summary: Get raw (plain text) content of a project file by id
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: fileId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Raw file content as plain text
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/tasks/{taskId}/events/stream:
+    get:
+      operationId: streamTaskEvents
+      tags: [tasks]
+      summary: SSE live event stream for a task (text/event-stream)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Server-Sent Events stream of TaskEvent objects until task completes or fails
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /billing/webhook:
+    post:
+      operationId: stripeWebhook
+      tags: [billing]
+      summary: Stripe webhook endpoint (public — called by Stripe)
+      responses:
+        "200":
+          description: Webhook received
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  processed: { type: boolean }
+
+  /billing/credits:
+    get:
+      operationId: getBillingCredits
+      tags: [billing]
+      summary: Current credit balance (billing alias for /credits)
+      responses:
+        "200":
+          description: User credit info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserCredit"
+
+  /billing/transactions:
+    get:
+      operationId: listBillingTransactions
+      tags: [billing]
+      summary: Transaction history (billing alias for /credits/transactions)
+      responses:
+        "200":
+          description: Transaction list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transactions]
+                properties:
+                  transactions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CreditTransaction"
+
+  /admin/me:
+    get:
+      operationId: getAdminMe
+      tags: [admin]
+      summary: Current user admin status and role
+      responses:
+        "200":
+          description: Admin identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMe"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden — not an admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /admin/stats:
+    get:
+      operationId: getAdminStats
+      tags: [admin]
+      summary: Platform-wide aggregate stats
+      responses:
+        "200":
+          description: Platform stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStats"
+
+  /admin/launch-readiness:
+    get:
+      operationId: getAdminLaunchReadiness
+      tags: [admin]
+      summary: Structured launch readiness checklist
+      responses:
+        "200":
+          description: Launch readiness result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLaunchReadiness"
+
+  /admin/roles:
+    get:
+      operationId: listAdminRoles
+      tags: [admin]
+      summary: List all role grants
+      responses:
+        "200":
+          description: Role list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roles]
+                properties:
+                  roles:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AdminRole"
+    post:
+      operationId: grantAdminRole
+      tags: [admin]
+      summary: Grant or update a role for a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRoleInput"
+      responses:
+        "200":
+          description: Role granted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, role]
+                properties:
+                  ok: { type: boolean }
+                  role: { $ref: "#/components/schemas/AdminRole" }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /admin/roles/{userId}:
+    delete:
+      operationId: revokeAdminRole
+      tags: [admin]
+      summary: Revoke a role grant — user reverts to default "user" role
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Role revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, userId]
+                properties:
+                  ok: { type: boolean }
+                  userId: { type: string }
+                  note: { type: string }
+
 components:
   schemas:
     HealthStatus:
@@ -1723,3 +1936,78 @@ components:
         setupRequired: { type: boolean }
         message: { type: string }
         error: { type: string }
+
+    AdminMe:
+      type: object
+      required: [userId, role, isAdmin, grantedViaEnv]
+      properties:
+        userId: { type: string }
+        role: { type: string }
+        isAdmin: { type: boolean }
+        grantedViaEnv: { type: boolean }
+        grantedBy: { type: ["string", "null"] }
+
+    AdminStats:
+      type: object
+      required: [projects, users, transactions, deployments]
+      properties:
+        projects:
+          type: object
+          required: [total, published]
+          properties:
+            total: { type: integer }
+            published: { type: integer }
+        users:
+          type: object
+          required: [withCredits, withRoles]
+          properties:
+            withCredits: { type: integer }
+            withRoles: { type: integer }
+        transactions: { type: integer }
+        deployments: { type: integer }
+
+    AdminLaunchCheck:
+      type: object
+      required: [id, label, status, note, blocking]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        status:
+          type: string
+          enum: [pass, fail, partial]
+        note: { type: string }
+        blocking: { type: boolean }
+
+    AdminLaunchReadiness:
+      type: object
+      required: [ready, blockingFailCount, totalChecks, passed, partial, failed, checks]
+      properties:
+        ready: { type: boolean }
+        blockingFailCount: { type: integer }
+        totalChecks: { type: integer }
+        passed: { type: integer }
+        partial: { type: integer }
+        failed: { type: integer }
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminLaunchCheck"
+
+    AdminRole:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: { type: string }
+        role: { type: string }
+        grantedBy: { type: ["string", "null"] }
+        createdAt: { type: ["string", "null"], format: date-time }
+        updatedAt: { type: ["string", "null"], format: date-time }
+
+    AdminRoleInput:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: { type: string, minLength: 1 }
+        role:
+          type: string
+          enum: [user, admin, owner]

@@ -201,6 +201,36 @@ router.patch(
   },
 );
 
+router.get(
+  "/projects/:id/files/:fileId/raw",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const fileId = Number(req.params.fileId);
+    if (!Number.isFinite(fileId)) {
+      res.status(400).json({ error: "Invalid file id" });
+      return;
+    }
+    const [row] = await db
+      .select()
+      .from(projectFilesTable)
+      .where(
+        and(
+          eq(projectFilesTable.projectId, projectId),
+          eq(projectFilesTable.id, fileId),
+        ),
+      );
+    if (!row) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    res
+      .type("text/plain")
+      .setHeader("Cache-Control", "no-store")
+      .send(row.content);
+  },
+);
+
 // Serves generated project files as the preview.
 // PUBLISHED projects are publicly accessible without authentication — anyone
 // with the URL can open the generated app.

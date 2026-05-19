@@ -8,6 +8,7 @@ import {
   ExternalLink,
   History,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 interface CreditPackage {
   id: string;
@@ -43,6 +44,7 @@ interface TransactionsResponse {
 }
 
 export default function BillingPage() {
+  const { toast } = useToast();
   const [balance, setBalance] = useState<CreditsBalance | null>(null);
   const [packages, setPackages] = useState<PackagesResponse | null>(null);
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
@@ -95,17 +97,29 @@ export default function BillingPage() {
       };
 
       if (data.setupRequired) {
-        alert("Stripe is not yet configured. Contact your administrator.");
+        toast({
+          title: "Billing not configured",
+          description: "Stripe is not yet configured. Contact your administrator.",
+          variant: "destructive",
+        });
         return;
       }
 
       if (data.checkoutUrl) {
         window.location.href = data.checkoutUrl;
       } else if (data.error) {
-        alert(`Checkout error: ${data.error}`);
+        toast({
+          title: "Checkout error",
+          description: data.error,
+          variant: "destructive",
+        });
       }
     } catch {
-      alert("Checkout failed. Please try again.");
+      toast({
+        title: "Checkout failed",
+        description: "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setCheckoutLoading(null);
     }
