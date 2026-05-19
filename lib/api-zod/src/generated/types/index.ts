@@ -24,6 +24,7 @@ export * from './chatMessageInputAgentMode';
 export * from './chatMessagePlan';
 export * from './chatMessageRole';
 export * from './creditTransaction';
+export * from './deleteSecret200';
 export * from './deleteWorkspace200';
 export * from './deploymentLog';
 export * from './duplicateProjectResult';

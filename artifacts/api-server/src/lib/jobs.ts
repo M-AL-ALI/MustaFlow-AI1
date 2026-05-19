@@ -8,6 +8,7 @@ import {
   chatMessagesTable,
   taskEventsTable,
   knowledgeEntriesTable,
+  secretsTable,
   type TaskReport,
   type FileSnapshotEntry,
 } from "@workspace/db";
@@ -139,23 +140,94 @@ async function deleteFiles(
   );
 }
 
+/** Map of integration name → required secret key names (subset of the frontend registry). */
+const INTEGRATION_KEY_MAP: Array<{ name: string; keys: string[] }> = [
+  { name: "OpenAI", keys: ["OPENAI_API_KEY"] },
+  { name: "Anthropic", keys: ["ANTHROPIC_API_KEY"] },
+  { name: "Gemini", keys: ["GEMINI_API_KEY"] },
+  { name: "Clerk", keys: ["CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"] },
+  { name: "Auth0", keys: ["AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"] },
+  { name: "Supabase Auth", keys: ["SUPABASE_URL", "SUPABASE_ANON_KEY"] },
+  { name: "Firebase Auth", keys: ["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN", "FIREBASE_PROJECT_ID"] },
+  { name: "PostgreSQL / Neon", keys: ["DATABASE_URL"] },
+  { name: "Supabase", keys: ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY"] },
+  { name: "Firebase Firestore", keys: ["FIREBASE_PROJECT_ID", "FIREBASE_API_KEY"] },
+  { name: "AWS S3", keys: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_S3_BUCKET", "AWS_REGION"] },
+  { name: "Cloudflare R2", keys: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_ACCOUNT_ID"] },
+  { name: "Supabase Storage", keys: ["SUPABASE_URL", "SUPABASE_SERVICE_KEY"] },
+  { name: "Stripe", keys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"] },
+  { name: "Stripe Connect", keys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_CONNECT_CLIENT_ID"] },
+  { name: "Google Maps", keys: ["GOOGLE_MAPS_API_KEY"] },
+  { name: "Apple Maps", keys: ["APPLE_MAPS_KEY_ID", "APPLE_MAPS_TEAM_ID", "APPLE_MAPS_PRIVATE_KEY"] },
+  { name: "Mapbox", keys: ["MAPBOX_PUBLIC_TOKEN"] },
+  { name: "Resend", keys: ["RESEND_API_KEY"] },
+  { name: "SendGrid", keys: ["SENDGRID_API_KEY"] },
+  { name: "Mailgun", keys: ["MAILGUN_API_KEY", "MAILGUN_DOMAIN"] },
+  { name: "Twilio", keys: ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"] },
+  { name: "Firebase Cloud Messaging", keys: ["FIREBASE_PROJECT_ID", "FIREBASE_SERVER_KEY"] },
+  { name: "PostHog", keys: ["POSTHOG_API_KEY", "POSTHOG_HOST"] },
+  { name: "Sentry", keys: ["SENTRY_DSN"] },
+  { name: "Google Analytics", keys: ["GA_MEASUREMENT_ID"] },
+  { name: "GitHub", keys: ["GITHUB_TOKEN"] },
+  { name: "Vercel", keys: ["VERCEL_TOKEN"] },
+  { name: "Render", keys: ["RENDER_API_KEY"] },
+  { name: "Fly.io", keys: ["FLY_API_TOKEN"] },
+  { name: "Railway", keys: ["RAILWAY_API_TOKEN"] },
+];
+
+async function loadActiveIntegrations(projectId: number): Promise<string> {
+  try {
+    const rows = await db
+      .select({ name: secretsTable.name, verificationStatus: secretsTable.verificationStatus })
+      .from(secretsTable)
+      .where(eq(secretsTable.projectId, projectId));
+    // Build a map of key name → verificationStatus for this project's secrets
+    const secretMap = new Map(rows.map((r) => [r.name, r.verificationStatus ?? "unverified"]));
+    // Fully connected = all required keys present and each is verified
+    const active = INTEGRATION_KEY_MAP.filter((integration) =>
+      integration.keys.every((k) => secretMap.has(k) && secretMap.get(k) === "verified"),
+    ).map((i) => i.name);
+    // Partially configured = some keys present (but not all), OR all present but not all verified
+    // Matches the broader UI definition of "partial" status
+    const partial = INTEGRATION_KEY_MAP.filter((integration) => {
+      const isActive = active.includes(integration.name);
+      if (isActive) return false;
+      const somePresent = integration.keys.some((k) => secretMap.has(k));
+      return somePresent;
+    }).map((i) => i.name);
+    const parts: string[] = [];
+    if (active.length > 0) {
+      parts.push(`ACTIVE INTEGRATIONS (connected and verified): ${active.join(", ")}. When generating or refining code, prefer these services over alternatives and reference their environment variables from project secrets.`);
+    }
+    if (partial.length > 0) {
+      parts.push(`PARTIALLY CONFIGURED (keys present but not yet verified): ${partial.join(", ")}. These may work but have not been verified — mention them if the user asks.`);
+    }
+    return parts.join("\n");
+  } catch {
+    return "";
+  }
+}
+
 async function loadKnowledgeContext(projectId: number): Promise<string> {
   try {
-    const entries = await db
-      .select()
-      .from(knowledgeEntriesTable)
-      .where(
-        or(
-          eq(knowledgeEntriesTable.approvedForReuse, true),
-          eq(knowledgeEntriesTable.projectId, projectId),
-        ),
-      )
-      .orderBy(knowledgeEntriesTable.createdAt)
-      .limit(40);
-    if (entries.length === 0) return "";
-    return entries
-      .map((e) => `[${e.category}] ${e.title}: ${e.content}`)
-      .join("\n");
+    const [entries, integrationsNote] = await Promise.all([
+      db
+        .select()
+        .from(knowledgeEntriesTable)
+        .where(
+          or(
+            eq(knowledgeEntriesTable.approvedForReuse, true),
+            eq(knowledgeEntriesTable.projectId, projectId),
+          ),
+        )
+        .orderBy(knowledgeEntriesTable.createdAt)
+        .limit(40),
+      loadActiveIntegrations(projectId),
+    ]);
+    const knowledgePart = entries.length > 0
+      ? entries.map((e) => `[${e.category}] ${e.title}: ${e.content}`).join("\n")
+      : "";
+    return [integrationsNote, knowledgePart].filter(Boolean).join("\n\n");
   } catch {
     return "";
   }

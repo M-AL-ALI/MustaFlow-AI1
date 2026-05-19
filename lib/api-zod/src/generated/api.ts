@@ -531,6 +531,20 @@ export const GetPublishReadinessResponse = zod.object({
 
 
 /**
+ * @summary Delete a project secret
+ */
+export const DeleteSecretParams = zod.object({
+  "id": zod.coerce.number(),
+  "secretId": zod.coerce.number()
+})
+
+export const DeleteSecretResponse = zod.object({
+  "deleted": zod.boolean(),
+  "id": zod.number()
+})
+
+
+/**
  * @summary Attempt automated verification of a secret value
  */
 export const VerifySecretParams = zod.object({

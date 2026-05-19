@@ -27,6 +27,7 @@ import type {
   ChatExchange,
   ChatMessage,
   ChatMessageInput,
+  DeleteSecret200,
   DeleteWorkspace200,
   DuplicateProjectResult,
   GetPublishReadinessParams,
@@ -2157,6 +2158,78 @@ export function useGetPublishReadiness<TData = Awaited<ReturnType<typeof getPubl
 
 
 
+
+export const getDeleteSecretUrl = (id: number,
+    secretId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/secrets/${secretId}`
+}
+
+/**
+ * @summary Delete a project secret
+ */
+export const deleteSecret = async (id: number,
+    secretId: number, options?: RequestInit): Promise<DeleteSecret200> => {
+
+  return customFetch<DeleteSecret200>(getDeleteSecretUrl(id,secretId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteSecretMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSecret>>, TError,{id: number;secretId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteSecret>>, TError,{id: number;secretId: number}, TContext> => {
+
+const mutationKey = ['deleteSecret'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteSecret>>, {id: number;secretId: number}> = (props) => {
+          const {id,secretId} = props ?? {};
+
+          return  deleteSecret(id,secretId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteSecretMutationResult = NonNullable<Awaited<ReturnType<typeof deleteSecret>>>
+
+    export type DeleteSecretMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a project secret
+ */
+export const useDeleteSecret = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSecret>>, TError,{id: number;secretId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteSecret>>,
+        TError,
+        {id: number;secretId: number},
+        TContext
+      > => {
+      return useMutation(getDeleteSecretMutationOptions(options));
+    }
 
 export const getVerifySecretUrl = (id: number,
     secretId: number,) => {

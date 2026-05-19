@@ -339,7 +339,7 @@ export function ToolsTab({ projectId }: { projectId: number }) {
             </TabsContent>
 
             <TabsContent value="integrations" className="h-full m-0 p-4">
-              <IntegrationsRegistry projectId={projectId} />
+              <IntegrationsRegistry projectId={projectId} secrets={secrets ?? []} />
             </TabsContent>
           </div>
         </Tabs>

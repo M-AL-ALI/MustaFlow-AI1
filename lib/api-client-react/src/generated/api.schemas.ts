@@ -640,6 +640,11 @@ export const GetPublishReadinessEnv = {
   production: 'production',
 } as const;
 
+export type DeleteSecret200 = {
+  deleted: boolean;
+  id: number;
+};
+
 export type ListDeployments200 = {
   deployments: DeploymentLog[];
 };

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import {
   Brain,
@@ -13,28 +13,42 @@ import {
   Rocket,
   Smartphone,
   Paintbrush,
-  Globe,
   Key,
   CheckCircle2,
-  Circle,
-  ChevronRight,
   ExternalLink,
   Search,
   Blocks,
+  Plus,
+  Trash2,
+  AlertCircle,
+  X,
+  Loader2,
+  XCircle,
+  Plug,
+  PlugZap,
+  ShieldCheck,
+  HelpCircle,
 } from "lucide-react";
-import { IntegrationSetupCard } from "./integration-setup-card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  useCreateSecret,
+  useDeleteSecret,
+  getListSecretsQueryKey,
+} from "@workspace/api-client-react";
+import type { SecretEntry } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 
-type IntegrationStatus = "available" | "coming-soon" | "connected";
+type ConnectionStatus = "connected" | "partial" | "not-connected";
 
 type Integration = {
   name: string;
   category: string;
   description: string;
-  status: IntegrationStatus;
-  requiredKeys?: string[];
+  comingSoon?: boolean;
+  mobileOnly?: boolean;
+  requiredKeys: string[];
   url?: string;
-  hasDetailedSetup?: boolean;
-  tags?: string[];
 };
 
 const CATEGORIES = [
@@ -55,82 +69,76 @@ const CATEGORIES = [
 
 const INTEGRATIONS: Integration[] = [
   // AI
-  { name: "OpenAI", category: "ai", description: "GPT-4o, GPT-5, DALL-E, and Whisper APIs. The default AI engine powering the builder.", status: "available", requiredKeys: ["OPENAI_API_KEY"], url: "https://platform.openai.com" },
-  { name: "Anthropic", category: "ai", description: "Claude 3.5 Sonnet and Opus — great for long-context tasks and structured reasoning.", status: "available", requiredKeys: ["ANTHROPIC_API_KEY"], url: "https://console.anthropic.com" },
-  { name: "Gemini", category: "ai", description: "Google's Gemini Pro and Flash models. Multimodal support with large context windows.", status: "available", requiredKeys: ["GEMINI_API_KEY"], url: "https://aistudio.google.com" },
-  { name: "Custom Model", category: "ai", description: "Connect any OpenAI-compatible endpoint. Works with Ollama, Together AI, and self-hosted models.", status: "coming-soon", requiredKeys: ["CUSTOM_AI_BASE_URL", "CUSTOM_AI_API_KEY"] },
+  { name: "OpenAI", category: "ai", description: "GPT-4o, GPT-5, DALL-E, and Whisper APIs.", requiredKeys: ["OPENAI_API_KEY"], url: "https://platform.openai.com" },
+  { name: "Anthropic", category: "ai", description: "Claude 3.5 Sonnet and Opus — long-context tasks and structured reasoning.", requiredKeys: ["ANTHROPIC_API_KEY"], url: "https://console.anthropic.com" },
+  { name: "Gemini", category: "ai", description: "Google's Gemini Pro and Flash models with large context windows.", requiredKeys: ["GEMINI_API_KEY"], url: "https://aistudio.google.com" },
+  { name: "Custom Model", category: "ai", description: "Connect any OpenAI-compatible endpoint (Ollama, Together AI, self-hosted).", requiredKeys: ["CUSTOM_AI_BASE_URL", "CUSTOM_AI_API_KEY"], comingSoon: true },
 
   // Auth
-  { name: "Clerk", category: "auth", description: "Drop-in auth with social logins, MFA, and user management UI. Recommended for most apps.", status: "available", requiredKeys: ["CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"], url: "https://clerk.com" },
-  { name: "Auth0", category: "auth", description: "Enterprise-grade identity platform with SSO, machine-to-machine, and social providers.", status: "available", requiredKeys: ["AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"], url: "https://auth0.com" },
-  { name: "Supabase Auth", category: "auth", description: "Built-in auth for Supabase projects. Email, OAuth, and magic links out of the box.", status: "available", requiredKeys: ["SUPABASE_URL", "SUPABASE_ANON_KEY"], url: "https://supabase.com" },
-  { name: "Firebase Auth", category: "auth", description: "Google's mobile-first auth with phone verification, anonymous auth, and social providers.", status: "available", requiredKeys: ["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN", "FIREBASE_PROJECT_ID"], url: "https://firebase.google.com" },
+  { name: "Clerk", category: "auth", description: "Drop-in auth with social logins, MFA, and user management UI.", requiredKeys: ["CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"], url: "https://clerk.com" },
+  { name: "Auth0", category: "auth", description: "Enterprise-grade identity platform with SSO and social providers.", requiredKeys: ["AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"], url: "https://auth0.com" },
+  { name: "Supabase Auth", category: "auth", description: "Built-in auth for Supabase projects. Email, OAuth, and magic links.", requiredKeys: ["SUPABASE_URL", "SUPABASE_ANON_KEY"], url: "https://supabase.com" },
+  { name: "Firebase Auth", category: "auth", description: "Google's mobile-first auth with phone verification and social providers.", requiredKeys: ["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN", "FIREBASE_PROJECT_ID"], url: "https://firebase.google.com" },
 
   // Database
-  { name: "PostgreSQL / Neon", category: "database", description: "Serverless Postgres with branching. MustaFlow's recommended database for web apps.", status: "available", requiredKeys: ["DATABASE_URL"], url: "https://neon.tech" },
-  { name: "Supabase", category: "database", description: "Open-source Firebase alternative with Postgres, real-time subscriptions, and storage.", status: "available", requiredKeys: ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY"], url: "https://supabase.com" },
-  { name: "Firebase Firestore", category: "database", description: "NoSQL document database with real-time sync. Best for mobile apps and event-driven data.", status: "available", requiredKeys: ["FIREBASE_PROJECT_ID", "FIREBASE_API_KEY"], url: "https://firebase.google.com" },
-  { name: "MySQL / PlanetScale", category: "database", description: "MySQL-compatible serverless database with horizontal sharding. Good for high-scale apps.", status: "coming-soon", requiredKeys: ["DATABASE_URL"] },
+  { name: "PostgreSQL / Neon", category: "database", description: "Serverless Postgres with branching. Recommended for web apps.", requiredKeys: ["DATABASE_URL"], url: "https://neon.tech" },
+  { name: "Supabase", category: "database", description: "Open-source Firebase alternative with Postgres and real-time subscriptions.", requiredKeys: ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY"], url: "https://supabase.com" },
+  { name: "Firebase Firestore", category: "database", description: "NoSQL document database with real-time sync.", requiredKeys: ["FIREBASE_PROJECT_ID", "FIREBASE_API_KEY"], url: "https://firebase.google.com" },
+  { name: "MySQL / PlanetScale", category: "database", description: "MySQL-compatible serverless database with horizontal sharding.", requiredKeys: ["DATABASE_URL"], comingSoon: true },
 
   // Storage
-  { name: "AWS S3", category: "storage", description: "Industry-standard object storage. For file uploads, images, videos, and generated assets.", status: "available", requiredKeys: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_S3_BUCKET", "AWS_REGION"], url: "https://s3.console.aws.amazon.com" },
-  { name: "Cloudflare R2", category: "storage", description: "S3-compatible storage with zero egress fees. Excellent cost profile for large files.", status: "available", requiredKeys: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_ACCOUNT_ID"], url: "https://dash.cloudflare.com" },
-  { name: "Supabase Storage", category: "storage", description: "File storage backed by Supabase with row-level security and CDN delivery.", status: "available", requiredKeys: ["SUPABASE_URL", "SUPABASE_SERVICE_KEY"], url: "https://supabase.com" },
-  { name: "Firebase Storage", category: "storage", description: "Cloud Storage for Firebase — ideal when your app already uses Firebase Auth and Firestore.", status: "available", requiredKeys: ["FIREBASE_PROJECT_ID", "FIREBASE_API_KEY"], url: "https://firebase.google.com" },
+  { name: "AWS S3", category: "storage", description: "Industry-standard object storage for file uploads, images, and videos.", requiredKeys: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_S3_BUCKET", "AWS_REGION"], url: "https://s3.console.aws.amazon.com" },
+  { name: "Cloudflare R2", category: "storage", description: "S3-compatible storage with zero egress fees.", requiredKeys: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_ACCOUNT_ID"], url: "https://dash.cloudflare.com" },
+  { name: "Supabase Storage", category: "storage", description: "File storage backed by Supabase with row-level security and CDN.", requiredKeys: ["SUPABASE_URL", "SUPABASE_SERVICE_KEY"], url: "https://supabase.com" },
+  { name: "Firebase Storage", category: "storage", description: "Cloud Storage for Firebase — ideal with Firebase Auth and Firestore.", requiredKeys: ["FIREBASE_PROJECT_ID", "FIREBASE_API_KEY"], url: "https://firebase.google.com" },
 
   // Payments
-  { name: "Stripe", category: "payments", description: "The default payment processor. Subscriptions, one-time payments, invoices, and checkout.", status: "available", requiredKeys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"], url: "https://dashboard.stripe.com" },
-  { name: "Stripe Connect", category: "payments", description: "Marketplace and platform payments. For apps where money flows between multiple parties.", status: "available", requiredKeys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_CONNECT_CLIENT_ID"], url: "https://stripe.com/connect" },
-  { name: "RevenueCat", category: "payments", description: "In-app purchases and subscriptions for iOS and Android. Handles App Store and Play Store billing.", status: "coming-soon", requiredKeys: ["REVENUECAT_PUBLIC_SDK_KEY"] },
+  { name: "Stripe", category: "payments", description: "Subscriptions, one-time payments, invoices, and checkout.", requiredKeys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"], url: "https://dashboard.stripe.com" },
+  { name: "Stripe Connect", category: "payments", description: "Marketplace and platform payments between multiple parties.", requiredKeys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_CONNECT_CLIENT_ID"], url: "https://stripe.com/connect" },
+  { name: "RevenueCat", category: "payments", description: "In-app purchases and subscriptions for iOS and Android.", requiredKeys: ["REVENUECAT_PUBLIC_SDK_KEY"], mobileOnly: true },
 
   // Maps
-  { name: "Google Maps", category: "maps", description: "Industry-standard maps with Places, Geocoding, Directions, and live traffic. Best coverage worldwide.", status: "available", requiredKeys: ["GOOGLE_MAPS_API_KEY"], url: "https://console.cloud.google.com/apis", hasDetailedSetup: true },
-  { name: "Apple Maps", category: "maps", description: "MapKit JS for web and native MapKit for iOS. Best default experience on Apple devices.", status: "available", requiredKeys: ["APPLE_MAPS_KEY_ID", "APPLE_MAPS_TEAM_ID", "APPLE_MAPS_PRIVATE_KEY"], url: "https://developer.apple.com/account", hasDetailedSetup: true },
-  { name: "Mapbox", category: "maps", description: "Highly customizable maps with beautiful styles, Navigation SDK, and advanced routing.", status: "available", requiredKeys: ["MAPBOX_PUBLIC_TOKEN"], url: "https://account.mapbox.com", hasDetailedSetup: true },
-  { name: "OpenStreetMap", category: "maps", description: "Free, open-source map tiles via Leaflet.js. No API key required. Used in all previews.", status: "available", requiredKeys: [], hasDetailedSetup: true },
+  { name: "Google Maps", category: "maps", description: "Places, Geocoding, Directions, and live traffic. Best global coverage.", requiredKeys: ["GOOGLE_MAPS_API_KEY"], url: "https://console.cloud.google.com/apis" },
+  { name: "Apple Maps", category: "maps", description: "MapKit JS for web apps and native MapKit for iOS.", requiredKeys: ["APPLE_MAPS_KEY_ID", "APPLE_MAPS_TEAM_ID", "APPLE_MAPS_PRIVATE_KEY"], url: "https://developer.apple.com/account" },
+  { name: "Mapbox", category: "maps", description: "Highly customizable maps with beautiful styles and advanced routing.", requiredKeys: ["MAPBOX_PUBLIC_TOKEN"], url: "https://account.mapbox.com" },
+  { name: "OpenStreetMap", category: "maps", description: "Free, open-source map tiles via Leaflet.js. No API key required.", requiredKeys: [], url: "https://leafletjs.com" },
 
   // Email / SMS
-  { name: "Resend", category: "email", description: "Modern transactional email for developers. React email templates and simple API.", status: "available", requiredKeys: ["RESEND_API_KEY"], url: "https://resend.com" },
-  { name: "SendGrid", category: "email", description: "Twilio SendGrid for transactional and marketing emails with high deliverability.", status: "available", requiredKeys: ["SENDGRID_API_KEY"], url: "https://app.sendgrid.com" },
-  { name: "Mailgun", category: "email", description: "Developer-focused email delivery with detailed logs and analytics.", status: "available", requiredKeys: ["MAILGUN_API_KEY", "MAILGUN_DOMAIN"], url: "https://app.mailgun.com" },
-  { name: "Twilio", category: "email", description: "SMS, WhatsApp, and voice communication. Phone number verification and OTP delivery.", status: "available", requiredKeys: ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"], url: "https://console.twilio.com" },
+  { name: "Resend", category: "email", description: "Modern transactional email with React email templates.", requiredKeys: ["RESEND_API_KEY"], url: "https://resend.com" },
+  { name: "SendGrid", category: "email", description: "Transactional and marketing emails with high deliverability.", requiredKeys: ["SENDGRID_API_KEY"], url: "https://app.sendgrid.com" },
+  { name: "Mailgun", category: "email", description: "Developer-focused email delivery with detailed logs.", requiredKeys: ["MAILGUN_API_KEY", "MAILGUN_DOMAIN"], url: "https://app.mailgun.com" },
+  { name: "Twilio", category: "email", description: "SMS, WhatsApp, and voice. Phone verification and OTP delivery.", requiredKeys: ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"], url: "https://console.twilio.com" },
 
   // Notifications
-  { name: "Expo Push", category: "notifications", description: "Push notifications for Expo / React Native apps on iOS and Android.", status: "available", requiredKeys: ["EXPO_ACCESS_TOKEN"], url: "https://expo.dev" },
-  { name: "Firebase Cloud Messaging", category: "notifications", description: "Cross-platform push notifications via Google Firebase. Works on web, iOS, and Android.", status: "available", requiredKeys: ["FIREBASE_PROJECT_ID", "FIREBASE_SERVER_KEY"], url: "https://firebase.google.com" },
-  { name: "APNs", category: "notifications", description: "Apple Push Notification service for native iOS apps. Required for direct iOS delivery.", status: "coming-soon", requiredKeys: ["APNS_KEY_ID", "APNS_TEAM_ID", "APNS_PRIVATE_KEY"] },
+  { name: "Expo Push", category: "notifications", description: "Push notifications for Expo / React Native apps.", requiredKeys: ["EXPO_ACCESS_TOKEN"], mobileOnly: true },
+  { name: "Firebase Cloud Messaging", category: "notifications", description: "Cross-platform push notifications via Google Firebase.", requiredKeys: ["FIREBASE_PROJECT_ID", "FIREBASE_SERVER_KEY"], url: "https://firebase.google.com" },
+  { name: "APNs", category: "notifications", description: "Apple Push Notification service for native iOS apps.", requiredKeys: ["APNS_KEY_ID", "APNS_TEAM_ID", "APNS_PRIVATE_KEY"], mobileOnly: true },
 
   // Analytics
-  { name: "PostHog", category: "analytics", description: "Open-source product analytics with session recording, feature flags, and A/B testing.", status: "available", requiredKeys: ["POSTHOG_API_KEY", "POSTHOG_HOST"], url: "https://posthog.com" },
-  { name: "Sentry", category: "analytics", description: "Error tracking and performance monitoring. Catches exceptions and slow transactions in production.", status: "available", requiredKeys: ["SENTRY_DSN"], url: "https://sentry.io" },
-  { name: "Google Analytics", category: "analytics", description: "Traffic and conversion analytics. Standard for web apps and marketing sites.", status: "available", requiredKeys: ["GA_MEASUREMENT_ID"], url: "https://analytics.google.com" },
-  { name: "Datadog", category: "analytics", description: "Full-stack observability with APM, logs, metrics, and infrastructure monitoring.", status: "coming-soon", requiredKeys: ["DD_API_KEY", "DD_APP_KEY"] },
+  { name: "PostHog", category: "analytics", description: "Product analytics with session recording, feature flags, and A/B testing.", requiredKeys: ["POSTHOG_API_KEY", "POSTHOG_HOST"], url: "https://posthog.com" },
+  { name: "Sentry", category: "analytics", description: "Error tracking and performance monitoring.", requiredKeys: ["SENTRY_DSN"], url: "https://sentry.io" },
+  { name: "Google Analytics", category: "analytics", description: "Traffic and conversion analytics for web apps.", requiredKeys: ["GA_MEASUREMENT_ID"], url: "https://analytics.google.com" },
+  { name: "Datadog", category: "analytics", description: "Full-stack observability with APM, logs, and infrastructure monitoring.", requiredKeys: ["DD_API_KEY", "DD_APP_KEY"], comingSoon: true },
 
   // Deploy
-  { name: "GitHub", category: "deploy", description: "Connect your repo for version control, CI/CD workflows, and automated deployments.", status: "available", requiredKeys: ["GITHUB_TOKEN"], url: "https://github.com" },
-  { name: "Vercel", category: "deploy", description: "Deploy frontend apps and serverless functions instantly from Git. Zero-config for React and Next.js.", status: "available", requiredKeys: ["VERCEL_TOKEN"], url: "https://vercel.com" },
-  { name: "Render", category: "deploy", description: "Full-stack cloud with web services, static sites, databases, and cron jobs.", status: "available", requiredKeys: ["RENDER_API_KEY"], url: "https://render.com" },
-  { name: "Fly.io", category: "deploy", description: "Run full-stack apps close to users on 30+ regions. Good for latency-sensitive apps.", status: "available", requiredKeys: ["FLY_API_TOKEN"], url: "https://fly.io" },
-  { name: "Railway", category: "deploy", description: "Deploy any app from GitHub in seconds. Includes Postgres, Redis, and private networking.", status: "available", requiredKeys: ["RAILWAY_API_TOKEN"], url: "https://railway.app" },
-  { name: "AWS", category: "deploy", description: "Full AWS cloud infrastructure including EC2, Lambda, ECS, RDS, and CloudFront.", status: "coming-soon", requiredKeys: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] },
+  { name: "GitHub", category: "deploy", description: "Connect your repo for version control and CI/CD workflows.", requiredKeys: ["GITHUB_TOKEN"], url: "https://github.com" },
+  { name: "Vercel", category: "deploy", description: "Deploy frontend apps and serverless functions instantly from Git.", requiredKeys: ["VERCEL_TOKEN"], url: "https://vercel.com" },
+  { name: "Render", category: "deploy", description: "Full-stack cloud with web services, static sites, and databases.", requiredKeys: ["RENDER_API_KEY"], url: "https://render.com" },
+  { name: "Fly.io", category: "deploy", description: "Run full-stack apps close to users on 30+ regions.", requiredKeys: ["FLY_API_TOKEN"], url: "https://fly.io" },
+  { name: "Railway", category: "deploy", description: "Deploy any app from GitHub in seconds with Postgres and Redis.", requiredKeys: ["RAILWAY_API_TOKEN"], url: "https://railway.app" },
+  { name: "AWS", category: "deploy", description: "Full AWS cloud infrastructure: EC2, Lambda, ECS, RDS, CloudFront.", requiredKeys: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"], comingSoon: true },
 
-  // App Stores
-  { name: "Apple Developer", category: "appstores", description: "Required for iOS App Store distribution, TestFlight beta testing, and push notifications.", status: "available", requiredKeys: ["APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"], url: "https://developer.apple.com/account" },
-  { name: "App Store Connect", category: "appstores", description: "Submit, manage, and monitor your iOS apps. Handles screenshots, metadata, and review submissions.", status: "available", requiredKeys: ["ASC_APP_ID", "ASC_KEY_ID", "ASC_ISSUER_ID"], url: "https://appstoreconnect.apple.com" },
-  { name: "TestFlight", category: "appstores", description: "Apple's beta testing platform. Distribute builds to up to 10,000 external testers before release.", status: "available", requiredKeys: ["APPLE_TEAM_ID"], url: "https://developer.apple.com/testflight" },
-  { name: "Google Play Console", category: "appstores", description: "Publish and manage Android apps. Handles APKs, AABs, staged rollouts, and store listings.", status: "available", requiredKeys: ["GOOGLE_PLAY_JSON_KEY"], url: "https://play.google.com/console" },
+  // App Stores (all mobile-only)
+  { name: "Apple Developer", category: "appstores", description: "Required for iOS App Store distribution and TestFlight beta testing.", requiredKeys: ["APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"], mobileOnly: true },
+  { name: "App Store Connect", category: "appstores", description: "Submit, manage, and monitor your iOS apps.", requiredKeys: ["ASC_APP_ID", "ASC_KEY_ID", "ASC_ISSUER_ID"], mobileOnly: true },
+  { name: "TestFlight", category: "appstores", description: "Apple's beta testing platform for up to 10,000 external testers.", requiredKeys: ["APPLE_TEAM_ID"], mobileOnly: true },
+  { name: "Google Play Console", category: "appstores", description: "Publish and manage Android apps with staged rollouts.", requiredKeys: ["GOOGLE_PLAY_JSON_KEY"], mobileOnly: true },
 
   // Design
-  { name: "Figma Import", category: "design", description: "Import a Figma file link and let the AI builder convert designs to code components.", status: "coming-soon", requiredKeys: ["FIGMA_ACCESS_TOKEN"] },
-  { name: "Brand Kit", category: "design", description: "Set your logo, colors, and typography. The AI applies your brand to every generated page.", status: "available" },
-  { name: "AI Logo / Icon Generator", category: "design", description: "Generate SVG logos, icons, and app icons from a text prompt. Uses the Canvas Brand Studio.", status: "available" },
+  { name: "Figma Import", category: "design", description: "Import a Figma file and let the AI builder convert designs to code.", requiredKeys: ["FIGMA_ACCESS_TOKEN"], comingSoon: true },
+  { name: "Brand Kit", category: "design", description: "Set your logo, colors, and typography. Applied to every generated page.", requiredKeys: [] },
+  { name: "AI Logo / Icon Generator", category: "design", description: "Generate SVG logos, icons, and app icons from a text prompt.", requiredKeys: [] },
 ];
-
-const STATUS_CONFIG: Record<IntegrationStatus, { label: string; color: string; dot: string }> = {
-  available: { label: "Available", color: "text-green-400", dot: "bg-green-400" },
-  "coming-soon": { label: "Coming soon", color: "text-muted-foreground", dot: "bg-muted-foreground/40" },
-  connected: { label: "Connected", color: "text-primary", dot: "bg-primary" },
-};
 
 const CATEGORY_COLORS: Record<string, string> = {
   ai: "from-violet-500/20 to-violet-600/10 border-violet-500/20",
@@ -162,75 +170,572 @@ const ICON_COLORS: Record<string, string> = {
   design: "text-fuchsia-400",
 };
 
-function IntegrationCard({
+/**
+ * "connected" = all required keys present AND all are verified.
+ * "partial"   = some keys present, or all present but not all verified.
+ * "not-connected" = no required keys present.
+ */
+function computeStatus(integration: Integration, secrets: SecretEntry[]): ConnectionStatus {
+  if (integration.requiredKeys.length === 0) return "not-connected";
+  const secretMap = new Map(secrets.map((s) => [s.name, s]));
+  const presentCount = integration.requiredKeys.filter((k) => secretMap.has(k)).length;
+  if (presentCount === 0) return "not-connected";
+  if (presentCount < integration.requiredKeys.length) return "partial";
+  // All keys present — require all to be verified for "connected"
+  const allVerified = integration.requiredKeys.every(
+    (k) => secretMap.get(k)?.verificationStatus === "verified",
+  );
+  return allVerified ? "connected" : "partial";
+}
+
+function getIntegrationSecrets(integration: Integration, secrets: SecretEntry[]): SecretEntry[] {
+  return secrets.filter((s) => integration.requiredKeys.includes(s.name));
+}
+
+const STATUS_CONFIG: Record<ConnectionStatus, { label: string; color: string; dot: string }> = {
+  connected: { label: "Connected", color: "text-green-400", dot: "bg-green-400" },
+  partial: { label: "Partial", color: "text-yellow-400", dot: "bg-yellow-400" },
+  "not-connected": { label: "Not connected", color: "text-muted-foreground", dot: "bg-muted-foreground/40" },
+};
+
+function VerifyStatusIcon({ status }: { status?: string }) {
+  if (status === "verified") return <CheckCircle2 className="h-3 w-3 text-green-400" />;
+  if (status === "verification_failed") return <XCircle className="h-3 w-3 text-destructive" />;
+  if (status === "manual_required") return <HelpCircle className="h-3 w-3 text-yellow-400" />;
+  return <AlertCircle className="h-3 w-3 text-muted-foreground/50" />;
+}
+
+function VerifyIntegrationButton({
   integration,
   projectId,
+  secrets,
+  onVerified,
 }: {
   integration: Integration;
   projectId: number;
+  secrets: SecretEntry[];
+  onVerified: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const cfg = STATUS_CONFIG[integration.status];
-  const catColor = CATEGORY_COLORS[integration.category] ?? "from-muted/20 to-muted/10 border-border";
-  const iconColor = ICON_COLORS[integration.category] ?? "text-muted-foreground";
-  const CatIcon = CATEGORIES.find((c) => c.id === integration.category)?.Icon ?? Blocks;
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<Record<number, string>>({});
+
+  const intSecrets = getIntegrationSecrets(integration, secrets);
+  if (intSecrets.length === 0) return null;
+
+  const handleVerify = async () => {
+    setLoading(true);
+    const next: Record<number, string> = {};
+    for (const secret of intSecrets) {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/secrets/${secret.id}/verify`, {
+          method: "POST",
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { status: string };
+          next[secret.id] = data.status;
+        } else {
+          next[secret.id] = "verification_failed";
+        }
+      } catch {
+        next[secret.id] = "verification_failed";
+      }
+    }
+    setResults(next);
+    setLoading(false);
+    onVerified();
+  };
+
+  const allVerified = intSecrets.every((s) => results[s.id] === "verified" || (!(s.id in results) && s.verificationStatus === "verified"));
+  const anyFailed = intSecrets.some((s) => results[s.id] === "verification_failed");
 
   return (
-    <div className={cn("border rounded-xl overflow-hidden transition-all", `bg-gradient-to-br ${catColor}`)}>
-      <button
-        className="w-full text-left p-3.5 flex items-start gap-3"
-        onClick={() => integration.hasDetailedSetup && setExpanded(!expanded)}
-      >
-        <div className={cn("w-9 h-9 rounded-lg bg-background/60 border border-border flex items-center justify-center shrink-0 mt-0.5")}>
-          <CatIcon className={cn("h-4 w-4", iconColor)} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-sm">{integration.name}</span>
-            <div className="flex items-center gap-1">
-              <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
-              <span className={cn("text-[10px] font-medium", cfg.color)}>{cfg.label}</span>
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">{integration.description}</p>
-          {integration.requiredKeys && integration.requiredKeys.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-2">
-              {integration.requiredKeys.map((k) => (
-                <span key={k} className="flex items-center gap-1 text-[10px] font-mono bg-background/60 border border-border px-1.5 py-0.5 rounded text-muted-foreground">
-                  <Key className="h-2.5 w-2.5" />
-                  {k}
-                </span>
-              ))}
-            </div>
+    <div className="flex items-center gap-1.5">
+      {Object.keys(results).length > 0 && (
+        <div className="flex items-center gap-1">
+          {allVerified ? (
+            <span className="flex items-center gap-1 text-[10px] text-green-400">
+              <CheckCircle2 className="h-3 w-3" /> All verified
+            </span>
+          ) : anyFailed ? (
+            <span className="flex items-center gap-1 text-[10px] text-destructive">
+              <XCircle className="h-3 w-3" /> Check failed
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-[10px] text-yellow-400">
+              <HelpCircle className="h-3 w-3" /> Manual check needed
+            </span>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0 self-start mt-1">
+      )}
+      <button
+        onClick={() => void handleVerify()}
+        disabled={loading}
+        className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 border border-border rounded px-1.5 py-0.5"
+      >
+        {loading ? (
+          <><Loader2 className="h-2.5 w-2.5 animate-spin" /> Verifying…</>
+        ) : (
+          <><ShieldCheck className="h-2.5 w-2.5" /> Verify</>
+        )}
+      </button>
+    </div>
+  );
+}
+
+function ConnectModal({
+  integration,
+  projectId,
+  existingSecrets,
+  onClose,
+  onSuccess,
+}: {
+  integration: Integration;
+  projectId: number;
+  existingSecrets: SecretEntry[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>(
+    Object.fromEntries(integration.requiredKeys.map((k) => [k, ""])),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const createSecret = useCreateSecret();
+  const deleteSecret = useDeleteSecret();
+  const queryClient = useQueryClient();
+  // Build a map of existing secret names → id so we can upsert (delete + create)
+  const existingByName = new Map(existingSecrets.map((s) => [s.name, s.id]));
+
+  const handleSubmit = useCallback(async () => {
+    setError(null);
+    const keysToAdd = integration.requiredKeys.filter((k) => values[k]?.trim());
+    if (keysToAdd.length === 0) {
+      setError("Enter at least one value to connect this integration.");
+      return;
+    }
+    try {
+      for (const key of keysToAdd) {
+        // If a secret with this name already exists, delete it first (upsert)
+        const existingId = existingByName.get(key);
+        if (existingId !== undefined) {
+          await deleteSecret.mutateAsync({ id: projectId, secretId: existingId });
+        }
+        await createSecret.mutateAsync({
+          id: projectId,
+          data: { name: key, value: values[key]!.trim(), environment: "development" },
+        });
+      }
+      await queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save secrets. Please try again.");
+    }
+  }, [integration.requiredKeys, values, createSecret, deleteSecret, existingByName, projectId, queryClient, onSuccess]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div>
+            <h3 className="font-semibold text-base">{integration.name}</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{integration.description}</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors ml-3 shrink-0">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
           {integration.url && (
             <a
               href={integration.url}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="text-muted-foreground hover:text-foreground transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
             >
-              <ExternalLink className="h-3.5 w-3.5" />
+              <ExternalLink className="h-3 w-3" />
+              Get API keys from {integration.url.replace(/^https?:\/\//, "").split("/")[0]}
             </a>
           )}
-          {integration.hasDetailedSetup && (
-            <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />
+
+          {integration.requiredKeys.length === 0 ? (
+            <p className="text-sm text-muted-foreground">This integration requires no API keys.</p>
+          ) : (
+            <div className="space-y-2.5">
+              <p className="text-xs text-muted-foreground">
+                Enter the secret values below. They are encrypted and never returned in plain text. Add all keys to reach <strong className="text-foreground">Connected</strong> status — partial entries show as <strong className="text-yellow-400">Partial</strong> until all keys are saved and verified.
+              </p>
+              {integration.requiredKeys.map((key) => (
+                <div key={key}>
+                  <label className="block text-xs font-mono text-muted-foreground mb-1">{key}</label>
+                  <Input
+                    type="password"
+                    placeholder={`Enter ${key}`}
+                    value={values[key] ?? ""}
+                    onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                    className="font-mono text-xs"
+                    autoComplete="off"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md p-2.5">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              {error}
+            </div>
           )}
         </div>
-      </button>
-      {expanded && integration.hasDetailedSetup && (
-        <div className="border-t border-border/60 bg-background/40 p-3">
-          <IntegrationSetupCard integrationName={integration.name} why="" keysNeeded={integration.requiredKeys ?? []} />
+
+        <div className="flex gap-2 px-5 pb-5">
+          <Button variant="outline" size="sm" className="flex-1" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            className="flex-1"
+            onClick={() => void handleSubmit()}
+            disabled={createSecret.isPending || integration.requiredKeys.length === 0}
+          >
+            {createSecret.isPending ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Saving…
+              </>
+            ) : (
+              <>
+                <PlugZap className="h-3.5 w-3.5 mr-1.5" />
+                Connect
+              </>
+            )}
+          </Button>
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-export function IntegrationsRegistry({ projectId }: { projectId: number }) {
+function DisconnectModal({
+  integration,
+  secrets,
+  projectId,
+  onClose,
+  onSuccess,
+}: {
+  integration: Integration;
+  secrets: SecretEntry[];
+  projectId: number;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const deleteSecret = useDeleteSecret();
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const secretIds = getIntegrationSecrets(integration, secrets).map((s) => s.id);
+
+  const handleDisconnect = useCallback(async () => {
+    setError(null);
+    try {
+      for (const id of secretIds) {
+        await deleteSecret.mutateAsync({ id: projectId, secretId: id });
+      }
+      await queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove secrets.");
+    }
+  }, [deleteSecret, secretIds, projectId, queryClient, onSuccess]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+          <h3 className="font-semibold text-sm">Disconnect {integration.name}</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <p className="text-sm text-muted-foreground">
+            This will permanently delete the following secrets from this project:
+          </p>
+          <div className="space-y-1">
+            {integration.requiredKeys.map((k) => (
+              <div key={k} className="flex items-center gap-2 text-xs font-mono bg-muted border border-border rounded px-2.5 py-1.5">
+                <Key className="h-3 w-3 text-muted-foreground shrink-0" />
+                {k}
+              </div>
+            ))}
+          </div>
+          {error && (
+            <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md p-2.5">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2 px-5 pb-5">
+          <Button variant="outline" size="sm" className="flex-1" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="flex-1"
+            onClick={() => void handleDisconnect()}
+            disabled={deleteSecret.isPending}
+          >
+            {deleteSecret.isPending ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Removing…
+              </>
+            ) : (
+              <>
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                Disconnect
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IntegrationCard({
+  integration,
+  projectId,
+  secrets,
+}: {
+  integration: Integration;
+  projectId: number;
+  secrets: SecretEntry[];
+}) {
+  const [showConnect, setShowConnect] = useState(false);
+  const [showDisconnect, setShowDisconnect] = useState(false);
+  const queryClient = useQueryClient();
+
+  const status = computeStatus(integration, secrets);
+  const cfg = STATUS_CONFIG[status];
+  const catColor = CATEGORY_COLORS[integration.category] ?? "from-muted/20 to-muted/10 border-border";
+  const iconColor = ICON_COLORS[integration.category] ?? "text-muted-foreground";
+  const CatIcon = CATEGORIES.find((c) => c.id === integration.category)?.Icon ?? Blocks;
+  const secretMap = new Map(secrets.map((s) => [s.name, s]));
+
+  const isDisabled = integration.comingSoon || integration.mobileOnly;
+  const hasNoKeys = integration.requiredKeys.length === 0;
+  const hasAnySecrets = integration.requiredKeys.some((k) => secretMap.has(k));
+
+  const handleVerified = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
+  }, [queryClient, projectId]);
+
+  return (
+    <>
+      <div className={cn("border rounded-xl overflow-hidden transition-all", `bg-gradient-to-br ${catColor}`)}>
+        <div className="p-3.5 flex items-start gap-3">
+          <div className="w-9 h-9 rounded-lg bg-background/60 border border-border flex items-center justify-center shrink-0 mt-0.5">
+            <CatIcon className={cn("h-4 w-4", iconColor)} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-sm">{integration.name}</span>
+              {integration.mobileOnly ? (
+                <span className="text-[10px] bg-slate-500/20 text-slate-400 border border-slate-500/20 px-1.5 py-px rounded-full font-medium">
+                  Mobile — coming soon
+                </span>
+              ) : integration.comingSoon ? (
+                <span className="text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-px rounded-full font-medium">
+                  Coming soon
+                </span>
+              ) : hasNoKeys ? (
+                <span className="text-[10px] bg-green-500/15 text-green-400 border border-green-500/20 px-1.5 py-px rounded-full font-medium">
+                  No key needed
+                </span>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
+                  <span className={cn("text-[10px] font-medium", cfg.color)}>{cfg.label}</span>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">{integration.description}</p>
+
+            {/* Per-key status pills */}
+            {integration.requiredKeys.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {integration.requiredKeys.map((k) => {
+                  const secret = secretMap.get(k);
+                  return (
+                    <span
+                      key={k}
+                      className={cn(
+                        "flex items-center gap-1 text-[10px] font-mono bg-background/60 border px-1.5 py-0.5 rounded",
+                        secret?.verificationStatus === "verified"
+                          ? "border-green-500/40 text-green-400/80"
+                          : secret
+                          ? "border-yellow-500/30 text-yellow-400/70"
+                          : "border-border text-muted-foreground",
+                      )}
+                    >
+                      <VerifyStatusIcon status={secret?.verificationStatus} />
+                      {k}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Verify button row — shown when secrets exist but not all verified */}
+            {!isDisabled && hasAnySecrets && status !== "not-connected" && (
+              <div className="mt-2">
+                <VerifyIntegrationButton
+                  integration={integration}
+                  projectId={projectId}
+                  secrets={secrets}
+                  onVerified={handleVerified}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-1.5 shrink-0 self-start mt-1">
+            {integration.url && (
+              <a
+                href={integration.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )}
+            {!isDisabled && !hasNoKeys && (
+              status === "not-connected" ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs px-2.5"
+                  onClick={() => setShowConnect(true)}
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Connect
+                </Button>
+              ) : (
+                <div className="flex items-center gap-1">
+                  {status === "partial" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs px-2.5 border-yellow-500/30 text-yellow-400 hover:text-yellow-300"
+                      onClick={() => setShowConnect(true)}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add keys
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs px-2 text-muted-foreground hover:text-destructive"
+                    onClick={() => setShowDisconnect(true)}
+                    title="Disconnect"
+                  >
+                    <XCircle className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )
+            )}
+          </div>
+        </div>
+      </div>
+
+      {showConnect && (
+        <ConnectModal
+          integration={integration}
+          projectId={projectId}
+          existingSecrets={secrets}
+          onClose={() => setShowConnect(false)}
+          onSuccess={() => setShowConnect(false)}
+        />
+      )}
+      {showDisconnect && (
+        <DisconnectModal
+          integration={integration}
+          secrets={secrets}
+          projectId={projectId}
+          onClose={() => setShowDisconnect(false)}
+          onSuccess={() => setShowDisconnect(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function MyIntegrationsBar({
+  secrets,
+  integrations,
+  onScrollTo,
+}: {
+  secrets: SecretEntry[];
+  integrations: Integration[];
+  onScrollTo: (name: string) => void;
+}) {
+  const connected = integrations.filter(
+    (i) => !i.comingSoon && !i.mobileOnly && computeStatus(i, secrets) === "connected" && i.requiredKeys.length > 0,
+  );
+
+  if (connected.length === 0) {
+    return (
+      <div className="flex items-center gap-2.5 bg-muted/50 border border-border rounded-lg px-3.5 py-2.5 text-xs text-muted-foreground">
+        <Plug className="h-3.5 w-3.5 shrink-0" />
+        Connect your first integration to supercharge your app. Click <strong className="text-foreground mx-1">Connect</strong> on any card below.
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-muted/40 border border-border rounded-lg px-3.5 py-2.5">
+      <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+        Connected &amp; Verified ({connected.length})
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {connected.map((i) => {
+          const CatIcon = CATEGORIES.find((c) => c.id === i.category)?.Icon ?? Blocks;
+          const iconColor = ICON_COLORS[i.category] ?? "text-muted-foreground";
+          return (
+            <button
+              key={i.name}
+              onClick={() => onScrollTo(i.name)}
+              className="flex items-center gap-1.5 bg-background border border-green-500/30 rounded-md px-2.5 py-1 text-xs font-medium hover:border-green-400/50 transition-colors"
+            >
+              <CatIcon className={cn("h-3 w-3", iconColor)} />
+              {i.name}
+              <CheckCircle2 className="h-3 w-3 text-green-400" />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function IntegrationsRegistry({
+  projectId,
+  secrets,
+}: {
+  projectId: number;
+  secrets: SecretEntry[];
+}) {
   const [activeCategory, setActiveCategory] = useState("all");
   const [search, setSearch] = useState("");
 
@@ -240,7 +745,7 @@ export function IntegrationsRegistry({ projectId }: { projectId: number }) {
       !search ||
       i.name.toLowerCase().includes(search.toLowerCase()) ||
       i.description.toLowerCase().includes(search.toLowerCase()) ||
-      i.requiredKeys?.some((k) => k.toLowerCase().includes(search.toLowerCase()));
+      i.requiredKeys.some((k) => k.toLowerCase().includes(search.toLowerCase()));
     return matchCat && matchSearch;
   });
 
@@ -251,9 +756,26 @@ export function IntegrationsRegistry({ projectId }: { projectId: number }) {
     return acc;
   }, {});
 
+  const handleScrollTo = (name: string) => {
+    // Reset filters first so the card becomes visible, then scroll after render
+    setSearch("");
+    setActiveCategory("all");
+    const id = `integration-${name.replace(/\s+/g, "-").toLowerCase()}`;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    });
+  };
+
   return (
     <div className="flex flex-col h-full gap-3">
-      {/* Search */}
+      <MyIntegrationsBar
+        secrets={secrets}
+        integrations={INTEGRATIONS}
+        onScrollTo={handleScrollTo}
+      />
+
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
         <input
@@ -264,7 +786,6 @@ export function IntegrationsRegistry({ projectId }: { projectId: number }) {
         />
       </div>
 
-      {/* Category filters */}
       <div className="flex gap-1.5 flex-wrap">
         {CATEGORIES.map(({ id, label, Icon }) => (
           <button
@@ -286,7 +807,6 @@ export function IntegrationsRegistry({ projectId }: { projectId: number }) {
         ))}
       </div>
 
-      {/* Integration grid */}
       <div className="flex-1 overflow-y-auto grid grid-cols-1 gap-2 content-start">
         {filtered.length === 0 && (
           <div className="col-span-full py-12 text-center text-muted-foreground text-sm">
@@ -294,18 +814,22 @@ export function IntegrationsRegistry({ projectId }: { projectId: number }) {
           </div>
         )}
         {filtered.map((integration) => (
-          <IntegrationCard
+          <div
             key={`${integration.category}-${integration.name}`}
-            integration={integration}
-            projectId={projectId}
-          />
+            id={`integration-${integration.name.replace(/\s+/g, "-").toLowerCase()}`}
+          >
+            <IntegrationCard
+              integration={integration}
+              projectId={projectId}
+              secrets={secrets}
+            />
+          </div>
         ))}
       </div>
 
-      {/* Info footer */}
       <div className="text-[11px] text-muted-foreground border-t border-border pt-2 flex items-start gap-1.5">
         <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 shrink-0 text-green-500/60" />
-        The AI builder recommends integrations as you build and tells you exactly which keys to add in Secrets and where to get them.
+        Verified integrations are automatically used by the AI builder when generating and refining code.
       </div>
     </div>
   );
