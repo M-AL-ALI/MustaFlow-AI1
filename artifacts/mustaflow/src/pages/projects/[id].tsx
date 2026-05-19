@@ -378,7 +378,15 @@ export default function ProjectWorkspacePage() {
   const [prefillSecretName, setPrefillSecretName] = useState<string | null>(null);
   const [viewingHistoryPlan, setViewingHistoryPlan] = useState<StructuredPlan | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
-  const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history">("chat");
+  const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history">(() => {
+    try {
+      const stored = localStorage.getItem(`mustaflow_lpanel_${projectId}`);
+      if (stored === "files" || stored === "history") return stored;
+    } catch {
+      // ignore
+    }
+    return "chat";
+  });
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
   const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
@@ -425,6 +433,27 @@ export default function ProjectWorkspacePage() {
     localStorage.setItem(`mustaflow_tab_${projectId}`, activeTab);
   }, [projectId, activeTab]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(`mustaflow_lpanel_${projectId}`, leftPanelTab);
+    } catch {
+      // ignore
+    }
+  }, [projectId, leftPanelTab]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(`mustaflow_lpanel_${projectId}`);
+      if (stored === "files" || stored === "history") {
+        setLeftPanelTab(stored);
+      } else {
+        setLeftPanelTab("chat");
+      }
+    } catch {
+      setLeftPanelTab("chat");
+    }
+  }, [projectId]);
+
   const isMobileLayout = windowWidth < 768;
 
   // Derive active module IDs from the most recent completed task report
@@ -452,10 +481,6 @@ export default function ProjectWorkspacePage() {
     }
     return undefined;
   }, [messages]);
-
-  useEffect(() => {
-    localStorage.setItem(`mustaflow_tab_${projectId}`, activeTab);
-  }, [projectId, activeTab]);
 
   useEffect(() => {
     if (scrollRef.current) {
