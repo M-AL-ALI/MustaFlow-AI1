@@ -13,6 +13,8 @@ import {
   Lock,
   UserPlus,
   UserMinus,
+  ScrollText,
+  ChevronLeft,
 } from "lucide-react";
 import {
   useGetAdminMe,
@@ -21,15 +23,18 @@ import {
   useListAdminRoles,
   useGrantAdminRole,
   useRevokeAdminRole,
+  useGetAdminAuditLog,
   getGetAdminMeQueryKey,
   getGetAdminStatsQueryKey,
   getGetAdminLaunchReadinessQueryKey,
   getListAdminRolesQueryKey,
+  getGetAdminAuditLogQueryKey,
 } from "@workspace/api-client-react";
 
 import type {
   AdminLaunchCheck,
   AdminRole,
+  AdminAuditLogEntry,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -42,6 +47,8 @@ function isHttpError(err: unknown): err is { status: number; data: unknown; mess
   );
 }
 
+const AUDIT_PAGE_SIZE = 50;
+
 export default function AdminPage() {
   const queryClient = useQueryClient();
 
@@ -49,6 +56,16 @@ export default function AdminPage() {
   const statsQuery = useGetAdminStats();
   const readinessQuery = useGetAdminLaunchReadiness();
   const rolesQuery = useListAdminRoles();
+
+  const [auditOffset, setAuditOffset] = useState(0);
+  const [auditLive, setAuditLive] = useState(true);
+  const auditParams = { limit: AUDIT_PAGE_SIZE, offset: auditOffset };
+  const auditQuery = useGetAdminAuditLog(auditParams, {
+    query: {
+      queryKey: getGetAdminAuditLogQueryKey(auditParams),
+      refetchInterval: auditLive ? 10_000 : false,
+    },
+  });
 
   const grantRoleMutation = useGrantAdminRole();
   const revokeRoleMutation = useRevokeAdminRole();
@@ -65,6 +82,8 @@ export default function AdminPage() {
   const loading = statsQuery.isPending;
   const readinessLoading = readinessQuery.isPending || readinessQuery.isFetching;
   const rolesLoading = rolesQuery.isPending || rolesQuery.isFetching;
+  const auditLoading = auditQuery.isPending || auditQuery.isFetching;
+  const auditPage = auditQuery.data;
 
   const isForbidden =
     isHttpError(meQuery.error) &&
@@ -75,6 +94,7 @@ export default function AdminPage() {
     void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() });
     void queryClient.invalidateQueries({ queryKey: getGetAdminLaunchReadinessQueryKey() });
     void queryClient.invalidateQueries({ queryKey: getListAdminRolesQueryKey() });
+    void queryClient.invalidateQueries({ queryKey: getGetAdminAuditLogQueryKey() });
   }
 
   function refreshReadiness() {
@@ -344,6 +364,93 @@ export default function AdminPage() {
         )}
       </div>
 
+      <div className="border border-border rounded-xl bg-card overflow-hidden">
+        <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <ScrollText className="h-3.5 w-3.5" />
+            Secret Audit Log
+            {auditPage && (
+              <span className="text-muted-foreground font-normal normal-case tracking-normal">
+                — {auditPage.total.toLocaleString()} total event{auditPage.total !== 1 ? "s" : ""}
+              </span>
+            )}
+          </h3>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setAuditLive((v) => !v)}
+              className={`flex items-center gap-1 text-[10px] font-semibold uppercase px-2 py-0.5 rounded border transition-colors ${
+                auditLive
+                  ? "border-green-500/40 text-green-500 bg-green-500/10"
+                  : "border-border text-muted-foreground bg-transparent"
+              }`}
+              title={auditLive ? "Auto-refresh on (every 10s) — click to pause" : "Auto-refresh off — click to enable"}
+            >
+              {auditLive ? "Live" : "Paused"}
+            </button>
+            {auditLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
+            <button
+              onClick={() => void queryClient.invalidateQueries({ queryKey: getGetAdminAuditLogQueryKey() })}
+              className="text-muted-foreground hover:text-foreground"
+              title="Refresh now"
+            >
+              <RefreshCw className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+
+        {!auditPage && auditLoading && (
+          <div className="px-4 py-6 text-sm text-muted-foreground text-center">Loading audit log…</div>
+        )}
+
+        {auditQuery.isError && !auditPage && (
+          <div className="px-4 py-6 text-sm text-destructive text-center">
+            Failed to load audit log. Check your connection or try refreshing.
+          </div>
+        )}
+
+        {auditPage && auditPage.entries.length === 0 && (
+          <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+            No audit events recorded yet.
+          </div>
+        )}
+
+        {auditPage && auditPage.entries.length > 0 && (
+          <>
+            <div className="divide-y divide-border">
+              {auditPage.entries.map((entry: AdminAuditLogEntry) => (
+                <AuditLogRow key={entry.id} entry={entry} />
+              ))}
+            </div>
+            <div className="px-4 py-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                Showing {auditOffset + 1}–{Math.min(auditOffset + AUDIT_PAGE_SIZE, auditPage.total)} of {auditPage.total.toLocaleString()}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setAuditOffset(Math.max(0, auditOffset - AUDIT_PAGE_SIZE))}
+                  disabled={auditOffset === 0}
+                  className="p-1 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Previous page"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <span className="px-2">
+                  Page {Math.floor(auditOffset / AUDIT_PAGE_SIZE) + 1} of {Math.max(1, Math.ceil(auditPage.total / AUDIT_PAGE_SIZE))}
+                </span>
+                <button
+                  onClick={() => setAuditOffset(auditOffset + AUDIT_PAGE_SIZE)}
+                  disabled={auditOffset + AUDIT_PAGE_SIZE >= auditPage.total}
+                  className="p-1 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Next page"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <AdminSection title="Security">
           <AdminItem label="Encryption" value="AES-256-GCM active" status="ok" />
@@ -413,6 +520,46 @@ export default function AdminPage() {
             status="ok"
           />
         </AdminSection>
+      </div>
+    </div>
+  );
+}
+
+const ACTION_COLORS: Record<string, string> = {
+  created: "text-green-500 bg-green-500/10",
+  updated: "text-blue-500 bg-blue-500/10",
+  deleted: "text-destructive bg-destructive/10",
+  accessed: "text-muted-foreground bg-muted",
+  verified: "text-green-500 bg-green-500/10",
+  verification_failed: "text-yellow-500 bg-yellow-500/10",
+};
+
+function AuditLogRow({ entry }: { entry: AdminAuditLogEntry }) {
+  const colorClass = ACTION_COLORS[entry.action] ?? "text-muted-foreground bg-muted";
+  const date = new Date(entry.createdAt);
+  const dateStr = date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const timeStr = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors">
+      <span
+        className={`shrink-0 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${colorClass}`}
+      >
+        {entry.action.replace(/_/g, " ")}
+      </span>
+      <div className="min-w-0 flex-1">
+        <span className="font-mono text-xs text-foreground truncate">{entry.secretName}</span>
+        <span className="text-muted-foreground text-xs ml-2">
+          project <span className="font-mono">{entry.projectId}</span>
+        </span>
+      </div>
+      <div className="shrink-0 text-right">
+        <code className="text-[10px] text-muted-foreground block font-mono truncate max-w-[140px]">
+          {entry.actorId}
+        </code>
+        <span className="text-[10px] text-muted-foreground/70">
+          {dateStr} {timeStr}
+        </span>
       </div>
     </div>
   );

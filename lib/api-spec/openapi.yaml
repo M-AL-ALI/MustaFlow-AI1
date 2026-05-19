@@ -1254,6 +1254,47 @@ paths:
                   userId: { type: string }
                   note: { type: string }
 
+  /admin/audit-log:
+    get:
+      operationId: getAdminAuditLog
+      tags: [admin]
+      summary: List secret audit log entries with pagination
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAuditLogPage"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden — not an admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
 components:
   schemas:
     HealthStatus:
@@ -2011,3 +2052,28 @@ components:
         role:
           type: string
           enum: [user, admin, owner]
+
+    AdminAuditLogEntry:
+      type: object
+      required: [id, projectId, secretName, action, actorId, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        secretId: { type: ["integer", "null"] }
+        secretName: { type: string }
+        action: { type: string }
+        actorId: { type: string }
+        metadata: {}
+        createdAt: { type: string, format: date-time }
+
+    AdminAuditLogPage:
+      type: object
+      required: [entries, total, limit, offset]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAuditLogEntry"
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }

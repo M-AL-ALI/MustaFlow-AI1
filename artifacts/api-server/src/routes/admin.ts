@@ -7,10 +7,11 @@
 //   GET  /api/admin/roles            — list all role grants
 //   POST /api/admin/roles            — grant or update a role
 //   DELETE /api/admin/roles/:userId  — revoke a role grant (resets to "user")
+//   GET  /api/admin/audit-log        — secret audit log (paginated)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { eq, sql, count } from "drizzle-orm";
+import { eq, sql, count, desc } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -18,6 +19,7 @@ import {
   userCreditsTable,
   creditTransactionsTable,
   deploymentLogsTable,
+  secretAuditLogTable,
 } from "@workspace/db";
 import { isAdminUser, requireAdmin } from "../lib/adminAuth";
 
@@ -321,6 +323,33 @@ router.delete("/admin/roles/:userId", async (req, res): Promise<void> => {
   await db.delete(userRolesTable).where(eq(userRolesTable.userId, targetUserId));
 
   res.json({ ok: true, userId: targetUserId, note: "Role revoked — user reverts to default 'user' role." });
+});
+
+// ── GET /api/admin/audit-log ──────────────────────────────────────────────────
+// Query params: limit (1–200, default 50), offset (default 0)
+router.get("/admin/audit-log", async (req, res): Promise<void> => {
+  const rawLimit = Number(req.query["limit"] ?? 50);
+  const rawOffset = Number(req.query["offset"] ?? 0);
+
+  const limit = Math.min(Math.max(1, isNaN(rawLimit) ? 50 : rawLimit), 200);
+  const offset = Math.max(0, isNaN(rawOffset) ? 0 : rawOffset);
+
+  const [entries, [totalRow]] = await Promise.all([
+    db
+      .select()
+      .from(secretAuditLogTable)
+      .orderBy(desc(secretAuditLogTable.createdAt))
+      .limit(limit)
+      .offset(offset),
+    db.select({ total: count() }).from(secretAuditLogTable),
+  ]);
+
+  res.json({
+    entries,
+    total: totalRow?.total ?? 0,
+    limit,
+    offset,
+  });
 });
 
 export default router;

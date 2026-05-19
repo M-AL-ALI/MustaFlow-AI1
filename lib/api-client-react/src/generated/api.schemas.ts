@@ -965,6 +965,25 @@ export interface AdminRoleInput {
   role: AdminRoleInputRole;
 }
 
+export interface AdminAuditLogEntry {
+  id: number;
+  projectId: number;
+  /** @nullable */
+  secretId?: number | null;
+  secretName: string;
+  action: string;
+  actorId: string;
+  metadata?: unknown;
+  createdAt: string;
+}
+
+export interface AdminAuditLogPage {
+  entries: AdminAuditLogEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export type DeleteWorkspace200 = {
   deleted: boolean;
 };
@@ -1066,5 +1085,17 @@ export type RevokeAdminRole200 = {
   ok: boolean;
   userId: string;
   note?: string;
+};
+
+export type GetAdminAuditLogParams = {
+/**
+ * @minimum 1
+ * @maximum 200
+ */
+limit?: number;
+/**
+ * @minimum 0
+ */
+offset?: number;
 };
 

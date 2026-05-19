@@ -1475,3 +1475,36 @@ export const RevokeAdminRoleResponse = zod.object({
 })
 
 
+/**
+ * @summary List secret audit log entries with pagination
+ */
+export const getAdminAuditLogQueryLimitDefault = 50;
+export const getAdminAuditLogQueryLimitMax = 200;
+
+export const getAdminAuditLogQueryOffsetDefault = 0;
+export const getAdminAuditLogQueryOffsetMin = 0;
+
+
+
+export const GetAdminAuditLogQueryParams = zod.object({
+  "limit": zod.coerce.number().min(1).max(getAdminAuditLogQueryLimitMax).default(getAdminAuditLogQueryLimitDefault),
+  "offset": zod.coerce.number().min(getAdminAuditLogQueryOffsetMin).default(getAdminAuditLogQueryOffsetDefault)
+})
+
+export const GetAdminAuditLogResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "secretId": zod.number().nullish(),
+  "secretName": zod.string(),
+  "action": zod.string(),
+  "actorId": zod.string(),
+  "metadata": zod.unknown().optional(),
+  "createdAt": zod.coerce.date()
+})),
+  "total": zod.number(),
+  "limit": zod.number(),
+  "offset": zod.number()
+})
+
+

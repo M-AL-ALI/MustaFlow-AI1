@@ -8,6 +8,8 @@
 
 export * from './activityItem';
 export * from './activityItemKind';
+export * from './adminAuditLogEntry';
+export * from './adminAuditLogPage';
 export * from './adminLaunchCheck';
 export * from './adminLaunchCheckStatus';
 export * from './adminLaunchReadiness';
@@ -45,6 +47,7 @@ export * from './deleteSecret200';
 export * from './deleteWorkspace200';
 export * from './deploymentLog';
 export * from './duplicateProjectResult';
+export * from './getAdminAuditLogParams';
 export * from './getPublishReadinessEnv';
 export * from './getPublishReadinessParams';
 export * from './grantAdminRole200';
