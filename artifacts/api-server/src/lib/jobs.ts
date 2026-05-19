@@ -24,6 +24,7 @@ import { logger } from "./logger";
 import { writeKnowledge } from "./knowledge";
 import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, deductCredits } from "../routes/credits";
+import { extractPageMap } from "./page-map";
 
 /** Credit cost per AI call, keyed by agentMode. */
 const CREDIT_COST: Record<string, number> = {
@@ -664,6 +665,11 @@ export async function runJob(input: JobInput): Promise<void> {
         projectId,
       }).catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
     }
+
+    // Fire-and-forget: re-extract page map from the freshly built files
+    void extractPageMap(projectId).catch((err) =>
+      logger.warn({ err, projectId }, "Page map extraction failed (non-fatal)"),
+    );
 
     // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
     void maybeEscalateWarnings(projectId, report.warnings ?? []);

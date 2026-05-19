@@ -18,6 +18,7 @@ import deploymentsRouter from "./deployments";
 import creditsRouter from "./credits";
 import domainsRouter from "./domains";
 import sslRouter, { sslWebhookRouter } from "./ssl";
+import pageMapRouter from "./page-map";
 import adminRouter from "./admin";
 import billingRouter, { billingWebhookRouter } from "./billing";
 import workspacesRouter from "./workspaces";
@@ -75,6 +76,7 @@ router.use(attachUser);
 
 // ── Specific rate limits ──────────────────────────────────────────────────────
 router.post("/projects/:id/messages", aiBuilderLimiter);
+router.post("/projects/:id/page-map/analyze", aiBuilderLimiter);
 router.post("/projects/:id/publish", publishLimiter);
 router.post("/projects/:id/unpublish", publishLimiter);
 router.post("/projects/:id/duplicate", exportLimiter);
@@ -99,6 +101,7 @@ router.use(deploymentsRouter);
 router.use(creditsRouter);
 router.use(domainsRouter);
 router.use(sslRouter);
+router.use(pageMapRouter);
 router.use(adminRouter);
 router.use(billingRouter);
 

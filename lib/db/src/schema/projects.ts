@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, jsonb } from "drizzle-orm/pg-core";
 import { workspacesTable } from "./workspaces";
 
 export const projectsTable = pgTable("projects", {
@@ -42,6 +42,9 @@ export const projectsTable = pgTable("projects", {
   domainVerifiedAt: timestamp("domain_verified_at", { withTimezone: true }),
   sslVerifiedAt: timestamp("ssl_verified_at", { withTimezone: true }),
   sslError: text("ssl_error"),
+  // pageMapData: AI-extracted and user-edited page/screen flow map.
+  // Structure: { web: { nodes, edges }, ios: { nodes, edges }, android: { nodes, edges } }
+  pageMapData: jsonb("page_map_data"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

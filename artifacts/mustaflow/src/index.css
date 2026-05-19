@@ -1,5 +1,6 @@
 @layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
 @import "@clerk/themes/shadcn.css";
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";

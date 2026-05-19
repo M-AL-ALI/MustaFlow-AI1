@@ -523,6 +523,58 @@ paths:
               schema:
                 $ref: "#/components/schemas/DuplicateProjectResult"
 
+  /projects/{id}/page-map:
+    get:
+      operationId: getPageMap
+      tags: [projects]
+      summary: Get the page/screen flow map for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Page map data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PageMapResponse"
+    put:
+      operationId: putPageMap
+      tags: [projects]
+      summary: Save the page/screen flow map for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PageMapData"
+      responses:
+        "200":
+          description: Updated page map
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PageMapResponse"
+
+  /projects/{id}/page-map/analyze:
+    post:
+      operationId: analyzePageMap
+      tags: [projects]
+      summary: Re-run AI extraction on project files and update the page map
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - in: query
+          name: platform
+          schema: { type: string, enum: [web, ios, android], default: web }
+      responses:
+        "200":
+          description: Updated page map after AI analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PageMapResponse"
+
   /projects/{id}/publish:
     post:
       operationId: publishProject
@@ -1281,6 +1333,64 @@ components:
         userId: { type: string }
         balance: { type: integer }
         updatedAt: { type: string, format: date-time }
+
+    PageMapNode:
+      type: object
+      required: [id, label, pageType, filePath, position, isNew, hasError, aiGenerated, notes]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        pageType:
+          type: string
+          enum: [landing, auth, form, dashboard, modal, settings, "404", tab-bar, drawer, sheet, list, detail, other]
+        filePath: { type: string }
+        position:
+          type: object
+          required: [x, y]
+          properties:
+            x: { type: number }
+            y: { type: number }
+        isNew: { type: boolean }
+        hasError: { type: boolean }
+        aiGenerated: { type: boolean }
+        notes: { type: string }
+
+    PageMapEdge:
+      type: object
+      required: [id, source, target, connectionType, aiGenerated]
+      properties:
+        id: { type: string }
+        source: { type: string }
+        target: { type: string }
+        connectionType:
+          type: string
+          enum: [nav, auth-gate, redirect, external]
+        aiGenerated: { type: boolean }
+
+    PageMapPlatformData:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/PageMapNode" }
+        edges:
+          type: array
+          items: { $ref: "#/components/schemas/PageMapEdge" }
+
+    PageMapData:
+      type: object
+      required: [web, ios, android]
+      properties:
+        web: { $ref: "#/components/schemas/PageMapPlatformData" }
+        ios: { $ref: "#/components/schemas/PageMapPlatformData" }
+        android: { $ref: "#/components/schemas/PageMapPlatformData" }
+
+    PageMapResponse:
+      type: object
+      required: [pageMapData]
+      properties:
+        pageMapData: { $ref: "#/components/schemas/PageMapData" }
 
     CreditTransaction:
       type: object

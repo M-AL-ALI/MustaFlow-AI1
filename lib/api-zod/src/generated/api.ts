@@ -524,6 +524,330 @@ export const DuplicateProjectParams = zod.object({
 })
 
 
+/**
+ * @summary Get the page/screen flow map for a project
+ */
+export const GetPageMapParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetPageMapResponse = zod.object({
+  "pageMapData": zod.object({
+  "web": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+}),
+  "ios": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+}),
+  "android": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+})
+})
+})
+
+
+/**
+ * @summary Save the page/screen flow map for a project
+ */
+export const PutPageMapParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const PutPageMapBody = zod.object({
+  "web": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+}),
+  "ios": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+}),
+  "android": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+})
+})
+
+export const PutPageMapResponse = zod.object({
+  "pageMapData": zod.object({
+  "web": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+}),
+  "ios": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+}),
+  "android": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+})
+})
+})
+
+
+/**
+ * @summary Re-run AI extraction on project files and update the page map
+ */
+export const AnalyzePageMapParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const analyzePageMapQueryPlatformDefault = `web`;
+
+export const AnalyzePageMapQueryParams = zod.object({
+  "platform": zod.enum(['web', 'ios', 'android']).default(analyzePageMapQueryPlatformDefault)
+})
+
+export const AnalyzePageMapResponse = zod.object({
+  "pageMapData": zod.object({
+  "web": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+}),
+  "ios": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+}),
+  "android": zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "pageType": zod.enum(['landing', 'auth', 'form', 'dashboard', 'modal', 'settings', '404', 'tab-bar', 'drawer', 'sheet', 'list', 'detail', 'other']),
+  "filePath": zod.string(),
+  "position": zod.object({
+  "x": zod.number(),
+  "y": zod.number()
+}),
+  "isNew": zod.boolean(),
+  "hasError": zod.boolean(),
+  "aiGenerated": zod.boolean(),
+  "notes": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
+  "aiGenerated": zod.boolean()
+}))
+})
+})
+})
+
+
 export const PublishProjectParams = zod.object({
   "id": zod.coerce.number()
 })

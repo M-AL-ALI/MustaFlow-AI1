@@ -23,6 +23,7 @@ import type {
   ActivityItem,
   AgentTask,
   AgentTaskInput,
+  AnalyzePageMapParams,
   ApiError,
   BillingCheckoutInput,
   BillingCheckoutResult,
@@ -43,6 +44,8 @@ import type {
   ListDeployments200,
   ListKnowledgeParams,
   ListProjectsParams,
+  PageMapData,
+  PageMapResponse,
   Project,
   ProjectFileContent,
   ProjectFileSummary,
@@ -2104,6 +2107,234 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getDuplicateProjectMutationOptions(options));
+    }
+
+export const getGetPageMapUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/page-map`
+}
+
+/**
+ * @summary Get the page/screen flow map for a project
+ */
+export const getPageMap = async (id: number, options?: RequestInit): Promise<PageMapResponse> => {
+
+  return customFetch<PageMapResponse>(getGetPageMapUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPageMapQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/page-map`
+    ] as const;
+    }
+
+
+export const getGetPageMapQueryOptions = <TData = Awaited<ReturnType<typeof getPageMap>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPageMap>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPageMapQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPageMap>>> = ({ signal }) => getPageMap(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPageMap>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPageMapQueryResult = NonNullable<Awaited<ReturnType<typeof getPageMap>>>
+export type GetPageMapQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the page/screen flow map for a project
+ */
+
+export function useGetPageMap<TData = Awaited<ReturnType<typeof getPageMap>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPageMap>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPageMapQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getPutPageMapUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/page-map`
+}
+
+/**
+ * @summary Save the page/screen flow map for a project
+ */
+export const putPageMap = async (id: number,
+    pageMapData: PageMapData, options?: RequestInit): Promise<PageMapResponse> => {
+
+  return customFetch<PageMapResponse>(getPutPageMapUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      pageMapData,)
+  }
+);}
+
+
+
+
+export const getPutPageMapMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPageMap>>, TError,{id: number;data: BodyType<PageMapData>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putPageMap>>, TError,{id: number;data: BodyType<PageMapData>}, TContext> => {
+
+const mutationKey = ['putPageMap'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putPageMap>>, {id: number;data: BodyType<PageMapData>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  putPageMap(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutPageMapMutationResult = NonNullable<Awaited<ReturnType<typeof putPageMap>>>
+    export type PutPageMapMutationBody = BodyType<PageMapData>
+    export type PutPageMapMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Save the page/screen flow map for a project
+ */
+export const usePutPageMap = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPageMap>>, TError,{id: number;data: BodyType<PageMapData>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof putPageMap>>,
+        TError,
+        {id: number;data: BodyType<PageMapData>},
+        TContext
+      > => {
+      return useMutation(getPutPageMapMutationOptions(options));
+    }
+
+export const getAnalyzePageMapUrl = (id: number,
+    params?: AnalyzePageMapParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/page-map/analyze?${stringifiedParams}` : `/api/projects/${id}/page-map/analyze`
+}
+
+/**
+ * @summary Re-run AI extraction on project files and update the page map
+ */
+export const analyzePageMap = async (id: number,
+    params?: AnalyzePageMapParams, options?: RequestInit): Promise<PageMapResponse> => {
+
+  return customFetch<PageMapResponse>(getAnalyzePageMapUrl(id,params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getAnalyzePageMapMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzePageMap>>, TError,{id: number;params?: AnalyzePageMapParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof analyzePageMap>>, TError,{id: number;params?: AnalyzePageMapParams}, TContext> => {
+
+const mutationKey = ['analyzePageMap'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof analyzePageMap>>, {id: number;params?: AnalyzePageMapParams}> = (props) => {
+          const {id,params} = props ?? {};
+
+          return  analyzePageMap(id,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AnalyzePageMapMutationResult = NonNullable<Awaited<ReturnType<typeof analyzePageMap>>>
+
+    export type AnalyzePageMapMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Re-run AI extraction on project files and update the page map
+ */
+export const useAnalyzePageMap = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzePageMap>>, TError,{id: number;params?: AnalyzePageMapParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof analyzePageMap>>,
+        TError,
+        {id: number;params?: AnalyzePageMapParams},
+        TContext
+      > => {
+      return useMutation(getAnalyzePageMapMutationOptions(options));
     }
 
 export const getPublishProjectUrl = (id: number,) => {

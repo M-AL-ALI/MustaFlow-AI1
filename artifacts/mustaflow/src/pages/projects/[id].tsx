@@ -13,10 +13,12 @@ import {
   getListProjectFilesQueryKey,
   getListVersionsQueryKey,
   getListTasksQueryKey,
+  getGetPageMapQueryKey,
 } from "@workspace/api-client-react";
 import { BuildProgressFeed } from "@/components/build-progress-feed";
 import { CodeEditorTab } from "./components/code-editor-tab";
 import { ChatHistory } from "./components/chat-history";
+import { PageMapTab } from "./components/page-map-tab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // used by inner components only
 import { Button } from "@/components/ui/button";
 import {
@@ -282,12 +284,13 @@ const PROJECT_NAV = [
 const WORKSPACE_TABS = [
   { label: "Preview", value: "preview", icon: Monitor },
   { label: "Code", value: "code", icon: FileCode2 },
+  { label: "Canvas", value: "canvas", icon: Paintbrush2 },
+  { label: "Page Map", value: "page-map", icon: Globe },
   { label: "Tools & Files", value: "tools-files", icon: Blocks },
   { label: "Publishing", value: "publishing", icon: Rocket },
   { label: "Logs", value: "logs", icon: TerminalSquare },
   { label: "Resources", value: "resources", icon: BookOpen },
   { label: "Analytics", value: "analytics", icon: Activity },
-  { label: "Canvas", value: "canvas", icon: Paintbrush2 },
   { label: "Manage", value: "manage", icon: Settings },
 ];
 
@@ -333,6 +336,7 @@ export default function ProjectWorkspacePage() {
   });
 
   const [prompt, setPrompt] = useState("");
+  const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [agentMode, setAgentMode] = useState<AgentMode>("power");
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
@@ -440,6 +444,7 @@ export default function ProjectWorkspacePage() {
             void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
             void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
             void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+            void queryClient.invalidateQueries({ queryKey: getGetPageMapQueryKey(projectId) });
           }, 3000);
           const plan = data?.assistantMessage?.plan as Record<string, unknown> | null | undefined;
           const tid = plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
@@ -464,6 +469,16 @@ export default function ProjectWorkspacePage() {
     setPrompt("");
     send(currentPrompt);
   };
+
+  // When page-map requests a chat prefill, switch to chat and set the prompt
+  useEffect(() => {
+    if (chatPrefill !== null) {
+      setPrompt(chatPrefill);
+      setLeftPanelTab("chat");
+      setActiveTab("preview");
+      setChatPrefill(null);
+    }
+  }, [chatPrefill]);
 
   /** Called from PlanCard "Build now" / "Background" buttons */
   const runPlanned = useCallback((editedPrompt: string, mode: AgentMode, background: boolean) => {
@@ -1157,6 +1172,15 @@ export default function ProjectWorkspacePage() {
             )}
             {activeTab === "code" && <CodeEditorTab projectId={projectId} initialFileId={selectedCodeFileId} />}
             {activeTab === "canvas" && <CanvasTab projectId={projectId} />}
+            {activeTab === "page-map" && (
+              <PageMapTab
+                projectId={projectId}
+                isBuilding={project.status === "building"}
+                onSwitchToPreview={() => setActiveTab("preview")}
+                onSwitchToCode={() => setActiveTab("code")}
+                onSwitchToChat={(prefill) => { if (prefill) setChatPrefill(prefill); }}
+              />
+            )}
             {activeTab === "tools-files" && (
               <ToolsTab
                 projectId={projectId}

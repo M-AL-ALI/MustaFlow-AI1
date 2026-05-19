@@ -78,6 +78,10 @@
   "dependencies": {
     "@clerk/react": "^6.6.4",
     "@clerk/themes": "^2.4.57",
-    "@monaco-editor/react": "^4.7.0"
+    "@dagrejs/dagre": "^3.0.0",
+    "@monaco-editor/react": "^4.7.0",
+    "@types/dagre": "^0.7.54",
+    "@xyflow/react": "^12.10.2",
+    "html2canvas": "^1.4.1"
   }
 }

@@ -644,6 +644,75 @@ export interface UserCredit {
   updatedAt: string;
 }
 
+export type PageMapNodePageType = typeof PageMapNodePageType[keyof typeof PageMapNodePageType];
+
+
+export const PageMapNodePageType = {
+  landing: 'landing',
+  auth: 'auth',
+  form: 'form',
+  dashboard: 'dashboard',
+  modal: 'modal',
+  settings: 'settings',
+  NUMBER_404: '404',
+  'tab-bar': 'tab-bar',
+  drawer: 'drawer',
+  sheet: 'sheet',
+  list: 'list',
+  detail: 'detail',
+  other: 'other',
+} as const;
+
+export type PageMapNodePosition = {
+  x: number;
+  y: number;
+};
+
+export interface PageMapNode {
+  id: string;
+  label: string;
+  pageType: PageMapNodePageType;
+  filePath: string;
+  position: PageMapNodePosition;
+  isNew: boolean;
+  hasError: boolean;
+  aiGenerated: boolean;
+  notes: string;
+}
+
+export type PageMapEdgeConnectionType = typeof PageMapEdgeConnectionType[keyof typeof PageMapEdgeConnectionType];
+
+
+export const PageMapEdgeConnectionType = {
+  nav: 'nav',
+  'auth-gate': 'auth-gate',
+  redirect: 'redirect',
+  external: 'external',
+} as const;
+
+export interface PageMapEdge {
+  id: string;
+  source: string;
+  target: string;
+  connectionType: PageMapEdgeConnectionType;
+  aiGenerated: boolean;
+}
+
+export interface PageMapPlatformData {
+  nodes: PageMapNode[];
+  edges: PageMapEdge[];
+}
+
+export interface PageMapData {
+  web: PageMapPlatformData;
+  ios: PageMapPlatformData;
+  android: PageMapPlatformData;
+}
+
+export interface PageMapResponse {
+  pageMapData: PageMapData;
+}
+
 export interface CreditTransaction {
   id: number;
   userId: string;
@@ -692,6 +761,19 @@ export type DeleteWorkspace200 = {
 export type ListProjectsParams = {
 workspaceId?: number;
 };
+
+export type AnalyzePageMapParams = {
+platform?: AnalyzePageMapPlatform;
+};
+
+export type AnalyzePageMapPlatform = typeof AnalyzePageMapPlatform[keyof typeof AnalyzePageMapPlatform];
+
+
+export const AnalyzePageMapPlatform = {
+  web: 'web',
+  ios: 'ios',
+  android: 'android',
+} as const;
 
 export type UnpublishProject200 = {
   projectId: number;
