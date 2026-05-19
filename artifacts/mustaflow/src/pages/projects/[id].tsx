@@ -350,7 +350,6 @@ export default function ProjectWorkspacePage() {
     const stored = localStorage.getItem("mustaflow_split_pct");
     return stored ? Math.min(65, Math.max(25, parseFloat(stored))) : 38;
   });
-  const [focusMode, setFocusMode] = useState(false);
   const [windowWidth, setWindowWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1200));
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
