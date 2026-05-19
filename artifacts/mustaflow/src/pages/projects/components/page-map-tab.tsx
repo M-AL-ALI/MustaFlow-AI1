@@ -168,6 +168,10 @@ export function PageMapTab({
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
 
+  // Reset the one-time fitView guard whenever the platform changes so that
+  // switching back to a platform re-frames all nodes correctly on the next onInit.
+  useEffect(() => { initialisedRef.current = false; }, [platform]);
+
   const platformData = mapResponse?.pageMapData?.[platform];
   const hasNodes = (platformData?.nodes?.length ?? 0) > 0 || nodes.length > 0;
 
