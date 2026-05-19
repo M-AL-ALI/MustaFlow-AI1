@@ -26,6 +26,7 @@ import { TemplatePicker } from "@/components/template-picker";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { type TemplateDefinition } from "@/lib/templates";
 import { cn } from "@/lib/utils";
+import { DemoAnimation } from "@/components/demo-animation";
 
 // Mobile generation is intentionally excluded — the builder produces static
 // HTML/CSS/JS. Expo/React Native output is a future milestone.
@@ -228,8 +229,21 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* How it works */}
+        {/* Animated demo */}
         <div className="border-t border-border bg-muted/20">
+          <div className="max-w-4xl mx-auto px-6 py-20">
+            <div className="text-center mb-10">
+              <h2 className="text-2xl font-bold tracking-tight mb-2">See it in action</h2>
+              <p className="text-muted-foreground text-sm max-w-md mx-auto">
+                From a single sentence to a live, shareable app — watch the full journey.
+              </p>
+            </div>
+            <DemoAnimation />
+          </div>
+        </div>
+
+        {/* How it works */}
+        <div className="border-t border-border bg-background">
           <div className="max-w-4xl mx-auto px-6 py-20">
             <div className="text-center mb-12">
               <h2 className="text-2xl font-bold tracking-tight mb-2">How it works</h2>
