@@ -1,4 +1,4 @@
-import { eq, sql, and, inArray, desc, or } from "drizzle-orm";
+import { eq, sql, and, inArray, desc, or, asc } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -54,6 +54,9 @@ export interface JobInput {
   userPrompt: string;
   agentMode: AgentMode;
   conversationHistory?: ConversationTurn[];
+  queueBatchId?: string | null;
+  queueIndex?: number | null;
+  queueTotalCount?: number | null;
 }
 
 async function emitEvent(
@@ -475,8 +478,87 @@ async function maybeEscalateWarnings(
   }
 }
 
+async function drainNextBatchTask(completedTaskId: number): Promise<void> {
+  const [completedTask] = await db
+    .select()
+    .from(agentTasksTable)
+    .where(eq(agentTasksTable.id, completedTaskId));
+  if (!completedTask?.queueBatchId) return;
+
+  const [nextTask] = await db
+    .select()
+    .from(agentTasksTable)
+    .where(
+      and(
+        eq(agentTasksTable.queueBatchId, completedTask.queueBatchId),
+        eq(agentTasksTable.status, "queued"),
+      ),
+    )
+    .orderBy(asc(agentTasksTable.queueIndex))
+    .limit(1);
+
+  if (!nextTask) return;
+
+  const [project] = await db
+    .select()
+    .from(projectsTable)
+    .where(eq(projectsTable.id, completedTask.projectId));
+  if (!project) return;
+
+  const recentMessages = await db
+    .select({ role: chatMessagesTable.role, content: chatMessagesTable.content })
+    .from(chatMessagesTable)
+    .where(eq(chatMessagesTable.projectId, completedTask.projectId))
+    .orderBy(asc(chatMessagesTable.createdAt));
+
+  const conversationHistory: ConversationTurn[] = recentMessages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+    .slice(-8);
+
+  const batchTasks = await db
+    .select({ id: agentTasksTable.id })
+    .from(agentTasksTable)
+    .where(eq(agentTasksTable.queueBatchId, completedTask.queueBatchId));
+
+  enqueueJob({
+    taskId: nextTask.id,
+    projectId: completedTask.projectId,
+    kind: "refine",
+    userPrompt: nextTask.prompt ?? "",
+    agentMode: (project.agentMode as AgentMode) ?? "power",
+    conversationHistory,
+    queueBatchId: completedTask.queueBatchId,
+    queueIndex: nextTask.queueIndex ?? undefined,
+    queueTotalCount: batchTasks.length,
+  });
+}
+
+async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
+  const [failedTask] = await db
+    .select({ queueBatchId: agentTasksTable.queueBatchId, projectId: agentTasksTable.projectId })
+    .from(agentTasksTable)
+    .where(eq(agentTasksTable.id, failedTaskId));
+  if (!failedTask?.queueBatchId) return;
+
+  try {
+    await db
+      .update(agentTasksTable)
+      .set({ status: "canceled", completedAt: sql`now()` })
+      .where(
+        and(
+          eq(agentTasksTable.queueBatchId, failedTask.queueBatchId),
+          eq(agentTasksTable.status, "queued"),
+        ),
+      );
+    logger.info({ queueBatchId: failedTask.queueBatchId }, "Cancelled remaining batch tasks after failure");
+  } catch (err) {
+    logger.warn({ err }, "Failed to cancel remaining batch tasks");
+  }
+}
+
 export async function runJob(input: JobInput): Promise<void> {
-  const { taskId, projectId, kind, userPrompt, agentMode, conversationHistory } = input;
+  const { taskId, projectId, kind, userPrompt, agentMode, conversationHistory, queueBatchId, queueIndex, queueTotalCount } = input;
 
   await emitEvent(taskId, "queued", "Task received, starting pipeline…");
 
@@ -727,6 +809,11 @@ export async function runJob(input: JobInput): Promise<void> {
 
     await emitEvent(taskId, "completed", "Task completed.");
 
+    // Drain next queued task in the same batch (if any)
+    void drainNextBatchTask(taskId).catch((err) =>
+      logger.warn({ err, taskId }, "Failed to drain next batch task"),
+    );
+
     // --- Deduct credits after a successful AI build/refine ---
     if (project.ownerId) {
       void deductCredits(project.ownerId, creditCost, {
@@ -778,13 +865,16 @@ export async function runJob(input: JobInput): Promise<void> {
     }
 
     // Append a system message so the chat shows the report was produced
+    const batchMeta = queueBatchId
+      ? { queueBatchId, queueIndex: queueIndex ?? null, queueTotalCount: queueTotalCount ?? null }
+      : {};
     await db.insert(chatMessagesTable).values({
       projectId,
       role: "system",
       content: assistantSummary,
       agentMode,
       planMode: false,
-      plan: { kind: "report", report } as unknown as Record<string, unknown>,
+      plan: { kind: "report", report, ...batchMeta } as unknown as Record<string, unknown>,
     });
   } catch (err) {
     logger.error({ err, taskId, projectId }, "Builder job failed");
@@ -814,15 +904,23 @@ export async function runJob(input: JobInput): Promise<void> {
     // Auto-write a diagnostic lesson to the Knowledge Vault
     void autoWriteFailureLesson(userPrompt, message, projectId, project.ownerId);
 
+    // Cancel remaining queued tasks in the same batch
+    void cancelRemainingBatchTasks(taskId).catch((err) =>
+      logger.warn({ err, taskId }, "Failed to cancel remaining batch tasks"),
+    );
+
     // Post a rich error message with suggestions into the chat
     try {
+      const errBatchMeta = queueBatchId
+        ? { queueBatchId, queueIndex: queueIndex ?? null, queueTotalCount: queueTotalCount ?? null }
+        : {};
       await db.insert(chatMessagesTable).values({
         projectId,
         role: "assistant",
         content: `Build failed: ${message}`,
         agentMode,
         planMode: false,
-        plan: { kind: "error", message, suggestions } as unknown as Record<string, unknown>,
+        plan: { kind: "error", message, suggestions, ...errBatchMeta } as unknown as Record<string, unknown>,
       });
     } catch {
       // best-effort

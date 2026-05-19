@@ -1262,6 +1262,8 @@ components:
           enum: [queued, planning, building, testing, needs_approval, completed, failed, canceled]
         prompt: { type: ["string", "null"] }
         result: { type: ["string", "null"] }
+        queueBatchId: { type: ["string", "null"] }
+        queueIndex: { type: ["integer", "null"] }
         report:
           type: ["object", "null"]
           additionalProperties: true

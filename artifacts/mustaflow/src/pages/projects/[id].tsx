@@ -22,7 +22,6 @@ import { PageMapTab } from "./components/page-map-tab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // used by inner components only
 import { Button } from "@/components/ui/button";
 import {
-  Send,
   Settings,
   History,
   Lock,
@@ -31,16 +30,13 @@ import {
   Globe,
   TerminalSquare,
   Zap,
-  Paperclip,
   CheckSquare,
   BrainCircuit,
-  ServerCog,
   CheckCircle2,
   AlertTriangle,
   CreditCard,
   KeyRound,
   ShieldCheck,
-  Mic,
   Paintbrush2,
   Cpu,
   Activity,
@@ -62,7 +58,11 @@ import {
   Pencil,
   X,
   Puzzle,
+  ListOrdered,
+  ServerCog,
 } from "lucide-react";
+import { QueueComposer } from "./components/queue-composer";
+import { QueueProgressStrip } from "./components/queue-progress-strip";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
@@ -359,6 +359,8 @@ export default function ProjectWorkspacePage() {
   });
 
   const [prompt, setPrompt] = useState("");
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const [batchTotalCount, setBatchTotalCount] = useState(0);
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [agentMode, setAgentMode] = useState<AgentMode>("power");
   const [planMode, setPlanMode] = useState(false);
@@ -550,6 +552,57 @@ export default function ProjectWorkspacePage() {
     setPrompt("");
     send(currentPrompt);
   };
+
+  // Restore active batch from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem(`mustaflow_batch_${projectId}`);
+    if (stored) {
+      setActiveBatchId(stored);
+    }
+  }, [projectId]);
+
+  const handleBatchStarted = useCallback((batchId: string, totalCount: number) => {
+    setActiveBatchId(batchId);
+    setBatchTotalCount(totalCount);
+    localStorage.setItem(`mustaflow_batch_${projectId}`, batchId);
+    void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+    void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+  }, [projectId, queryClient]);
+
+  const handleBatchComplete = useCallback(() => {
+    setActiveBatchId(null);
+    setBatchTotalCount(0);
+    localStorage.removeItem(`mustaflow_batch_${projectId}`);
+    void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+    void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+    void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+    void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
+  }, [projectId, queryClient]);
+
+  const handleBatchRetry = useCallback(async (remainingMessages: string[], retryMode: string) => {
+    setActiveBatchId(null);
+    setBatchTotalCount(0);
+    localStorage.removeItem(`mustaflow_batch_${projectId}`);
+    if (remainingMessages.length === 0) return;
+    if (remainingMessages.length === 1) {
+      send(remainingMessages[0]!, { agentMode: retryMode as AgentMode });
+      return;
+    }
+    try {
+      const res = await fetch(`/api/projects/${projectId}/queue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: remainingMessages, agentMode: retryMode, planMode }),
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { batchId: string; totalTasks: number };
+        handleBatchStarted(data.batchId, data.totalTasks);
+      }
+    } catch {
+      send(remainingMessages[0]!, { agentMode: retryMode as AgentMode });
+    }
+  }, [projectId, send, planMode, handleBatchStarted]);
 
   // When page-map requests a chat prefill, switch to chat and set the prompt
   useEffect(() => {
@@ -906,15 +959,29 @@ export default function ProjectWorkspacePage() {
                       : "bg-muted text-foreground rounded-bl-sm border border-border",
                   )}>
                     <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
-                    {isReport && (
-                      <ReportCard
-                        report={(planPayload as { kind: "report"; report: TaskReport }).report}
-                        onViewFile={(path) => {
-                          const f = files.find((x) => x.path === path);
-                          if (f) { setSelectedCodeFileId(f.id); setActiveTab("code"); }
-                        }}
-                      />
-                    )}
+                    {isReport && (() => {
+                      const rp = planPayload as { kind: "report"; report: TaskReport; queueBatchId?: string; queueIndex?: number | null; queueTotalCount?: number | null };
+                      const hasBatch = rp.queueBatchId && rp.queueTotalCount && rp.queueTotalCount > 1;
+                      return (
+                        <>
+                          {hasBatch && (
+                            <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
+                              <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
+                              <span className="text-[10px] text-muted-foreground/70 font-medium">
+                                Task {(rp.queueIndex ?? 0) + 1} of {rp.queueTotalCount}
+                              </span>
+                            </div>
+                          )}
+                          <ReportCard
+                            report={rp.report}
+                            onViewFile={(path) => {
+                              const f = files.find((x) => x.path === path);
+                              if (f) { setSelectedCodeFileId(f.id); setActiveTab("code"); }
+                            }}
+                          />
+                        </>
+                      );
+                    })()}
                     {isQueued && (
                       <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
                         <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary" />
@@ -1010,34 +1077,12 @@ export default function ProjectWorkspacePage() {
                     </span>
                   </div>
                 </div>
-                {/* Plan / Background controls */}
-                <div className="px-3 py-1 flex items-center gap-2">
-                  <button
-                    onClick={() => setPlanMode(!planMode)}
-                    className={cn(
-                      "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
-                      planMode ? "bg-secondary/15 text-secondary border-secondary/30" : "text-muted-foreground border-border hover:text-foreground",
-                    )}
-                  >
-                    <CheckSquare className="h-3 w-3" /> Plan
-                  </button>
-                  <button
-                    onClick={() => setRunInBackground((v) => !v)}
-                    className={cn(
-                      "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
-                      runInBackground ? "bg-primary/10 text-primary border-primary/30" : "text-muted-foreground border-border hover:text-foreground",
-                    )}
-                  >
-                    <ServerCog className="h-3 w-3" /> Background
-                  </button>
-                  <span className="ml-auto text-[9px] text-muted-foreground/40">⌘↩ to send</span>
-                </div>
               </>
             )}
           </div>
 
           {/* Quick action chips */}
-          {!sendMessage.isPending && prompt === "" && (
+          {!sendMessage.isPending && !activeBatchId && prompt === "" && (
             <div className="shrink-0 px-3 pt-2 pb-1 flex flex-wrap gap-1.5">
               {QUICK_ACTIONS.map((chip) => (
                 <button
@@ -1051,64 +1096,31 @@ export default function ProjectWorkspacePage() {
             </div>
           )}
 
-          {/* Chat input */}
-          <div className="shrink-0 px-3 py-2.5 border-t border-border">
-            <div className="flex items-start gap-2">
-              <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shrink-0 shadow-md shadow-primary/20 mt-0.5">
-                <Sparkles style={{ width: 12, height: 12 }} className="text-white" />
-              </div>
-              <div className="flex-1 bg-muted border border-border rounded-2xl rounded-tl-sm overflow-hidden">
-                <textarea
-                  ref={promptInputRef}
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder={planMode ? "Describe your app — I'll create a plan first…" : "Describe what to build or change…"}
-                  rows={2}
-                  className="w-full bg-transparent px-4 pt-3 pb-1 text-sm resize-none focus:outline-none text-foreground placeholder:text-muted-foreground/60"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) { e.preventDefault(); handleSend(); }
-                  }}
-                  title="⌘↩ or Enter to send · Shift+Enter for new line"
-                />
-                <div className="h-px bg-border/40 mx-4" />
-                <div className="flex items-center gap-2 px-3 py-1.5">
-                  <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Attach file">
-                    <Paperclip className="h-3.5 w-3.5" />
-                  </button>
-                  <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Attach design">
-                    <Paintbrush2 className="h-3.5 w-3.5" />
-                  </button>
-                  <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Voice">
-                    <Mic className="h-3.5 w-3.5" />
-                  </button>
-                  <div className="ml-auto flex items-center gap-2">
-                    <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
-                      {(["lite", "eco", "power", "pro"] as const).map((mode) => (
-                        <button
-                          key={mode}
-                          onClick={() => setAgentMode(mode)}
-                          className={cn(
-                            "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
-                            agentMode === mode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          {mode}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      onClick={handleSend}
-                      disabled={sendMessage.isPending || !prompt.trim()}
-                      title="Send (⌘↩)"
-                      className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shadow-md shadow-primary/30 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      <Send style={{ width: 14, height: 14 }} className="text-primary-foreground" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* Queue progress strip — shown when a batch is active */}
+          {activeBatchId && (
+            <QueueProgressStrip
+              projectId={projectId}
+              batchId={activeBatchId}
+              onComplete={handleBatchComplete}
+              onRetry={(msgs, mode) => void handleBatchRetry(msgs, mode)}
+            />
+          )}
+
+          {/* Chat / Queue input */}
+          <QueueComposer
+            projectId={projectId}
+            agentMode={agentMode}
+            onAgentModeChange={setAgentMode}
+            planMode={planMode}
+            onPlanModeChange={setPlanMode}
+            runInBackground={runInBackground}
+            onRunInBackgroundChange={setRunInBackground}
+            disabled={sendMessage.isPending || !!activeBatchId}
+            onSingleSend={(content) => { setPrompt(""); send(content); }}
+            onBatchStarted={handleBatchStarted}
+            promptValue={prompt}
+            onPromptValueChange={setPrompt}
+          />
           </>}
           </>
           )}

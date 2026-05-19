@@ -24,6 +24,7 @@ import adminRouter from "./admin";
 import billingRouter, { billingWebhookRouter } from "./billing";
 import workspacesRouter from "./workspaces";
 import buildsRouter from "./builds";
+import queueRouter from "./queue";
 import { attachUser } from "../lib/auth";
 import {
   aiBuilderLimiter,
@@ -59,6 +60,8 @@ const KNOWN_PREFIXES = [
   "/domain",
   "/admin",
   "/billing",
+  "/queue",
+  "/builds",
 ];
 
 router.use((req, res, next) => {
@@ -78,6 +81,7 @@ router.use(attachUser);
 
 // ── Specific rate limits ──────────────────────────────────────────────────────
 router.post("/projects/:id/messages", aiBuilderLimiter);
+router.post("/projects/:id/queue", aiBuilderLimiter);
 router.post("/projects/:id/page-map/analyze", aiBuilderLimiter);
 router.post("/projects/:id/publish", publishLimiter);
 router.post("/projects/:id/unpublish", publishLimiter);
@@ -108,6 +112,7 @@ router.use(mobileSettingsRouter);
 router.use(adminRouter);
 router.use(billingRouter);
 router.use(buildsRouter);
+router.use(queueRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

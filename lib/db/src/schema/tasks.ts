@@ -43,12 +43,15 @@ export const agentTasksTable = pgTable("agent_tasks", {
   result: text("result"),
   report: jsonb("report").$type<TaskReport>(),
   userFeedback: text("user_feedback"),
+  queueBatchId: text("queue_batch_id"),
+  queueIndex: integer("queue_index"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
 }, (table) => [
   index("agent_tasks_project_id_created_at_idx").on(table.projectId, table.createdAt),
+  index("agent_tasks_queue_batch_id_idx").on(table.queueBatchId),
 ]);
 
 export type AgentTask = typeof agentTasksTable.$inferSelect;

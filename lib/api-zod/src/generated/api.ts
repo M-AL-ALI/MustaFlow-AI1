@@ -319,6 +319,8 @@ export const ListTasksResponseItem = zod.object({
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'completed', 'failed', 'canceled']),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
+  "queueBatchId": zod.string().nullish(),
+  "queueIndex": zod.number().nullish(),
   "report": zod.object({
   "userRequest": zod.string().optional(),
   "filesCreated": zod.array(zod.string()).optional(),
@@ -379,6 +381,8 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'completed', 'failed', 'canceled']),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
+  "queueBatchId": zod.string().nullish(),
+  "queueIndex": zod.number().nullish(),
   "report": zod.object({
   "userRequest": zod.string().optional(),
   "filesCreated": zod.array(zod.string()).optional(),

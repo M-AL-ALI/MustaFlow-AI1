@@ -21,6 +21,10 @@ export interface AgentTask {
   /** @nullable */
   result?: string | null;
   /** @nullable */
+  queueBatchId?: string | null;
+  /** @nullable */
+  queueIndex?: number | null;
+  /** @nullable */
   report?: AgentTaskReport;
   /** @nullable */
   userFeedback?: AgentTaskUserFeedback;
