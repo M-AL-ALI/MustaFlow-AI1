@@ -517,6 +517,19 @@ function formatLogAge(fetchedAt: Date): string {
   return `fetched ${mins} min ago`;
 }
 
+/** Hook that returns a live-updating relative-time label for a log fetch timestamp.
+ *  Re-evaluates every 60 seconds so the label stays accurate without a full data refetch. */
+function useRelativeTime(fetchedAt: Date | null): string {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!fetchedAt) return;
+    const id = setInterval(() => setTick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
+  }, [fetchedAt]);
+  if (!fetchedAt) return "";
+  return formatLogAge(fetchedAt);
+}
+
 function EasBuildPanel({
   projectId,
   platform,
@@ -547,6 +560,12 @@ function EasBuildPanel({
   const [expandedLogsId, setExpandedLogsId] = useState<number | null>(null);
   const [reloadingLogsId, setReloadingLogsId] = useState<number | null>(null);
   const [logFetchedAt, setLogFetchedAt] = useState<Map<number, Date>>(() => new Map());
+  const [, setAgeTick] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setAgeTick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const logPreRef = useRef<HTMLPreElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1198,6 +1217,7 @@ function BuildLogViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
+  const logAge = useRelativeTime(fetchedAt);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isActive = ACTIVE_BUILD_STATUSES.has(buildStatus);
 
@@ -1247,7 +1267,7 @@ function BuildLogViewer({
         <div className="flex items-center gap-1.5">
           {fetchedAt && (
             <span className="text-[10px] text-zinc-600 whitespace-nowrap">
-              {formatLogAge(fetchedAt)}
+              {logAge}
             </span>
           )}
           <button
