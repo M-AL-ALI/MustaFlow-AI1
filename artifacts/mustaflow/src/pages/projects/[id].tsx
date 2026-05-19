@@ -307,6 +307,7 @@ export default function ProjectWorkspacePage() {
   const { data: project, isLoading: projectLoading, isError: projectError } = useGetProject(projectId, {
     query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId), retry: false },
   });
+  const sendMessage = useSendMessage();
   const { data: messages } = useListMessages(projectId, {
     query: {
       enabled: !!projectId,
@@ -314,7 +315,6 @@ export default function ProjectWorkspacePage() {
       refetchInterval: (project?.status === "building" || sendMessage.isPending) ? 2000 : 15000,
     },
   });
-  const sendMessage = useSendMessage();
   const rollbackVersion = useRollbackVersion();
   const { data: versions } = useListVersions(projectId, {
     query: { enabled: !!projectId, queryKey: getListVersionsQueryKey(projectId) },
@@ -354,6 +354,7 @@ export default function ProjectWorkspacePage() {
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoAnalyzedRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   // Track whether the pending send is plan-mode so we can show the right indicator
@@ -1039,7 +1040,6 @@ export default function ProjectWorkspacePage() {
                 setPrompt(text);
                 setLeftPanelTab("chat");
               }}
-              onViewPlan={(plan) => setViewingHistoryPlan(plan)}
             />
           )}
         </div>
@@ -1069,6 +1069,9 @@ export default function ProjectWorkspacePage() {
                 <PlanCard
                   plan={viewingHistoryPlan}
                   projectId={projectId}
+                  initialAgentMode={agentMode}
+                  onBuild={() => {}}
+                  disabled={true}
                   readOnly
                 />
               </div>

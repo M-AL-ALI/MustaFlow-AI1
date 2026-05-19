@@ -218,9 +218,6 @@ importers:
         specifier: 'catalog:'
         version: 3.25.76
     devDependencies:
-      '@types/acorn':
-        specifier: ^6.0.4
-        version: 6.0.4
       '@types/archiver':
         specifier: ^7.0.0
         version: 7.0.0
