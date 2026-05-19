@@ -28,6 +28,7 @@ import {
   Key,
   ExternalLink,
   Terminal,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -47,6 +48,78 @@ function CopyUrlButton({ url }: { url: string }) {
     >
       {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
+  );
+}
+
+function EasCredVerifyButton({
+  secretId,
+  projectId,
+  initialStatus,
+  onVerified,
+}: {
+  secretId: number;
+  projectId: number;
+  initialStatus: string;
+  onVerified?: (status: string) => void;
+}) {
+  const [status, setStatus] = useState(initialStatus ?? "unverified");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const verify = useCallback(async () => {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/secrets/${secretId}/verify`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { status: string; message?: string };
+        setStatus(data.status);
+        setMessage(data.message ?? null);
+        onVerified?.(data.status);
+      }
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [projectId, secretId, onVerified]);
+
+  const statusIcon =
+    status === "verified" ? (
+      <CheckCircle2 className="h-3 w-3 text-green-500" />
+    ) : status === "verification_failed" ? (
+      <XCircle className="h-3 w-3 text-destructive" />
+    ) : (
+      <AlertCircle className="h-3 w-3 text-muted-foreground" />
+    );
+
+  return (
+    <div className="shrink-0 flex flex-col items-end gap-0.5">
+      <div className="flex items-center gap-1">
+        {statusIcon}
+        <button
+          onClick={() => void verify()}
+          disabled={loading}
+          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 whitespace-nowrap"
+          title={message ?? undefined}
+        >
+          {loading ? "Checking…" : status === "verified" ? "Re-verify" : "Verify"}
+        </button>
+      </div>
+      {message && (
+        <span
+          className={cn(
+            "text-[9px] max-w-[120px] text-right leading-tight",
+            status === "verified"
+              ? "text-green-500"
+              : status === "verification_failed"
+              ? "text-destructive"
+              : "text-muted-foreground",
+          )}
+        >
+          {message}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -596,15 +669,17 @@ export function PublishingTab({
   const [iosCredsOpen, setIosCredsOpen] = useState(true);
   const [androidCredsOpen, setAndroidCredsOpen] = useState(true);
 
-  // EAS credentials checklist — tracks which secret names are configured
-  const [configuredSecrets, setConfiguredSecrets] = useState<Set<string>>(new Set());
+  // EAS credentials checklist — tracks which secret names are configured + their IDs + verification status
+  const [configuredSecrets, setConfiguredSecrets] = useState<Map<string, { id: number; verificationStatus: string }>>(new Map());
   const fetchConfiguredSecrets = useCallback(async () => {
     if (!isMobile) return;
     try {
       const res = await fetch(`/api/projects/${projectId}/secrets`);
       if (res.ok) {
-        const data = (await res.json()) as { secrets?: Array<{ name: string }> };
-        setConfiguredSecrets(new Set((data.secrets ?? []).map((s) => s.name)));
+        const data = (await res.json()) as { secrets?: Array<{ name: string; id: number; verificationStatus?: string | null }> };
+        setConfiguredSecrets(new Map(
+          (data.secrets ?? []).map((s) => [s.name, { id: s.id, verificationStatus: s.verificationStatus ?? "unverified" }])
+        ));
       }
     } catch { /* ignore */ }
   }, [projectId, isMobile]);
@@ -1691,6 +1766,7 @@ export function PublishingTab({
                         { name: "APPLE_ASC_PRIVATE_KEY", label: "ASC Private Key (.p8)", required: true, hint: "Paste the full .p8 file contents" },
                       ].map(({ name, label, required, hint }) => {
                         const isSet = configuredSecrets.has(name);
+                        const secretEntry = configuredSecrets.get(name);
                         return (
                           <div key={name} className="flex items-start gap-2.5 px-4 py-2.5 text-xs">
                             {isSet ? (
@@ -1722,8 +1798,20 @@ export function PublishingTab({
                                 Add
                               </button>
                             )}
-                            {isSet && (
-                              <span className="shrink-0 text-[10px] text-green-500 font-medium">Configured</span>
+                            {isSet && secretEntry && (
+                              <EasCredVerifyButton
+                                secretId={secretEntry.id}
+                                projectId={projectId}
+                                initialStatus={secretEntry.verificationStatus}
+                                onVerified={(status) => {
+                                  setConfiguredSecrets((prev) => {
+                                    const next = new Map(prev);
+                                    const entry = next.get(name);
+                                    if (entry) next.set(name, { ...entry, verificationStatus: status });
+                                    return next;
+                                  });
+                                }}
+                              />
                             )}
                           </div>
                         );
@@ -2007,6 +2095,7 @@ export function PublishingTab({
                         { name: "GOOGLE_SERVICE_ACCOUNT_JSON", label: "Google Play Service Account JSON", required: true, hint: "Service account JSON with releasemanager role from Google Play Console" },
                       ].map(({ name, label, required, hint }) => {
                         const isSet = configuredSecrets.has(name);
+                        const secretEntry = configuredSecrets.get(name);
                         return (
                           <div key={name} className="flex items-start gap-2.5 px-4 py-2.5 text-xs">
                             {isSet ? (
@@ -2038,8 +2127,20 @@ export function PublishingTab({
                                 Add
                               </button>
                             )}
-                            {isSet && (
-                              <span className="shrink-0 text-[10px] text-green-500 font-medium">Configured</span>
+                            {isSet && secretEntry && (
+                              <EasCredVerifyButton
+                                secretId={secretEntry.id}
+                                projectId={projectId}
+                                initialStatus={secretEntry.verificationStatus}
+                                onVerified={(status) => {
+                                  setConfiguredSecrets((prev) => {
+                                    const next = new Map(prev);
+                                    const entry = next.get(name);
+                                    if (entry) next.set(name, { ...entry, verificationStatus: status });
+                                    return next;
+                                  });
+                                }}
+                              />
                             )}
                           </div>
                         );

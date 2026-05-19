@@ -298,7 +298,30 @@ router.post(
 
     const nameLower = row.name.toLowerCase();
 
-    if (nameLower.includes("openai") || plaintext.startsWith("sk-")) {
+    if (nameLower === "eas_access_token") {
+      try {
+        const easRes = await fetch("https://api.expo.dev/v2/viewer", {
+          headers: { Authorization: `Bearer ${plaintext}`, "Content-Type": "application/json" },
+        });
+        if (easRes.ok) {
+          const body = (await easRes.json()) as { data?: { username?: string } };
+          const username = body?.data?.username;
+          status = "verified";
+          message = username
+            ? `EAS token is valid. Authenticated as "${username}".`
+            : "EAS token is valid and active.";
+        } else if (easRes.status === 401 || easRes.status === 403) {
+          status = "verification_failed";
+          message = "EAS token is invalid or expired (HTTP " + easRes.status + ").";
+        } else {
+          status = "manual_required";
+          message = `EAS API returned HTTP ${easRes.status} — please verify manually.`;
+        }
+      } catch {
+        status = "manual_required";
+        message = "Could not reach EAS API to verify — check network connectivity.";
+      }
+    } else if (nameLower.includes("openai") || plaintext.startsWith("sk-")) {
       try {
         const oRes = await fetch("https://api.openai.com/v1/models", {
           headers: { Authorization: `Bearer ${plaintext}` },
