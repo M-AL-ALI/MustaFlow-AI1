@@ -13,6 +13,7 @@ import {
   type Node,
   type OnNodeDrag,
   type OnEdgesDelete,
+  type EdgeMouseHandler,
 } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import html2canvas from "html2canvas";
@@ -30,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { PageNode, type PageNodeData, type PageType } from "./page-node";
 import { PageEdge, type ConnectionType } from "./page-edge";
 import { PageDetailPanel, type PageMapNodeState } from "./page-detail-panel";
+import { EdgeDetailPanel, type PageMapEdgeState } from "./edge-detail-panel";
 
 type Platform = "web" | "ios" | "android";
 
@@ -126,6 +128,7 @@ export function PageMapTab({
 }: PageMapTabProps) {
   const [platform, setPlatform] = useState<Platform>("web");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -147,7 +150,13 @@ export function PageMapTab({
   const hasNodes = (platformData?.nodes?.length ?? 0) > 0 || nodes.length > 0;
 
   const handleNodeClick = useCallback((nodeId: string) => {
+    setSelectedEdgeId(null);
     setSelectedNodeId(nodeId);
+  }, []);
+
+  const onEdgeClick: EdgeMouseHandler = useCallback((_evt, edge) => {
+    setSelectedNodeId(null);
+    setSelectedEdgeId(edge.id);
   }, []);
 
   // Keep a stable ref to onSwitchToPreview so the callback identity
@@ -238,6 +247,10 @@ export function PageMapTab({
   }, [debouncedSave, nodes, setEdges]);
 
   const onEdgesDelete: OnEdgesDelete = useCallback((deleted) => {
+    setSelectedEdgeId((prev) => {
+      if (prev && deleted.some((e) => e.id === prev)) return null;
+      return prev;
+    });
     setEdges((prev) => {
       const deletedIds = new Set(deleted.map((e) => e.id));
       const updated = prev.filter((e) => !deletedIds.has(e.id));
@@ -294,6 +307,42 @@ export function PageMapTab({
         planned: selectedNode.planned,
       }
     : null;
+
+  const selectedEdgeState: PageMapEdgeState | null = (() => {
+    if (!selectedEdgeId) return null;
+    const edge = edges.find((e) => e.id === selectedEdgeId);
+    if (!edge) return null;
+    const sourceNode = nodes.find((n) => n.id === edge.source);
+    const targetNode = nodes.find((n) => n.id === edge.target);
+    return {
+      id: edge.id,
+      sourceLabel: (sourceNode?.data as PageNodeData | undefined)?.label ?? edge.source,
+      targetLabel: (targetNode?.data as PageNodeData | undefined)?.label ?? edge.target,
+      connectionType: ((edge.data as { connectionType?: ConnectionType })?.connectionType ?? "nav") as ConnectionType,
+      aiGenerated: (edge.data as { aiGenerated?: boolean })?.aiGenerated ?? false,
+    };
+  })();
+
+  const handleEdgeSave = useCallback((edgeId: string, connectionType: ConnectionType) => {
+    setEdges((prev) => {
+      const updated = prev.map((e) =>
+        e.id === edgeId
+          ? { ...e, data: { ...(e.data as object), connectionType } }
+          : e,
+      );
+      debouncedSave(nodes, updated);
+      return updated;
+    });
+  }, [nodes, setEdges, debouncedSave]);
+
+  const handleEdgeDelete = useCallback((edgeId: string) => {
+    setSelectedEdgeId(null);
+    setEdges((prev) => {
+      const updated = prev.filter((e) => e.id !== edgeId);
+      debouncedSave(nodes, updated);
+      return updated;
+    });
+  }, [nodes, setEdges, debouncedSave]);
 
   const handleDetailSave = useCallback((updated: PageMapNodeState) => {
     setNodes((prev) => prev.map((n) => {
@@ -497,6 +546,8 @@ export function PageMapTab({
             onConnect={onConnect}
             onNodeDragStop={onNodeDragStop}
             onEdgesDelete={onEdgesDelete}
+            onEdgeClick={onEdgeClick}
+            onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
             onMove={(_evt, viewport) => { viewportRef.current = viewport; }}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
@@ -520,13 +571,19 @@ export function PageMapTab({
           </ReactFlow>
         )}
 
-        {/* Side panel */}
+        {/* Side panel — node or edge, mutually exclusive */}
         <PageDetailPanel
-          node={selectedNodeState}
+          node={selectedEdgeId ? null : selectedNodeState}
           onClose={() => setSelectedNodeId(null)}
           onSave={handleDetailSave}
           onFileOpen={handleFileOpen}
           onModifyPage={handleModifyPage}
+        />
+        <EdgeDetailPanel
+          edge={selectedNodeId ? null : selectedEdgeState}
+          onClose={() => setSelectedEdgeId(null)}
+          onSave={handleEdgeSave}
+          onDelete={handleEdgeDelete}
         />
       </div>
     </div>
