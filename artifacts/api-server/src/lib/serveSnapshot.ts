@@ -5,6 +5,7 @@ import type { Response } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable, projectVersionsTable } from "@workspace/db";
 import { guessMime } from "./builder";
+import { injectBridge } from "./consoleBridge";
 
 type SnapshotFile = { path: string; content: string; mimeType?: string };
 
@@ -57,8 +58,10 @@ export async function serveSnapshot(
   }
 
   const mime = file.mimeType || guessMime(file.path);
+  const isHtml = mime === "text/html";
+  const content = isHtml ? injectBridge(file.content) : file.content;
   res
     .type(mime)
     .setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
-    .send(file.content);
+    .send(content);
 }
