@@ -4,6 +4,8 @@ import { db, projectFilesTable, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { guessMime } from "../lib/builder";
 import { injectBridge } from "../lib/consoleBridge";
+import { extractPageMap } from "../lib/page-map";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -114,6 +116,14 @@ router.patch(
       content: updated.content,
       updatedAt: updated.updatedAt,
     });
+
+    const isHtml =
+      updated.mimeType === "text/html" || updated.path.endsWith(".html");
+    if (isHtml) {
+      extractPageMap(projectId).catch((err: unknown) => {
+        logger.warn({ err, projectId }, "page map re-extraction failed after manual file save");
+      });
+    }
   },
 );
 
