@@ -353,6 +353,7 @@ export default function ProjectWorkspacePage() {
   const [windowWidth, setWindowWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1200));
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const promptInputRef = useRef<HTMLTextAreaElement>(null);
   const autoAnalyzedRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
@@ -944,6 +945,7 @@ export default function ProjectWorkspacePage() {
               </div>
               <div className="flex-1 bg-muted border border-border rounded-2xl rounded-tl-sm overflow-hidden">
                 <textarea
+                  ref={promptInputRef}
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder={planMode ? "Describe your app — I'll create a plan first…" : "Describe what to build or change…"}
@@ -1148,6 +1150,8 @@ export default function ProjectWorkspacePage() {
                 onFixPrompt={(text) => {
                   setPrompt(text);
                   setLeftPanelTab("chat");
+                  if (isMobileLayout) setChatDrawerOpen(true);
+                  setTimeout(() => promptInputRef.current?.focus(), 50);
                 }}
               />
             )}

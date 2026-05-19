@@ -398,6 +398,18 @@ export function PreviewTab({
         >
           <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px" />
           <span className="flex-1 line-clamp-2 break-all">{crashBanner}</span>
+          {onFixPrompt && (
+            <button
+              type="button"
+              onClick={() => {
+                onFixPrompt(`Fix this runtime error: ${crashBanner}`);
+                setCrashBanner(null);
+              }}
+              className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-destructive/20 border border-destructive/30 text-destructive hover:bg-destructive/30 transition-colors whitespace-nowrap mt-px"
+            >
+              Fix with AI
+            </button>
+          )}
           <button
             type="button"
             onClick={() => { setConsoleOpen(true); setCrashBanner(null); }}
