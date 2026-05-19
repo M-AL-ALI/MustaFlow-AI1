@@ -6,12 +6,14 @@ import {
   useListVersions,
   useListProjectFiles,
   useSendMessage,
+  useListTasks,
   getGetProjectQueryKey,
   getListMessagesQueryKey,
   getListProjectFilesQueryKey,
   getListVersionsQueryKey,
   getListTasksQueryKey,
 } from "@workspace/api-client-react";
+import { BuildProgressFeed } from "@/components/build-progress-feed";
 import { CodeEditorTab } from "./components/code-editor-tab";
 import { ChatHistory } from "./components/chat-history";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // used by inner components only
@@ -40,10 +42,6 @@ import {
   Cpu,
   Activity,
   Rocket,
-  ChevronRight,
-  FolderOpen,
-  Code2,
-  FilePen,
   Sparkles,
   Monitor,
   Tablet,
@@ -276,60 +274,6 @@ function PlanCard({
   );
 }
 
-const AGENT_STEPS = [
-  { Icon: FolderOpen, msg: "Reading context" },
-  { Icon: BrainCircuit, msg: "Analyzing request" },
-  { Icon: Code2, msg: "Generating code" },
-  { Icon: FilePen, msg: "Writing files" },
-  { Icon: CheckCircle2, msg: "Verifying output" },
-];
-
-function AgentStepTicker() {
-  const [step, setStep] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setStep((s) => (s + 1) % AGENT_STEPS.length), 2200);
-    return () => clearInterval(id);
-  }, []);
-
-  const visible = [
-    AGENT_STEPS[(step + AGENT_STEPS.length - 1) % AGENT_STEPS.length],
-    AGENT_STEPS[step],
-    AGENT_STEPS[(step + 1) % AGENT_STEPS.length],
-  ];
-
-  return (
-    <div className="px-3 py-1.5 flex items-center gap-2">
-      <span className="relative flex h-2 w-2 shrink-0">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-      </span>
-      <span className="text-[11px] font-semibold text-primary shrink-0">Building</span>
-      <div className="flex items-center gap-1 overflow-x-hidden flex-1 min-w-0">
-        {visible.map((ev, i) => {
-          const isCurrent = i === 1;
-          const isPast = i === 0;
-          return (
-            <div key={`${step}-${i}`} className="flex items-center gap-1 shrink-0">
-              <div className={cn(
-                "flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] transition-all duration-500",
-                isCurrent
-                  ? "bg-primary/15 text-primary border border-primary/25"
-                  : isPast
-                  ? "text-green-500/60"
-                  : "text-muted-foreground/30",
-              )}>
-                <ev.Icon className={cn("h-3 w-3", isCurrent && "animate-pulse")} />
-                {ev.msg}
-                {isPast && <CheckCircle2 className="h-3 w-3 ml-0.5" />}
-              </div>
-              {i < 1 && <ChevronRight className="h-3 w-3 text-muted-foreground/30 shrink-0" />}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 function ErrorCard({
   message,
@@ -446,11 +390,20 @@ export default function ProjectWorkspacePage() {
   });
   const queryClient = useQueryClient();
 
+  const { data: tasksForFeed = [] } = useListTasks(projectId, {
+    query: {
+      enabled: !!projectId,
+      queryKey: getListTasksQueryKey(projectId),
+      refetchInterval: sendMessage.isPending ? 1500 : 15000,
+    },
+  });
+
   const [prompt, setPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<"lite" | "eco" | "power" | "pro">("power");
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+  const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState("preview");
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history">("chat");
@@ -510,6 +463,7 @@ export default function ProjectWorkspacePage() {
 
   const send = useCallback((content: string, opts?: { planMode?: boolean; background?: boolean }) => {
     if (!content.trim()) return;
+    setPendingBuildStartedAt(new Date());
     sendMessage.mutate(
       {
         id: projectId,
@@ -522,6 +476,7 @@ export default function ProjectWorkspacePage() {
       },
       {
         onSuccess: (data) => {
+          setPendingBuildStartedAt(null);
           // Invalidate immediately: messages + project status drive UI visibility
           void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
           void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
@@ -534,6 +489,9 @@ export default function ProjectWorkspacePage() {
           const plan = data?.assistantMessage?.plan as Record<string, unknown> | null | undefined;
           const tid = plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
           if (tid) setActiveTaskId(tid);
+        },
+        onError: () => {
+          setPendingBuildStartedAt(null);
         },
       },
     );
@@ -584,6 +542,21 @@ export default function ProjectWorkspacePage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [focusMode]);
+
+  // Discover the active task ID during sendMessage.isPending so BuildProgressFeed
+  // can show real events even before the API call resolves (for synchronous builds).
+  const pendingFeedTaskId = sendMessage.isPending
+    ? (tasksForFeed
+        .filter((t) => {
+          const activeStatuses = new Set(["queued", "planning", "building", "testing"]);
+          if (!activeStatuses.has(t.status)) return false;
+          if (!pendingBuildStartedAt) return true;
+          return new Date(t.createdAt).getTime() >= pendingBuildStartedAt.getTime() - 5000;
+        })
+        .sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        )[0]?.id ?? null)
+    : null;
 
   if (projectError || (!projectLoading && !project))
     return (
@@ -876,7 +849,11 @@ export default function ProjectWorkspacePage() {
           {/* Activity ticker / Status bar */}
           <div className="shrink-0 border-t border-border/40">
             {sendMessage.isPending ? (
-              <AgentStepTicker />
+              <BuildProgressFeed
+                projectId={projectId}
+                taskId={pendingFeedTaskId}
+                taskStartedAt={pendingBuildStartedAt}
+              />
             ) : (
               <>
                 {/* Bottom status bar — shown when idle */}
