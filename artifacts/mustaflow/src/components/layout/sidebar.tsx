@@ -15,6 +15,7 @@ import {
   LogOut,
   ChevronDown,
   Plus,
+  PanelLeftClose,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser, useClerk } from "@clerk/react";
@@ -44,14 +45,16 @@ const TERTIARY_NAV_ITEMS = [
 function NavGroup({
   items,
   title,
+  collapsed,
 }: {
   items: { name: string; href: string; icon: React.ElementType }[];
   title?: string;
+  collapsed?: boolean;
 }) {
   const [location] = useLocation();
   return (
     <div className="px-3 py-2">
-      {title && (
+      {title && !collapsed && (
         <h3 className="mb-2 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           {title}
         </h3>
@@ -71,7 +74,7 @@ function NavGroup({
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
-                <item.icon className="h-4 w-4" />
+                <item.icon className="h-4 w-4 shrink-0" />
                 {item.name}
               </div>
             </Link>
@@ -192,52 +195,85 @@ function UserSection() {
 
 export function Sidebar() {
   const [createOpen, setCreateOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const { isSignedIn } = useUser();
 
   return (
-    <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col shrink-0 overflow-y-auto">
-      <CreateProjectModal open={createOpen} onOpenChange={setCreateOpen} />
+    <>
+      {/* Floating logo pill — visible only when sidebar is collapsed */}
+      <button
+        onClick={() => setCollapsed(false)}
+        className={cn(
+          "fixed top-4 left-4 z-50 flex items-center gap-2 bg-sidebar border border-border rounded-xl px-2 py-1.5 shadow-lg transition-all duration-300",
+          collapsed
+            ? "opacity-100 pointer-events-auto translate-x-0"
+            : "opacity-0 pointer-events-none -translate-x-2",
+        )}
+        aria-label="Open sidebar"
+      >
+        <img src={logoUrl} alt="MustaFlow AI" className="h-7 w-auto object-contain" />
+      </button>
 
-      {/* Logo */}
-      <div className="px-4 py-5 flex justify-center shrink-0">
-        <img src={logoUrl} alt="MustaFlow AI" className="h-28 w-auto object-contain" />
-      </div>
+      {/* Sidebar sliding wrapper */}
+      <div
+        className={cn(
+          "relative shrink-0 transition-all duration-300 ease-in-out overflow-hidden",
+          collapsed ? "w-0" : "w-64",
+        )}
+      >
+        {/* Inner sidebar — fixed width so it doesn't squash during animation */}
+        <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col overflow-y-auto absolute inset-y-0 left-0">
+          <CreateProjectModal open={createOpen} onOpenChange={setCreateOpen} />
 
-      {/* Workspace switcher — visible when signed in */}
-      {isSignedIn && <WorkspaceSwitcher />}
+          {/* Logo + collapse button */}
+          <div className="px-4 py-5 flex flex-col items-center gap-2 shrink-0 relative">
+            <img src={logoUrl} alt="MustaFlow AI" className="h-28 w-auto object-contain" />
+            <button
+              onClick={() => setCollapsed(true)}
+              className="absolute top-3 right-3 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Collapse sidebar"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+          </div>
 
-      {/* Create button — visible when signed in */}
-      {isSignedIn && (
-        <div className="px-3 pb-2 shrink-0">
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/60 transition-colors px-3 py-2 text-sm font-semibold"
-          >
-            <Plus className="h-4 w-4" />
-            New Project
-          </button>
+          {/* Workspace switcher — visible when signed in */}
+          {isSignedIn && <WorkspaceSwitcher />}
+
+          {/* Create button — visible when signed in */}
+          {isSignedIn && (
+            <div className="px-3 pb-2 shrink-0">
+              <button
+                onClick={() => setCreateOpen(true)}
+                className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/60 transition-colors px-3 py-2 text-sm font-semibold"
+              >
+                <Plus className="h-4 w-4" />
+                New Project
+              </button>
+            </div>
+          )}
+
+          {/* Nav */}
+          <div className="flex-1 space-y-4">
+            <NavGroup items={NAV_ITEMS} />
+            <NavGroup items={SECONDARY_NAV_ITEMS} title="Platform" />
+            <AdminNavItem />
+          </div>
+
+          {/* Resources + user */}
+          <div className="mt-auto">
+            <NavGroup items={TERTIARY_NAV_ITEMS} title="Resources" />
+            <div className="px-6 py-2 flex items-center gap-3 text-[10px] text-muted-foreground/60">
+              <a href="/terms" className="hover:text-muted-foreground transition-colors">Terms</a>
+              <span>·</span>
+              <a href="/privacy" className="hover:text-muted-foreground transition-colors">Privacy</a>
+              <span>·</span>
+              <a href="/help" className="hover:text-muted-foreground transition-colors">Help</a>
+            </div>
+            <UserSection />
+          </div>
         </div>
-      )}
-
-      {/* Nav */}
-      <div className="flex-1 space-y-4">
-        <NavGroup items={NAV_ITEMS} />
-        <NavGroup items={SECONDARY_NAV_ITEMS} title="Platform" />
-        <AdminNavItem />
       </div>
-
-      {/* Resources + user */}
-      <div className="mt-auto">
-        <NavGroup items={TERTIARY_NAV_ITEMS} title="Resources" />
-        <div className="px-6 py-2 flex items-center gap-3 text-[10px] text-muted-foreground/60">
-          <a href="/terms" className="hover:text-muted-foreground transition-colors">Terms</a>
-          <span>·</span>
-          <a href="/privacy" className="hover:text-muted-foreground transition-colors">Privacy</a>
-          <span>·</span>
-          <a href="/help" className="hover:text-muted-foreground transition-colors">Help</a>
-        </div>
-        <UserSection />
-      </div>
-    </div>
+    </>
   );
 }
