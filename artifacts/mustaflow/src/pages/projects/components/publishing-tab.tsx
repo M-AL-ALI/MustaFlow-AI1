@@ -836,9 +836,21 @@ export function PublishingTab({
     }
   };
 
-  // Fetch secrets list for credentials checklist
+  // Fetch secrets list for credentials checklist; re-fetch when the tab
+  // becomes visible again so stale badge states are cleared automatically.
   useEffect(() => {
     void fetchConfiguredSecrets();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void fetchConfiguredSecrets();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [fetchConfiguredSecrets]);
 
   // Poll mobile builds every 5 s while any build is in progress
