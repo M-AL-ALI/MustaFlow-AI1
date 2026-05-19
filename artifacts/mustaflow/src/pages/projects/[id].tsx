@@ -53,6 +53,7 @@ import {
   ExternalLink,
   GitCommit,
   RotateCcw,
+  BookOpen,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -388,15 +389,16 @@ const PROJECT_NAV = [
 ];
 
 const WORKSPACE_TABS = [
-  { label: "Preview", value: "preview" },
-  { label: "Code", value: "code" },
-  { label: "Canvas", value: "canvas" },
-  { label: "Tools & Files", value: "tools-files" },
-  { label: "Publishing", value: "publishing" },
-  { label: "Logs", value: "logs" },
-  { label: "Analytics", value: "analytics" },
-  { label: "Resources", value: "resources" },
-  { label: "Manage", value: "manage" },
+  { label: "Preview", value: "preview", icon: Monitor },
+  { label: "Files", value: "code", icon: FileCode2 },
+  { label: "Publishing", value: "publishing", icon: Rocket },
+  { label: "Logs", value: "logs", icon: TerminalSquare },
+  { label: "Integrations", value: "tools-files", icon: Blocks },
+  { label: "Resources", value: "resources", icon: BookOpen },
+  { label: "Canvas", value: "canvas", icon: Paintbrush2 },
+  { label: "Domains", value: "domains", icon: Globe },
+  { label: "Analytics", value: "analytics", icon: Activity },
+  { label: "Manage", value: "manage", icon: Settings },
 ];
 
 const QUICK_ACTIONS = [
@@ -438,20 +440,31 @@ export default function ProjectWorkspacePage() {
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
-  const [deviceMode, setDeviceMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [activeTab, setActiveTab] = useState("preview");
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history">("chat");
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
   const [splitPct, setSplitPct] = useState<number>(() => {
     const stored = localStorage.getItem("mustaflow_split_pct");
-    return stored ? Math.min(65, Math.max(25, parseFloat(stored))) : 40;
+    return stored ? Math.min(65, Math.max(25, parseFloat(stored))) : 38;
   });
   const [isDragging, setIsDragging] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
+  const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoAnalyzedRef = useRef(false);
   const isDraggingRef = useRef(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
+
+  // Track window width for responsive layout
+  useEffect(() => {
+    const handler = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  const isMobileLayout = windowWidth < 1024;
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -548,8 +561,17 @@ export default function ProjectWorkspacePage() {
   }, []);
 
   const resetSplit = useCallback(() => {
-    updateSplit(40);
+    updateSplit(38);
   }, [updateSplit]);
+
+  // ESC key exits focus mode
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && focusMode) setFocusMode(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusMode]);
 
   if (projectError || (!projectLoading && !project))
     return (
@@ -598,20 +620,24 @@ export default function ProjectWorkspacePage() {
           <div className="flex items-stretch h-12">
             {WORKSPACE_TABS.filter((tab) =>
               tab.value !== "analytics" || project.status === "published",
-            ).map((tab) => (
-              <button
-                key={tab.value}
-                onClick={() => setActiveTab(tab.value)}
-                className={cn(
-                  "px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full",
-                  activeTab === tab.value
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {tab.label}
-              </button>
-            ))}
+            ).map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.value}
+                  onClick={() => setActiveTab(tab.value)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
+                    activeTab === tab.value
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-3 w-3 shrink-0" />
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -631,20 +657,42 @@ export default function ProjectWorkspacePage() {
       </div>
 
       {/* ── Main split: chat LEFT + preview RIGHT ── */}
+      {/* Mobile backdrop */}
+      {isMobileLayout && chatDrawerOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-30"
+          onClick={() => setChatDrawerOpen(false)}
+        />
+      )}
+
       <div
         ref={splitContainerRef}
         className={cn(
-          "flex-1 flex min-h-0 overflow-hidden select-none",
+          "flex-1 flex min-h-0 overflow-hidden select-none relative",
           isDragging && "cursor-col-resize",
         )}
-        onMouseMove={handleSplitDrag}
-        onMouseUp={stopSplitDrag}
-        onMouseLeave={stopSplitDrag}
+        onMouseMove={isMobileLayout ? undefined : handleSplitDrag}
+        onMouseUp={isMobileLayout ? undefined : stopSplitDrag}
+        onMouseLeave={isMobileLayout ? undefined : stopSplitDrag}
       >
         {/* ── LEFT: AI Chat Panel ── */}
         <div
-          className="flex flex-col min-h-0 border-r border-border bg-card/40"
-          style={{ width: `${splitPct}%`, minWidth: 260, maxWidth: "72%" }}
+          className={cn(
+            "flex flex-col min-h-0 border-border bg-card/40 overflow-hidden",
+            isMobileLayout
+              ? cn(
+                  "fixed bottom-0 left-0 right-0 z-40 border-t shadow-2xl transition-transform duration-300 ease-in-out",
+                  chatDrawerOpen ? "translate-y-0" : "translate-y-full",
+                )
+              : "border-r transition-[width] duration-300 ease-in-out",
+          )}
+          style={
+            isMobileLayout
+              ? { height: "65vh" }
+              : focusMode
+              ? { width: 0, minWidth: 0 }
+              : { width: `${splitPct}%`, minWidth: 260, maxWidth: "72%" }
+          }
         >
           {/* Left panel tab bar: Chat | Files | History */}
           <div className="shrink-0 flex border-b border-border bg-card/60">
@@ -675,6 +723,17 @@ export default function ProjectWorkspacePage() {
                 </button>
               );
             })}
+            {/* Close button for mobile drawer */}
+            {isMobileLayout && (
+              <button
+                onClick={() => setChatDrawerOpen(false)}
+                className="px-3 py-2 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
+                title="Close"
+                aria-label="Close chat drawer"
+              >
+                <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+              </button>
+            )}
           </div>
 
           {/* ── CHAT TAB ── */}
@@ -1016,76 +1075,56 @@ export default function ProjectWorkspacePage() {
         </div>
 
         {/* ── Drag handle ── */}
-        <div
-          className={cn(
-            "w-[5px] shrink-0 relative flex items-center justify-center group cursor-col-resize transition-colors duration-100",
-            isDragging ? "bg-primary/40" : "bg-border hover:bg-primary/30",
-          )}
-          onMouseDown={startSplitDrag}
-          onDoubleClick={resetSplit}
-          title="Drag to resize · Double-click to reset"
-        >
-          {/* Wider invisible grab zone so it's easy to click */}
-          <div className="absolute inset-y-0 -left-[5px] -right-[5px] z-10" />
-          {/* Grip dot indicator */}
-          <div className="relative z-20 flex flex-col gap-[4px]">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className={cn(
-                  "w-[3px] h-[3px] rounded-full transition-colors duration-100",
-                  isDragging
-                    ? "bg-primary"
-                    : "bg-muted-foreground/25 group-hover:bg-primary/60",
-                )}
-              />
-            ))}
+        {!focusMode && !isMobileLayout && (
+          <div
+            className={cn(
+              "shrink-0 relative flex items-center justify-center group cursor-col-resize transition-colors duration-100",
+              isDragging ? "bg-primary/30" : "bg-border/60 hover:bg-primary/20",
+            )}
+            style={{ width: 4 }}
+            onMouseDown={startSplitDrag}
+            onDoubleClick={resetSplit}
+            title="Drag to resize · Double-click to reset 38/62"
+          >
+            {/* Wider invisible grab zone */}
+            <div className="absolute inset-y-0 -left-2 -right-2 z-10" />
+            {/* 3 horizontal tick marks */}
+            <div className="relative z-20 flex flex-col gap-[5px]">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    "h-px rounded-full transition-colors duration-100",
+                    isDragging ? "w-3 bg-primary" : "w-3 bg-muted-foreground/30 group-hover:bg-primary/70",
+                  )}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* ── RIGHT: Preview / Tab Content ── */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background">
-          {activeTab === "preview" && (
-            <div className="shrink-0 border-b border-border px-3 py-1.5 flex items-center gap-2 bg-card">
-              <div className="flex items-center bg-muted border border-border rounded-lg p-0.5 gap-0.5">
-                {([
-                  { mode: "desktop", Icon: Monitor },
-                  { mode: "tablet", Icon: Tablet },
-                  { mode: "mobile", Icon: Smartphone },
-                ] as const).map(({ mode, Icon }) => (
-                  <button
-                    key={mode}
-                    onClick={() => setDeviceMode(mode)}
-                    className={cn(
-                      "w-7 h-6 flex items-center justify-center rounded-md transition-colors",
-                      deviceMode === mode ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                    )}
-                    title={mode}
-                  >
-                    <Icon style={{ width: 13, height: 13 }} />
-                  </button>
-                ))}
-              </div>
-              <div className="ml-auto flex items-center gap-2">
-                <button
-                  onClick={() => window.open(`/api/projects/${projectId}/preview/`, "_blank")}
-                  className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors border border-transparent hover:border-border"
-                  title="Open preview in new tab"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  New tab
-                </button>
-                <div className="w-px h-3.5 bg-border" />
-                <span className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Live Preview</span>
-                <div className={cn("w-1.5 h-1.5 rounded-full shrink-0",
-                  project.status === "building" ? "bg-primary animate-pulse" : "bg-green-500"
-                )} />
-              </div>
-            </div>
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background relative">
+          {/* Floating chat button — mobile only */}
+          {isMobileLayout && !chatDrawerOpen && (
+            <button
+              onClick={() => setChatDrawerOpen(true)}
+              className="fixed bottom-6 right-6 z-50 w-13 h-13 bg-primary rounded-full shadow-xl flex items-center justify-center hover:bg-primary/90 transition-colors"
+              style={{ width: 52, height: 52 }}
+              aria-label="Open AI Builder"
+              title="Open AI Builder"
+            >
+              <MessageSquare className="h-5 w-5 text-primary-foreground" />
+            </button>
           )}
-
           <div className="flex-1 min-h-0 overflow-hidden">
-            {activeTab === "preview" && <PreviewTab project={project} />}
+            {activeTab === "preview" && (
+              <PreviewTab
+                project={project}
+                focusMode={focusMode}
+                onToggleFocusMode={() => setFocusMode((f) => !f)}
+              />
+            )}
             {activeTab === "code" && <CodeEditorTab projectId={projectId} initialFileId={selectedCodeFileId} />}
             {activeTab === "canvas" && <CanvasTab projectId={projectId} />}
             {activeTab === "tools-files" && <ToolsTab projectId={projectId} />}

@@ -6,7 +6,6 @@ import {
   ExternalLink,
   Globe,
   LayoutTemplate,
-  Clock,
   Zap,
   BrainCircuit,
   Loader2,
@@ -15,15 +14,22 @@ import {
   AlertTriangle,
   Terminal,
   X,
-  ShieldAlert,
+  Maximize2,
+  Minimize2,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { useListProjectFiles, getListProjectFilesQueryKey } from "@workspace/api-client-react";
 
-type Platform = "web" | "ios" | "android";
 type DeviceFrame = "desktop" | "tablet" | "mobile";
+
+const DEVICE_LABELS: Record<DeviceFrame, string> = {
+  desktop: "Desktop",
+  tablet: "Tablet",
+  mobile: "Mobile",
+};
 
 const DEVICE_ICONS: Record<DeviceFrame, React.ElementType> = {
   desktop: Monitor,
@@ -31,22 +37,11 @@ const DEVICE_ICONS: Record<DeviceFrame, React.ElementType> = {
   mobile: Smartphone,
 };
 
-const DEVICE_SIZES: Record<Platform, Record<DeviceFrame, { w: number | string; h: number | string }>> = {
-  web: {
-    desktop: { w: "100%", h: "100%" },
-    tablet: { w: 768, h: 1024 },
-    mobile: { w: 390, h: 844 },
-  },
-  ios: {
-    desktop: { w: "100%", h: "100%" },
-    tablet: { w: 820, h: 1180 },
-    mobile: { w: 390, h: 844 },
-  },
-  android: {
-    desktop: { w: "100%", h: "100%" },
-    tablet: { w: 800, h: 1280 },
-    mobile: { w: 360, h: 800 },
-  },
+type ConsoleEntry = {
+  id: number;
+  level: "log" | "warn" | "error" | "info";
+  args: string[];
+  ts: number;
 };
 
 type Project = {
@@ -56,29 +51,53 @@ type Project = {
   name?: string;
 };
 
-// ─── Security note ────────────────────────────────────────────────────────────
-// The preview iframe uses sandbox="allow-scripts allow-forms allow-popups".
-// allow-same-origin is intentionally OMITTED so the iframe receives a null origin
-// and cannot read parent window data, cookies, localStorage, or secrets.
-//
-// Consequence: contentWindow access is cross-origin and will throw SecurityError.
-// Console capture and health-check DOM inspection are therefore not available.
-//
-// TODO (multi-user launch): serve previews from a separate subdomain with
-// short-lived signed URLs, or use a container-based preview system.
-// This will restore full isolation AND allow opt-in postMessage console bridging.
-// ─────────────────────────────────────────────────────────────────────────────
+// Bridge script injected into the preview iframe via srcdoc.
+// Uses only double quotes to avoid any escaping issues inside the template literal.
+// The script overrides console methods and forwards them to the parent via postMessage.
+const BRIDGE_SCRIPT = `(function(){
+  var _o={log:console.log,warn:console.warn,error:console.error,info:console.info};
+  function relay(lv,args){
+    try{
+      window.parent.postMessage({__mustaflow:true,level:lv,args:Array.prototype.slice.call(args).map(function(a){
+        try{return typeof a==="object"?JSON.stringify(a):String(a);}catch(e){return String(a);}
+      })},"*");
+    }catch(_){}
+  }
+  console.log=function(){relay("log",arguments);_o.log.apply(console,arguments);};
+  console.warn=function(){relay("warn",arguments);_o.warn.apply(console,arguments);};
+  console.error=function(){relay("error",arguments);_o.error.apply(console,arguments);};
+  console.info=function(){relay("info",arguments);_o.info.apply(console,arguments);};
+  window.addEventListener("error",function(e){
+    window.parent.postMessage({__mustaflow:true,level:"error",args:[(e.message||"Script error")+(e.filename?" ("+e.filename+":"+e.lineno+")":"")]},"*");
+  });
+  window.addEventListener("unhandledrejection",function(e){
+    var m=e.reason&&e.reason.message?e.reason.message:String(e.reason);
+    window.parent.postMessage({__mustaflow:true,level:"error",args:["Unhandled rejection: "+m]},"*");
+  });
+})();`;
 
-export function PreviewTab({ project }: { project: Project }) {
-  const [platform, setPlatform] = useState<Platform>("web");
+export function PreviewTab({
+  project,
+  focusMode,
+  onToggleFocusMode,
+}: {
+  project: Project;
+  focusMode?: boolean;
+  onToggleFocusMode?: () => void;
+}) {
   const [device, setDevice] = useState<DeviceFrame>("desktop");
   const [iframeKey, setIframeKey] = useState(0);
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
+  const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
+  const [srcdoc, setSrcdoc] = useState<string | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const prevStatusRef = useRef<string>(project.status);
   const healthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const entryIdRef = useRef(0);
+  const consoleEndRef = useRef<HTMLDivElement>(null);
 
   const { data: files, isLoading: filesLoading } = useListProjectFiles(project.id, {
     query: {
@@ -91,41 +110,86 @@ export function PreviewTab({ project }: { project: Project }) {
   const isLoading = filesLoading && files === undefined;
   const previewSrc = `/api/projects/${project.id}/preview/?t=${iframeKey}`;
 
-  const sizes = DEVICE_SIZES[platform][device];
-  const isFullWidth = sizes.w === "100%";
-
-  const lastUpdated = project.updatedAt
-    ? new Date(project.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : null;
-
-  // Hard refresh: force iframe remount (key change)
-  const forceRefresh = useCallback(() => {
-    setHealthWarning(null);
-    setIframeKey((k) => k + 1);
-  }, []);
-
-  // Smooth reload: try contentWindow.location.reload() first.
-  // Without allow-same-origin this will throw — falls through to key change.
-  const smoothRefresh = useCallback(() => {
-    setHealthWarning(null);
+  // Fetch preview HTML and inject console bridge + base tag so relative URLs still resolve
+  const loadWithBridge = useCallback(async (src: string) => {
+    setLoadingPreview(true);
+    setSrcdoc(null);
     try {
-      const cw = iframeRef.current?.contentWindow;
-      if (cw) {
-        cw.location.reload();
+      const res = await fetch(src);
+      if (!res.ok) {
+        setLoadingPreview(false);
         return;
       }
+      const html = await res.text();
+      const baseHref = new URL(src, window.location.href).href;
+      const bridgeTag = `<script>${BRIDGE_SCRIPT}<\/script>`;
+      const baseTag = `<base href="${baseHref}">`;
+      let injected: string;
+      if (/<head[\s>]/i.test(html)) {
+        injected = html.replace(/(<head[^>]*>)/i, `$1${baseTag}${bridgeTag}`);
+      } else if (/<html[\s>]/i.test(html)) {
+        injected = html.replace(/(<html[^>]*>)/i, `$1<head>${baseTag}${bridgeTag}</head>`);
+      } else {
+        injected = `<head>${baseTag}${bridgeTag}</head>${html}`;
+      }
+      setSrcdoc(injected);
     } catch {
-      // cross-origin (no allow-same-origin) — fall through to hard refresh
+      setSrcdoc(null);
+    } finally {
+      setLoadingPreview(false);
     }
+  }, []);
+
+  // Reload bridge whenever iframeKey, project, or file presence changes.
+  // Including previewSrc ensures stale srcdoc doesn't persist on project switches.
+  useEffect(() => {
+    if (!hasFiles) return;
+    void loadWithBridge(previewSrc);
+    // loadWithBridge is stable (useCallback with no deps); previewSrc encodes project.id + iframeKey
+  }, [iframeKey, hasFiles, previewSrc, loadWithBridge]);
+
+  // postMessage listener — only accept messages from our preview iframe.
+  // Requires both a mounted iframe ref AND a matching source window.
+  // When iframeRef is null (no iframe mounted) all messages are rejected.
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) return;
+      const data = event.data;
+      if (!data || typeof data !== "object" || !data.__mustaflow) return;
+      const VALID_LEVELS = ["log", "warn", "error", "info"] as const;
+      type ValidLevel = typeof VALID_LEVELS[number];
+      const rawLevel = data.level as string;
+      const level: ValidLevel = (VALID_LEVELS as readonly string[]).includes(rawLevel)
+        ? (rawLevel as ValidLevel)
+        : "log";
+      const args = Array.isArray(data.args) ? (data.args as string[]) : [String(data.args)];
+      const id = entryIdRef.current++;
+      setConsoleEntries((prev) => [...prev.slice(-199), { id, level: level as ConsoleEntry["level"], args, ts: Date.now() }]);
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
+  // Scroll console to bottom on new entries
+  useEffect(() => {
+    if (consoleOpen && consoleEndRef.current) {
+      consoleEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [consoleEntries, consoleOpen]);
+
+  const refresh = useCallback(() => {
+    setHealthWarning(null);
+    setConsoleEntries([]);
     setIframeKey((k) => k + 1);
   }, []);
 
-  // Auto-refresh when project transitions out of "building"
+  // Auto-refresh when project finishes building
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = project.status;
     if (prev === "building" && project.status !== "building" && hasFiles) {
       setHealthWarning(null);
+      setConsoleEntries([]);
       setIframeKey((k) => k + 1);
     }
   }, [project.status, hasFiles]);
@@ -133,72 +197,92 @@ export function PreviewTab({ project }: { project: Project }) {
   const handleIframeLoad = useCallback(() => {
     setHealthWarning(null);
     if (healthTimerRef.current) clearTimeout(healthTimerRef.current);
-
-    // Health check: without allow-same-origin, contentDocument is null.
-    // We set a timer and check the iframe's load state via a secondary mechanism.
-    // If the iframe src is not a 200, the browser will typically still fire onLoad,
-    // so we skip the empty-body check (it would throw cross-origin anyway).
-    // TODO: implement postMessage health ping from preview route once isolated domain is set up.
-    healthTimerRef.current = setTimeout(() => {
-      // Cross-origin check is not available without allow-same-origin.
-      // Health monitoring via postMessage bridge is planned for the isolated preview domain.
-    }, 3000);
   }, []);
 
-  // Cleanup health timer on unmount
   useEffect(() => () => {
     if (healthTimerRef.current) clearTimeout(healthTimerRef.current);
   }, []);
+
+  const errorCount = consoleEntries.filter((e) => e.level === "error").length;
+  const warnCount = consoleEntries.filter((e) => e.level === "warn").length;
+
+  // Shared iframe renderer based on current srcdoc/src state
+  const renderIframe = (extraClass?: string, extraStyle?: React.CSSProperties) => (
+    srcdoc != null ? (
+      <iframe
+        key={`srcdoc-${device}-${iframeKey}`}
+        ref={iframeRef}
+        srcDoc={srcdoc}
+        title="App preview"
+        aria-label="App preview"
+        className={cn("w-full border-0", extraClass)}
+        style={extraStyle}
+        sandbox="allow-scripts allow-forms allow-popups"
+        onLoad={handleIframeLoad}
+      />
+    ) : (
+      <iframe
+        key={`src-${device}-${iframeKey}`}
+        ref={iframeRef}
+        src={previewSrc}
+        title="App preview"
+        aria-label="App preview"
+        className={cn("w-full border-0", extraClass)}
+        style={extraStyle}
+        sandbox="allow-scripts allow-forms allow-popups"
+        onLoad={handleIframeLoad}
+      />
+    )
+  );
 
   return (
     <div className="flex flex-col h-full bg-background">
 
       {/* Preview toolbar */}
-      <div className="shrink-0 flex items-center gap-3 px-3 py-1.5 border-b border-border bg-card">
+      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-card">
 
-        {/* Platform selector */}
-        <div className="flex bg-muted rounded-lg p-0.5 shrink-0">
-          {(["web", "ios", "android"] as Platform[]).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPlatform(p)}
-              className={cn(
-                "px-3 py-1 text-[11px] font-semibold rounded-md transition-colors uppercase tracking-wide",
-                platform === p
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-
-        {/* Device selector */}
-        <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5 shrink-0">
+        {/* Device size switcher */}
+        <div className="flex items-center bg-muted border border-border rounded-lg p-0.5 gap-0.5 shrink-0">
           {(["desktop", "tablet", "mobile"] as DeviceFrame[]).map((d) => {
             const Icon = DEVICE_ICONS[d];
             return (
               <button
                 key={d}
                 onClick={() => setDevice(d)}
-                title={d}
+                title={DEVICE_LABELS[d]}
                 className={cn(
-                  "p-1.5 rounded-md transition-colors",
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-colors text-[11px] font-medium",
                   device === d
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                <Icon className="h-3.5 w-3.5" />
+                <Icon className="h-3 w-3" />
+                <span className="hidden sm:inline">{DEVICE_LABELS[d]}</span>
               </button>
             );
           })}
         </div>
 
-        <div className="w-px h-4 bg-border" />
+        {/* Mobile Phase 4 — subtle hover hint, not an interactive control */}
+        <div className="relative shrink-0 group">
+          <div
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] text-muted-foreground/30 border border-dashed border-border/25 cursor-default select-none"
+            aria-hidden="true"
+          >
+            <Smartphone className="h-3 w-3" />
+            <span>iOS / Android</span>
+          </div>
+          {/* Tooltip shown on hover only */}
+          <div className="absolute top-full left-0 mt-1.5 z-50 w-52 bg-popover border border-border rounded-lg shadow-xl p-2.5 text-[11px] text-muted-foreground hidden group-hover:block pointer-events-none">
+            <div className="font-semibold text-foreground mb-1">Mobile — Phase 4</div>
+            <p>iOS and Android publishing is planned for a future release. MustaFlow currently generates web apps.</p>
+          </div>
+        </div>
 
-        {/* Status badge */}
+        <div className="w-px h-4 bg-border shrink-0" />
+
+        {/* Status indicator */}
         <div className={cn(
           "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium shrink-0",
           project.status === "building"
@@ -212,7 +296,7 @@ export function PreviewTab({ project }: { project: Project }) {
             : "bg-muted text-muted-foreground",
         )}>
           <span className={cn(
-            "w-1.5 h-1.5 rounded-full",
+            "w-1.5 h-1.5 rounded-full shrink-0",
             project.status === "building" ? "bg-primary animate-pulse" :
             project.status === "published" ? "bg-green-500" :
             project.status === "testing" ? "bg-yellow-500" :
@@ -221,41 +305,47 @@ export function PreviewTab({ project }: { project: Project }) {
           {project.status}
         </div>
 
-        {lastUpdated && (
-          <div className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
-            <Clock className="h-3 w-3" />
-            {lastUpdated}
-          </div>
-        )}
-
         <div className="flex-1" />
 
-        {/* Sandbox notice button */}
+        {/* Console toggle */}
         {hasFiles && (
           <button
             onClick={() => setConsoleOpen((o) => !o)}
-            aria-label={consoleOpen ? "Close sandbox info" : "Open console panel"}
+            aria-label={consoleOpen ? "Close console" : "Open console"}
             aria-pressed={consoleOpen}
             className={cn(
-              "flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors shrink-0",
+              "flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors shrink-0 border",
               consoleOpen
-                ? "bg-zinc-800 text-zinc-100"
-                : "bg-muted text-muted-foreground hover:text-foreground",
+                ? "bg-zinc-800 text-zinc-100 border-zinc-700"
+                : errorCount > 0
+                ? "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/15"
+                : "bg-muted text-muted-foreground border-border hover:text-foreground",
             )}
-            title="Console info"
+            title="Console"
           >
             <Terminal className="h-3 w-3" />
             Console
+            {errorCount > 0 && (
+              <span className="px-1 py-0.5 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold leading-none">
+                {errorCount}
+              </span>
+            )}
+            {errorCount === 0 && warnCount > 0 && (
+              <span className="px-1 py-0.5 rounded-full bg-yellow-500 text-black text-[9px] font-bold leading-none">
+                {warnCount}
+              </span>
+            )}
           </button>
         )}
 
-        <div className="flex items-center gap-1">
+        {/* Action buttons */}
+        <div className="flex items-center gap-1 shrink-0">
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7"
-            onClick={smoothRefresh}
-            title="Reload preview"
+            onClick={refresh}
+            title="Refresh preview"
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
@@ -263,22 +353,24 @@ export function PreviewTab({ project }: { project: Project }) {
             variant="ghost"
             size="icon"
             className="h-7 w-7"
-            onClick={forceRefresh}
-            title="Hard refresh (full reload)"
-          >
-            <RefreshCw className="h-3.5 w-3.5 opacity-50" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
             asChild
-            title="Open preview in new tab"
+            title="Open in new tab"
           >
             <a href={previewSrc} target="_blank" rel="noreferrer">
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           </Button>
+          {onToggleFocusMode && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={onToggleFocusMode}
+              title={focusMode ? "Exit focus mode (Esc)" : "Focus mode — expand preview"}
+            >
+              {focusMode ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -294,50 +386,92 @@ export function PreviewTab({ project }: { project: Project }) {
       )}
 
       {/* Preview area */}
-      <div className="flex-1 min-h-0 bg-muted/20 overflow-auto flex items-start justify-center p-4">
-        {isLoading ? (
+      <div className="flex-1 min-h-0 bg-[#1a1a1f] overflow-auto flex items-start justify-center p-4">
+        {isLoading || loadingPreview ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
             <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
             <span className="text-sm">Loading preview…</span>
           </div>
         ) : hasFiles ? (
-          <div
-            className={cn(
-              "border border-border rounded-lg shadow-xl overflow-hidden bg-white flex flex-col",
-              isFullWidth ? "w-full h-full" : "",
-            )}
-            style={!isFullWidth ? { width: sizes.w, minHeight: sizes.h, maxWidth: "100%" } : undefined}
-          >
-            {/* Browser / device chrome */}
-            <div className="h-8 bg-zinc-100 border-b border-zinc-200/80 flex items-center px-3 gap-1.5 shrink-0">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
-              <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
-              <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
-              <div className="flex-1 mx-2 max-w-xs">
-                <div className="bg-white border border-zinc-200 rounded px-2 py-0.5 text-[10px] text-zinc-500 font-mono text-center truncate">
-                  {platform === "web" ? `preview/${project.id}/` : `${platform} preview/${project.id}/`}
+          device === "desktop" ? (
+            /* ── Desktop browser chrome ── */
+            <div className="w-full h-full flex flex-col rounded-xl overflow-hidden shadow-2xl border border-white/5">
+              {/* Tab bar */}
+              <div className="h-8 bg-zinc-900 flex items-end px-2 gap-0.5 shrink-0">
+                <div className="h-7 flex items-center gap-2 px-3 bg-zinc-800 rounded-t-lg border border-zinc-700 border-b-0 min-w-[140px] max-w-[200px]">
+                  <Globe className="h-3 w-3 text-zinc-400 shrink-0" />
+                  <span className="text-[11px] text-zinc-300 truncate flex-1">{project.name ?? "Preview"}</span>
+                  <X className="h-2.5 w-2.5 text-zinc-500 shrink-0" />
                 </div>
               </div>
-              <Globe className="h-3 w-3 text-zinc-400" />
+              {/* Address bar */}
+              <div className="h-9 bg-zinc-800 border-b border-zinc-700 flex items-center gap-2 px-3 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3.5 h-3.5 rounded-full bg-red-500/80" />
+                  <div className="w-3.5 h-3.5 rounded-full bg-yellow-500/80" />
+                  <div className="w-3.5 h-3.5 rounded-full bg-green-500/80" />
+                </div>
+                <button onClick={refresh} className="text-zinc-400 hover:text-zinc-200 transition-colors p-1 rounded hover:bg-zinc-700">
+                  <RefreshCw className="h-3 w-3" />
+                </button>
+                <div className="flex-1 flex items-center bg-zinc-900 border border-zinc-700 rounded-md px-3 h-6 gap-2 max-w-md mx-auto">
+                  <Globe className="h-3 w-3 text-zinc-500 shrink-0" />
+                  <span className="text-[11px] text-zinc-300 font-mono truncate flex-1">
+                    preview/{project.id}/
+                  </span>
+                </div>
+              </div>
+              {/* iframe */}
+              <div className="flex-1 min-h-0 bg-white overflow-hidden">
+                {renderIframe("h-full")}
+              </div>
             </div>
-            {/*
-              SECURITY: sandbox does NOT include allow-same-origin.
-              The iframe gets a null origin — it cannot read parent cookies,
-              localStorage, or any app data. Cross-origin restrictions apply.
-              TODO: move preview to an isolated subdomain + postMessage bridge.
-            */}
-            <iframe
-              key={iframeKey}
-              ref={iframeRef}
-              src={previewSrc}
-              title="App preview"
-              aria-label="App preview"
-              className="flex-1 w-full border-0"
-              style={{ minHeight: isFullWidth ? "100%" : sizes.h }}
-              sandbox="allow-scripts allow-forms allow-popups"
-              onLoad={handleIframeLoad}
-            />
-          </div>
+          ) : device === "mobile" ? (
+            /* ── Mobile phone shell ── */
+            <div className="flex items-center justify-center py-4">
+              <div
+                className="relative flex flex-col rounded-[40px] shadow-2xl border-[6px] border-zinc-800 bg-zinc-800 overflow-hidden"
+                style={{ width: 390, minHeight: 844 }}
+              >
+                {/* Dynamic Island / Notch */}
+                <div className="shrink-0 h-12 bg-black flex justify-center items-center">
+                  <div className="w-28 h-7 bg-zinc-900 rounded-full flex items-center justify-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-zinc-700" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                  </div>
+                </div>
+                {/* Screen */}
+                <div className="flex-1 bg-white overflow-hidden">
+                  {renderIframe(undefined, { height: 780 })}
+                </div>
+                {/* Home bar */}
+                <div className="shrink-0 bg-black flex justify-center py-3">
+                  <div className="w-24 h-1 rounded-full bg-zinc-600" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ── Tablet frame ── */
+            <div className="flex items-center justify-center py-4">
+              <div
+                className="relative flex flex-col rounded-[24px] shadow-2xl border-[6px] border-zinc-800 bg-zinc-800 overflow-hidden"
+                style={{ width: 768, minHeight: 1024 }}
+              >
+                {/* Camera */}
+                <div className="shrink-0 h-7 bg-zinc-900 flex justify-center items-center">
+                  <div className="w-2 h-2 rounded-full bg-zinc-700" />
+                </div>
+                {/* Screen */}
+                <div className="flex-1 bg-white overflow-hidden">
+                  {renderIframe(undefined, { height: 970 })}
+                </div>
+                {/* Home bar */}
+                <div className="shrink-0 bg-zinc-900 flex justify-center py-2">
+                  <div className="w-16 h-1 rounded-full bg-zinc-600" />
+                </div>
+              </div>
+            </div>
+          )
         ) : (
           <div className="flex flex-col items-center justify-center h-full max-w-md text-center gap-6 py-16">
             <div className="relative">
@@ -377,43 +511,90 @@ export function PreviewTab({ project }: { project: Project }) {
         )}
       </div>
 
-      {/* Console / sandbox info panel */}
+      {/* Console panel */}
       {hasFiles && consoleOpen && (
-        <div className="shrink-0 border-t border-border bg-zinc-950 flex flex-col" style={{ maxHeight: 200 }}>
+        <div className="shrink-0 border-t border-zinc-800 bg-zinc-950 flex flex-col" style={{ height: 200 }}>
           <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 shrink-0">
-            <ShieldAlert className="h-3.5 w-3.5 text-yellow-400" />
-            <span className="text-[11px] font-medium text-zinc-300">Sandbox Security Info</span>
+            <Terminal className="h-3.5 w-3.5 text-zinc-400" />
+            <span className="text-[11px] font-medium text-zinc-300">Console</span>
+            {consoleEntries.length > 0 && (
+              <span className="text-[10px] text-zinc-500">
+                {consoleEntries.length} {consoleEntries.length === 1 ? "entry" : "entries"}
+              </span>
+            )}
             <div className="flex-1" />
-            <button onClick={() => setConsoleOpen(false)} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+            {consoleEntries.length > 0 && (
+              <button
+                onClick={() => setConsoleEntries([])}
+                className="text-zinc-600 hover:text-zinc-400 transition-colors p-0.5 rounded"
+                title="Clear console"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            )}
+            <button
+              onClick={() => setConsoleOpen(false)}
+              className="text-zinc-600 hover:text-zinc-300 transition-colors p-0.5 rounded"
+            >
               <ChevronDown className="h-3.5 w-3.5" />
             </button>
           </div>
-          <div className="p-3 text-[11px] text-zinc-400 space-y-2 overflow-y-auto">
-            <div className="flex items-start gap-2">
-              <span className="text-green-400 font-bold shrink-0">SECURE</span>
-              <span>Preview runs in a sandboxed iframe without <code className="text-zinc-300">allow-same-origin</code>. The generated app cannot read parent cookies, localStorage, or any MustaFlow data.</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="text-yellow-400 font-bold shrink-0">INFO</span>
-              <span>Console log capture is not available in the current sandbox configuration. Open the preview in a new tab to use browser DevTools directly.</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="text-zinc-500 font-bold shrink-0">TODO</span>
-              <span>Isolated preview domain + postMessage console bridge planned for multi-user launch (replaces allow-same-origin entirely).</span>
-            </div>
+          <div className="flex-1 overflow-y-auto font-mono text-[11px] leading-5">
+            {consoleEntries.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-1.5 text-zinc-600">
+                <Terminal className="h-4 w-4" />
+                <span>Listening for console output…</span>
+              </div>
+            ) : (
+              <div>
+                {consoleEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={cn(
+                      "flex items-start gap-2 px-3 py-0.5 border-b border-zinc-900 hover:bg-zinc-900/50",
+                      entry.level === "error" ? "text-red-400 bg-red-950/20" :
+                      entry.level === "warn" ? "text-yellow-400" :
+                      entry.level === "info" ? "text-blue-400" :
+                      "text-zinc-300",
+                    )}
+                  >
+                    <span className={cn(
+                      "shrink-0 uppercase text-[9px] font-bold tracking-wider mt-0.5 w-7",
+                      entry.level === "error" ? "text-red-500" :
+                      entry.level === "warn" ? "text-yellow-500" :
+                      entry.level === "info" ? "text-blue-500" :
+                      "text-zinc-600",
+                    )}>
+                      {entry.level}
+                    </span>
+                    <span className="flex-1 break-all whitespace-pre-wrap">{entry.args.join(" ")}</span>
+                    <span className="text-zinc-700 text-[9px] shrink-0 mt-0.5">
+                      {new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </span>
+                  </div>
+                ))}
+                <div ref={consoleEndRef} />
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Collapsed console indicator */}
+      {/* Collapsed console tab strip */}
       {hasFiles && !consoleOpen && (
-        <div className="shrink-0 border-t border-border bg-zinc-950/60">
+        <div className="shrink-0 border-t border-zinc-800/60 bg-zinc-950/80">
           <button
             onClick={() => setConsoleOpen(true)}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-zinc-600 hover:text-zinc-300 transition-colors"
           >
-            <ShieldAlert className="h-3 w-3 text-green-500" />
-            <span>Sandbox active — previews are isolated from app data</span>
+            <Terminal className="h-3 w-3" />
+            <span>Console</span>
+            {errorCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive text-[9px] font-bold">{errorCount} error{errorCount !== 1 ? "s" : ""}</span>
+            )}
+            {errorCount === 0 && warnCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-[9px] font-bold">{warnCount} warning{warnCount !== 1 ? "s" : ""}</span>
+            )}
             <div className="flex-1" />
             <ChevronUp className="h-3 w-3" />
           </button>
