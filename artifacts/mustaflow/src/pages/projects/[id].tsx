@@ -366,6 +366,7 @@ export default function ProjectWorkspacePage() {
   // Track whether the pending send is plan-mode so we can show the right indicator
   const pendingIsPlanRef = useRef(false);
   const [pendingIsPlan, setPendingIsPlan] = useState(false);
+  const seenPageMapEventIdsRef = useRef<Set<number>>(new Set());
 
   // Track window width for responsive layout
   useEffect(() => {
@@ -381,6 +382,35 @@ export default function ProjectWorkspacePage() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, activeTaskId]);
+
+  // Subscribe to the SSE event stream for the active task. When the server
+  // emits "page_map_updated" (guaranteed before "completed"), invalidate the
+  // page map cache so the Page Map tab refreshes without any user action.
+  useEffect(() => {
+    if (!activeTaskId) return;
+    // Reset dedup set per task so it stays bounded across long sessions
+    seenPageMapEventIdsRef.current = new Set();
+    const es = new EventSource(
+      `/api/projects/${projectId}/tasks/${activeTaskId}/events/stream`,
+    );
+    es.onmessage = (e: MessageEvent<string>) => {
+      try {
+        const event = JSON.parse(e.data) as { id: number; eventType: string };
+        if (
+          event.eventType === "page_map_updated" &&
+          !seenPageMapEventIdsRef.current.has(event.id)
+        ) {
+          seenPageMapEventIdsRef.current.add(event.id);
+          void queryClient.invalidateQueries({
+            queryKey: getGetPageMapQueryKey(projectId),
+          });
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    return () => es.close();
+  }, [activeTaskId, projectId, queryClient]);
 
   // Auto-generate a plan analysis when a project opens with no messages yet
   useEffect(() => {

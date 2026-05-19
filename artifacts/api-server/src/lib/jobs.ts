@@ -27,6 +27,7 @@ import { writeKnowledge } from "./knowledge";
 import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, deductCredits } from "../routes/credits";
 import { extractPageMap } from "./page-map";
+import { publishTaskEvent } from "./event-bus";
 
 /** Credit cost per AI call, keyed by agentMode. */
 const CREDIT_COST: Record<string, number> = {
@@ -54,12 +55,22 @@ async function emitEvent(
   filePath?: string,
 ): Promise<void> {
   try {
-    await db.insert(taskEventsTable).values({
+    const [row] = await db.insert(taskEventsTable).values({
       taskId,
       eventType,
       message,
       filePath: filePath ?? null,
-    });
+    }).returning();
+    if (row) {
+      publishTaskEvent({
+        id: row.id,
+        taskId: row.taskId,
+        eventType: row.eventType,
+        message: row.message,
+        filePath: row.filePath ?? null,
+        createdAt: row.createdAt,
+      });
+    }
   } catch (err) {
     logger.warn({ err, taskId, eventType }, "Failed to emit task event");
   }
@@ -667,6 +678,17 @@ export async function runJob(input: JobInput): Promise<void> {
       })
       .where(eq(projectsTable.id, projectId));
 
+    // Extract the page map BEFORE emitting "completed" so the
+    // "page_map_updated" event is guaranteed to precede the terminal event.
+    // This eliminates the race where event consumers stop listening on
+    // "completed" and never see the subsequent "page_map_updated".
+    try {
+      await extractPageMap(projectId);
+      await emitEvent(taskId, "page_map_updated", "Page map updated.");
+    } catch (err) {
+      logger.warn({ err, projectId }, "Page map extraction failed (non-fatal)");
+    }
+
     await emitEvent(taskId, "completed", "Task completed.");
 
     // --- Deduct credits after a successful AI build/refine ---
@@ -677,11 +699,6 @@ export async function runJob(input: JobInput): Promise<void> {
         projectId,
       }).catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
     }
-
-    // Fire-and-forget: re-extract page map from the freshly built files
-    void extractPageMap(projectId).catch((err) =>
-      logger.warn({ err, projectId }, "Page map extraction failed (non-fatal)"),
-    );
 
     // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
     void maybeEscalateWarnings(projectId, report.warnings ?? []);
