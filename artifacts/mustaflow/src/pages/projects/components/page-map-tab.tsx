@@ -14,6 +14,7 @@ import {
   type OnNodeDrag,
   type OnEdgesDelete,
   type EdgeMouseHandler,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import html2canvas from "html2canvas";
@@ -154,6 +155,19 @@ export function PageMapTab({
   const putPageMap = usePutPageMap();
   const analyzePageMap = useAnalyzePageMap();
 
+  // Stable refs so timer callbacks always read the latest data, not stale closures.
+  // Initialized after the query so TypeScript can infer the correct type.
+  const mapResponseRef = useRef(mapResponse);
+  const nodesRef = useRef<Node[]>([]);
+  const edgesRef = useRef<Edge[]>([]);
+  // True once fitView has been called — prevents the camera from jumping on every reload
+  const initialisedRef = useRef(false);
+
+  // Keep stable refs in sync with latest values so timer callbacks never capture stale closures
+  useEffect(() => { mapResponseRef.current = mapResponse; }, [mapResponse]);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+
   const platformData = mapResponse?.pageMapData?.[platform];
   const hasNodes = (platformData?.nodes?.length ?? 0) > 0 || nodes.length > 0;
 
@@ -187,8 +201,49 @@ export function PageMapTab({
       handleNodeClick,
       handlePreviewClick,
     );
-    setNodes(rfNodes);
-    setEdges(rfEdges);
+
+    // Auto-layout when all positions are (0,0) — sentinel for "never been positioned"
+    const needsAutoLayout =
+      rfNodes.length > 0 &&
+      rfNodes.every((n) => n.position.x === 0 && n.position.y === 0);
+
+    if (needsAutoLayout) {
+      const laidOut = runDagreLayout(rfNodes, rfEdges);
+      setNodes(laidOut);
+      setEdges(rfEdges);
+      // Persist the auto-computed positions immediately so next load doesn't re-layout
+      const currentMap = mapResponseRef.current?.pageMapData ?? {
+        web: { nodes: [], edges: [] },
+        ios: { nodes: [], edges: [] },
+        android: { nodes: [], edges: [] },
+      };
+      const updatedPlatform = {
+        nodes: laidOut.map((n) => ({
+          id: n.id,
+          label: (n.data as PageNodeData).label,
+          pageType: (n.data as PageNodeData).pageType,
+          filePath: (n.data as PageNodeData).filePath,
+          position: n.position,
+          isNew: (n.data as PageNodeData).isNew,
+          hasError: (n.data as PageNodeData).hasError,
+          aiGenerated: (n.data as PageNodeData).aiGenerated,
+          notes: (n.data as PageNodeData).notes,
+          planned: (n.data as PageNodeData).planned ?? false,
+        })),
+        edges: rfEdges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          connectionType: ((e.data as { connectionType?: string })?.connectionType ?? "nav") as ConnectionType,
+          aiGenerated: (e.data as { aiGenerated?: boolean })?.aiGenerated ?? false,
+        })),
+      };
+      const payload: PageMapData = { ...currentMap, [platform]: updatedPlatform } as PageMapData;
+      putPageMap.mutate({ id: projectId, data: payload });
+    } else {
+      setNodes(rfNodes);
+      setEdges(rfEdges);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapResponse, platform, projectId]);
 
@@ -231,7 +286,9 @@ export function PageMapTab({
   const debouncedSave = useCallback((updatedNodes: Node[], updatedEdges: Edge[]) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      const currentMap = mapResponse?.pageMapData ?? { web: { nodes: [], edges: [] }, ios: { nodes: [], edges: [] }, android: { nodes: [], edges: [] } };
+      // Read mapResponse from the ref so background refetches that fire between
+      // scheduling and execution don't replace in-flight edits with stale data.
+      const currentMap = mapResponseRef.current?.pageMapData ?? { web: { nodes: [], edges: [] }, ios: { nodes: [], edges: [] }, android: { nodes: [], edges: [] } };
       const updatedPlatform = {
         nodes: updatedNodes.map((n) => ({
           id: n.id,
@@ -260,7 +317,10 @@ export function PageMapTab({
       // scheduled refetch or explicit re-analyze will pick up server changes.
       putPageMap.mutate({ id: projectId, data: payload });
     }, 800);
-  }, [mapResponse, platform, projectId, putPageMap]);
+  // mapResponseRef is a stable ref — intentionally excluded from deps so the timer
+  // identity doesn't change on every background refetch.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platform, projectId, putPageMap]);
 
   const onNodeDragStop: OnNodeDrag = useCallback((_evt, _node, allNodes) => {
     debouncedSave(allNodes, edges);
@@ -276,10 +336,11 @@ export function PageMapTab({
     };
     setEdges((prev) => {
       const updated = addEdge(newEdge, prev);
-      debouncedSave(nodes, updated);
+      // Use nodesRef so we read current nodes, not the stale closure value
+      debouncedSave(nodesRef.current, updated);
       return updated;
     });
-  }, [debouncedSave, nodes, setEdges]);
+  }, [debouncedSave, setEdges]);
 
   const onEdgesDelete: OnEdgesDelete = useCallback((deleted) => {
     setSelectedEdgeId((prev) => {
@@ -289,10 +350,10 @@ export function PageMapTab({
     setEdges((prev) => {
       const deletedIds = new Set(deleted.map((e) => e.id));
       const updated = prev.filter((e) => !deletedIds.has(e.id));
-      debouncedSave(nodes, updated);
+      debouncedSave(nodesRef.current, updated);
       return updated;
     });
-  }, [debouncedSave, nodes, setEdges]);
+  }, [debouncedSave, setEdges]);
 
   const handleReanalyze = useCallback(() => {
     analyzePageMap.mutate(
@@ -365,35 +426,41 @@ export function PageMapTab({
           ? { ...e, data: { ...(e.data as object), connectionType } }
           : e,
       );
-      debouncedSave(nodes, updated);
+      debouncedSave(nodesRef.current, updated);
       return updated;
     });
-  }, [nodes, setEdges, debouncedSave]);
+  }, [setEdges, debouncedSave]);
 
   const handleEdgeDelete = useCallback((edgeId: string) => {
     setSelectedEdgeId(null);
     setEdges((prev) => {
       const updated = prev.filter((e) => e.id !== edgeId);
-      debouncedSave(nodes, updated);
+      debouncedSave(nodesRef.current, updated);
       return updated;
     });
-  }, [nodes, setEdges, debouncedSave]);
+  }, [setEdges, debouncedSave]);
 
   const handleDetailSave = useCallback((updated: PageMapNodeState) => {
-    setNodes((prev) => prev.map((n) => {
-      if (n.id !== updated.id) return n;
-      return {
-        ...n,
-        data: {
-          ...(n.data as PageNodeData),
-          label: updated.label,
-          pageType: updated.pageType,
-          notes: updated.notes,
-        },
-      };
-    }));
-    setTimeout(() => debouncedSave(nodes, edges), 50);
-  }, [nodes, edges, setNodes, debouncedSave]);
+    // Use a functional updater so we capture the post-setNodes array, not the
+    // stale `nodes` closure that existed before setNodes ran.
+    setNodes((prev) => {
+      const updatedNodes = prev.map((n) => {
+        if (n.id !== updated.id) return n;
+        return {
+          ...n,
+          data: {
+            ...(n.data as PageNodeData),
+            label: updated.label,
+            pageType: updated.pageType,
+            notes: updated.notes,
+          },
+        };
+      });
+      nodesRef.current = updatedNodes;
+      debouncedSave(updatedNodes, edgesRef.current);
+      return updatedNodes;
+    });
+  }, [setNodes, debouncedSave]);
 
   const handleFileOpen = useCallback((filePath: string) => {
     onSwitchToCode(filePath);
@@ -433,8 +500,10 @@ export function PageMapTab({
     setNodes((prev) => {
       const updated = [...prev, newNode];
 
-      // Immediate (non-debounced) save for the add action
-      const currentMap = mapResponse?.pageMapData ?? { web: { nodes: [], edges: [] }, ios: { nodes: [], edges: [] }, android: { nodes: [], edges: [] } };
+      // Immediate (non-debounced) save for the add action.
+      // Read from mapResponseRef so we get the latest server snapshot even if a
+      // background refetch updated mapResponse after this callback was created.
+      const currentMap = mapResponseRef.current?.pageMapData ?? { web: { nodes: [], edges: [] }, ios: { nodes: [], edges: [] }, android: { nodes: [], edges: [] } };
       const updatedPlatform = {
         nodes: updated.map((n) => ({
           id: n.id,
@@ -448,7 +517,7 @@ export function PageMapTab({
           notes: (n.data as PageNodeData).notes,
           planned: (n.data as PageNodeData).planned ?? false,
         })),
-        edges: edges.map((e) => ({
+        edges: edgesRef.current.map((e) => ({
           id: e.id,
           source: e.source,
           target: e.target,
@@ -463,7 +532,9 @@ export function PageMapTab({
       return updated;
     });
     setSelectedNodeId(id);
-  }, [edges, projectId, platform, mapResponse, handleNodeClick, handlePreviewClick, setNodes, putPageMap]);
+  // mapResponseRef and edgesRef are stable refs — intentionally omitted from deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, platform, handleNodeClick, handlePreviewClick, setNodes, putPageMap]);
 
   const handleModifyPage = useCallback((node: PageMapNodeState) => {
     const isPlanned = node.planned;
@@ -593,11 +664,16 @@ export function PageMapTab({
             onEdgeClick={onEdgeClick}
             onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
             onMove={(_evt, viewport) => { viewportRef.current = viewport; }}
+            onInit={(instance: ReactFlowInstance) => {
+              // fitView exactly once — subsequent Effect 1 re-fires must not snap the camera
+              if (!initialisedRef.current) {
+                initialisedRef.current = true;
+                instance.fitView({ padding: 0.2 });
+              }
+            }}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
             defaultEdgeOptions={EDGE_DEFAULTS}
-            fitView
-            fitViewOptions={{ padding: 0.2 }}
             deleteKeyCode={["Delete", "Backspace"]}
             className="bg-background"
             proOptions={{ hideAttribution: true }}
