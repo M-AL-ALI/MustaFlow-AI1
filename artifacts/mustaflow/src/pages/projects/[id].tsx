@@ -84,6 +84,7 @@ type TaskReport = {
     environment: "test" | "production";
   }>;
   nextRecommendation?: string;
+  knowledgeApplied?: Array<{ title: string; category: string }>;
 };
 
 type ChatPlanPayload =
@@ -178,6 +179,21 @@ function ReportCard({ report, onViewFile }: { report: TaskReport; onViewFile?: (
               why={i.why}
               keysNeeded={i.keysNeeded}
             />
+          ))}
+        </div>
+      )}
+      {report.knowledgeApplied && report.knowledgeApplied.length > 0 && (
+        <div className="space-y-1 pt-1.5 border-t border-border">
+          <div className="font-semibold text-foreground flex items-center gap-1 text-[11px]">
+            <BookOpen className="h-3 w-3 text-primary" /> Lessons applied
+          </div>
+          {report.knowledgeApplied.map((k, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <span className="text-[9px] font-medium text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0">
+                {k.category}
+              </span>
+              <span className="text-[11px] text-foreground truncate">{k.title}</span>
+            </div>
           ))}
         </div>
       )}

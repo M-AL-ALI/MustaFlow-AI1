@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   FileCode2,
   RotateCcw,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ type TaskReport = {
   warnings?: string[];
   suggestions?: string[];
   nextRecommendation?: string;
+  knowledgeApplied?: Array<{ title: string; category: string }>;
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -254,6 +256,23 @@ function TaskRow({
               ))}
               {filesChanged.slice(0, 6).map((p) => (
                 <div key={`m-${p}`} className="font-mono text-[10px] text-yellow-400 truncate">~ {p}</div>
+              ))}
+            </div>
+          )}
+
+          {/* Lessons applied */}
+          {task.status === "completed" && report?.knowledgeApplied && report.knowledgeApplied.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                <BookOpen className="h-3 w-3 text-primary" /> Lessons applied
+              </div>
+              {report.knowledgeApplied.map((k, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <span className="text-[9px] font-medium text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0">
+                    {k.category}
+                  </span>
+                  <span className="text-[11px] text-foreground truncate">{k.title}</span>
+                </div>
               ))}
             </div>
           )}

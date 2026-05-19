@@ -205,6 +205,11 @@ async function loadActiveIntegrations(projectId: number): Promise<string> {
   }
 }
 
+type KnowledgeContextResult = {
+  context: string;
+  applied: Array<{ title: string; category: string }>;
+};
+
 /**
  * Compute a diff summary for an initial build (previous = empty).
  */
@@ -248,7 +253,29 @@ function computeRefineDiff(
   return { filesAdded, filesModified, filesRemoved: removedPaths, linesAdded, linesRemoved };
 }
 
-async function loadKnowledgeContext(projectId: number): Promise<string> {
+/**
+ * Tokenise a string into a set of meaningful lowercase words (≥3 chars).
+ */
+function tokenise(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .split(/[\s,.:;_\-/()[\]{}'"!?]+/)
+      .filter((w) => w.length >= 3),
+  );
+}
+
+/**
+ * Relevance-ranked knowledge injection.
+ * Scores each knowledge entry by keyword overlap with the current user prompt,
+ * then returns the top 15 most relevant. Also loads active integrations context.
+ * Returns both the combined context string and the selected knowledge entries
+ * so they can be surfaced in the task report.
+ */
+async function loadKnowledgeContext(
+  projectId: number,
+  userPrompt?: string,
+): Promise<KnowledgeContextResult> {
   try {
     const [entries, integrationsNote] = await Promise.all([
       db
@@ -260,16 +287,43 @@ async function loadKnowledgeContext(projectId: number): Promise<string> {
             eq(knowledgeEntriesTable.projectId, projectId),
           ),
         )
-        .orderBy(knowledgeEntriesTable.createdAt)
-        .limit(40),
+        .orderBy(desc(knowledgeEntriesTable.createdAt))
+        .limit(80),
       loadActiveIntegrations(projectId),
     ]);
-    const knowledgePart = entries.length > 0
-      ? entries.map((e) => `[${e.category}] ${e.title}: ${e.content}`).join("\n")
-      : "";
-    return [integrationsNote, knowledgePart].filter(Boolean).join("\n\n");
+
+    let topEntries: typeof entries;
+
+    if (entries.length === 0) {
+      return { context: integrationsNote, applied: [] };
+    }
+
+    if (userPrompt && userPrompt.length > 0) {
+      const promptTokens = tokenise(userPrompt);
+      const scored = entries.map((e) => {
+        const entryTokens = tokenise(`${e.title} ${e.content} ${e.tags ?? ""}`);
+        let overlap = 0;
+        for (const t of promptTokens) {
+          if (entryTokens.has(t)) overlap++;
+        }
+        const score = promptTokens.size > 0 ? overlap / promptTokens.size : 0;
+        return { entry: e, score };
+      });
+      scored.sort((a, b) => b.score - a.score);
+      topEntries = scored.slice(0, 15).map((s) => s.entry);
+    } else {
+      topEntries = entries.slice(0, 15);
+    }
+
+    const knowledgePart = topEntries
+      .map((e) => `[${e.category}] ${e.title}: ${e.content}`)
+      .join("\n");
+    const context = [integrationsNote, knowledgePart].filter(Boolean).join("\n\n");
+    const applied = topEntries.map((e) => ({ title: e.title, category: e.category }));
+
+    return { context, applied };
   } catch {
-    return "";
+    return { context: "", applied: [] };
   }
 }
 
@@ -410,7 +464,7 @@ export async function runJob(input: JobInput): Promise<void> {
     return;
   }
 
-  const knowledgeContext = await loadKnowledgeContext(projectId);
+  const { context: knowledgeContext, applied: knowledgeApplied } = await loadKnowledgeContext(projectId, userPrompt);
 
   // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
   const creditCost = CREDIT_COST[agentMode] ?? 1;
@@ -519,6 +573,11 @@ export async function runJob(input: JobInput): Promise<void> {
       report = result.report;
       assistantSummary = result.assistantSummary;
       nextVersionLabel = userPrompt.slice(0, 40) || "Refinement";
+    }
+
+    // Attach knowledge lessons that influenced this build
+    if (knowledgeApplied.length > 0) {
+      report.knowledgeApplied = knowledgeApplied;
     }
 
     await emitEvent(
