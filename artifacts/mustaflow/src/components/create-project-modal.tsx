@@ -26,6 +26,7 @@ import {
   LayoutTemplate,
   PencilLine,
   ChevronLeft,
+  Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TemplatePicker } from "@/components/template-picker";
@@ -37,6 +38,7 @@ const PROJECT_TYPES = [
   { label: "Dashboard", kind: "dashboard", icon: LayoutDashboard },
   { label: "Automation", kind: "automation", icon: Zap },
   { label: "API", kind: "api", icon: Database },
+  { label: "Mobile", kind: "mobile", icon: Smartphone },
 ] as const;
 
 type ProjectKind = (typeof PROJECT_TYPES)[number]["kind"];
@@ -273,7 +275,7 @@ export function CreateProjectModal({
               {/* Project type */}
               <div className="space-y-1.5">
                 <Label>Project type</Label>
-                <div className="grid grid-cols-5 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {PROJECT_TYPES.map(({ label, kind: k, icon: Icon }) => (
                     <button
                       key={k}
