@@ -22,6 +22,7 @@ export const projectVersionsTable = pgTable("project_versions", {
   label: text("label").notNull(),
   note: text("note"),
   filesSnapshot: jsonb("files_snapshot").$type<FileSnapshotEntry[]>(),
+  planSnapshot: jsonb("plan_snapshot").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

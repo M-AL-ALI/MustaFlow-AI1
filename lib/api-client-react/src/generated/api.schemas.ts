@@ -360,6 +360,8 @@ export interface AgentTaskInput {
   prompt?: string;
 }
 
+export type ProjectVersionPlanSnapshot = { [key: string]: unknown } | null;
+
 export interface ProjectVersion {
   id: number;
   projectId: number;
@@ -368,6 +370,7 @@ export interface ProjectVersion {
   note?: string | null;
   filesCount: number;
   createdAt: string;
+  planSnapshot?: ProjectVersionPlanSnapshot;
 }
 
 export interface ProjectVersionInput {

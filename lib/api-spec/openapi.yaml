@@ -1029,6 +1029,10 @@ components:
         note: { type: ["string", "null"] }
         filesCount: { type: integer }
         createdAt: { type: string, format: date-time }
+        planSnapshot:
+          nullable: true
+          type: object
+          additionalProperties: true
 
     ProjectVersionInput:
       type: object

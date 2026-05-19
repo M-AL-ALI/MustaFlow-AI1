@@ -50,6 +50,7 @@ router.get(
         note: projectVersionsTable.note,
         filesCount: sql<number>`COALESCE(jsonb_array_length(${projectVersionsTable.filesSnapshot}), 0)`,
         createdAt: projectVersionsTable.createdAt,
+        planSnapshot: projectVersionsTable.planSnapshot,
       })
       .from(projectVersionsTable)
       .where(eq(projectVersionsTable.projectId, params.data.id))

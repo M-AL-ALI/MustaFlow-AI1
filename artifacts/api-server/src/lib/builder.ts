@@ -41,6 +41,13 @@ const MODE_QUALITY_STANDARDS: Record<AgentMode, string> = {
 - Long-term maintainability: logical file structure, named CSS custom properties for theme tokens, no magic numbers.`,
 };
 
+const MODE_QUALITY_HINTS: Record<AgentMode, string> = {
+  lite: "Speed over polish. Generate minimal, working code quickly. Keep it simple.",
+  eco: "Balance quality and brevity. Write clean, readable code without over-engineering.",
+  power: "Production-grade quality. Prioritize completeness, accessibility, polished UX, and thorough error handling.",
+  pro: "Highest quality. Focus on UX excellence, accessibility, robust error handling, edge cases, clean code structure, and long-term maintainability.",
+};
+
 export type BuilderFile = {
   path: string;
   content: string;
@@ -161,21 +168,41 @@ OUTPUT STRICT JSON matching this exact shape:
 
 The "files" array should contain ONLY the files that were created or changed (full new content). The "patches" array is optional — use it for large files where only a section changes. The "filesRemoved" array lists files to delete. Do NOT echo files that are unchanged.`;
 
-const PLAN_SYSTEM_PROMPT = `You are the MustaFlow AI Planner. You do NOT generate code in this mode. You output a structured plan as STRICT JSON only:
+const PLAN_SYSTEM_PROMPT = `You are the MustaFlow AI Planner. You do NOT generate code in this mode. You output a comprehensive, structured plan as STRICT JSON only.
+
+OUTPUT STRICT JSON matching this exact shape:
 {
   "summary": string,
   "goal": string,
   "approach": string,
+  "sitemap": [{ "name": string, "route": string, "purpose": string }],
   "pages": string[],
   "backend": string[],
   "database": string[],
+  "dataModel": [{ "table": string, "fields": string[] }],
+  "apiEndpoints": [{ "method": string, "path": string, "purpose": string }],
   "integrations": string[],
   "keysNeeded": string[],
   "filesAffected": string[],
+  "uxNotes": { "PageName": "UX guidance for this page — layout, interactions, tone" },
+  "accessibilityNotes": string,
+  "complexityScore": integer (1=trivial, 10=very complex),
+  "recommendedMode": "lite"|"eco"|"power"|"pro",
+  "estimatedBuildSeconds": integer,
   "risks": string[],
   "testPlan": string[]
 }
-Be concrete. Empty arrays for sections that don't apply.`;
+
+Rules:
+- "sitemap" must list every page/screen with route and one-sentence purpose. "pages" is a flat string list of the same names (for backward compat).
+- "dataModel" only if the app stores data (even localStorage counts). Empty array otherwise.
+- "apiEndpoints" only if the app calls external APIs or needs a backend. Empty array otherwise.
+- "uxNotes" must have one entry per page in "sitemap" with 1-3 sentences of UX guidance.
+- "accessibilityNotes" is a brief string summarising keyboard, contrast, and ARIA considerations.
+- "complexityScore" must be an integer 1-10. Consider pages, data model, integrations, and interactivity.
+- "recommendedMode" must be one of: lite (score 1-2), eco (score 3-4), power (score 5-7), pro (score 8-10).
+- "estimatedBuildSeconds" is a realistic estimate: simple apps ~20s, medium ~40s, complex ~80s.
+- Be concrete and specific. Empty arrays for sections that don't apply.`;
 
 function modelFor(mode: AgentMode): string {
   return MODEL_FOR_MODE[mode] ?? MODEL_FOR_MODE.eco;
@@ -620,6 +647,25 @@ async function runCorrectionPass(
   }
 }
 
+/** Validate that a plan response contains the required new fields and retry if key ones are missing */
+function validatePlanResponse(parsed: Record<string, unknown>): boolean {
+  const hasGoal = typeof parsed.goal === "string" && (parsed.goal as string).length > 0;
+  const hasApproach = typeof parsed.approach === "string" && (parsed.approach as string).length > 0;
+  const hasSitemap = Array.isArray(parsed.sitemap) && (parsed.sitemap as unknown[]).length > 0;
+  const hasComplexity =
+    typeof parsed.complexityScore === "number" &&
+    (parsed.complexityScore as number) >= 1 &&
+    (parsed.complexityScore as number) <= 10;
+  const validModes = ["lite", "eco", "power", "pro"];
+  const hasRecommendedMode =
+    typeof parsed.recommendedMode === "string" &&
+    validModes.includes(parsed.recommendedMode as string);
+  const hasEstimate =
+    typeof parsed.estimatedBuildSeconds === "number" &&
+    (parsed.estimatedBuildSeconds as number) > 0;
+  return hasGoal && hasApproach && hasSitemap && hasComplexity && hasRecommendedMode && hasEstimate;
+}
+
 export async function runBuildPipeline(args: {
   projectName: string;
   projectKind: string;
@@ -975,9 +1021,28 @@ export async function runPlanPipeline(args: {
 
   let plan: Record<string, unknown> | null = null;
   try {
-    plan = await callWithRetry(messages, modelFor(agentMode), 6000, "plan");
+    plan = await callWithRetry(messages, modelFor(agentMode), 8000, "plan");
+
+    // Retry once if required new fields are missing
+    if (plan && !validatePlanResponse(plan)) {
+      logger.info({ projectName }, "Plan missing required fields, retrying with stricter prompt");
+      messages.push({
+        role: "assistant",
+        content: JSON.stringify(plan),
+      });
+      messages.push({
+        role: "user",
+        content: "Your plan is missing required fields. Please regenerate with ALL fields: complexityScore (integer 1-10), recommendedMode (lite/eco/power/pro), sitemap (array of objects with name/route/purpose), uxNotes (object keyed by page name), estimatedBuildSeconds (integer). Output ONLY valid JSON.",
+      });
+      plan = await callWithRetry(messages, modelFor(agentMode), 8000, "plan-retry");
+    }
   } catch {
     plan = null;
+  }
+
+  // Ensure backward compat: if sitemap exists but pages doesn't, derive pages from sitemap
+  if (plan && Array.isArray(plan.sitemap) && !Array.isArray(plan.pages)) {
+    plan.pages = (plan.sitemap as Array<{ name: string }>).map((s) => s.name);
   }
 
   const summary =
@@ -1007,3 +1072,4 @@ export function guessMime(path: string): string {
   if (lower.endsWith(".txt") || lower.endsWith(".md")) return "text/plain";
   return "text/plain";
 }
+

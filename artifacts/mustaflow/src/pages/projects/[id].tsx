@@ -7,6 +7,7 @@ import {
   useListProjectFiles,
   useSendMessage,
   useListTasks,
+  useRollbackVersion,
   getGetProjectQueryKey,
   getListMessagesQueryKey,
   getListProjectFilesQueryKey,
@@ -54,6 +55,10 @@ import {
   ChevronRight,
   FilePen,
   FolderOpen,
+  GitCommit,
+  RotateCcw,
+  Pencil,
+  X,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -68,7 +73,10 @@ import { ResourcesTab } from "./components/resources-tab";
 import { ManageTab } from "./components/manage-tab";
 import { ActivityStream } from "./components/activity-stream";
 import { HistoryTab } from "./components/history-tab";
+import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { cn } from "@/lib/utils";
+
+type AgentMode = "lite" | "eco" | "power" | "pro";
 
 type TaskReport = {
   userRequest: string;
@@ -93,20 +101,6 @@ type ChatPlanPayload =
   | { kind: "task-done"; taskId: number }
   | { kind: "error"; message: string; suggestions?: string[] }
   | Record<string, unknown>;
-
-type StructuredPlan = {
-  summary?: string;
-  goal?: string;
-  approach?: string;
-  pages?: string[];
-  backend?: string[];
-  database?: string[];
-  integrations?: string[];
-  keysNeeded?: string[];
-  filesAffected?: string[];
-  risks?: string[];
-  testPlan?: string[];
-};
 
 function ReportCard({ report, onViewFile }: { report: TaskReport; onViewFile?: (path: string) => void }) {
   return (
@@ -213,84 +207,6 @@ function ReportCard({ report, onViewFile }: { report: TaskReport; onViewFile?: (
   );
 }
 
-function PlanCard({
-  plan,
-  onMain,
-  onBackground,
-  disabled,
-}: {
-  plan: StructuredPlan | null;
-  onMain: () => void;
-  onBackground: () => void;
-  disabled: boolean;
-}) {
-  const PlanSection = ({
-    label,
-    items,
-    color = "text-foreground",
-  }: {
-    label: string;
-    items?: string[];
-    color?: string;
-  }) => {
-    if (!items || items.length === 0) return null;
-    return (
-      <div>
-        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">{label}</div>
-        <div className="space-y-0.5">
-          {items.map((item, i) => (
-            <div key={i} className={cn("text-[11px] flex items-start gap-1", color)}>
-              <span className="mt-0.5 opacity-50">•</span>
-              <span>{item}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-3">
-      <div className="flex items-center gap-2 font-semibold text-foreground">
-        <BrainCircuit className="h-3.5 w-3.5 text-secondary" />
-        Plan ready
-      </div>
-
-      {plan && (
-        <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
-          {plan.goal && (
-            <div className="text-[11px] text-muted-foreground bg-muted rounded p-2 leading-relaxed">
-              {plan.goal}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            <PlanSection label="Pages / Screens" items={plan.pages} />
-            <PlanSection label="Backend / API" items={plan.backend} />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <PlanSection label="Database" items={plan.database} />
-            <PlanSection label="Integrations" items={plan.integrations} />
-          </div>
-          {plan.keysNeeded && plan.keysNeeded.length > 0 && (
-            <PlanSection label="API Keys needed" items={plan.keysNeeded} color="text-yellow-400" />
-          )}
-          {plan.risks && plan.risks.length > 0 && (
-            <PlanSection label="Risks" items={plan.risks} color="text-orange-400" />
-          )}
-        </div>
-      )}
-
-      <div className="flex gap-2 pt-1 border-t border-border">
-        <Button size="sm" className="flex-1 h-7 text-xs" onClick={onMain} disabled={disabled}>
-          Build now
-        </Button>
-        <Button size="sm" variant="secondary" className="flex-1 h-7 text-xs" onClick={onBackground} disabled={disabled}>
-          <ServerCog className="h-3 w-3 mr-1" /> Background
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 
 function ErrorCard({
@@ -395,11 +311,11 @@ export default function ProjectWorkspacePage() {
     query: {
       enabled: !!projectId,
       queryKey: getListMessagesQueryKey(projectId),
-      // Poll fast while building, back off to 15 s when idle to reduce server load
-      refetchInterval: project?.status === "building" ? 2000 : 15000,
+      refetchInterval: (project?.status === "building" || sendMessage.isPending) ? 2000 : 15000,
     },
   });
   const sendMessage = useSendMessage();
+  const rollbackVersion = useRollbackVersion();
   const { data: versions } = useListVersions(projectId, {
     query: { enabled: !!projectId, queryKey: getListVersionsQueryKey(projectId) },
   });
@@ -417,12 +333,14 @@ export default function ProjectWorkspacePage() {
   });
 
   const [prompt, setPrompt] = useState("");
-  const [agentMode, setAgentMode] = useState<"lite" | "eco" | "power" | "pro">("power");
+  const [agentMode, setAgentMode] = useState<AgentMode>("power");
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState("preview");
+  const [prefillSecretName, setPrefillSecretName] = useState<string | null>(null);
+  const [viewingHistoryPlan, setViewingHistoryPlan] = useState<StructuredPlan | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history">("chat");
   const [showChatHistory, setShowChatHistory] = useState(false);
@@ -431,14 +349,16 @@ export default function ProjectWorkspacePage() {
     const stored = localStorage.getItem("mustaflow_split_pct");
     return stored ? Math.min(65, Math.max(25, parseFloat(stored))) : 38;
   });
-  const [isDragging, setIsDragging] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
-  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
+  const [windowWidth, setWindowWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1200));
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoAnalyzedRef = useRef(false);
   const isDraggingRef = useRef(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
+  // Track whether the pending send is plan-mode so we can show the right indicator
+  const pendingIsPlanRef = useRef(false);
+  const [pendingIsPlan, setPendingIsPlan] = useState(false);
 
   // Track window width for responsive layout
   useEffect(() => {
@@ -461,6 +381,8 @@ export default function ProjectWorkspacePage() {
     if (messages.length > 0) { autoAnalyzedRef.current = true; return; }
     if (sendMessage.isPending) return;
     autoAnalyzedRef.current = true;
+    pendingIsPlanRef.current = true;
+    setPendingIsPlan(true);
     sendMessage.mutate(
       {
         id: projectId,
@@ -473,32 +395,45 @@ export default function ProjectWorkspacePage() {
       },
       {
         onSuccess: () => {
+          pendingIsPlanRef.current = false;
+          setPendingIsPlan(false);
           queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+        },
+        onError: () => {
+          pendingIsPlanRef.current = false;
+          setPendingIsPlan(false);
         },
       },
     );
   }, [project, messages, projectId, sendMessage, queryClient]);
 
-  const send = useCallback((content: string, opts?: { planMode?: boolean; background?: boolean }) => {
+  const send = useCallback((
+    content: string,
+    opts?: { planMode?: boolean; background?: boolean; agentMode?: AgentMode },
+  ) => {
     if (!content.trim()) return;
     setPendingBuildStartedAt(new Date());
+    const effectiveMode = opts?.agentMode ?? agentMode;
+    const effectivePlanMode = opts?.planMode ?? planMode;
+    pendingIsPlanRef.current = effectivePlanMode;
+    setPendingIsPlan(effectivePlanMode);
     sendMessage.mutate(
       {
         id: projectId,
         data: {
           content,
-          agentMode,
-          planMode: opts?.planMode ?? planMode,
+          agentMode: effectiveMode,
+          planMode: effectivePlanMode,
           background: opts?.background ?? runInBackground,
         },
       },
       {
         onSuccess: (data) => {
           setPendingBuildStartedAt(null);
-          // Invalidate immediately: messages + project status drive UI visibility
+          pendingIsPlanRef.current = false;
+          setPendingIsPlan(false);
           void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
           void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
-          // Stagger file/version/task invalidations to avoid a burst of 5 parallel refetches
           setTimeout(() => {
             void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
             void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
@@ -510,10 +445,17 @@ export default function ProjectWorkspacePage() {
         },
         onError: () => {
           setPendingBuildStartedAt(null);
+          pendingIsPlanRef.current = false;
+          setPendingIsPlan(false);
         },
       },
     );
   }, [projectId, agentMode, planMode, runInBackground, sendMessage, queryClient]);
+
+  const handleAddKey = useCallback((keyName: string) => {
+    setPrefillSecretName(keyName);
+    setActiveTab("tools-files");
+  }, []);
 
   const handleSend = () => {
     const currentPrompt = prompt;
@@ -521,9 +463,11 @@ export default function ProjectWorkspacePage() {
     send(currentPrompt);
   };
 
-  const runPlanned = (planMessageContent: string, background: boolean) => {
-    send(`Execute this plan now:\n${planMessageContent}`, { planMode: false, background });
-  };
+  /** Called from PlanCard "Build now" / "Background" buttons */
+  const runPlanned = useCallback((editedPrompt: string, mode: AgentMode, background: boolean) => {
+    setAgentMode(mode);
+    send(editedPrompt, { planMode: false, background, agentMode: mode });
+  }, [send]);
 
   const updateSplit = useCallback((pct: number) => {
     const clamped = Math.min(65, Math.max(25, pct));
@@ -619,30 +563,31 @@ export default function ProjectWorkspacePage() {
           </span>
         </div>
         <div className="w-px h-5 bg-border shrink-0" />
-        <div className="flex-1 overflow-x-auto min-w-0">
-          <div className="flex items-stretch h-12">
-            {WORKSPACE_TABS.filter((tab) =>
-              tab.value !== "analytics" || project.status === "published",
-            ).map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.value}
-                  onClick={() => setActiveTab(tab.value)}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
-                    activeTab === tab.value
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-3 w-3 shrink-0" />
-                  {tab.label}
-                </button>
-              );
-            })}
+          <div className="flex-1 overflow-x-auto min-w-0">
+            <div className="flex items-stretch h-12">
+              {WORKSPACE_TABS.filter((tab) =>
+                tab.value !== "analytics" || project.status === "published",
+              ).map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.value}
+                    onClick={() => setActiveTab(tab.value)}
+                    data-tab={tab.value}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
+                      activeTab === tab.value
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="h-3 w-3 shrink-0" />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => setNewProjectOpen(true)}
@@ -737,6 +682,38 @@ export default function ProjectWorkspacePage() {
             )}
           </div>
 
+          {/* ── PLAN SNAPSHOT VIEWER (overlay over chat when viewing a history plan) ── */}
+          {viewingHistoryPlan && (
+            <div className="absolute inset-0 z-30 flex flex-col bg-background/95 backdrop-blur-sm">
+              <div className="shrink-0 px-3 py-2 border-b border-border flex items-center gap-2">
+                <BrainCircuit className="h-3.5 w-3.5 text-secondary" />
+                <span className="text-xs font-semibold text-foreground flex-1">Plan snapshot</span>
+                <button
+                  onClick={() => setViewingHistoryPlan(null)}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  title="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-3 py-3 hide-scrollbar">
+                <PlanCard
+                  plan={viewingHistoryPlan}
+                  projectId={projectId}
+                  initialAgentMode={agentMode}
+                  onBuild={runPlanned}
+                  onAddKey={(keyName) => {
+                    setViewingHistoryPlan(null);
+                    setPrefillSecretName(keyName);
+                    setActiveTab("tools-files");
+                  }}
+                  disabled={sendMessage.isPending}
+                  readOnly
+                />
+              </div>
+            </div>
+          )}
+
           {/* ── CHAT TAB ── */}
           {leftPanelTab === "chat" && (
           <>
@@ -746,19 +723,21 @@ export default function ProjectWorkspacePage() {
               <Sparkles style={{ width: 10, height: 10 }} className="text-white" />
             </div>
             <span className="text-xs font-semibold text-foreground">AI Builder</span>
-            {!showChatHistory && (
-              <span className={cn(
-                "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-                sendMessage.isPending ? "bg-primary/15 text-primary" : "bg-green-500/15 text-green-400"
-              )}>
-                {sendMessage.isPending ? "Working…" : "Ready"}
-              </span>
-            )}
+            <span className={cn(
+              "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+              sendMessage.isPending
+                ? pendingIsPlan
+                  ? "bg-secondary/15 text-secondary"
+                  : "bg-primary/15 text-primary"
+                : "bg-green-500/15 text-green-400"
+            )}>
+              {sendMessage.isPending ? (pendingIsPlan ? "Planning…" : "Working…") : "Ready"}
+            </span>
             <button
               onClick={() => setShowChatHistory((v) => !v)}
               title={showChatHistory ? "Back to live chat" : "View chat history"}
               className={cn(
-                "ml-auto flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
+                "ml-1.5 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
                 showChatHistory
                   ? "bg-primary/10 text-primary border-primary/20"
                   : "text-muted-foreground border-border hover:text-foreground hover:bg-muted",
@@ -836,8 +815,10 @@ export default function ProjectWorkspacePage() {
                     {isPlanCard && (
                       <PlanCard
                         plan={structuredPlan}
-                        onMain={() => runPlanned(msg.content, false)}
-                        onBackground={() => runPlanned(msg.content, true)}
+                        projectId={projectId}
+                        initialAgentMode={agentMode}
+                        onBuild={runPlanned}
+                        onAddKey={handleAddKey}
                         disabled={sendMessage.isPending}
                       />
                     )}
@@ -849,8 +830,13 @@ export default function ProjectWorkspacePage() {
             {sendMessage.isPending && !activeTaskId && (
               <div className="flex justify-start">
                 <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
-                  <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-primary" />
-                  <span className="text-muted-foreground">MustaFlow is working…</span>
+                  <div className={cn(
+                    "animate-pulse w-1.5 h-1.5 rounded-full",
+                    pendingIsPlan ? "bg-secondary" : "bg-primary",
+                  )} />
+                  <span className="text-muted-foreground">
+                    {pendingIsPlan ? "Thinking through the plan…" : "MustaFlow is working…"}
+                  </span>
                 </div>
               </div>
             )}
@@ -1053,9 +1039,47 @@ export default function ProjectWorkspacePage() {
                 setPrompt(text);
                 setLeftPanelTab("chat");
               }}
+              onViewPlan={(plan) => setViewingHistoryPlan(plan)}
             />
           )}
         </div>
+
+        {/* Plan Viewer Overlay */}
+        {viewingHistoryPlan && (
+          <div className="fixed inset-0 z-[100] bg-background/95 backdrop-blur-sm flex items-center justify-center p-4 lg:p-8">
+            <div className="w-full max-w-4xl max-h-full flex flex-col bg-card border border-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+              <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-secondary/15 flex items-center justify-center">
+                    <History className="h-5 w-5 text-secondary" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold">Historical Plan</h2>
+                    <p className="text-xs text-muted-foreground">Viewing a read-only snapshot from this version</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setViewingHistoryPlan(null)}
+                  className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-muted transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto p-6">
+                <PlanCard
+                  plan={viewingHistoryPlan}
+                  projectId={projectId}
+                  readOnly
+                />
+              </div>
+              <div className="shrink-0 p-4 border-t border-border bg-muted/30 flex justify-end">
+                <Button onClick={() => setViewingHistoryPlan(null)}>
+                  Close Viewer
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Drag handle ── */}
         {!focusMode && !isMobileLayout && (
@@ -1110,7 +1134,13 @@ export default function ProjectWorkspacePage() {
             )}
             {activeTab === "code" && <CodeEditorTab projectId={projectId} initialFileId={selectedCodeFileId} />}
             {activeTab === "canvas" && <CanvasTab projectId={projectId} />}
-            {activeTab === "tools-files" && <ToolsTab projectId={projectId} />}
+            {activeTab === "tools-files" && (
+              <ToolsTab
+                projectId={projectId}
+                prefillSecretName={prefillSecretName}
+                defaultTab={prefillSecretName ? "secrets" : undefined}
+              />
+            )}
             {activeTab === "publishing" && <PublishingTab projectId={projectId} />}
             {activeTab === "logs" && (
               <LogsTab

@@ -5,6 +5,7 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { ProjectVersionPlanSnapshot } from './projectVersionPlanSnapshot';
 
 export interface ProjectVersion {
   id: number;
@@ -14,4 +15,5 @@ export interface ProjectVersion {
   note?: string | null;
   filesCount: number;
   createdAt: Date;
+  planSnapshot?: ProjectVersionPlanSnapshot;
 }

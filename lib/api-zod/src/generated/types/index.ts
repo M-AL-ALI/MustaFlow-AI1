@@ -63,6 +63,7 @@ export * from './projectVersion';
 export * from './projectVersionDetail';
 export * from './projectVersionDetailFilesSnapshotItem';
 export * from './projectVersionInput';
+export * from './projectVersionPlanSnapshot';
 export * from './publishResult';
 export * from './readinessCheck';
 export * from './readinessCheckSeverity';

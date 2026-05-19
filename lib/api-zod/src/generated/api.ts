@@ -375,7 +375,8 @@ export const ListVersionsResponseItem = zod.object({
   "label": zod.string(),
   "note": zod.string().nullish(),
   "filesCount": zod.number(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "planSnapshot": zod.record(zod.string(), zod.unknown()).nullish()
 })
 export const ListVersionsResponse = zod.array(ListVersionsResponseItem)
 

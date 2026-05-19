@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,8 +79,19 @@ function SecretVerifyButton({
   );
 }
 
-export function ToolsTab({ projectId }: { projectId: number }) {
+export function ToolsTab({
+  projectId,
+  prefillSecretName,
+  defaultTab,
+}: {
+  projectId: number;
+  prefillSecretName?: string | null;
+  defaultTab?: string;
+}) {
   const queryClient = useQueryClient();
+  const [innerTab, setInnerTab] = useState<string>(
+    prefillSecretName ? "secrets" : (defaultTab ?? "files"),
+  );
 
   // Files
   const { data: files } = useListProjectFiles(projectId, {
@@ -110,9 +121,16 @@ export function ToolsTab({ projectId }: { projectId: number }) {
   });
   const createSecret = useCreateSecret();
 
-  const [newSecretName, setNewSecretName] = useState("");
+  const [newSecretName, setNewSecretName] = useState(prefillSecretName ?? "");
   const [newSecretValue, setNewSecretValue] = useState("");
   const [secretEnv, setSecretEnv] = useState<"development" | "testing" | "staging" | "production">("development");
+
+  useEffect(() => {
+    if (prefillSecretName) {
+      setInnerTab("secrets");
+      setNewSecretName(prefillSecretName);
+    }
+  }, [prefillSecretName]);
 
   const handleCreateSecret = () => {
     if (!newSecretName || !newSecretValue) return;
@@ -134,7 +152,7 @@ export function ToolsTab({ projectId }: { projectId: number }) {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border p-2 bg-card flex-1 overflow-hidden">
-        <Tabs defaultValue="files" className="w-full h-full flex flex-col">
+        <Tabs value={innerTab} onValueChange={setInnerTab} className="w-full h-full flex flex-col">
           <TabsList className="bg-muted">
             <TabsTrigger value="files">
               <FolderTree className="h-4 w-4 mr-2" /> Files

@@ -327,6 +327,35 @@ async function loadKnowledgeContext(
   }
 }
 
+/**
+ * Look up the most recent plan-mode assistant message for this project and return
+ * its plan JSON to store as a version annotation (planSnapshot).
+ */
+async function loadLatestPlanSnapshot(
+  projectId: number,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const [row] = await db
+      .select({ plan: chatMessagesTable.plan })
+      .from(chatMessagesTable)
+      .where(
+        and(
+          eq(chatMessagesTable.projectId, projectId),
+          eq(chatMessagesTable.planMode, true),
+          eq(chatMessagesTable.role, "assistant"),
+        ),
+      )
+      .orderBy(desc(chatMessagesTable.createdAt))
+      .limit(1);
+    if (!row?.plan || typeof row.plan !== "object") return null;
+    // Exclude error plans
+    if ((row.plan as Record<string, unknown>).kind === "error") return null;
+    return row.plan as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 async function generateFixSuggestions(
   userPrompt: string,
   errorMessage: string,
@@ -586,6 +615,10 @@ export async function runJob(input: JobInput): Promise<void> {
       "Saving version rollback point…",
     );
     const snapshot = await snapshotFilesForVersion(projectId);
+
+    // Fetch the most recent plan snapshot to annotate this version
+    const planSnapshot = await loadLatestPlanSnapshot(projectId);
+
     const [version] = await db
       .insert(projectVersionsTable)
       .values({
@@ -593,6 +626,7 @@ export async function runJob(input: JobInput): Promise<void> {
         label: nextVersionLabel,
         note: assistantSummary.slice(0, 200),
         filesSnapshot: snapshot,
+        planSnapshot: planSnapshot ?? undefined,
       })
       .returning();
     report.versionId = version?.id ?? null;
