@@ -43,7 +43,12 @@ import type {
   ListCreditTransactions200,
   ListDeployments200,
   ListKnowledgeParams,
+  ListMobileBuilds200,
   ListProjectsParams,
+  MobileBuildInput,
+  MobileBuildLog,
+  MobileBuildLogsResult,
+  MobileBuildQueued,
   PageMapData,
   PageMapResponse,
   Project,
@@ -3428,6 +3433,319 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getDeleteKnowledgeMutationOptions(options));
     }
+
+export const getTriggerMobileBuildUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/builds`
+}
+
+/**
+ * @summary Trigger an EAS cloud build for iOS or Android
+ */
+export const triggerMobileBuild = async (id: number,
+    mobileBuildInput: MobileBuildInput, options?: RequestInit): Promise<MobileBuildQueued> => {
+
+  return customFetch<MobileBuildQueued>(getTriggerMobileBuildUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      mobileBuildInput,)
+  }
+);}
+
+
+
+
+export const getTriggerMobileBuildMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof triggerMobileBuild>>, TError,{id: number;data: BodyType<MobileBuildInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof triggerMobileBuild>>, TError,{id: number;data: BodyType<MobileBuildInput>}, TContext> => {
+
+const mutationKey = ['triggerMobileBuild'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof triggerMobileBuild>>, {id: number;data: BodyType<MobileBuildInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  triggerMobileBuild(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TriggerMobileBuildMutationResult = NonNullable<Awaited<ReturnType<typeof triggerMobileBuild>>>
+    export type TriggerMobileBuildMutationBody = BodyType<MobileBuildInput>
+    export type TriggerMobileBuildMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Trigger an EAS cloud build for iOS or Android
+ */
+export const useTriggerMobileBuild = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof triggerMobileBuild>>, TError,{id: number;data: BodyType<MobileBuildInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof triggerMobileBuild>>,
+        TError,
+        {id: number;data: BodyType<MobileBuildInput>},
+        TContext
+      > => {
+      return useMutation(getTriggerMobileBuildMutationOptions(options));
+    }
+
+export const getListMobileBuildsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/builds`
+}
+
+/**
+ * @summary List EAS builds for a project
+ */
+export const listMobileBuilds = async (id: number, options?: RequestInit): Promise<ListMobileBuilds200> => {
+
+  return customFetch<ListMobileBuilds200>(getListMobileBuildsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMobileBuildsQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/builds`
+    ] as const;
+    }
+
+
+export const getListMobileBuildsQueryOptions = <TData = Awaited<ReturnType<typeof listMobileBuilds>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMobileBuilds>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMobileBuildsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMobileBuilds>>> = ({ signal }) => listMobileBuilds(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMobileBuilds>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMobileBuildsQueryResult = NonNullable<Awaited<ReturnType<typeof listMobileBuilds>>>
+export type ListMobileBuildsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List EAS builds for a project
+ */
+
+export function useListMobileBuilds<TData = Awaited<ReturnType<typeof listMobileBuilds>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMobileBuilds>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMobileBuildsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetMobileBuildUrl = (id: number,
+    buildLogId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/builds/${buildLogId}`
+}
+
+/**
+ * @summary Get a single EAS build record and status
+ */
+export const getMobileBuild = async (id: number,
+    buildLogId: number, options?: RequestInit): Promise<MobileBuildLog> => {
+
+  return customFetch<MobileBuildLog>(getGetMobileBuildUrl(id,buildLogId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMobileBuildQueryKey = (id: number,
+    buildLogId: number,) => {
+    return [
+    `/api/projects/${id}/builds/${buildLogId}`
+    ] as const;
+    }
+
+
+export const getGetMobileBuildQueryOptions = <TData = Awaited<ReturnType<typeof getMobileBuild>>, TError = ErrorType<ApiError>>(id: number,
+    buildLogId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMobileBuild>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMobileBuildQueryKey(id,buildLogId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMobileBuild>>> = ({ signal }) => getMobileBuild(id,buildLogId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && buildLogId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMobileBuild>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMobileBuildQueryResult = NonNullable<Awaited<ReturnType<typeof getMobileBuild>>>
+export type GetMobileBuildQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get a single EAS build record and status
+ */
+
+export function useGetMobileBuild<TData = Awaited<ReturnType<typeof getMobileBuild>>, TError = ErrorType<ApiError>>(
+ id: number,
+    buildLogId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMobileBuild>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMobileBuildQueryOptions(id,buildLogId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetMobileBuildLogsUrl = (id: number,
+    buildLogId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/builds/${buildLogId}/logs`
+}
+
+/**
+ * @summary Fetch EAS build log output for a build
+ */
+export const getMobileBuildLogs = async (id: number,
+    buildLogId: number, options?: RequestInit): Promise<MobileBuildLogsResult> => {
+
+  return customFetch<MobileBuildLogsResult>(getGetMobileBuildLogsUrl(id,buildLogId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMobileBuildLogsQueryKey = (id: number,
+    buildLogId: number,) => {
+    return [
+    `/api/projects/${id}/builds/${buildLogId}/logs`
+    ] as const;
+    }
+
+
+export const getGetMobileBuildLogsQueryOptions = <TData = Awaited<ReturnType<typeof getMobileBuildLogs>>, TError = ErrorType<unknown>>(id: number,
+    buildLogId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMobileBuildLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMobileBuildLogsQueryKey(id,buildLogId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMobileBuildLogs>>> = ({ signal }) => getMobileBuildLogs(id,buildLogId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && buildLogId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMobileBuildLogs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMobileBuildLogsQueryResult = NonNullable<Awaited<ReturnType<typeof getMobileBuildLogs>>>
+export type GetMobileBuildLogsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Fetch EAS build log output for a build
+ */
+
+export function useGetMobileBuildLogs<TData = Awaited<ReturnType<typeof getMobileBuildLogs>>, TError = ErrorType<unknown>>(
+ id: number,
+    buildLogId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMobileBuildLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMobileBuildLogsQueryOptions(id,buildLogId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetRecentActivityUrl = () => {
 

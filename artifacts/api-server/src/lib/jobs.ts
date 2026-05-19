@@ -9,6 +9,7 @@ import {
   taskEventsTable,
   knowledgeEntriesTable,
   secretsTable,
+  deploymentLogsTable,
   type TaskReport,
   type FileSnapshotEntry,
 } from "@workspace/db";
@@ -28,6 +29,13 @@ import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, deductCredits } from "../routes/credits";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
+import {
+  triggerEasBuild,
+  getEasBuildStatus,
+  triggerEasSubmit,
+  mapEasStatusToDeploymentStatus,
+  type EasPlatform,
+} from "./eas";
 
 /** Credit cost per AI call, keyed by agentMode. */
 const CREDIT_COST: Record<string, number> = {
@@ -781,3 +789,164 @@ export function enqueueJob(input: JobInput): void {
     void runJob(input);
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EAS Build Job — mobile cloud builds via Expo Application Services
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const EAS_BUILD_CREDIT_COST = 5;
+
+export interface EasJobInput {
+  deploymentLogId: number;
+  projectId: number;
+  userId: string;
+  platform: EasPlatform;
+  accessToken: string;
+  appSlug: string;
+  appOwner: string;
+  /** Extracted from project files — used to log context but not uploaded to EAS */
+  appJsonSummary?: string;
+}
+
+async function extractAppJsonSummary(projectId: number): Promise<string> {
+  try {
+    const [row] = await db
+      .select({ content: projectFilesTable.content })
+      .from(projectFilesTable)
+      .where(
+        and(
+          eq(projectFilesTable.projectId, projectId),
+          eq(projectFilesTable.path, "app.json"),
+        ),
+      )
+      .limit(1);
+    if (!row) return "(no app.json found in project files)";
+    // Truncate to avoid bloating the log
+    return row.content.slice(0, 500);
+  } catch {
+    return "";
+  }
+}
+
+async function runEasBuildJob(input: EasJobInput): Promise<void> {
+  const { deploymentLogId, projectId, userId, platform, accessToken, appSlug, appOwner } = input;
+  let easBuildId: string | null = null;
+
+  try {
+    logger.info({ projectId, platform, appSlug, appOwner }, "EAS build job starting");
+
+    await db
+      .update(deploymentLogsTable)
+      .set({ status: "building", note: "EAS build triggered — waiting for result…" })
+      .where(eq(deploymentLogsTable.id, deploymentLogId));
+
+    const build = await triggerEasBuild({ accessToken, appSlug, appOwner, platform });
+    easBuildId = build.id;
+
+    await db
+      .update(deploymentLogsTable)
+      .set({ buildId: easBuildId, status: "building", note: `EAS build in progress (id: ${easBuildId})` })
+      .where(eq(deploymentLogsTable.id, deploymentLogId));
+
+    // Poll for completion (max 15 min, every 15 s)
+    const maxPollMs = 15 * 60 * 1000;
+    const pollIntervalMs = 15_000;
+    const startTime = Date.now();
+    let finalBuild = build;
+
+    while (Date.now() - startTime < maxPollMs) {
+      await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+      finalBuild = await getEasBuildStatus(accessToken, easBuildId);
+      const deployStatus = mapEasStatusToDeploymentStatus(finalBuild.status);
+      await db
+        .update(deploymentLogsTable)
+        .set({ status: deployStatus, note: `EAS status: ${finalBuild.status}` })
+        .where(eq(deploymentLogsTable.id, deploymentLogId));
+      if (["finished", "errored", "canceled", "timed-out"].includes(finalBuild.status)) break;
+    }
+
+    if (finalBuild.status === "finished") {
+      const downloadUrl =
+        finalBuild.artifacts?.applicationArchiveUrl ?? finalBuild.artifacts?.buildUrl ?? null;
+
+      let testflightUrl: string | null = null;
+      let submissionNote = "";
+      try {
+        await db
+          .update(deploymentLogsTable)
+          .set({ status: "submitting", note: "Build succeeded — submitting to store…", downloadUrl: downloadUrl ?? undefined })
+          .where(eq(deploymentLogsTable.id, deploymentLogId));
+
+        await triggerEasSubmit({ accessToken, buildId: easBuildId, platform, appOwner });
+        testflightUrl = platform === "ios"
+          ? "https://appstoreconnect.apple.com/apps"
+          : "https://play.google.com/console";
+        submissionNote = platform === "ios"
+          ? "Submitted to TestFlight. Check App Store Connect for processing status."
+          : "Uploaded to Google Play Internal Testing track.";
+      } catch (submitErr) {
+        logger.warn({ submitErr, easBuildId }, "EAS submit failed (build still succeeded)");
+        submissionNote = `Build succeeded. Auto-submit failed: ${submitErr instanceof Error ? submitErr.message : "unknown error"}`;
+      }
+
+      await db
+        .update(deploymentLogsTable)
+        .set({ status: "submitted", downloadUrl: downloadUrl ?? undefined, testflightUrl: testflightUrl ?? undefined, note: submissionNote })
+        .where(eq(deploymentLogsTable.id, deploymentLogId));
+
+      void writeKnowledge({
+        title: `EAS ${platform} build succeeded`,
+        content: `Project ${projectId} EAS ${platform} build (id: ${easBuildId}) completed and submitted. ${submissionNote}`,
+        type: "build", category: "event", severity: "info", projectId, userId,
+      });
+
+      void db.insert(chatMessagesTable).values({
+        projectId, role: "system",
+        content: `${platform === "ios" ? "iOS" : "Android"} cloud build succeeded and submitted. ${submissionNote}`,
+        agentMode: "eco", planMode: false,
+        plan: { kind: "report", report: { userRequest: `EAS ${platform} build`, filesCreated: [], filesChanged: [], filesRemoved: [], previewUpdated: false, warnings: [] } } as unknown as Record<string, unknown>,
+      }).catch(() => { /* best-effort */ });
+    } else {
+      const errorMsg = finalBuild.error?.message ?? `EAS build ${finalBuild.status}`;
+      await db
+        .update(deploymentLogsTable)
+        .set({ status: "failed", note: errorMsg })
+        .where(eq(deploymentLogsTable.id, deploymentLogId));
+
+      void writeKnowledge({
+        title: `EAS ${platform} build failed`,
+        content: `Project ${projectId} EAS ${platform} build (id: ${easBuildId}) failed: ${errorMsg}. Check credentials in project Secrets.`,
+        type: "build", category: "diagnostic", severity: "error", projectId, userId,
+      });
+
+      void db.insert(chatMessagesTable).values({
+        projectId, role: "assistant",
+        content: `${platform === "ios" ? "iOS" : "Android"} cloud build failed: ${errorMsg}`,
+        agentMode: "eco", planMode: false,
+        plan: {
+          kind: "error", message: errorMsg,
+          suggestions: [
+            "Check your Apple/Google credentials in the project Secrets tab.",
+            "Verify your app.json has a valid bundleIdentifier / package name.",
+            "Review the EAS dashboard for detailed build logs.",
+          ],
+        } as unknown as Record<string, unknown>,
+      }).catch(() => { /* best-effort */ });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown EAS error";
+    logger.error({ err, deploymentLogId, platform }, "EAS build job failed");
+    await db
+      .update(deploymentLogsTable)
+      .set({ status: "failed", note: `Build error: ${message}` })
+      .where(eq(deploymentLogsTable.id, deploymentLogId));
+  }
+}
+
+export function enqueueEasJob(input: EasJobInput): void {
+  setImmediate(() => {
+    void runEasBuildJob(input);
+  });
+}
+
+export { extractAppJsonSummary };

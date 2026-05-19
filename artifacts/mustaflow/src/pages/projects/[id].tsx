@@ -1256,10 +1256,11 @@ export default function ProjectWorkspacePage() {
                 defaultTab={prefillSecretName ? "secrets" : undefined}
               />
             )}
-            {activeTab === "publishing" && <PublishingTab projectId={projectId} />}
+            {activeTab === "publishing" && <PublishingTab projectId={projectId} kind={project.kind} />}
             {activeTab === "logs" && (
               <LogsTab
                 projectId={projectId}
+                kind={project.kind}
                 onTryFix={(text) => {
                   setPrompt(text);
                   setActiveTab("preview");

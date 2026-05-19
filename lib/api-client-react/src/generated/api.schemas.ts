@@ -671,7 +671,69 @@ export interface DeploymentLog {
   snapshotVersionId?: number | null;
   /** @nullable */
   note?: string | null;
+  /** @nullable */
+  buildId?: string | null;
+  /** @nullable */
+  platform?: string | null;
+  /** @nullable */
+  downloadUrl?: string | null;
+  /** @nullable */
+  testflightUrl?: string | null;
   createdAt: string;
+}
+
+export type MobileBuildInputPlatform = typeof MobileBuildInputPlatform[keyof typeof MobileBuildInputPlatform];
+
+
+export const MobileBuildInputPlatform = {
+  ios: 'ios',
+  android: 'android',
+} as const;
+
+export interface MobileBuildInput {
+  platform: MobileBuildInputPlatform;
+}
+
+export interface MobileBuildQueued {
+  ok: boolean;
+  buildLogId: number;
+  platform: string;
+  status: string;
+  note: string;
+}
+
+export interface MobileBuildLog {
+  id: number;
+  projectId: number;
+  userId: string;
+  env: string;
+  status: string;
+  /** @nullable */
+  platform: string | null;
+  /** @nullable */
+  buildId?: string | null;
+  /** @nullable */
+  downloadUrl?: string | null;
+  /** @nullable */
+  testflightUrl?: string | null;
+  /** @nullable */
+  note?: string | null;
+  createdAt: string;
+}
+
+export interface MobileBuildLogsResult {
+  /** @nullable */
+  buildId?: string | null;
+  status: string;
+  /** @nullable */
+  platform?: string | null;
+  /** @nullable */
+  downloadUrl?: string | null;
+  /** @nullable */
+  testflightUrl?: string | null;
+  /** @nullable */
+  note?: string | null;
+  logs?: string;
 }
 
 export interface UserCredit {
@@ -864,5 +926,9 @@ export const ListKnowledgeSeverity = {
 
 export type DeleteKnowledge200 = {
   ok: boolean;
+};
+
+export type ListMobileBuilds200 = {
+  builds: MobileBuildLog[];
 };
 

@@ -28,6 +28,8 @@ tags:
     description: User workspaces (containers for projects)
   - name: credits
     description: User credits and billing
+  - name: builds
+    description: EAS mobile cloud builds (iOS / Android)
 paths:
   /healthz:
     get:
@@ -876,6 +878,102 @@ paths:
                 properties:
                   ok: { type: boolean }
 
+  /projects/{id}/builds:
+    post:
+      operationId: triggerMobileBuild
+      tags: [builds]
+      summary: Trigger an EAS cloud build for iOS or Android
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MobileBuildInput"
+      responses:
+        "202":
+          description: Build queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MobileBuildQueued"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "402":
+          description: Insufficient credits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: EAS credentials not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: listMobileBuilds
+      tags: [builds]
+      summary: List EAS builds for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Build list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [builds]
+                properties:
+                  builds:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MobileBuildLog"
+
+  /projects/{id}/builds/{buildLogId}:
+    get:
+      operationId: getMobileBuild
+      tags: [builds]
+      summary: Get a single EAS build record and status
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: buildLogId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Build record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MobileBuildLog"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/builds/{buildLogId}/logs:
+    get:
+      operationId: getMobileBuildLogs
+      tags: [builds]
+      summary: Fetch EAS build log output for a build
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: buildLogId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Build logs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MobileBuildLogsResult"
+
   /activity:
     get:
       operationId: getRecentActivity
@@ -1380,7 +1478,57 @@ components:
         filesCount: { type: ["integer", "null"] }
         snapshotVersionId: { type: ["integer", "null"] }
         note: { type: ["string", "null"] }
+        buildId: { type: ["string", "null"] }
+        platform: { type: ["string", "null"] }
+        downloadUrl: { type: ["string", "null"] }
+        testflightUrl: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
+
+    MobileBuildInput:
+      type: object
+      required: [platform]
+      properties:
+        platform:
+          type: string
+          enum: [ios, android]
+
+    MobileBuildQueued:
+      type: object
+      required: [ok, buildLogId, platform, status, note]
+      properties:
+        ok: { type: boolean }
+        buildLogId: { type: integer }
+        platform: { type: string }
+        status: { type: string }
+        note: { type: string }
+
+    MobileBuildLog:
+      type: object
+      required: [id, projectId, userId, env, status, platform, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        userId: { type: string }
+        env: { type: string }
+        status: { type: string }
+        platform: { type: ["string", "null"] }
+        buildId: { type: ["string", "null"] }
+        downloadUrl: { type: ["string", "null"] }
+        testflightUrl: { type: ["string", "null"] }
+        note: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+
+    MobileBuildLogsResult:
+      type: object
+      required: [status]
+      properties:
+        buildId: { type: ["string", "null"] }
+        status: { type: string }
+        platform: { type: ["string", "null"] }
+        downloadUrl: { type: ["string", "null"] }
+        testflightUrl: { type: ["string", "null"] }
+        note: { type: ["string", "null"] }
+        logs: { type: string }
 
     UserCredit:
       type: object

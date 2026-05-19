@@ -22,6 +22,7 @@ import pageMapRouter from "./page-map";
 import adminRouter from "./admin";
 import billingRouter, { billingWebhookRouter } from "./billing";
 import workspacesRouter from "./workspaces";
+import buildsRouter from "./builds";
 import { attachUser } from "../lib/auth";
 import {
   aiBuilderLimiter,
@@ -104,6 +105,7 @@ router.use(sslRouter);
 router.use(pageMapRouter);
 router.use(adminRouter);
 router.use(billingRouter);
+router.use(buildsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

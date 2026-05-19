@@ -1008,6 +1008,10 @@ export const ListDeploymentsResponse = zod.object({
   "filesCount": zod.number().nullish(),
   "snapshotVersionId": zod.number().nullish(),
   "note": zod.string().nullish(),
+  "buildId": zod.string().nullish(),
+  "platform": zod.string().nullish(),
+  "downloadUrl": zod.string().nullish(),
+  "testflightUrl": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -1170,6 +1174,84 @@ export const DeleteKnowledgeParams = zod.object({
 
 export const DeleteKnowledgeResponse = zod.object({
   "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Trigger an EAS cloud build for iOS or Android
+ */
+export const TriggerMobileBuildParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const TriggerMobileBuildBody = zod.object({
+  "platform": zod.enum(['ios', 'android'])
+})
+
+
+/**
+ * @summary List EAS builds for a project
+ */
+export const ListMobileBuildsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListMobileBuildsResponse = zod.object({
+  "builds": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "userId": zod.string(),
+  "env": zod.string(),
+  "status": zod.string(),
+  "platform": zod.string().nullable(),
+  "buildId": zod.string().nullish(),
+  "downloadUrl": zod.string().nullish(),
+  "testflightUrl": zod.string().nullish(),
+  "note": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Get a single EAS build record and status
+ */
+export const GetMobileBuildParams = zod.object({
+  "id": zod.coerce.number(),
+  "buildLogId": zod.coerce.number()
+})
+
+export const GetMobileBuildResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "userId": zod.string(),
+  "env": zod.string(),
+  "status": zod.string(),
+  "platform": zod.string().nullable(),
+  "buildId": zod.string().nullish(),
+  "downloadUrl": zod.string().nullish(),
+  "testflightUrl": zod.string().nullish(),
+  "note": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Fetch EAS build log output for a build
+ */
+export const GetMobileBuildLogsParams = zod.object({
+  "id": zod.coerce.number(),
+  "buildLogId": zod.coerce.number()
+})
+
+export const GetMobileBuildLogsResponse = zod.object({
+  "buildId": zod.string().nullish(),
+  "status": zod.string(),
+  "platform": zod.string().nullish(),
+  "downloadUrl": zod.string().nullish(),
+  "testflightUrl": zod.string().nullish(),
+  "note": zod.string().nullish(),
+  "logs": zod.string().optional()
 })
 
 

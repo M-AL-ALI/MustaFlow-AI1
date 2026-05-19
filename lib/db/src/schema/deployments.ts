@@ -1,10 +1,10 @@
 import { pgTable, serial, integer, text, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
-export const DEPLOYMENT_ENVS = ["testing", "production"] as const;
+export const DEPLOYMENT_ENVS = ["testing", "production", "ios", "android"] as const;
 export type DeploymentEnv = (typeof DEPLOYMENT_ENVS)[number];
 
-export const DEPLOYMENT_STATUSES = ["started", "passed", "failed", "unpublished"] as const;
+export const DEPLOYMENT_STATUSES = ["started", "queued", "building", "passed", "failed", "unpublished", "submitting", "submitted"] as const;
 export type DeploymentStatus = (typeof DEPLOYMENT_STATUSES)[number];
 
 export const deploymentLogsTable = pgTable("deployment_logs", {
@@ -21,6 +21,11 @@ export const deploymentLogsTable = pgTable("deployment_logs", {
   snapshotVersionId: integer("snapshot_version_id"),
   checksResult: jsonb("checks_result"),
   note: text("note"),
+  // Mobile / EAS build columns
+  buildId: text("build_id"),
+  platform: text("platform"),
+  downloadUrl: text("download_url"),
+  testflightUrl: text("testflight_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

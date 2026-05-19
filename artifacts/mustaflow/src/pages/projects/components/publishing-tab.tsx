@@ -391,7 +391,38 @@ function ReadinessGate({
 
 type Platform = "web" | "ios" | "android";
 
-export function PublishingTab({ projectId }: { projectId: number }) {
+type MobileBuildLog = {
+  id: number;
+  env: string;
+  status: string;
+  platform: string | null;
+  buildId: string | null;
+  downloadUrl: string | null;
+  testflightUrl: string | null;
+  note: string | null;
+  createdAt: string;
+};
+
+function MobileBuildStatusBadge({ status }: { status: string }) {
+  const cfg: Record<string, { label: string; className: string; spin?: boolean }> = {
+    queued: { label: "Queued", className: "bg-muted text-muted-foreground border-border" },
+    building: { label: "Building", className: "bg-primary/10 text-primary border-primary/20", spin: true },
+    submitting: { label: "Submitting", className: "bg-violet-500/10 text-violet-400 border-violet-500/20", spin: true },
+    submitted: { label: "Submitted", className: "bg-green-500/10 text-green-400 border-green-500/20" },
+    passed: { label: "Passed", className: "bg-green-500/10 text-green-400 border-green-500/20" },
+    failed: { label: "Failed", className: "bg-destructive/10 text-destructive border-destructive/20" },
+  };
+  const c = cfg[status] ?? { label: status, className: "bg-muted text-muted-foreground border-border" };
+  return (
+    <span className={cn("inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium shrink-0", c.className)}>
+      {c.spin && <span className="w-1.5 h-1.5 rounded-full border border-current border-t-transparent animate-spin" />}
+      {c.label}
+    </span>
+  );
+}
+
+export function PublishingTab({ projectId, kind }: { projectId: number; kind?: string }) {
+  const isMobile = kind?.startsWith("mobile-") ?? false;
   const [platform, setPlatform] = useState<Platform>("web");
   const [webEnv, setWebEnv] = useState<"testing" | "production">("testing");
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -425,6 +456,25 @@ export function PublishingTab({ projectId }: { projectId: number }) {
     }>
   >([]);
 
+  // Mobile build state
+  const [mobileBuilds, setMobileBuilds] = useState<MobileBuildLog[]>([]);
+  const [triggeringBuild, setTriggeringBuild] = useState<"ios" | "android" | null>(null);
+  const [buildError, setBuildError] = useState<string | null>(null);
+  const [credsMissing, setCredsMissing] = useState<string | null>(null);
+
+  // EAS credentials checklist — tracks which secret names are configured
+  const [configuredSecrets, setConfiguredSecrets] = useState<Set<string>>(new Set());
+  const fetchConfiguredSecrets = useCallback(async () => {
+    if (!isMobile) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/secrets`);
+      if (res.ok) {
+        const data = (await res.json()) as { secrets?: Array<{ name: string }> };
+        setConfiguredSecrets(new Set((data.secrets ?? []).map((s) => s.name)));
+      }
+    } catch { /* ignore */ }
+  }, [projectId, isMobile]);
+
   // Site settings state
   const [siteTitle, setSiteTitle] = useState("");
   const [metaDescription, setMetaDescription] = useState("");
@@ -450,6 +500,45 @@ export function PublishingTab({ projectId }: { projectId: number }) {
   const [domainSaving, setDomainSaving] = useState(false);
   const [domainVerifying, setDomainVerifying] = useState(false);
   const [domainError, setDomainError] = useState<string | null>(null);
+
+  const fetchMobileBuilds = useCallback(async () => {
+    if (!isMobile) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/builds`);
+      if (res.ok) {
+        const data = (await res.json()) as { builds: MobileBuildLog[] };
+        setMobileBuilds(data.builds ?? []);
+      }
+    } catch { /* ignore */ }
+  }, [projectId, isMobile]);
+
+  const triggerBuild = async (p: "ios" | "android") => {
+    setTriggeringBuild(p);
+    setBuildError(null);
+    setCredsMissing(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/builds`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: p }),
+      });
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string };
+        if (res.status === 422) {
+          setCredsMissing(err.error ?? "EAS credentials not configured.");
+        } else {
+          setBuildError(err.error ?? `HTTP ${res.status}`);
+        }
+        return;
+      }
+      // Refresh builds list immediately
+      await fetchMobileBuilds();
+    } catch (err) {
+      setBuildError(err instanceof Error ? err.message : "Build trigger failed");
+    } finally {
+      setTriggeringBuild(null);
+    }
+  };
 
   async function handlePublish() {
     setIsPublishing(true);
@@ -612,6 +701,27 @@ export function PublishingTab({ projectId }: { projectId: number }) {
       setSavingSettings(false);
     }
   };
+
+  // Fetch secrets list for credentials checklist
+  useEffect(() => {
+    void fetchConfiguredSecrets();
+  }, [fetchConfiguredSecrets]);
+
+  // Poll mobile builds every 5 s while any build is in progress
+  useEffect(() => {
+    void fetchMobileBuilds();
+  }, [fetchMobileBuilds]);
+
+  useEffect(() => {
+    const inProgress = mobileBuilds.some((b) =>
+      ["queued", "building", "submitting"].includes(b.status),
+    );
+    if (!inProgress) return;
+    const timer = setInterval(() => {
+      void fetchMobileBuilds();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [mobileBuilds, fetchMobileBuilds]);
 
   useEffect(() => {
     void fetchReadiness();
@@ -1291,63 +1401,156 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                 <div>
                   <h3 className="font-semibold">iOS App Publishing</h3>
                   <p className="text-sm text-muted-foreground">
-                    Build with Expo → TestFlight beta → App Store production.
+                    Build with EAS → TestFlight beta → App Store production.
                   </p>
                 </div>
               </div>
 
               {/* Step pipeline */}
               <div className="grid grid-cols-3 gap-3 text-center text-xs">
-                {["Expo Build", "TestFlight", "App Store"].map((step, i) => (
-                  <div key={step} className="flex flex-col items-center gap-1.5">
-                    <div
-                      className={cn(
-                        "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold",
-                        i === 0
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {i + 1}
+                {["EAS Build", "TestFlight", "App Store"].map((step, i) => {
+                  const iosBuilds = mobileBuilds.filter((b) => b.platform === "ios");
+                  const latest = iosBuilds[0];
+                  const isActive = i === 0 || (i === 1 && latest?.status === "submitting") || (i === 1 && latest?.status === "submitted");
+                  return (
+                    <div key={step} className="flex flex-col items-center gap-1.5">
+                      <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold", isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
+                        {i + 1}
+                      </div>
+                      <span className="text-muted-foreground">{step}</span>
                     </div>
-                    <span className="text-muted-foreground">{step}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
-              {/* Expo placeholder */}
-              <div className="bg-muted/50 border border-border rounded-lg p-3 text-xs space-y-1">
-                <div className="flex items-center gap-1.5 font-semibold text-foreground">
-                  <Server className="h-3.5 w-3.5" /> Expo Preview
-                </div>
-                <p className="text-muted-foreground">
-                  Mobile app generation (Expo / React Native) is planned for Phase 3. The checklist below covers everything you will need when it arrives.
-                </p>
-              </div>
+              {/* Latest iOS build status */}
+              {(() => {
+                const iosBuild = mobileBuilds.find((b) => b.platform === "ios");
+                if (!iosBuild) return null;
+                return (
+                  <div className={cn("border rounded-lg p-3 text-xs space-y-2", iosBuild.status === "failed" ? "border-destructive/30 bg-destructive/5" : iosBuild.status === "submitted" ? "border-green-500/30 bg-green-500/5" : "border-border bg-muted/30")}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-foreground">Latest iOS Build</span>
+                      <MobileBuildStatusBadge status={iosBuild.status} />
+                    </div>
+                    {iosBuild.note && <p className="text-muted-foreground">{iosBuild.note}</p>}
+                    {iosBuild.buildId && <p className="font-mono text-[10px] text-muted-foreground">EAS ID: {iosBuild.buildId}</p>}
+                    {iosBuild.downloadUrl && (
+                      <a href={iosBuild.downloadUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-primary hover:underline">
+                        Download IPA <ArrowUpRight className="h-3 w-3" />
+                      </a>
+                    )}
+                    {iosBuild.testflightUrl && (
+                      <a href={iosBuild.testflightUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-green-500 hover:underline font-medium">
+                        Open App Store Connect <ArrowUpRight className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" asChild>
-                  <a
-                    href="https://developer.apple.com/account"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1"
-                  >
+                  <a href="https://developer.apple.com/account" target="_blank" rel="noreferrer" className="flex items-center gap-1">
                     Apple Developer <ArrowUpRight className="h-3 w-3" />
                   </a>
                 </Button>
                 <Button variant="outline" size="sm" asChild>
-                  <a
-                    href="https://appstoreconnect.apple.com"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1"
-                  >
+                  <a href="https://appstoreconnect.apple.com" target="_blank" rel="noreferrer" className="flex items-center gap-1">
                     App Store Connect <ArrowUpRight className="h-3 w-3" />
+                  </a>
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <a href="https://expo.dev/accounts" target="_blank" rel="noreferrer" className="flex items-center gap-1">
+                    EAS Dashboard <ArrowUpRight className="h-3 w-3" />
                   </a>
                 </Button>
               </div>
             </div>
+
+            {/* EAS Build panel for mobile projects */}
+            {isMobile && (
+              <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                <h3 className="font-semibold text-sm">EAS Cloud Build</h3>
+                <p className="text-xs text-muted-foreground">
+                  Triggers an Expo Application Services cloud build. Costs 5 credits per build.
+                </p>
+
+                {/* Credentials checklist */}
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <div className="bg-muted/40 px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border">
+                    Required Credentials
+                  </div>
+                  {[
+                    { name: "EAS_ACCESS_TOKEN", label: "EAS Access Token", required: true },
+                    { name: "EXPO_ACCOUNT_NAME", label: "Expo Account Name", required: true },
+                    { name: "EXPO_APP_SLUG", label: "Expo App Slug", required: false },
+                    { name: "APPLE_TEAM_ID", label: "Apple Developer Team ID", required: true },
+                    { name: "APPLE_ASC_KEY_ID", label: "ASC API Key ID", required: true },
+                    { name: "APPLE_ASC_ISSUER_ID", label: "ASC Issuer ID", required: true },
+                    { name: "APPLE_ASC_PRIVATE_KEY", label: "ASC Private Key (.p8)", required: true },
+                  ].map(({ name, label, required }) => {
+                    const isSet = configuredSecrets.has(name);
+                    return (
+                      <div key={name} className="flex items-center gap-2 px-3 py-2 border-b border-border/50 last:border-0 text-xs">
+                        {isSet ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                        ) : (
+                          <Circle className={cn("h-3.5 w-3.5 shrink-0", required ? "text-yellow-500" : "text-muted-foreground")} />
+                        )}
+                        <span className={cn("flex-1", isSet ? "text-foreground" : required ? "text-yellow-600" : "text-muted-foreground")}>
+                          {label}
+                        </span>
+                        <code className="font-mono text-[9px] text-muted-foreground bg-muted px-1 rounded">{name}</code>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {credsMissing && (
+                  <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>{credsMissing}</span>
+                  </div>
+                )}
+                {buildError && platform === "ios" && (
+                  <p className="text-xs text-destructive">{buildError}</p>
+                )}
+                <Button
+                  className="w-full"
+                  onClick={() => void triggerBuild("ios")}
+                  disabled={triggeringBuild !== null}
+                >
+                  {triggeringBuild === "ios" ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Smartphone className="h-4 w-4 mr-2" />
+                  )}
+                  {triggeringBuild === "ios" ? "Queuing build…" : "Build for iOS (TestFlight)"}
+                </Button>
+              </div>
+            )}
+
+            {/* Build history for iOS */}
+            {isMobile && mobileBuilds.filter((b) => b.platform === "ios").length > 0 && (
+              <div className="border border-border rounded-xl overflow-hidden bg-card">
+                <div className="px-4 py-3 border-b border-border text-sm font-semibold">iOS Build History</div>
+                <div className="divide-y divide-border">
+                  {mobileBuilds.filter((b) => b.platform === "ios").slice(0, 10).map((b) => (
+                    <div key={b.id} className="flex items-center gap-3 px-4 py-2.5 text-xs">
+                      <MobileBuildStatusBadge status={b.status} />
+                      {b.buildId && <span className="font-mono text-muted-foreground truncate">{b.buildId.slice(0, 8)}…</span>}
+                      {b.testflightUrl && (
+                        <a href={b.testflightUrl} target="_blank" rel="noreferrer" className="text-green-500 hover:underline flex items-center gap-0.5">
+                          TestFlight <ArrowUpRight className="h-2.5 w-2.5" />
+                        </a>
+                      )}
+                      <span className="ml-auto text-muted-foreground shrink-0">{new Date(b.createdAt).toLocaleDateString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between gap-4">
               <h3 className="font-semibold text-sm whitespace-nowrap">iOS Submission Checklist</h3>
@@ -1355,24 +1558,26 @@ export function PublishingTab({ projectId }: { projectId: number }) {
             </div>
             <ChecklistGroup sections={IOS_CHECKLIST} checked={checked} onToggle={toggle} />
 
-            <div className="border border-border rounded-xl p-4 bg-card space-y-3">
-              {!iosReady ? (
-                <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>Complete all required items before submitting to App Store Connect.</span>
-                </div>
-              ) : (
-                <div className="flex items-start gap-2 text-xs text-green-600 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2">
-                  <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>All required items complete. Ready to submit to App Store Connect.</span>
-                </div>
-              )}
-              <Button className="w-full" disabled>
-                <Smartphone className="h-4 w-4 mr-2" />
-                Submit to TestFlight
-                <span className="ml-2 text-[11px] opacity-60">(Expo build required)</span>
-              </Button>
-            </div>
+            {!isMobile && (
+              <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                {!iosReady ? (
+                  <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>Complete all required items before submitting to App Store Connect.</span>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 text-xs text-green-600 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2">
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>All required items complete. Ready to submit to App Store Connect.</span>
+                  </div>
+                )}
+                <Button className="w-full" disabled>
+                  <Smartphone className="h-4 w-4 mr-2" />
+                  Submit to TestFlight
+                  <span className="ml-2 text-[11px] opacity-60">(Expo build required)</span>
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -1388,53 +1593,148 @@ export function PublishingTab({ projectId }: { projectId: number }) {
                 <div>
                   <h3 className="font-semibold">Android App Publishing</h3>
                   <p className="text-sm text-muted-foreground">
-                    Build with Expo → Internal testing → Google Play production.
+                    Build with EAS → Internal testing → Google Play production.
                   </p>
                 </div>
               </div>
 
               {/* Step pipeline */}
               <div className="grid grid-cols-3 gap-3 text-center text-xs">
-                {["Expo Build", "Play Console", "Production"].map((step, i) => (
-                  <div key={step} className="flex flex-col items-center gap-1.5">
-                    <div
-                      className={cn(
-                        "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold",
-                        i === 0
-                          ? "bg-green-500 text-white"
-                          : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {i + 1}
+                {["EAS Build", "Play Console", "Production"].map((step, i) => {
+                  const androidBuilds = mobileBuilds.filter((b) => b.platform === "android");
+                  const latest = androidBuilds[0];
+                  const isActive = i === 0 || (i === 1 && (latest?.status === "submitting" || latest?.status === "submitted"));
+                  return (
+                    <div key={step} className="flex flex-col items-center gap-1.5">
+                      <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold", isActive ? "bg-green-500 text-white" : "bg-muted text-muted-foreground")}>
+                        {i + 1}
+                      </div>
+                      <span className="text-muted-foreground">{step}</span>
                     </div>
-                    <span className="text-muted-foreground">{step}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
-              {/* Android preview placeholder */}
-              <div className="bg-muted/50 border border-border rounded-lg p-3 text-xs space-y-1">
-                <div className="flex items-center gap-1.5 font-semibold text-foreground">
-                  <Server className="h-3.5 w-3.5" /> Android Preview
-                </div>
-                <p className="text-muted-foreground">
-                  Mobile app generation (Expo / React Native) is planned for Phase 3.
-                </p>
-              </div>
+              {/* Latest Android build status */}
+              {(() => {
+                const androidBuild = mobileBuilds.find((b) => b.platform === "android");
+                if (!androidBuild) return null;
+                return (
+                  <div className={cn("border rounded-lg p-3 text-xs space-y-2", androidBuild.status === "failed" ? "border-destructive/30 bg-destructive/5" : androidBuild.status === "submitted" ? "border-green-500/30 bg-green-500/5" : "border-border bg-muted/30")}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-foreground">Latest Android Build</span>
+                      <MobileBuildStatusBadge status={androidBuild.status} />
+                    </div>
+                    {androidBuild.note && <p className="text-muted-foreground">{androidBuild.note}</p>}
+                    {androidBuild.buildId && <p className="font-mono text-[10px] text-muted-foreground">EAS ID: {androidBuild.buildId}</p>}
+                    {androidBuild.downloadUrl && (
+                      <a href={androidBuild.downloadUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-primary hover:underline">
+                        Download AAB <ArrowUpRight className="h-3 w-3" />
+                      </a>
+                    )}
+                    {androidBuild.testflightUrl && (
+                      <a href={androidBuild.testflightUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-green-500 hover:underline font-medium">
+                        Open Play Console <ArrowUpRight className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" asChild>
-                  <a
-                    href="https://play.google.com/console"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1"
-                  >
+                  <a href="https://play.google.com/console" target="_blank" rel="noreferrer" className="flex items-center gap-1">
                     Play Console <ArrowUpRight className="h-3 w-3" />
+                  </a>
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <a href="https://expo.dev/accounts" target="_blank" rel="noreferrer" className="flex items-center gap-1">
+                    EAS Dashboard <ArrowUpRight className="h-3 w-3" />
                   </a>
                 </Button>
               </div>
             </div>
+
+            {/* EAS Build panel for mobile projects */}
+            {isMobile && (
+              <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                <h3 className="font-semibold text-sm">EAS Cloud Build</h3>
+                <p className="text-xs text-muted-foreground">
+                  Triggers an Expo Application Services cloud build. Costs 5 credits per build.
+                </p>
+
+                {/* Credentials checklist */}
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <div className="bg-muted/40 px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border">
+                    Required Credentials
+                  </div>
+                  {[
+                    { name: "EAS_ACCESS_TOKEN", label: "EAS Access Token", required: true },
+                    { name: "EXPO_ACCOUNT_NAME", label: "Expo Account Name", required: true },
+                    { name: "EXPO_APP_SLUG", label: "Expo App Slug", required: false },
+                    { name: "GOOGLE_SERVICE_ACCOUNT_JSON", label: "Google Play Service Account JSON", required: true },
+                  ].map(({ name, label, required }) => {
+                    const isSet = configuredSecrets.has(name);
+                    return (
+                      <div key={name} className="flex items-center gap-2 px-3 py-2 border-b border-border/50 last:border-0 text-xs">
+                        {isSet ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                        ) : (
+                          <Circle className={cn("h-3.5 w-3.5 shrink-0", required ? "text-yellow-500" : "text-muted-foreground")} />
+                        )}
+                        <span className={cn("flex-1", isSet ? "text-foreground" : required ? "text-yellow-600" : "text-muted-foreground")}>
+                          {label}
+                        </span>
+                        <code className="font-mono text-[9px] text-muted-foreground bg-muted px-1 rounded">{name}</code>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {credsMissing && (
+                  <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>{credsMissing}</span>
+                  </div>
+                )}
+                {buildError && platform === "android" && (
+                  <p className="text-xs text-destructive">{buildError}</p>
+                )}
+                <Button
+                  className="w-full bg-green-600 hover:bg-green-700 text-white"
+                  onClick={() => void triggerBuild("android")}
+                  disabled={triggeringBuild !== null}
+                >
+                  {triggeringBuild === "android" ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <PlaySquare className="h-4 w-4 mr-2" />
+                  )}
+                  {triggeringBuild === "android" ? "Queuing build…" : "Build for Android (Play Store)"}
+                </Button>
+              </div>
+            )}
+
+            {/* Build history for Android */}
+            {isMobile && mobileBuilds.filter((b) => b.platform === "android").length > 0 && (
+              <div className="border border-border rounded-xl overflow-hidden bg-card">
+                <div className="px-4 py-3 border-b border-border text-sm font-semibold">Android Build History</div>
+                <div className="divide-y divide-border">
+                  {mobileBuilds.filter((b) => b.platform === "android").slice(0, 10).map((b) => (
+                    <div key={b.id} className="flex items-center gap-3 px-4 py-2.5 text-xs">
+                      <MobileBuildStatusBadge status={b.status} />
+                      {b.buildId && <span className="font-mono text-muted-foreground truncate">{b.buildId.slice(0, 8)}…</span>}
+                      {b.testflightUrl && (
+                        <a href={b.testflightUrl} target="_blank" rel="noreferrer" className="text-green-500 hover:underline flex items-center gap-0.5">
+                          Play Console <ArrowUpRight className="h-2.5 w-2.5" />
+                        </a>
+                      )}
+                      <span className="ml-auto text-muted-foreground shrink-0">{new Date(b.createdAt).toLocaleDateString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between gap-4">
               <h3 className="font-semibold text-sm whitespace-nowrap">
@@ -1444,24 +1744,26 @@ export function PublishingTab({ projectId }: { projectId: number }) {
             </div>
             <ChecklistGroup sections={ANDROID_CHECKLIST} checked={checked} onToggle={toggle} />
 
-            <div className="border border-border rounded-xl p-4 bg-card space-y-3">
-              {!andReady ? (
-                <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>Complete all required items before uploading to Google Play.</span>
-                </div>
-              ) : (
-                <div className="flex items-start gap-2 text-xs text-green-600 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2">
-                  <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>All required items complete. Ready to upload to Google Play Console.</span>
-                </div>
-              )}
-              <Button className="w-full" disabled>
-                <PlaySquare className="h-4 w-4 mr-2" />
-                Upload to Google Play
-                <span className="ml-2 text-[11px] opacity-60">(Expo build required)</span>
-              </Button>
-            </div>
+            {!isMobile && (
+              <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                {!andReady ? (
+                  <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>Complete all required items before uploading to Google Play.</span>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 text-xs text-green-600 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2">
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>All required items complete. Ready to upload to Google Play Console.</span>
+                  </div>
+                )}
+                <Button className="w-full" disabled>
+                  <PlaySquare className="h-4 w-4 mr-2" />
+                  Upload to Google Play
+                  <span className="ml-2 text-[11px] opacity-60">(Expo build required)</span>
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

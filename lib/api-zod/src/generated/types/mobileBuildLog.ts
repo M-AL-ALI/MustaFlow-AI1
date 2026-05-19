@@ -6,29 +6,21 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface DeploymentLog {
+export interface MobileBuildLog {
   id: number;
   projectId: number;
   userId: string;
   env: string;
   status: string;
   /** @nullable */
-  publicSlug?: string | null;
-  /** @nullable */
-  publicUrl?: string | null;
-  /** @nullable */
-  filesCount?: number | null;
-  /** @nullable */
-  snapshotVersionId?: number | null;
-  /** @nullable */
-  note?: string | null;
+  platform: string | null;
   /** @nullable */
   buildId?: string | null;
-  /** @nullable */
-  platform?: string | null;
   /** @nullable */
   downloadUrl?: string | null;
   /** @nullable */
   testflightUrl?: string | null;
+  /** @nullable */
+  note?: string | null;
   createdAt: Date;
 }
