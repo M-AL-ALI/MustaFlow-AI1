@@ -1,0 +1,86 @@
+Important UI/layout change:
+
+I want the Preview to be side by side with the AI chat/work panel, similar to the screenshot I shared.
+
+Current issue:
+The layout does not feel like the Replit-style workspace I want.
+
+Required new layout:
+- Left side: AI chat / work log / agent activity panel
+- Right side: live Preview panel
+- Both visible at the same time
+- Side by side, not stacked vertically
+- Preview must not appear below the chat
+- Chat must not overlay the preview
+
+Workspace structure I want:
+
+1. Global left sidebar
+- Home
+- Projects
+- Knowledge Vault
+- Settings
+- Platform items like Published, Integrations, Security, Billing
+- Add clear “Create New Project” button near the top
+
+2. Main workspace area split into 2 columns
+
+LEFT MAIN COLUMN:
+- AI task/chat panel
+- Show:
+  - current task title
+  - agent activity stream
+  - progress steps
+  - working status
+  - messages/history
+  - bottom input box
+  - mode selector (Lite / Eco / Power / Pro)
+  - Plan toggle
+- This should behave like the main build conversation area
+
+RIGHT MAIN COLUMN:
+- Live Preview panel
+- Browser/app frame
+- Web / iOS / Android selector if needed
+- Canvas mode toggle if applicable
+- Refresh/open controls
+- Published result or live app preview
+
+3. Top area / tabs
+Keep workspace tabs at top if needed, but the main default workspace view should show:
+- Chat panel on left
+- Preview on right
+
+Behavior requirements:
+- Use a resizable split layout if possible
+- Default split can be around:
+  - Left 38–45%
+  - Right 55–62%
+- On smaller screens, responsive fallback is okay, but on desktop it must stay side by side
+- Chat input stays pinned at the bottom of the left panel
+- Preview fills the right panel height
+- Activity log/messages should scroll independently from preview
+
+Visual style:
+- Dark professional workspace
+- Similar structure to the reference screenshot
+- Clean, modern, easy to use
+- MustaFlow AI branding only — do not copy Replit branding exactly
+
+Important:
+The user should feel like:
+- the AI is working on the left
+- the app/site is appearing live on the right
+
+Acceptance criteria:
+1. Chat/work panel is on the left
+2. Preview is on the right
+3. Both are visible at the same time
+4. Layout is side by side on desktop
+5. Chat input is pinned at bottom of left panel
+6. Preview is not blocked by chat
+7. Resizable split works if possible
+8. Typecheck passes
+9. App runs correctly
+
+After updating it, give me a screenshot and short validation report.

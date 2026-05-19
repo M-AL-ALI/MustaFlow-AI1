@@ -1,4 +1,5 @@
 import { useParams } from "wouter";
+import { CreateProjectModal } from "@/components/create-project-modal";
 import {
   useGetProject,
   useListMessages,
@@ -47,6 +48,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Wrench,
+  Plus,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -339,6 +341,7 @@ export default function ProjectWorkspacePage() {
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [deviceMode, setDeviceMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [activeTab, setActiveTab] = useState("preview");
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoAnalyzedRef = useRef(false);
 
@@ -545,7 +548,15 @@ export default function ProjectWorkspacePage() {
           <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold hover:bg-green-500/15 transition-colors shrink-0">
             <Rocket style={{ width: 12, height: 12 }} /> Publish
           </button>
+          {/* New Project button */}
+          <button
+            onClick={() => setNewProjectOpen(true)}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-border text-muted-foreground text-xs font-medium hover:bg-muted hover:text-foreground transition-colors shrink-0"
+          >
+            <Plus style={{ width: 12, height: 12 }} /> New
+          </button>
         </div>
+        <CreateProjectModal open={newProjectOpen} onOpenChange={setNewProjectOpen} />
 
         {/* Tab content — fills remaining space above chat */}
         <div className="flex-1 min-h-0 overflow-hidden">

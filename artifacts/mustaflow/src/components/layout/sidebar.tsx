@@ -14,10 +14,12 @@ import {
   LayoutDashboard,
   LogOut,
   ChevronDown,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser, useClerk } from "@clerk/react";
 import { useState, useEffect } from "react";
+import { CreateProjectModal } from "@/components/create-project-modal";
 
 const NAV_ITEMS = [
   { name: "Home", href: "/", icon: Home },
@@ -188,12 +190,30 @@ function UserSection() {
 }
 
 export function Sidebar() {
+  const [createOpen, setCreateOpen] = useState(false);
+  const { isSignedIn } = useUser();
+
   return (
     <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col shrink-0 overflow-y-auto">
+      <CreateProjectModal open={createOpen} onOpenChange={setCreateOpen} />
+
       {/* Logo */}
       <div className="px-4 py-5 flex justify-center shrink-0">
         <img src={logoUrl} alt="MustaFlow AI" className="h-28 w-auto object-contain" />
       </div>
+
+      {/* Create button — visible when signed in */}
+      {isSignedIn && (
+        <div className="px-4 pb-2 shrink-0">
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/60 transition-colors px-3 py-2 text-sm font-semibold"
+          >
+            <Plus className="h-4 w-4" />
+            New Project
+          </button>
+        </div>
+      )}
 
       {/* Nav */}
       <div className="flex-1 space-y-4">

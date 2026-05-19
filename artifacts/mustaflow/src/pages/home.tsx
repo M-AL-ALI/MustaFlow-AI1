@@ -40,16 +40,19 @@ export default function HomePage() {
 
   const handleBuild = (kind: string = "web") => {
     if (!prompt.trim()) return;
+    // Derive a short project name from the prompt (first 5 words, capitalised)
+    const words = prompt.trim().split(/\s+/).slice(0, 5).join(" ");
+    const name = words.charAt(0).toUpperCase() + words.slice(1);
     createProject.mutate({
       data: {
-        name: "New Project",
+        name,
         description: prompt,
-        kind: kind as any,
+        kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
         initialPrompt: prompt
       }
     }, {
       onSuccess: (project) => {
-        queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
+        void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
         setLocation(`/projects/${project.id}`);
       }
     });
