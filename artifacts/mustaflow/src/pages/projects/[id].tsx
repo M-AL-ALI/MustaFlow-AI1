@@ -693,7 +693,7 @@ export default function ProjectWorkspacePage() {
                     onClick={() => setActiveTab(tab.value)}
                     data-tab={tab.value}
                     className={cn(
-                      "flex items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
+                      "relative flex items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
                       activeTab === tab.value
                         ? "border-primary text-foreground"
                         : "border-transparent text-muted-foreground hover:text-foreground",
@@ -701,6 +701,12 @@ export default function ProjectWorkspacePage() {
                   >
                     <Icon className="h-3 w-3 shrink-0" />
                     {tab.label}
+                    {tab.value === "page-map" && pageMapSyncing && (
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                      </span>
+                    )}
                   </button>
                 );
               })}
