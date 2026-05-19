@@ -508,6 +508,15 @@ function isExpUrl(url: string): boolean {
   return url.startsWith("exp://") || url.startsWith("exp+");
 }
 
+/** Returns a human-readable "fetched X min ago" label for a log fetch timestamp. */
+function formatLogAge(fetchedAt: Date): string {
+  const diffMs = Date.now() - fetchedAt.getTime();
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return "fetched just now";
+  if (mins === 1) return "fetched 1 min ago";
+  return `fetched ${mins} min ago`;
+}
+
 function EasBuildPanel({
   projectId,
   platform,
@@ -537,6 +546,7 @@ function EasBuildPanel({
   const [refreshing, setRefreshing] = useState<number | null>(null);
   const [expandedLogsId, setExpandedLogsId] = useState<number | null>(null);
   const [reloadingLogsId, setReloadingLogsId] = useState<number | null>(null);
+  const [logFetchedAt, setLogFetchedAt] = useState<Map<number, Date>>(() => new Map());
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Ref tracks in-progress build log IDs so the interval can PATCH them without stale closure issues
@@ -691,6 +701,7 @@ function EasBuildPanel({
               }
             : prev,
         );
+        setLogFetchedAt((prev) => new Map(prev).set(logId, new Date()));
       }
     } finally {
       setReloadingLogsId(null);
@@ -1045,14 +1056,21 @@ function EasBuildPanel({
                           <span className="text-muted-foreground flex-1">Build logs</span>
                         )}
                         {build.status !== "started" && (
-                          <button
-                            onClick={() => void reloadLogs(build.id)}
-                            disabled={reloadingLogsId === build.id}
-                            title="Reload logs"
-                            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                          >
-                            <RefreshCw className={cn("h-3 w-3", reloadingLogsId === build.id && "animate-spin")} />
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {logFetchedAt.has(build.id) && (
+                              <span className="text-[10px] text-muted-foreground/70 whitespace-nowrap">
+                                {formatLogAge(logFetchedAt.get(build.id) as Date)}
+                              </span>
+                            )}
+                            <button
+                              onClick={() => void reloadLogs(build.id)}
+                              disabled={reloadingLogsId === build.id}
+                              title="Reload logs"
+                              className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                            >
+                              <RefreshCw className={cn("h-3 w-3", reloadingLogsId === build.id && "animate-spin")} />
+                            </button>
+                          </div>
                         )}
                       </div>
                       {build.logSnippet ? (
@@ -1173,6 +1191,7 @@ function BuildLogViewer({
   const [data, setData] = useState<BuildLogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isActive = ACTIVE_BUILD_STATUSES.has(buildStatus);
 
@@ -1186,6 +1205,7 @@ function BuildLogViewer({
       const json = (await res.json()) as BuildLogResponse;
       setData(json);
       setError(null);
+      setFetchedAt(new Date());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch logs");
     } finally {
@@ -1218,13 +1238,20 @@ function BuildLogViewer({
             </span>
           )}
         </div>
-        <button
-          onClick={() => void fetchLogs()}
-          className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
-        >
-          <RefreshCw className="h-2.5 w-2.5" />
-          Refresh
-        </button>
+        <div className="flex items-center gap-1.5">
+          {fetchedAt && (
+            <span className="text-[10px] text-zinc-600 whitespace-nowrap">
+              {formatLogAge(fetchedAt)}
+            </span>
+          )}
+          <button
+            onClick={() => void fetchLogs()}
+            className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            <RefreshCw className="h-2.5 w-2.5" />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Log content */}
