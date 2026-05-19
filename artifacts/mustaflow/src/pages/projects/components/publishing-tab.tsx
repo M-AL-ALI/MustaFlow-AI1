@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { Link } from "wouter";
 import {
   Globe,
   Smartphone,
@@ -1252,6 +1253,11 @@ export function PublishingTab({
   const [iosCredsOpen, setIosCredsOpen] = useState(true);
   const [androidCredsOpen, setAndroidCredsOpen] = useState(true);
 
+  // Credit balance for low-credit warning near EAS build buttons
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const EAS_BUILD_COST = 5;
+  const creditFetchRef = useRef<(() => Promise<void>) | null>(null);
+
   // EAS credentials checklist — tracks which secret names are configured + their IDs + verification status
   const [configuredSecrets, setConfiguredSecrets] = useState<Map<string, { id: number; verificationStatus: string }>>(new Map());
   const fetchConfiguredSecrets = useCallback(async () => {
@@ -1304,6 +1310,20 @@ export function PublishingTab({
     } catch { /* ignore */ }
   }, [projectId, isMobile]);
 
+  const fetchCreditBalance = useCallback(async () => {
+    if (!isMobile) return;
+    try {
+      const res = await fetch("/api/credits");
+      if (res.ok) {
+        const data = (await res.json()) as { balance: number };
+        setCreditBalance(data.balance);
+      }
+    } catch { /* ignore */ }
+  }, [isMobile]);
+
+  // Keep a stable ref so the focus listener doesn't need to be recreated
+  creditFetchRef.current = fetchCreditBalance;
+
   const triggerBuild = async (p: "ios" | "android") => {
     setTriggeringBuild(p);
     setBuildError(null);
@@ -1323,8 +1343,8 @@ export function PublishingTab({
         }
         return;
       }
-      // Refresh builds list immediately
-      await fetchMobileBuilds();
+      // Refresh builds list and credit balance immediately after queuing
+      await Promise.all([fetchMobileBuilds(), fetchCreditBalance()]);
     } catch (err) {
       setBuildError(err instanceof Error ? err.message : "Build trigger failed");
     } finally {
@@ -1510,6 +1530,14 @@ export function PublishingTab({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [fetchConfiguredSecrets]);
+
+  useEffect(() => {
+    void fetchCreditBalance();
+    // Refresh on window focus so returning from Stripe checkout shows updated balance
+    const onFocus = () => { void creditFetchRef.current?.(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [fetchCreditBalance]);
 
   // Poll mobile builds every 5 s while any build is in progress
   useEffect(() => {
@@ -2370,6 +2398,20 @@ export function PublishingTab({
                   {buildError && platform === "ios" && (
                     <p className="text-xs text-destructive">{buildError}</p>
                   )}
+                  {creditBalance !== null && creditBalance < EAS_BUILD_COST && (
+                    <div className="flex items-center gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2.5">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      <span className="flex-1">
+                        Not enough credits ({creditBalance} / {EAS_BUILD_COST} needed).
+                      </span>
+                      <Link
+                        href="/billing"
+                        className="font-semibold underline underline-offset-2 hover:opacity-80 shrink-0"
+                      >
+                        Buy credits
+                      </Link>
+                    </div>
+                  )}
 
                   {!configuredSecrets.has("EAS_ACCESS_TOKEN") ? (
                     <div className="space-y-2">
@@ -2399,7 +2441,7 @@ export function PublishingTab({
                     <Button
                       className="w-full"
                       onClick={() => void triggerBuild("ios")}
-                      disabled={triggeringBuild !== null}
+                      disabled={triggeringBuild !== null || (creditBalance !== null && creditBalance < EAS_BUILD_COST)}
                     >
                       {triggeringBuild === "ios" ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -2638,6 +2680,20 @@ export function PublishingTab({
                   {buildError && platform === "android" && (
                     <p className="text-xs text-destructive">{buildError}</p>
                   )}
+                  {creditBalance !== null && creditBalance < EAS_BUILD_COST && (
+                    <div className="flex items-center gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2.5">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      <span className="flex-1">
+                        Not enough credits ({creditBalance} / {EAS_BUILD_COST} needed).
+                      </span>
+                      <Link
+                        href="/billing"
+                        className="font-semibold underline underline-offset-2 hover:opacity-80 shrink-0"
+                      >
+                        Buy credits
+                      </Link>
+                    </div>
+                  )}
 
                   {!configuredSecrets.has("EAS_ACCESS_TOKEN") ? (
                     <div className="space-y-2">
@@ -2667,7 +2723,7 @@ export function PublishingTab({
                     <Button
                       className="w-full bg-green-600 hover:bg-green-700 text-white"
                       onClick={() => void triggerBuild("android")}
-                      disabled={triggeringBuild !== null}
+                      disabled={triggeringBuild !== null || (creditBalance !== null && creditBalance < EAS_BUILD_COST)}
                     >
                       {triggeringBuild === "android" ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
