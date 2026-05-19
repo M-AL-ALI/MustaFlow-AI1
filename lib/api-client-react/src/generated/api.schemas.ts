@@ -205,6 +205,35 @@ export interface ProjectUpdate {
   themeColor?: string;
 }
 
+export interface MobileAppSettingsInput {
+  /** @minLength 1 */
+  appName?: string;
+  bundleId?: string;
+  packageName?: string;
+  version?: string;
+  splashBackgroundColor?: string;
+  /** Base64-encoded PNG for the app icon (1024×1024 recommended). Stored as assets/icon.png. */
+  iconBase64?: string;
+}
+
+export interface MobileAppSettings {
+  appName: string;
+  bundleId: string;
+  packageName: string;
+  version: string;
+  splashBackgroundColor: string;
+  /**
+     * Preview URL for the current icon, or null if not yet uploaded.
+     * @nullable
+     */
+  iconUrl?: string | null;
+  /**
+     * ID of the AgentTask created for this save (for event polling).
+     * @nullable
+     */
+  taskId?: number | null;
+}
+
 export type ProjectsSummaryByStatus = {[key: string]: number};
 
 export type ProjectsSummaryByKind = {[key: string]: number};

@@ -3,6 +3,7 @@ import { strToU8, zipSync } from "fflate";
 import { eq } from "drizzle-orm";
 import { db, projectsTable, projectFilesTable, secretsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+import { isBinaryMime } from "../lib/binary-mime";
 
 const router: IRouter = Router();
 
@@ -100,7 +101,10 @@ router.get(
     const zipFiles: Record<string, Uint8Array> = {};
 
     for (const file of files) {
-      zipFiles[file.path] = strToU8(file.content);
+      const mime = file.mimeType ?? "";
+      zipFiles[file.path] = isBinaryMime(mime)
+        ? new Uint8Array(Buffer.from(file.content, "base64"))
+        : strToU8(file.content);
     }
     zipFiles["README.md"] = strToU8(generateReadme(project, files));
     zipFiles[".env.example"] = strToU8(

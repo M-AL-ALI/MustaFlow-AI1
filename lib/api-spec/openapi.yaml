@@ -652,6 +652,58 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReadinessResult"
 
+  /projects/{id}/mobile-settings:
+    get:
+      operationId: getMobileAppSettings
+      tags: [projects]
+      summary: Read current mobile app.json settings
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Current settings (empty strings when app.json not yet generated)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MobileAppSettings"
+        "400":
+          description: Not a mobile project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      operationId: saveMobileAppSettings
+      tags: [projects]
+      summary: Update mobile app.json settings (app name, bundle ID, package name, version, splash color)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MobileAppSettingsInput"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MobileAppSettings"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Project or app.json not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/secrets/{secretId}:
     delete:
       operationId: deleteSecret
@@ -1094,6 +1146,28 @@ components:
         siteTitle: { type: string }
         metaDescription: { type: string }
         themeColor: { type: string }
+
+    MobileAppSettingsInput:
+      type: object
+      properties:
+        appName: { type: string, minLength: 1 }
+        bundleId: { type: string }
+        packageName: { type: string }
+        version: { type: string }
+        splashBackgroundColor: { type: string }
+        iconBase64: { type: string, description: "Base64-encoded PNG for the app icon (1024×1024 recommended). Stored as assets/icon.png." }
+
+    MobileAppSettings:
+      type: object
+      required: [appName, bundleId, packageName, version, splashBackgroundColor]
+      properties:
+        appName: { type: string }
+        bundleId: { type: string }
+        packageName: { type: string }
+        version: { type: string }
+        splashBackgroundColor: { type: string }
+        iconUrl: { type: ["string", "null"], description: "Preview URL for the current icon, or null if not yet uploaded." }
+        taskId: { type: ["integer", "null"], description: "ID of the AgentTask created for this save (for event polling)." }
 
     ProjectsSummary:
       type: object

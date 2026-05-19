@@ -48,6 +48,8 @@ export * from './listKnowledgeParams';
 export * from './listKnowledgeSeverity';
 export * from './listMobileBuilds200';
 export * from './listProjectsParams';
+export * from './mobileAppSettings';
+export * from './mobileAppSettingsInput';
 export * from './mobileBuildInput';
 export * from './mobileBuildInputPlatform';
 export * from './mobileBuildLog';

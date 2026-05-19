@@ -961,6 +961,54 @@ export const GetPublishReadinessResponse = zod.object({
 
 
 /**
+ * @summary Read current mobile app.json settings
+ */
+export const GetMobileAppSettingsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetMobileAppSettingsResponse = zod.object({
+  "appName": zod.string(),
+  "bundleId": zod.string(),
+  "packageName": zod.string(),
+  "version": zod.string(),
+  "splashBackgroundColor": zod.string(),
+  "iconUrl": zod.string().nullish().describe('Preview URL for the current icon, or null if not yet uploaded.'),
+  "taskId": zod.number().nullish().describe('ID of the AgentTask created for this save (for event polling).')
+})
+
+
+/**
+ * @summary Update mobile app.json settings (app name, bundle ID, package name, version, splash color)
+ */
+export const SaveMobileAppSettingsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+
+
+export const SaveMobileAppSettingsBody = zod.object({
+  "appName": zod.string().min(1).optional(),
+  "bundleId": zod.string().optional(),
+  "packageName": zod.string().optional(),
+  "version": zod.string().optional(),
+  "splashBackgroundColor": zod.string().optional(),
+  "iconBase64": zod.string().optional().describe('Base64-encoded PNG for the app icon (1024×1024 recommended). Stored as assets\/icon.png.')
+})
+
+export const SaveMobileAppSettingsResponse = zod.object({
+  "appName": zod.string(),
+  "bundleId": zod.string(),
+  "packageName": zod.string(),
+  "version": zod.string(),
+  "splashBackgroundColor": zod.string(),
+  "iconUrl": zod.string().nullish().describe('Preview URL for the current icon, or null if not yet uploaded.'),
+  "taskId": zod.number().nullish().describe('ID of the AgentTask created for this save (for event polling).')
+})
+
+
+/**
  * @summary Delete a project secret
  */
 export const DeleteSecretParams = zod.object({

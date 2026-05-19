@@ -45,6 +45,8 @@ import type {
   ListKnowledgeParams,
   ListMobileBuilds200,
   ListProjectsParams,
+  MobileAppSettings,
+  MobileAppSettingsInput,
   MobileBuildInput,
   MobileBuildLog,
   MobileBuildLogsResult,
@@ -2631,6 +2633,155 @@ export function useGetPublishReadiness<TData = Awaited<ReturnType<typeof getPubl
 
 
 
+
+export const getGetMobileAppSettingsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/mobile-settings`
+}
+
+/**
+ * @summary Read current mobile app.json settings
+ */
+export const getMobileAppSettings = async (id: number, options?: RequestInit): Promise<MobileAppSettings> => {
+
+  return customFetch<MobileAppSettings>(getGetMobileAppSettingsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMobileAppSettingsQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/mobile-settings`
+    ] as const;
+    }
+
+
+export const getGetMobileAppSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getMobileAppSettings>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMobileAppSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMobileAppSettingsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMobileAppSettings>>> = ({ signal }) => getMobileAppSettings(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMobileAppSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMobileAppSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getMobileAppSettings>>>
+export type GetMobileAppSettingsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Read current mobile app.json settings
+ */
+
+export function useGetMobileAppSettings<TData = Awaited<ReturnType<typeof getMobileAppSettings>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMobileAppSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMobileAppSettingsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveMobileAppSettingsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/mobile-settings`
+}
+
+/**
+ * @summary Update mobile app.json settings (app name, bundle ID, package name, version, splash color)
+ */
+export const saveMobileAppSettings = async (id: number,
+    mobileAppSettingsInput: MobileAppSettingsInput, options?: RequestInit): Promise<MobileAppSettings> => {
+
+  return customFetch<MobileAppSettings>(getSaveMobileAppSettingsUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      mobileAppSettingsInput,)
+  }
+);}
+
+
+
+
+export const getSaveMobileAppSettingsMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveMobileAppSettings>>, TError,{id: number;data: BodyType<MobileAppSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveMobileAppSettings>>, TError,{id: number;data: BodyType<MobileAppSettingsInput>}, TContext> => {
+
+const mutationKey = ['saveMobileAppSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveMobileAppSettings>>, {id: number;data: BodyType<MobileAppSettingsInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  saveMobileAppSettings(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveMobileAppSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof saveMobileAppSettings>>>
+    export type SaveMobileAppSettingsMutationBody = BodyType<MobileAppSettingsInput>
+    export type SaveMobileAppSettingsMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Update mobile app.json settings (app name, bundle ID, package name, version, splash color)
+ */
+export const useSaveMobileAppSettings = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveMobileAppSettings>>, TError,{id: number;data: BodyType<MobileAppSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveMobileAppSettings>>,
+        TError,
+        {id: number;data: BodyType<MobileAppSettingsInput>},
+        TContext
+      > => {
+      return useMutation(getSaveMobileAppSettingsMutationOptions(options));
+    }
 
 export const getDeleteSecretUrl = (id: number,
     secretId: number,) => {

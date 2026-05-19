@@ -3,11 +3,13 @@ import { and, asc, eq } from "drizzle-orm";
 import { db, projectFilesTable, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { guessMime } from "../lib/builder";
+import { isBinaryMime } from "../lib/binary-mime";
 import { injectBridge } from "../lib/consoleBridge";
 import { extractPageMap } from "../lib/page-map";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
 
 router.get(
   "/projects/:id/files",
@@ -290,8 +292,12 @@ router.get(
     const isHtml = mime === "text/html" || row.path.endsWith(".html");
     res
       .type(mime)
-      .setHeader("Cache-Control", "no-store, must-revalidate")
-      .send(isHtml ? injectBridge(row.content) : row.content);
+      .setHeader("Cache-Control", "no-store, must-revalidate");
+    if (isBinaryMime(mime)) {
+      res.end(Buffer.from(row.content, "base64"));
+    } else {
+      res.send(isHtml ? injectBridge(row.content) : row.content);
+    }
   },
 );
 
