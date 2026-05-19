@@ -25,6 +25,8 @@ import {
   XCircle,
   Info,
   Save,
+  Key,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -421,7 +423,15 @@ function MobileBuildStatusBadge({ status }: { status: string }) {
   );
 }
 
-export function PublishingTab({ projectId, kind }: { projectId: number; kind?: string }) {
+export function PublishingTab({
+  projectId,
+  kind,
+  onNavigateToSecret,
+}: {
+  projectId: number;
+  kind?: string;
+  onNavigateToSecret?: (secretName: string) => void;
+}) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
   const [platform, setPlatform] = useState<Platform>("web");
   const [webEnv, setWebEnv] = useState<"testing" | "production">("testing");
@@ -461,6 +471,10 @@ export function PublishingTab({ projectId, kind }: { projectId: number; kind?: s
   const [triggeringBuild, setTriggeringBuild] = useState<"ios" | "android" | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [credsMissing, setCredsMissing] = useState<string | null>(null);
+
+  // Expandable credentials panels
+  const [iosCredsOpen, setIosCredsOpen] = useState(true);
+  const [androidCredsOpen, setAndroidCredsOpen] = useState(true);
 
   // EAS credentials checklist — tracks which secret names are configured
   const [configuredSecrets, setConfiguredSecrets] = useState<Set<string>>(new Set());
@@ -1470,64 +1484,172 @@ export function PublishingTab({ projectId, kind }: { projectId: number; kind?: s
 
             {/* EAS Build panel for mobile projects */}
             {isMobile && (
-              <div className="border border-border rounded-xl p-4 bg-card space-y-3">
-                <h3 className="font-semibold text-sm">EAS Cloud Build</h3>
-                <p className="text-xs text-muted-foreground">
-                  Triggers an Expo Application Services cloud build. Costs 5 credits per build.
-                </p>
-
-                {/* Credentials checklist */}
-                <div className="border border-border rounded-lg overflow-hidden">
-                  <div className="bg-muted/40 px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border">
-                    Required Credentials
-                  </div>
-                  {[
-                    { name: "EAS_ACCESS_TOKEN", label: "EAS Access Token", required: true },
-                    { name: "EXPO_ACCOUNT_NAME", label: "Expo Account Name", required: true },
-                    { name: "EXPO_APP_SLUG", label: "Expo App Slug", required: false },
-                    { name: "APPLE_TEAM_ID", label: "Apple Developer Team ID", required: true },
-                    { name: "APPLE_ASC_KEY_ID", label: "ASC API Key ID", required: true },
-                    { name: "APPLE_ASC_ISSUER_ID", label: "ASC Issuer ID", required: true },
-                    { name: "APPLE_ASC_PRIVATE_KEY", label: "ASC Private Key (.p8)", required: true },
-                  ].map(({ name, label, required }) => {
-                    const isSet = configuredSecrets.has(name);
-                    return (
-                      <div key={name} className="flex items-center gap-2 px-3 py-2 border-b border-border/50 last:border-0 text-xs">
-                        {isSet ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                        ) : (
-                          <Circle className={cn("h-3.5 w-3.5 shrink-0", required ? "text-yellow-500" : "text-muted-foreground")} />
-                        )}
-                        <span className={cn("flex-1", isSet ? "text-foreground" : required ? "text-yellow-600" : "text-muted-foreground")}>
-                          {label}
-                        </span>
-                        <code className="font-mono text-[9px] text-muted-foreground bg-muted px-1 rounded">{name}</code>
-                      </div>
-                    );
-                  })}
+              <div className="border border-border rounded-xl bg-card overflow-hidden">
+                <div className="px-4 py-3 border-b border-border space-y-0.5">
+                  <h3 className="font-semibold text-sm">EAS Cloud Build</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Triggers an Expo Application Services cloud build. Costs 5 credits per build.
+                  </p>
                 </div>
 
-                {credsMissing && (
-                  <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>{credsMissing}</span>
+                {/* Configure EAS Credentials — expandable */}
+                <div className="border-b border-border">
+                  <div className="flex items-center px-4 py-2.5">
+                    <button
+                      onClick={() => setIosCredsOpen((o) => !o)}
+                      className="flex-1 flex items-center gap-2 text-left hover:opacity-80 transition-opacity"
+                      aria-expanded={iosCredsOpen}
+                    >
+                      <Key className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="text-xs font-semibold">Configure EAS Credentials</span>
+                      {(() => {
+                        const iosCreds = [
+                          { name: "EAS_ACCESS_TOKEN", required: true },
+                          { name: "EXPO_ACCOUNT_NAME", required: true },
+                          { name: "EXPO_APP_SLUG", required: false },
+                          { name: "APPLE_TEAM_ID", required: true },
+                          { name: "APPLE_ASC_KEY_ID", required: true },
+                          { name: "APPLE_ASC_ISSUER_ID", required: true },
+                          { name: "APPLE_ASC_PRIVATE_KEY", required: true },
+                        ];
+                        const required = iosCreds.filter((c) => c.required);
+                        const missing = required.filter((c) => !configuredSecrets.has(c.name));
+                        return missing.length === 0 ? (
+                          <span className="text-[10px] bg-green-500/15 text-green-500 px-1.5 py-0.5 rounded font-medium">
+                            All set
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-yellow-500/15 text-yellow-500 px-1.5 py-0.5 rounded font-medium">
+                            {missing.length} missing
+                          </span>
+                        );
+                      })()}
+                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => void fetchConfiguredSecrets()}
+                        className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        title="Refresh secret status"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                      </button>
+                      <button
+                        onClick={() => setIosCredsOpen((o) => !o)}
+                        className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        aria-expanded={iosCredsOpen}
+                      >
+                        {iosCredsOpen ? (
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
-                )}
-                {buildError && platform === "ios" && (
-                  <p className="text-xs text-destructive">{buildError}</p>
-                )}
-                <Button
-                  className="w-full"
-                  onClick={() => void triggerBuild("ios")}
-                  disabled={triggeringBuild !== null}
-                >
-                  {triggeringBuild === "ios" ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Smartphone className="h-4 w-4 mr-2" />
+
+                  {iosCredsOpen && (
+                    <div className="divide-y divide-border/50">
+                      {[
+                        { name: "EAS_ACCESS_TOKEN", label: "EAS Access Token", required: true, hint: "From expo.dev → Access Tokens" },
+                        { name: "EXPO_ACCOUNT_NAME", label: "Expo Account Name", required: true, hint: "Your Expo username or org slug" },
+                        { name: "EXPO_APP_SLUG", label: "Expo App Slug", required: false, hint: "Defaults to project name if not set" },
+                        { name: "APPLE_TEAM_ID", label: "Apple Developer Team ID", required: true, hint: "10-character ID from developer.apple.com" },
+                        { name: "APPLE_ASC_KEY_ID", label: "ASC API Key ID", required: true, hint: "From App Store Connect → Users → Keys" },
+                        { name: "APPLE_ASC_ISSUER_ID", label: "ASC Issuer ID", required: true, hint: "Shown alongside the API key" },
+                        { name: "APPLE_ASC_PRIVATE_KEY", label: "ASC Private Key (.p8)", required: true, hint: "Paste the full .p8 file contents" },
+                      ].map(({ name, label, required, hint }) => {
+                        const isSet = configuredSecrets.has(name);
+                        return (
+                          <div key={name} className="flex items-start gap-2.5 px-4 py-2.5 text-xs">
+                            {isSet ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" />
+                            ) : (
+                              <Circle className={cn("h-3.5 w-3.5 shrink-0 mt-0.5", required ? "text-yellow-500" : "text-muted-foreground/60")} />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={cn("font-medium", isSet ? "text-foreground" : required ? "text-foreground" : "text-muted-foreground")}>
+                                  {label}
+                                </span>
+                                {required && !isSet && (
+                                  <span className="text-[9px] bg-yellow-500/15 text-yellow-600 px-1 py-0.5 rounded font-semibold">required</span>
+                                )}
+                                {!required && (
+                                  <span className="text-[9px] bg-muted text-muted-foreground px-1 py-0.5 rounded">optional</span>
+                                )}
+                              </div>
+                              <code className="font-mono text-[9px] text-muted-foreground">{name}</code>
+                              {hint && <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>}
+                            </div>
+                            {!isSet && onNavigateToSecret && (
+                              <button
+                                onClick={() => onNavigateToSecret(name)}
+                                className="shrink-0 flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 font-medium transition-colors"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                Add
+                              </button>
+                            )}
+                            {isSet && (
+                              <span className="shrink-0 text-[10px] text-green-500 font-medium">Configured</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
-                  {triggeringBuild === "ios" ? "Queuing build…" : "Build for iOS (TestFlight)"}
-                </Button>
+                </div>
+
+                <div className="p-4 space-y-3">
+                  {credsMissing && (
+                    <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>{credsMissing}</span>
+                    </div>
+                  )}
+                  {buildError && platform === "ios" && (
+                    <p className="text-xs text-destructive">{buildError}</p>
+                  )}
+
+                  {!configuredSecrets.has("EAS_ACCESS_TOKEN") ? (
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-2 text-xs bg-muted border border-border rounded-lg px-3 py-2.5">
+                        <Key className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                        <span className="text-muted-foreground">
+                          <span className="font-semibold text-foreground">EAS_ACCESS_TOKEN</span> is required before you can trigger a build.
+                          Get yours at{" "}
+                          <a href="https://expo.dev/accounts" target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                            expo.dev
+                          </a>
+                          .
+                        </span>
+                      </div>
+                      {onNavigateToSecret && (
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => onNavigateToSecret("EAS_ACCESS_TOKEN")}
+                        >
+                          <Key className="h-4 w-4 mr-2" />
+                          Add EAS_ACCESS_TOKEN to Secrets
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <Button
+                      className="w-full"
+                      onClick={() => void triggerBuild("ios")}
+                      disabled={triggeringBuild !== null}
+                    >
+                      {triggeringBuild === "ios" ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Smartphone className="h-4 w-4 mr-2" />
+                      )}
+                      {triggeringBuild === "ios" ? "Queuing build…" : "Build for iOS (TestFlight)"}
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1657,61 +1779,166 @@ export function PublishingTab({ projectId, kind }: { projectId: number; kind?: s
 
             {/* EAS Build panel for mobile projects */}
             {isMobile && (
-              <div className="border border-border rounded-xl p-4 bg-card space-y-3">
-                <h3 className="font-semibold text-sm">EAS Cloud Build</h3>
-                <p className="text-xs text-muted-foreground">
-                  Triggers an Expo Application Services cloud build. Costs 5 credits per build.
-                </p>
-
-                {/* Credentials checklist */}
-                <div className="border border-border rounded-lg overflow-hidden">
-                  <div className="bg-muted/40 px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border">
-                    Required Credentials
-                  </div>
-                  {[
-                    { name: "EAS_ACCESS_TOKEN", label: "EAS Access Token", required: true },
-                    { name: "EXPO_ACCOUNT_NAME", label: "Expo Account Name", required: true },
-                    { name: "EXPO_APP_SLUG", label: "Expo App Slug", required: false },
-                    { name: "GOOGLE_SERVICE_ACCOUNT_JSON", label: "Google Play Service Account JSON", required: true },
-                  ].map(({ name, label, required }) => {
-                    const isSet = configuredSecrets.has(name);
-                    return (
-                      <div key={name} className="flex items-center gap-2 px-3 py-2 border-b border-border/50 last:border-0 text-xs">
-                        {isSet ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                        ) : (
-                          <Circle className={cn("h-3.5 w-3.5 shrink-0", required ? "text-yellow-500" : "text-muted-foreground")} />
-                        )}
-                        <span className={cn("flex-1", isSet ? "text-foreground" : required ? "text-yellow-600" : "text-muted-foreground")}>
-                          {label}
-                        </span>
-                        <code className="font-mono text-[9px] text-muted-foreground bg-muted px-1 rounded">{name}</code>
-                      </div>
-                    );
-                  })}
+              <div className="border border-border rounded-xl bg-card overflow-hidden">
+                <div className="px-4 py-3 border-b border-border space-y-0.5">
+                  <h3 className="font-semibold text-sm">EAS Cloud Build</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Triggers an Expo Application Services cloud build. Costs 5 credits per build.
+                  </p>
                 </div>
 
-                {credsMissing && (
-                  <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>{credsMissing}</span>
+                {/* Configure EAS Credentials — expandable */}
+                <div className="border-b border-border">
+                  <div className="flex items-center px-4 py-2.5">
+                    <button
+                      onClick={() => setAndroidCredsOpen((o) => !o)}
+                      className="flex-1 flex items-center gap-2 text-left hover:opacity-80 transition-opacity"
+                      aria-expanded={androidCredsOpen}
+                    >
+                      <Key className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="text-xs font-semibold">Configure EAS Credentials</span>
+                      {(() => {
+                        const androidCreds = [
+                          { name: "EAS_ACCESS_TOKEN", required: true },
+                          { name: "EXPO_ACCOUNT_NAME", required: true },
+                          { name: "EXPO_APP_SLUG", required: false },
+                          { name: "GOOGLE_SERVICE_ACCOUNT_JSON", required: true },
+                        ];
+                        const required = androidCreds.filter((c) => c.required);
+                        const missing = required.filter((c) => !configuredSecrets.has(c.name));
+                        return missing.length === 0 ? (
+                          <span className="text-[10px] bg-green-500/15 text-green-500 px-1.5 py-0.5 rounded font-medium">
+                            All set
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-yellow-500/15 text-yellow-500 px-1.5 py-0.5 rounded font-medium">
+                            {missing.length} missing
+                          </span>
+                        );
+                      })()}
+                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => void fetchConfiguredSecrets()}
+                        className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        title="Refresh secret status"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                      </button>
+                      <button
+                        onClick={() => setAndroidCredsOpen((o) => !o)}
+                        className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        aria-expanded={androidCredsOpen}
+                      >
+                        {androidCredsOpen ? (
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
-                )}
-                {buildError && platform === "android" && (
-                  <p className="text-xs text-destructive">{buildError}</p>
-                )}
-                <Button
-                  className="w-full bg-green-600 hover:bg-green-700 text-white"
-                  onClick={() => void triggerBuild("android")}
-                  disabled={triggeringBuild !== null}
-                >
-                  {triggeringBuild === "android" ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <PlaySquare className="h-4 w-4 mr-2" />
+
+                  {androidCredsOpen && (
+                    <div className="divide-y divide-border/50">
+                      {[
+                        { name: "EAS_ACCESS_TOKEN", label: "EAS Access Token", required: true, hint: "From expo.dev → Access Tokens" },
+                        { name: "EXPO_ACCOUNT_NAME", label: "Expo Account Name", required: true, hint: "Your Expo username or org slug" },
+                        { name: "EXPO_APP_SLUG", label: "Expo App Slug", required: false, hint: "Defaults to project name if not set" },
+                        { name: "GOOGLE_SERVICE_ACCOUNT_JSON", label: "Google Play Service Account JSON", required: true, hint: "Service account JSON with releasemanager role from Google Play Console" },
+                      ].map(({ name, label, required, hint }) => {
+                        const isSet = configuredSecrets.has(name);
+                        return (
+                          <div key={name} className="flex items-start gap-2.5 px-4 py-2.5 text-xs">
+                            {isSet ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" />
+                            ) : (
+                              <Circle className={cn("h-3.5 w-3.5 shrink-0 mt-0.5", required ? "text-yellow-500" : "text-muted-foreground/60")} />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={cn("font-medium", isSet ? "text-foreground" : required ? "text-foreground" : "text-muted-foreground")}>
+                                  {label}
+                                </span>
+                                {required && !isSet && (
+                                  <span className="text-[9px] bg-yellow-500/15 text-yellow-600 px-1 py-0.5 rounded font-semibold">required</span>
+                                )}
+                                {!required && (
+                                  <span className="text-[9px] bg-muted text-muted-foreground px-1 py-0.5 rounded">optional</span>
+                                )}
+                              </div>
+                              <code className="font-mono text-[9px] text-muted-foreground">{name}</code>
+                              {hint && <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>}
+                            </div>
+                            {!isSet && onNavigateToSecret && (
+                              <button
+                                onClick={() => onNavigateToSecret(name)}
+                                className="shrink-0 flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 font-medium transition-colors"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                Add
+                              </button>
+                            )}
+                            {isSet && (
+                              <span className="shrink-0 text-[10px] text-green-500 font-medium">Configured</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
-                  {triggeringBuild === "android" ? "Queuing build…" : "Build for Android (Play Store)"}
-                </Button>
+                </div>
+
+                <div className="p-4 space-y-3">
+                  {credsMissing && (
+                    <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>{credsMissing}</span>
+                    </div>
+                  )}
+                  {buildError && platform === "android" && (
+                    <p className="text-xs text-destructive">{buildError}</p>
+                  )}
+
+                  {!configuredSecrets.has("EAS_ACCESS_TOKEN") ? (
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-2 text-xs bg-muted border border-border rounded-lg px-3 py-2.5">
+                        <Key className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                        <span className="text-muted-foreground">
+                          <span className="font-semibold text-foreground">EAS_ACCESS_TOKEN</span> is required before you can trigger a build.
+                          Get yours at{" "}
+                          <a href="https://expo.dev/accounts" target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                            expo.dev
+                          </a>
+                          .
+                        </span>
+                      </div>
+                      {onNavigateToSecret && (
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => onNavigateToSecret("EAS_ACCESS_TOKEN")}
+                        >
+                          <Key className="h-4 w-4 mr-2" />
+                          Add EAS_ACCESS_TOKEN to Secrets
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <Button
+                      className="w-full bg-green-600 hover:bg-green-700 text-white"
+                      onClick={() => void triggerBuild("android")}
+                      disabled={triggeringBuild !== null}
+                    >
+                      {triggeringBuild === "android" ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <PlaySquare className="h-4 w-4 mr-2" />
+                      )}
+                      {triggeringBuild === "android" ? "Queuing build…" : "Build for Android (Play Store)"}
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
 

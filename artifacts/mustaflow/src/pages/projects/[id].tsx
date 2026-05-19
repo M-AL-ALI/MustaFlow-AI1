@@ -1345,7 +1345,7 @@ export default function ProjectWorkspacePage() {
                 }}
               />
             )}
-            {activeTab === "publishing" && <PublishingTab projectId={projectId} kind={project.kind} />}
+            {activeTab === "publishing" && <PublishingTab projectId={projectId} kind={project.kind} onNavigateToSecret={handleAddKey} />}
             {activeTab === "logs" && (
               <LogsTab
                 projectId={projectId}
