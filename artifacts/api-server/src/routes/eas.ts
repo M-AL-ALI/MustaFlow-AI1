@@ -565,11 +565,13 @@ router.patch(
     const logsPageUrl = build.logsPageUrl ?? (meta.logsPageUrl as string | undefined);
     const newNote = `EAS Build ${build.status} (${build.platform})`;
 
-    // Fetch log snippet when build has finished (pass or fail) or if we don't have one yet
+    // Fetch log snippet when build has finished (pass or fail), if we don't have one yet,
+    // or when the caller explicitly requests a refresh via ?force=1.
+    const forceRefresh = req.query.force === "1" || req.query.force === "true";
     const existingSnippet = meta.logSnippet as string | undefined;
     let logSnippet = existingSnippet ?? null;
     const isFinal = ["passed", "failed"].includes(newStatus);
-    if (isFinal && !existingSnippet) {
+    if (isFinal && (!existingSnippet || forceRefresh)) {
       logSnippet = await fetchLogSnippet(token, easBuildId);
     }
 

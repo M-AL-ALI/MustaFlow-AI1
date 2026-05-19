@@ -536,6 +536,7 @@ function EasBuildPanel({
 
   const [refreshing, setRefreshing] = useState<number | null>(null);
   const [expandedLogsId, setExpandedLogsId] = useState<number | null>(null);
+  const [reloadingLogsId, setReloadingLogsId] = useState<number | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Ref tracks in-progress build log IDs so the interval can PATCH them without stale closure issues
@@ -671,6 +672,28 @@ function EasBuildPanel({
       void fetchState();
     } finally {
       setRefreshing(null);
+    }
+  };
+
+  const reloadLogs = async (logId: number) => {
+    setReloadingLogsId(logId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/eas/builds/${logId}?force=1`, { method: "PATCH" });
+      if (res.ok) {
+        const data = (await res.json()) as { logSnippet?: string | null };
+        setState((prev) =>
+          prev
+            ? {
+                ...prev,
+                builds: prev.builds.map((b) =>
+                  b.id === logId ? { ...b, logSnippet: data.logSnippet ?? b.logSnippet } : b,
+                ),
+              }
+            : prev,
+        );
+      }
+    } finally {
+      setReloadingLogsId(null);
     }
   };
 
@@ -996,28 +1019,42 @@ function EasBuildPanel({
                   {/* Inline log panel */}
                   {isLogsOpen && (
                     <div className="border border-border rounded-lg overflow-hidden bg-zinc-950/80 text-xs">
-                      {build.logsPageUrl && (
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
-                          <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0" />
-                          <span className="text-muted-foreground">Full log on Expo:</span>
-                          <a
-                            href={build.logsPageUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-primary hover:underline truncate flex-1 min-w-0"
+                      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
+                        {build.logsPageUrl ? (
+                          <>
+                            <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0" />
+                            <span className="text-muted-foreground">Full log on Expo:</span>
+                            <a
+                              href={build.logsPageUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary hover:underline truncate flex-1 min-w-0"
+                            >
+                              {build.logsPageUrl}
+                            </a>
+                            <a
+                              href={build.logsPageUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              <ArrowUpRight className="h-3 w-3" />
+                            </a>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground flex-1">Build logs</span>
+                        )}
+                        {build.status !== "started" && (
+                          <button
+                            onClick={() => void reloadLogs(build.id)}
+                            disabled={reloadingLogsId === build.id}
+                            title="Reload logs"
+                            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                           >
-                            {build.logsPageUrl}
-                          </a>
-                          <a
-                            href={build.logsPageUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            <ArrowUpRight className="h-3 w-3" />
-                          </a>
-                        </div>
-                      )}
+                            <RefreshCw className={cn("h-3 w-3", reloadingLogsId === build.id && "animate-spin")} />
+                          </button>
+                        )}
+                      </div>
                       {build.logSnippet ? (
                         <pre className="px-3 py-3 text-[11px] leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">
                           {build.logSnippet}
