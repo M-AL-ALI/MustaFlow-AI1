@@ -355,7 +355,7 @@ export default function ProjectWorkspacePage() {
     return stored ? Math.min(65, Math.max(25, parseFloat(stored))) : 38;
   });
   const [windowWidth, setWindowWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1200));
-  const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
+  const [chatDrawerOpen, setChatDrawerOpen] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const scrollRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
   const autoAnalyzedRef = useRef(false);
@@ -373,7 +373,7 @@ export default function ProjectWorkspacePage() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  const isMobileLayout = windowWidth < 1024;
+  const isMobileLayout = windowWidth < 768;
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -622,14 +622,6 @@ export default function ProjectWorkspacePage() {
       </div>
 
       {/* ── Main split: chat LEFT + preview RIGHT ── */}
-      {/* Mobile backdrop */}
-      {isMobileLayout && chatDrawerOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-30"
-          onClick={() => setChatDrawerOpen(false)}
-        />
-      )}
-
       <div
         ref={splitContainerRef}
         className={cn(
@@ -646,14 +638,14 @@ export default function ProjectWorkspacePage() {
             "flex flex-col min-h-0 border-border bg-card/40 overflow-hidden",
             isMobileLayout
               ? cn(
-                  "fixed bottom-0 left-0 right-0 z-40 border-t shadow-2xl transition-transform duration-300 ease-in-out",
-                  chatDrawerOpen ? "translate-y-0" : "translate-y-full",
+                  "fixed inset-x-0 top-0 z-40 shadow-2xl transition-transform duration-300 ease-in-out",
+                  chatDrawerOpen ? "translate-y-0" : "-translate-y-full",
                 )
               : "border-r transition-[width] duration-300 ease-in-out",
           )}
           style={
             isMobileLayout
-              ? { height: "65vh" }
+              ? { bottom: "56px" }
               : focusMode
               ? { width: 0, minWidth: 0 }
               : { width: `${splitPct}%`, minWidth: 260, maxWidth: "72%" }
@@ -1133,19 +1125,42 @@ export default function ProjectWorkspacePage() {
 
         {/* ── RIGHT: Preview / Tab Content ── */}
         <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background relative">
-          {/* Floating chat button — mobile only */}
-          {isMobileLayout && !chatDrawerOpen && (
-            <button
-              onClick={() => setChatDrawerOpen(true)}
-              className="fixed bottom-6 right-6 z-50 w-13 h-13 bg-primary rounded-full shadow-xl flex items-center justify-center hover:bg-primary/90 transition-colors"
-              style={{ width: 52, height: 52 }}
-              aria-label="Open AI Builder"
-              title="Open AI Builder"
-            >
-              <MessageSquare className="h-5 w-5 text-primary-foreground" />
-            </button>
+          {/* Mobile bottom tab bar */}
+          {isMobileLayout && (
+            <div className="fixed bottom-0 left-0 right-0 z-30 flex items-stretch border-t border-border bg-card/95 backdrop-blur-sm" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+              {[
+                { label: "Preview", value: "preview", icon: Monitor },
+                { label: "Code", value: "code", icon: FileCode2 },
+                { label: "Publish", value: "publishing", icon: Rocket },
+              ].map(({ label, value, icon: Icon }) => (
+                <button
+                  key={value}
+                  onClick={() => { setActiveTab(value); setChatDrawerOpen(false); }}
+                  className={cn(
+                    "flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors",
+                    activeTab === value && !chatDrawerOpen
+                      ? "text-primary"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </button>
+              ))}
+              <button
+                onClick={() => setChatDrawerOpen((o) => !o)}
+                className={cn(
+                  "flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors",
+                  chatDrawerOpen ? "text-primary" : "text-muted-foreground",
+                )}
+              >
+                <MessageSquare className="h-4 w-4" />
+                Chat
+              </button>
+            </div>
           )}
-          <div className="flex-1 min-h-0 overflow-hidden">
+
+          <div className={cn("flex-1 min-h-0 overflow-hidden", isMobileLayout && "pb-14")}>
             {activeTab === "preview" && (
               <PreviewTab
                 project={{ ...project, kind: project.kind }}

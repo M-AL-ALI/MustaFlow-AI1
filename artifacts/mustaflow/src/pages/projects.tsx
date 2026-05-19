@@ -252,12 +252,13 @@ export default function ProjectsPage() {
 
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
-          <p className="text-muted-foreground mt-1">Manage and monitor your MustaFlow AI builds.</p>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Projects</h1>
+          <p className="text-muted-foreground mt-1 text-sm md:text-base">Manage and monitor your MustaFlow AI builds.</p>
         </div>
-        <Button onClick={() => setModalOpen(true)} size="lg" className="shrink-0 gap-2">
+        <Button onClick={() => setModalOpen(true)} size="default" className="shrink-0 gap-2">
           <Plus className="h-4 w-4" />
-          New Project
+          <span className="hidden sm:inline">New Project</span>
+          <span className="sm:hidden">New</span>
         </Button>
       </div>
 

@@ -193,13 +193,102 @@ function UserSection() {
   );
 }
 
+function SidebarInner({
+  createOpen,
+  setCreateOpen,
+  onClose,
+}: {
+  createOpen: boolean;
+  setCreateOpen: (v: boolean) => void;
+  onClose: () => void;
+}) {
+  const { isSignedIn } = useUser();
+  return (
+    <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col overflow-y-auto">
+      <CreateProjectModal open={createOpen} onOpenChange={setCreateOpen} />
+
+      {/* Logo + collapse button */}
+      <div className="px-4 py-5 flex flex-col items-center gap-2 shrink-0 relative">
+        <img src={logoUrl} alt="MustaFlow AI" className="h-28 w-auto object-contain" />
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          title="Collapse sidebar"
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Workspace switcher — visible when signed in */}
+      {isSignedIn && <WorkspaceSwitcher />}
+
+      {/* Create button — visible when signed in */}
+      {isSignedIn && (
+        <div className="px-3 pb-2 shrink-0">
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/60 transition-colors px-3 py-2 text-sm font-semibold"
+          >
+            <Plus className="h-4 w-4" />
+            New Project
+          </button>
+        </div>
+      )}
+
+      {/* Nav */}
+      <div className="flex-1 space-y-4">
+        <NavGroup items={NAV_ITEMS} />
+        <NavGroup items={SECONDARY_NAV_ITEMS} title="Platform" />
+        <AdminNavItem />
+      </div>
+
+      {/* Resources + user */}
+      <div className="mt-auto">
+        <NavGroup items={TERTIARY_NAV_ITEMS} title="Resources" />
+        <div className="px-6 py-2 flex items-center gap-3 text-[10px] text-muted-foreground/60">
+          <a href="/terms" className="hover:text-muted-foreground transition-colors">Terms</a>
+          <span>·</span>
+          <a href="/privacy" className="hover:text-muted-foreground transition-colors">Privacy</a>
+          <span>·</span>
+          <a href="/pricing" className="hover:text-muted-foreground transition-colors">Pricing</a>
+          <span>·</span>
+          <a href="/help" className="hover:text-muted-foreground transition-colors">Help</a>
+        </div>
+        <UserSection />
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar() {
   const [createOpen, setCreateOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
-  const { isSignedIn } = useUser();
+  const [windowWidth, setWindowWidth] = useState(() => typeof window !== "undefined" ? window.innerWidth : 1200);
+  const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+
+  useEffect(() => {
+    const handler = () => {
+      const w = window.innerWidth;
+      setWindowWidth(w);
+      // Auto-collapse when resizing down to mobile
+      if (w < 768) setCollapsed(true);
+    };
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  const isMobile = windowWidth < 768;
 
   return (
     <>
+      {/* Mobile backdrop — dims content behind open sidebar */}
+      {isMobile && !collapsed && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40"
+          onClick={() => setCollapsed(true)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Floating logo pill — visible only when sidebar is collapsed */}
       <button
         onClick={() => setCollapsed(false)}
@@ -214,68 +303,40 @@ export function Sidebar() {
         <img src={logoUrl} alt="MustaFlow AI" className="h-7 w-auto object-contain" />
       </button>
 
-      {/* Sidebar sliding wrapper */}
-      <div
-        className={cn(
-          "relative shrink-0 transition-all duration-300 ease-in-out overflow-hidden",
-          collapsed ? "w-0" : "w-64",
-        )}
-      >
-        {/* Inner sidebar — fixed width so it doesn't squash during animation */}
-        <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col overflow-y-auto absolute inset-y-0 left-0">
-          <CreateProjectModal open={createOpen} onOpenChange={setCreateOpen} />
-
-          {/* Logo + collapse button */}
-          <div className="px-4 py-5 flex flex-col items-center gap-2 shrink-0 relative">
-            <img src={logoUrl} alt="MustaFlow AI" className="h-28 w-auto object-contain" />
-            <button
-              onClick={() => setCollapsed(true)}
-              className="absolute top-3 right-3 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Collapse sidebar"
-            >
-              <PanelLeftClose className="h-4 w-4" />
-            </button>
-          </div>
-
-          {/* Workspace switcher — visible when signed in */}
-          {isSignedIn && <WorkspaceSwitcher />}
-
-          {/* Create button — visible when signed in */}
-          {isSignedIn && (
-            <div className="px-3 pb-2 shrink-0">
-              <button
-                onClick={() => setCreateOpen(true)}
-                className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/60 transition-colors px-3 py-2 text-sm font-semibold"
-              >
-                <Plus className="h-4 w-4" />
-                New Project
-              </button>
-            </div>
+      {/* Desktop: in-flow spacer that animates width to push content */}
+      {!isMobile && (
+        <div
+          className={cn(
+            "relative shrink-0 transition-all duration-300 ease-in-out overflow-hidden",
+            collapsed ? "w-0" : "w-64",
           )}
-
-          {/* Nav */}
-          <div className="flex-1 space-y-4">
-            <NavGroup items={NAV_ITEMS} />
-            <NavGroup items={SECONDARY_NAV_ITEMS} title="Platform" />
-            <AdminNavItem />
-          </div>
-
-          {/* Resources + user */}
-          <div className="mt-auto">
-            <NavGroup items={TERTIARY_NAV_ITEMS} title="Resources" />
-            <div className="px-6 py-2 flex items-center gap-3 text-[10px] text-muted-foreground/60">
-              <a href="/terms" className="hover:text-muted-foreground transition-colors">Terms</a>
-              <span>·</span>
-              <a href="/privacy" className="hover:text-muted-foreground transition-colors">Privacy</a>
-              <span>·</span>
-              <a href="/pricing" className="hover:text-muted-foreground transition-colors">Pricing</a>
-              <span>·</span>
-              <a href="/help" className="hover:text-muted-foreground transition-colors">Help</a>
-            </div>
-            <UserSection />
+        >
+          {/* Absolute inner so content doesn't squash during animation */}
+          <div className="absolute inset-y-0 left-0">
+            <SidebarInner
+              createOpen={createOpen}
+              setCreateOpen={setCreateOpen}
+              onClose={() => setCollapsed(true)}
+            />
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Mobile: fixed overlay panel that slides in/out */}
+      {isMobile && (
+        <div
+          className={cn(
+            "fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out",
+            collapsed ? "-translate-x-full" : "translate-x-0",
+          )}
+        >
+          <SidebarInner
+            createOpen={createOpen}
+            setCreateOpen={setCreateOpen}
+            onClose={() => setCollapsed(true)}
+          />
+        </div>
+      )}
     </>
   );
 }
