@@ -103,6 +103,21 @@ The intended user journey is: Login → create project → build app → preview
 - `DELETE /api/projects/:id` — soft-deletes (sets `deleted_at`); returns 200 `{ deleted: true }`.
 - `PATCH /api/projects/:id` — updates name, description, agentMode, status.
 
+## Phase 4A — Mobile App Builder Foundation
+
+- **Mobile project creation**: Create Project modal now has a Web / Mobile platform tab. Selecting Mobile creates a `mobile-cross` (Expo iOS + Android) project. The mobile lock in `routes/projects.ts` and `jobs.ts` is removed.
+- **Mobile builder pipelines**: `runMobileBuildPipeline` and `runMobileRefinePipeline` in `builder.ts` generate complete Expo SDK 52 / Expo Router v3 / NativeWind v4 codebases. The AI also generates an `index.html` web preview served by the existing preview route.
+- **Mobile plan mode**: `runPlanPipeline` detects mobile projects and uses `MOBILE_PLAN_SYSTEM_PROMPT`, which outputs `pages` (screens) and `nativeFeatures` fields compatible with the existing PlanCard.
+- **Mobile validation**: `validateMobileFiles()` in `builder.ts` checks for required Expo structure: `app.json` (name/slug/version), `app/_layout.tsx`, `app/index.tsx`, and required packages.
+- **QR code panel**: PreviewTab shows an "Expo Go" button for mobile projects. Clicking it opens a panel with a QR code (via qrserver.com) pointing to the web preview URL.
+- **Phone frame default**: Mobile projects default to the phone frame view in the Preview tab.
+- **6 mobile templates**: Onboarding & Auth, Social Feed, Mobile Store, Mobile Dashboard, Chat Messenger, Subscription SaaS — all `mobile-cross` kind.
+- **DB schema**: `platform` column added to `projects` table (`web | ios | android | cross`). Set automatically on project creation from kind.
+- **OpenAPI**: `mobile-cross` added to kind enum; `platform` and `mobilePreviewUrl` fields added to Project schema.
+- **guessMime**: `.ts` / `.tsx` → `application/typescript` (previously unhandled).
+- **Template picker**: `filterPlatform` prop filters web vs. mobile templates in the Create Project modal.
+- Env vars: none new.
+
 ## Phase 4 — Public Launch Hardening
 
 - **Public slugs**: `projects.publicSlug` column (UUID-based). `/api/p/:slug/` serves the published snapshot by slug; integer ID still accepted for legacy. Slug generated at first publish, preserved on republish.

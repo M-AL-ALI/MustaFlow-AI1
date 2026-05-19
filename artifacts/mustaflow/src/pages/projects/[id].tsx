@@ -1148,7 +1148,7 @@ export default function ProjectWorkspacePage() {
           <div className="flex-1 min-h-0 overflow-hidden">
             {activeTab === "preview" && (
               <PreviewTab
-                project={project}
+                project={{ ...project, kind: project.kind }}
                 focusMode={focusMode}
                 onToggleFocusMode={() => setFocusMode((f) => !f)}
                 validationWarnings={(() => {

@@ -15,6 +15,8 @@ import {
 import {
   runBuildPipeline,
   runRefinePipeline,
+  runMobileBuildPipeline,
+  runMobileRefinePipeline,
   type BuilderFile,
   type ConversationTurn,
 } from "./builder";
@@ -481,19 +483,6 @@ export async function runJob(input: JobInput): Promise<void> {
     return;
   }
 
-  // ── Mobile generation lock ────────────────────────────────────────────────
-  const MOBILE_KINDS = ["mobile-ios", "mobile-android"];
-  if (MOBILE_KINDS.includes(project.kind)) {
-    const msg =
-      "Mobile generation is not enabled yet. MustaFlow AI currently supports static web apps only.";
-    await emitEvent(taskId, "failed", msg);
-    await db
-      .update(agentTasksTable)
-      .set({ status: "failed", result: msg, completedAt: sql`now()` })
-      .where(eq(agentTasksTable.id, taskId));
-    return;
-  }
-
   const { context: knowledgeContext, applied: knowledgeApplied } = await loadKnowledgeContext(projectId, userPrompt);
 
   // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
@@ -517,22 +506,35 @@ export async function runJob(input: JobInput): Promise<void> {
     let nextVersionLabel: string;
     let diffSummary: DiffSummary | undefined;
 
+    const isMobileProject = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind);
+
     if (kind === "build") {
       await emitEvent(taskId, "planning", "Reading project configuration…");
       await emitEvent(
         taskId,
         "generating_code",
-        "Generating app blueprint and code with AI…",
+        isMobileProject
+          ? "Generating Expo/React Native app with AI…"
+          : "Generating app blueprint and code with AI…",
       );
 
-      const result = await runBuildPipeline({
-        projectName: project.name,
-        projectKind: project.kind,
-        userPrompt,
-        agentMode,
-        conversationHistory,
-        knowledgeContext: knowledgeContext || undefined,
-      });
+      const result = isMobileProject
+        ? await runMobileBuildPipeline({
+            projectName: project.name,
+            projectKind: project.kind,
+            userPrompt,
+            agentMode,
+            conversationHistory,
+            knowledgeContext: knowledgeContext || undefined,
+          })
+        : await runBuildPipeline({
+            projectName: project.name,
+            projectKind: project.kind,
+            userPrompt,
+            agentMode,
+            conversationHistory,
+            knowledgeContext: knowledgeContext || undefined,
+          });
 
       await emitEvent(
         taskId,
@@ -549,7 +551,7 @@ export async function runJob(input: JobInput): Promise<void> {
 
       report = result.report;
       assistantSummary = result.assistantSummary;
-      nextVersionLabel = "Initial build";
+      nextVersionLabel = isMobileProject ? "Initial mobile build" : "Initial build";
     } else {
       await emitEvent(taskId, "reading_files", "Reading current project files…");
       const existingFiles = await loadFiles(projectId);
@@ -562,18 +564,28 @@ export async function runJob(input: JobInput): Promise<void> {
       await emitEvent(
         taskId,
         "generating_code",
-        "Applying change request with AI…",
+        isMobileProject ? "Applying change to Expo project with AI…" : "Applying change request with AI…",
       );
 
-      const result = await runRefinePipeline({
-        projectName: project.name,
-        projectKind: project.kind,
-        userPrompt,
-        agentMode,
-        existingFiles,
-        conversationHistory,
-        knowledgeContext: knowledgeContext || undefined,
-      });
+      const result = isMobileProject
+        ? await runMobileRefinePipeline({
+            projectName: project.name,
+            projectKind: project.kind,
+            userPrompt,
+            agentMode,
+            existingFiles,
+            conversationHistory,
+            knowledgeContext: knowledgeContext || undefined,
+          })
+        : await runRefinePipeline({
+            projectName: project.name,
+            projectKind: project.kind,
+            userPrompt,
+            agentMode,
+            existingFiles,
+            conversationHistory,
+            knowledgeContext: knowledgeContext || undefined,
+          });
 
       await emitEvent(
         taskId,

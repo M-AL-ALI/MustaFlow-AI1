@@ -4,7 +4,7 @@ export interface TemplateDefinition {
   description: string;
   category: TemplateCategory;
   icon: string;
-  projectKind: "web" | "fullstack" | "dashboard" | "automation" | "api";
+  projectKind: "web" | "fullstack" | "dashboard" | "automation" | "api" | "mobile-cross";
   seedPrompt: string;
 }
 
@@ -16,7 +16,8 @@ export type TemplateCategory =
   | "Content"
   | "Business Tools"
   | "Productivity"
-  | "AI";
+  | "AI"
+  | "Mobile";
 
 export const TEMPLATE_CATEGORIES: TemplateCategory[] = [
   "Marketing",
@@ -27,6 +28,7 @@ export const TEMPLATE_CATEGORIES: TemplateCategory[] = [
   "Business Tools",
   "Productivity",
   "AI",
+  "Mobile",
 ];
 
 export const CATEGORY_COLORS: Record<TemplateCategory, string> = {
@@ -38,6 +40,7 @@ export const CATEGORY_COLORS: Record<TemplateCategory, string> = {
   "Business Tools": "bg-orange-500/10 text-orange-400 border-orange-500/20",
   Productivity: "bg-rose-500/10 text-rose-400 border-rose-500/20",
   AI: "bg-violet-500/10 text-violet-400 border-violet-500/20",
+  Mobile: "bg-green-500/10 text-green-400 border-green-500/20",
 };
 
 export const TEMPLATES: TemplateDefinition[] = [
@@ -59,7 +62,7 @@ export const TEMPLATES: TemplateDefinition[] = [
     icon: "Briefcase",
     projectKind: "web",
     seedPrompt:
-      "Build a sleek personal portfolio website. Start with a hero section that includes a professional greeting, a short bio paragraph, and links to GitHub and LinkedIn. Add a skills section displaying a grid of technology badges. Include a projects section showing 4 project cards, each with a title, description, tech stack tags, and GitHub/live demo links. Add a work experience timeline with 3 entries. Include a contact section with a simple form (name, email, message) and social links. Use smooth scroll navigation with a sticky header. Design should be minimal and elegant.",
+      "Build a sleek personal portfolio website. Start with a hero section that includes a professional greeting, a short bio paragraph, and links to GitHub and LinkedIn. Add a skills section displaying a grid of technology badges. Include a projects section showing 4 project cards with a title, description, tech stack tags, and GitHub/live demo links. Add a work experience timeline with 3 entries. Include a contact section with a simple form (name, email, message) and social links. Use smooth scroll navigation with a sticky header. Design should be minimal and elegant.",
   },
   {
     id: "saas-dashboard",
@@ -200,5 +203,67 @@ export const TEMPLATES: TemplateDefinition[] = [
     projectKind: "web",
     seedPrompt:
       "Build a stylish link-in-bio page. Show a centered profile with a large avatar placeholder, name, short bio, and location. Include 5–6 prominent link buttons with icons (YouTube Channel, Latest Article, Newsletter, Shop, Podcast, Instagram). Add a featured content section below with 3 cards for latest posts or projects with thumbnail, title, and description. Include social media icon links at the bottom (Twitter, LinkedIn, GitHub, Instagram, TikTok). Add subtle animated background or gradient. Support light and dark variants. The design should be personal, clean, and eye-catching — something a creator would proudly share.",
+  },
+
+  // ── Mobile templates ───────────────────────────────────────────────────────
+  {
+    id: "mobile-onboarding-auth",
+    title: "Onboarding & Auth",
+    description: "Expo app with animated onboarding slides, sign-in, and sign-up screens",
+    category: "Mobile",
+    icon: "Smartphone",
+    projectKind: "mobile-cross",
+    seedPrompt:
+      "Build a complete Expo React Native onboarding and authentication app. Include 3 animated onboarding screens with illustrations (icon-based), title, subtitle, and a Next button with a progress indicator. The final onboarding screen has Get Started and Sign In buttons. Build a Sign Up screen with first name, last name, email, password, and confirm password fields, a terms of service checkbox, and a Create Account button. Build a Sign In screen with email, password, a Forgot Password link, and Sign In button. Include a Forgot Password screen with email input and Send Reset Link. Use Expo Router for navigation, NativeWind for styling, and a clean modern design with a primary brand color. Show smooth screen transition animations.",
+  },
+  {
+    id: "mobile-social-feed",
+    title: "Social Feed",
+    description: "Expo social media app with feed, stories, post creation, and profile",
+    category: "Mobile",
+    icon: "Smartphone",
+    projectKind: "mobile-cross",
+    seedPrompt:
+      "Build an Expo React Native social media app. Include a tab-based navigation with Home (feed), Search, Create Post, Notifications, and Profile tabs. The Home screen shows a horizontal stories strip at the top (avatar circles with ring indicators) followed by an infinite-scroll feed of posts (user avatar, name, caption, image placeholder, like/comment/share action bar). The Search screen has a search input and a grid of discovery content. The Create Post screen has an image picker area, caption input, and location tag. The Notifications screen lists recent likes, comments, and follows. The Profile screen shows avatar, bio, follower/following counts, a post grid, and a settings button. Use NativeWind for styling, Expo Router, and realistic mock data.",
+  },
+  {
+    id: "mobile-ecommerce",
+    title: "Mobile Store",
+    description: "Expo e-commerce app with product catalog, cart, and checkout",
+    category: "Mobile",
+    icon: "ShoppingCart",
+    projectKind: "mobile-cross",
+    seedPrompt:
+      "Build a full-featured Expo React Native e-commerce app. Include tab navigation: Home, Shop, Cart, Orders, and Profile. The Home screen has a banner carousel, category quick-picks (horizontal scroll), and featured products (FlatList). The Shop screen shows a searchable, filterable product grid with sort options. Each product card shows image placeholder, name, price, and rating. Product detail screen has image gallery, size/color selectors, description accordion, Add to Cart button, and related products. Cart screen shows items with quantity controls, remove button, subtotal, shipping estimate, and Checkout CTA. Checkout screen has address form, payment method selector, and order summary. Orders screen shows order history with status badges. Use NativeWind and Expo Router.",
+  },
+  {
+    id: "mobile-dashboard",
+    title: "Mobile Dashboard",
+    description: "Expo analytics dashboard app with charts, stats, and data visualization",
+    category: "Mobile",
+    icon: "LayoutDashboard",
+    projectKind: "mobile-cross",
+    seedPrompt:
+      "Build an Expo React Native analytics dashboard app. Include tab navigation: Overview, Reports, Transactions, and Settings. The Overview screen shows a greeting header with user name, 4 stat cards (Revenue, Users, Conversions, Churn) with trend arrows, a line chart for revenue over 30 days (use SVG or react-native-chart-kit placeholder comments), and a recent activity list. The Reports screen has a scrollable list of report cards with bar chart placeholders and date range filters. Transactions screen shows a searchable list of transactions with amount, merchant, date, and category badge. Settings screen has profile section, notifications toggles, appearance (dark/light), linked accounts, and sign out. Use NativeWind, Expo Router, and mock data throughout. Clean dark financial-app aesthetic.",
+  },
+  {
+    id: "mobile-chat",
+    title: "Chat Messenger",
+    description: "Expo real-time chat app with conversations list, messages, and media sharing",
+    category: "Mobile",
+    icon: "Smartphone",
+    projectKind: "mobile-cross",
+    seedPrompt:
+      "Build an Expo React Native chat messenger app. Include tab navigation: Chats, Calls, Status, and Profile. The Chats screen shows a searchable list of conversations with avatar, name, last message preview, timestamp, and unread count badge. Tapping a conversation opens the Chat screen with a message list (sent/received bubbles with timestamps), a typing indicator, and an input bar with text field, attachment icon, and send button. The message bubbles support text, image placeholder, and audio message placeholders. Include a New Chat button that opens a contact picker. Calls screen shows recent calls list with call type icon (audio/video), name, and duration. Status screen shows contacts' status updates with a ring around avatars. Profile shows avatar, name, bio, and privacy settings. Use NativeWind and Expo Router.",
+  },
+  {
+    id: "mobile-subscription-saas",
+    title: "Subscription SaaS",
+    description: "Expo SaaS app with paywall, subscription plans, and gated premium content",
+    category: "Mobile",
+    icon: "CreditCard",
+    projectKind: "mobile-cross",
+    seedPrompt:
+      "Build an Expo React Native subscription SaaS app. Include tab navigation: Home, Features, Account. The Home screen shows a hero with app value proposition, 3 feature preview cards (blurred/locked for non-subscribers), and a prominent Subscribe CTA button. The Features screen shows gated premium features (blurred overlays on locked items) with an upgrade prompt at the top for free users and full access for subscribers. Include a Paywall modal/screen with 3 plan cards (Monthly $9.99, Annual $79.99 with 'Best Value' badge, Lifetime $149.99), feature list with checkmarks, restore purchases link, and terms/privacy links. The Account screen shows subscription status badge (Free/Pro/Premium), billing info, manage subscription, and sign out. Include a Settings screen with notifications toggles, theme selector, and help. Use NativeWind, Expo Router, and mock subscription state.",
   },
 ];

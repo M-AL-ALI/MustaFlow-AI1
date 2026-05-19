@@ -104,7 +104,8 @@ export const ListProjectsResponseItem = zod.object({
   "workspaceId": zod.number().nullish(),
   "name": zod.string(),
   "description": zod.string().nullish(),
-  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'mobile-cross', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "platform": zod.enum(['web', 'ios', 'android', 'cross']).optional(),
   "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
@@ -113,6 +114,7 @@ export const ListProjectsResponseItem = zod.object({
   "siteTitle": zod.string().nullish(),
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
+  "mobilePreviewUrl": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -129,7 +131,7 @@ export const CreateProjectBody = zod.object({
   "name": zod.string().min(1),
   "description": zod.string().optional(),
   "workspaceId": zod.number().optional(),
-  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'mobile-cross', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
   "initialPrompt": zod.string().optional()
 })
 
@@ -143,7 +145,8 @@ export const GetProjectResponse = zod.object({
   "workspaceId": zod.number().nullish(),
   "name": zod.string(),
   "description": zod.string().nullish(),
-  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'mobile-cross', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "platform": zod.enum(['web', 'ios', 'android', 'cross']).optional(),
   "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
@@ -152,6 +155,7 @@ export const GetProjectResponse = zod.object({
   "siteTitle": zod.string().nullish(),
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
+  "mobilePreviewUrl": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -176,7 +180,8 @@ export const UpdateProjectResponse = zod.object({
   "workspaceId": zod.number().nullish(),
   "name": zod.string(),
   "description": zod.string().nullish(),
-  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'mobile-cross', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "platform": zod.enum(['web', 'ios', 'android', 'cross']).optional(),
   "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
@@ -185,6 +190,7 @@ export const UpdateProjectResponse = zod.object({
   "siteTitle": zod.string().nullish(),
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
+  "mobilePreviewUrl": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -207,7 +213,8 @@ export const GetProjectsSummaryResponse = zod.object({
   "workspaceId": zod.number().nullish(),
   "name": zod.string(),
   "description": zod.string().nullish(),
-  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'mobile-cross', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "platform": zod.enum(['web', 'ios', 'android', 'cross']).optional(),
   "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "lastTaskSummary": zod.string().nullish(),
@@ -216,6 +223,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "siteTitle": zod.string().nullish(),
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
+  "mobilePreviewUrl": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))

@@ -13,6 +13,7 @@ export const ProjectKind = {
   web: 'web',
   'mobile-ios': 'mobile-ios',
   'mobile-android': 'mobile-android',
+  'mobile-cross': 'mobile-cross',
   fullstack: 'fullstack',
   dashboard: 'dashboard',
   api: 'api',

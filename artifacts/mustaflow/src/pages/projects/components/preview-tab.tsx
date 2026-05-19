@@ -19,6 +19,8 @@ import {
   Minimize2,
   Trash2,
   Wrench,
+  QrCode,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -53,6 +55,7 @@ type Project = {
   status: string;
   updatedAt: string;
   name?: string;
+  kind?: string;
 };
 
 type PreviewTabProps = {
@@ -83,8 +86,9 @@ export function PreviewTab({
   validationWarnings = [],
   onFixPrompt,
 }: PreviewTabProps) {
+  const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
   const [platform, setPlatform] = useState<Platform>("web");
-  const [device, setDevice] = useState<DeviceFrame>("desktop");
+  const [device, setDevice] = useState<DeviceFrame>(isMobile ? "mobile" : "desktop");
   const [iframeKey, setIframeKey] = useState(0);
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
@@ -92,6 +96,7 @@ export function PreviewTab({
   const [validationDismissed, setValidationDismissed] = useState(false);
   const prevWarningsRef = useRef<string[]>([]);
   const [crashBanner, setCrashBanner] = useState<string | null>(null);
+  const [qrOpen, setQrOpen] = useState(false);
 
   // Reset dismissed state when warnings change (new build completed)
   useEffect(() => {
@@ -202,6 +207,10 @@ export function PreviewTab({
     />
   );
 
+  // Suppress unused variable warning — platform state reserved for future iOS/Android toggle
+  void platform;
+  void setPlatform;
+
   return (
     <div className="flex flex-col h-full bg-background">
 
@@ -231,21 +240,53 @@ export function PreviewTab({
           })}
         </div>
 
-        {/* Mobile Phase 4 — subtle hover hint, not an interactive control */}
-        <div className="relative shrink-0 group">
-          <div
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] text-muted-foreground/30 border border-dashed border-border/25 cursor-default select-none"
-            aria-hidden="true"
-          >
-            <Smartphone className="h-3 w-3" />
-            <span>iOS / Android</span>
+        {/* QR code panel — shown for mobile projects */}
+        {isMobile && hasFiles && (
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setQrOpen((o) => !o)}
+              className={cn(
+                "flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors border",
+                qrOpen
+                  ? "bg-green-500/15 text-green-400 border-green-500/30"
+                  : "bg-muted text-muted-foreground border-border hover:text-foreground",
+              )}
+              title="Scan with Expo Go"
+            >
+              <QrCode className="h-3 w-3" />
+              <span className="hidden sm:inline">Expo Go</span>
+            </button>
+            {qrOpen && (
+              <div className="absolute top-full left-0 mt-2 z-50 w-72 bg-popover border border-border rounded-xl shadow-2xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="font-semibold text-foreground text-sm flex items-center gap-1.5">
+                    <Smartphone className="h-4 w-4 text-green-400" />
+                    Scan with Expo Go
+                  </div>
+                  <button onClick={() => setQrOpen(false)} className="text-muted-foreground hover:text-foreground">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="flex justify-center mb-3">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(window.location.origin + previewSrc)}&size=180x180&bgcolor=ffffff&color=000000&margin=8`}
+                    alt="QR code for Expo Go"
+                    className="rounded-lg border border-border"
+                    width={180}
+                    height={180}
+                  />
+                </div>
+                <div className="flex items-start gap-2 bg-muted/60 rounded-lg p-2.5 text-xs text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-green-400" />
+                  <div>
+                    <p className="text-foreground font-medium mb-0.5">Web preview only</p>
+                    <p>This opens the web preview in your mobile browser. For native Expo Go testing with real device sensors, use EAS Build (coming in Phase 4B).</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-          {/* Tooltip shown on hover only */}
-          <div className="absolute top-full left-0 mt-1.5 z-50 w-52 bg-popover border border-border rounded-lg shadow-xl p-2.5 text-[11px] text-muted-foreground hidden group-hover:block pointer-events-none">
-            <div className="font-semibold text-foreground mb-1">Mobile — Phase 4</div>
-            <p>iOS and Android publishing is planned for a future release. MustaFlow currently generates web apps.</p>
-          </div>
-        </div>
+        )}
 
         <div className="w-px h-4 bg-border shrink-0" />
 
@@ -528,7 +569,9 @@ export function PreviewTab({
             <div>
               <h3 className="text-lg font-semibold text-foreground mb-2">No preview yet</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Use the AI Builder below to describe what you want to build. MustaFlow will generate your app and show a live preview here.
+                {isMobile
+                  ? "Use the AI Builder below to describe your mobile app. MustaFlow will generate Expo/React Native code and a web preview here."
+                  : "Use the AI Builder below to describe what you want to build. MustaFlow will generate your app and show a live preview here."}
               </p>
             </div>
             <div className="flex flex-col gap-2 w-full">
@@ -568,7 +611,7 @@ export function PreviewTab({
             <div className="flex-1" />
             {consoleEntries.length > 0 && (
               <button
-                onClick={() => { setConsoleEntries([]); setCrashBanner(null); }}
+                onClick={() => setConsoleEntries([])}
                 className="text-zinc-600 hover:text-zinc-400 transition-colors p-0.5 rounded"
                 title="Clear console"
               >
@@ -595,6 +638,7 @@ export function PreviewTab({
                     key={entry.id}
                     className={cn(
                       "flex items-start gap-2 px-3 py-0.5 border-b border-zinc-900 hover:bg-zinc-900/50",
+                      entry.isCrash ? "bg-destructive/10 text-destructive" :
                       entry.level === "error" ? "text-red-400 bg-red-950/20" :
                       entry.level === "warn" ? "text-yellow-400" :
                       entry.level === "info" ? "text-blue-400" :
@@ -603,12 +647,13 @@ export function PreviewTab({
                   >
                     <span className={cn(
                       "shrink-0 uppercase text-[9px] font-bold tracking-wider mt-0.5 w-7",
+                      entry.isCrash ? "text-destructive" :
                       entry.level === "error" ? "text-red-500" :
                       entry.level === "warn" ? "text-yellow-500" :
                       entry.level === "info" ? "text-blue-500" :
                       "text-zinc-600",
                     )}>
-                      {entry.level}
+                      {entry.isCrash ? "CRASH" : entry.level}
                     </span>
                     <span className="flex-1 break-all whitespace-pre-wrap">{entry.args.join(" ")}</span>
                     <span className="text-zinc-700 text-[9px] shrink-0 mt-0.5">

@@ -426,6 +426,77 @@ const APPROVED_CDN_HOSTNAMES = new Set([
 ]);
 
 /**
+ * Validate mobile (Expo/React Native) project files.
+ * Checks for required Expo structure: app.json (with name/slug/version),
+ * app/_layout.tsx, and app/index.tsx. Synchronous — no network calls.
+ */
+export function validateMobileFiles(files: BuilderFile[]): ValidationResult {
+  const criticalErrors: string[] = [];
+  const warnings: string[] = [];
+
+  const hasAppJson = files.some((f) => f.path === "app.json");
+  const hasLayout = files.some(
+    (f) => f.path === "app/_layout.tsx" || f.path === "app/_layout.ts",
+  );
+  const hasIndex = files.some(
+    (f) => f.path === "app/index.tsx" || f.path === "app/index.ts",
+  );
+  const hasPackageJson = files.some((f) => f.path === "package.json");
+
+  if (!hasAppJson) {
+    criticalErrors.push("Missing app.json — required for Expo projects");
+  } else {
+    const appJsonFile = files.find((f) => f.path === "app.json");
+    if (appJsonFile) {
+      try {
+        const json = JSON.parse(appJsonFile.content) as Record<string, unknown>;
+        const expo = json.expo as Record<string, unknown> | undefined;
+        if (!expo) {
+          criticalErrors.push('app.json: Missing "expo" root key');
+        } else {
+          if (!expo.name) criticalErrors.push("app.json: Missing expo.name");
+          if (!expo.slug) criticalErrors.push("app.json: Missing expo.slug");
+          if (!expo.version) warnings.push("app.json: Missing expo.version — defaulting to 1.0.0");
+        }
+      } catch {
+        criticalErrors.push("app.json: Invalid JSON content");
+      }
+    }
+  }
+
+  if (!hasLayout) {
+    criticalErrors.push("Missing app/_layout.tsx — required for Expo Router navigation");
+  }
+
+  if (!hasIndex) {
+    warnings.push("Missing app/index.tsx — the app may not have a home screen");
+  }
+
+  if (hasPackageJson) {
+    const pkgFile = files.find((f) => f.path === "package.json");
+    if (pkgFile) {
+      try {
+        const pkg = JSON.parse(pkgFile.content) as Record<string, unknown>;
+        const deps = {
+          ...((pkg.dependencies as Record<string, string>) ?? {}),
+          ...((pkg.devDependencies as Record<string, string>) ?? {}),
+        };
+        const requiredPkgs = ["expo", "react-native", "expo-router"];
+        for (const req of requiredPkgs) {
+          if (!deps[req]) {
+            warnings.push(`package.json: Missing required dependency "${req}"`);
+          }
+        }
+      } catch {
+        warnings.push("package.json: Could not parse JSON to check dependencies");
+      }
+    }
+  }
+
+  return { passed: criticalErrors.length === 0, criticalErrors, warnings };
+}
+
+/**
  * Lightweight self-validation of generated/changed files.
  * Validates ALL file types in the given array:
  * - HTML: structure check + inline <script> acorn parse + CDN URL reachability
@@ -994,6 +1065,421 @@ export async function runRefinePipeline(args: {
   return { changedFiles, removedPaths, report, assistantSummary: summary };
 }
 
+const MOBILE_PREVIEW_NOTE = `MOBILE WEB PREVIEW (index.html) — REQUIRED:
+You MUST include an index.html file that is a beautiful, realistic web preview of the mobile app.
+- Render inside a mobile phone frame: max-w-[390px] mx-auto, dark phone shell around the content
+- Show the app's main screen with realistic mock data
+- Use Tailwind CDN: <script src="https://cdn.tailwindcss.com"></script>
+- Use lucide icons: <script src="https://unpkg.com/lucide@latest"></script>
+- If the app has tabs, render a bottom tab bar with tab icons and labels
+- Use safe area insets: top bar + bottom bar like a real phone
+- Dark or light theme based on app design
+- No emojis — use lucide icons only
+- Mobile touch targets: min 44px height for interactive elements
+- Include a "Scan with Expo Go" badge or note in the preview header
+- Keep under 20,000 chars for the preview HTML`;
+
+const MOBILE_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Builder. You generate complete, production-ready Expo/React Native projects from a single user request. You output ONLY valid JSON — no prose, no markdown fences.
+
+EXPO PROJECT REQUIREMENTS:
+- Expo SDK 52, Expo Router v3, TypeScript, NativeWind v4
+- File structure:
+  - app.json: Expo configuration (name, slug, version, scheme, ios.bundleIdentifier, android.package)
+  - package.json: All dependencies listed (expo ~52.0.0, react-native, expo-router ~3.5.0, nativewind ~4.0.0, tailwindcss, react, react-dom, @expo/metro-runtime, react-native-safe-area-context, react-native-screens, @react-navigation/native)
+  - tailwind.config.js: NativeWind config with content paths
+  - babel.config.js: Expo preset with NativeWind plugin
+  - app/_layout.tsx: Root Expo Router layout (Stack or Tabs) with SafeAreaProvider
+  - app/index.tsx: Home/main screen
+  - app/(tabs)/_layout.tsx: Tab layout if tabs navigation is used
+  - Screen files in app/* using Expo Router file-based routing
+  - Shared components in components/*
+  - constants/Colors.ts: Theme color constants
+- TypeScript throughout: type all props, navigation params, and component interfaces
+- NativeWind className props for all styling (Tailwind utility classes on React Native components)
+- Expo Router file-based routing — all screens are files in the app/ directory
+- SafeAreaView from react-native-safe-area-context in layouts
+- Platform.OS checks where appropriate for platform-specific behavior
+- FlatList for scrollable lists of data
+- Stack navigation header customization via <Stack.Screen options={{}} />
+- Expo SDK modules for native features (expo-camera, expo-location, expo-notifications stubs)
+- NEVER use hardcoded API keys — use environment variable comments
+- Mobile-first UX: large touch targets (min 44px), thumb-reachable navigation, clear visual hierarchy
+
+${MOBILE_PREVIEW_NOTE}
+
+OUTPUT STRICT JSON matching this exact shape:
+{
+  "blueprint": {
+    "projectName": string,
+    "projectType": string,
+    "targetPlatforms": string[],
+    "screens": [{ "name": string, "route": string, "purpose": string }],
+    "components": string[],
+    "navigation": "stack" | "tabs" | "drawer" | "mixed",
+    "nativeFeatures": string[],
+    "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }]
+  },
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "summary": string,
+  "warnings": string[],
+  "nextRecommendation": string
+}
+
+MIME types: TypeScript/TSX files → "application/typescript", JSON → "application/json", JS → "application/javascript", HTML → "text/html"
+Always include index.html (web preview) and all required Expo files.`;
+
+const MOBILE_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Builder in CHANGE MODE. You receive the current Expo/React Native project files and a change request. You modify the affected files and return the FULL updated file contents.
+
+${MOBILE_PREVIEW_NOTE}
+
+OUTPUT STRICT JSON matching this exact shape:
+{
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "filesRemoved": string[],
+  "summary": string,
+  "warnings": string[],
+  "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+  "nextRecommendation": string
+}
+
+Return ONLY files that were created or changed (full new content). Do NOT echo unchanged files.
+Always update index.html to reflect any UI changes made in the React Native screens.`;
+
+const MOBILE_PLAN_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Planner. You plan Expo/React Native mobile app projects. Output ONLY strict JSON — no prose, no markdown:
+{
+  "summary": string,
+  "goal": string,
+  "approach": string,
+  "pages": string[],
+  "navigation": string[],
+  "nativeFeatures": string[],
+  "backend": string[],
+  "database": string[],
+  "integrations": string[],
+  "keysNeeded": string[],
+  "filesAffected": string[],
+  "risks": string[],
+  "testPlan": string[]
+}
+"pages" lists screens (e.g. "Home — feed of latest posts", "Profile — user settings and avatar"). Be specific. Empty arrays for sections that don't apply.`;
+
+export type MobileBlueprint = {
+  projectName: string;
+  projectType: string;
+  targetPlatforms: string[];
+  screens: Array<{ name: string; route: string; purpose: string }>;
+  components: string[];
+  navigation: "stack" | "tabs" | "drawer" | "mixed";
+  nativeFeatures: string[];
+  integrationsNeeded: Array<{
+    name: string;
+    why: string;
+    keysNeeded: string[];
+    environment: "test" | "production";
+  }>;
+};
+
+export type MobileBuilderResult = {
+  blueprint: MobileBlueprint;
+  files: BuilderFile[];
+  report: TaskReport;
+  assistantSummary: string;
+};
+
+export async function runMobileBuildPipeline(args: {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  onEvent?: (type: string, message: string) => Promise<void>;
+}): Promise<MobileBuilderResult> {
+  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext, onEvent } = args;
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: MOBILE_BUILD_SYSTEM_PROMPT },
+    { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).` },
+  ];
+
+  if (knowledgeContext) {
+    messages.push({
+      role: "system",
+      content: `LEARNED LESSONS — apply these:\n${knowledgeContext}`,
+    });
+  }
+
+  messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
+
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  await onEvent?.("generating_code", "Generating Expo/React Native app blueprint…");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "mobile-build");
+
+  const blueprint = (parsed.blueprint ?? {
+    projectName,
+    projectType: projectKind,
+    targetPlatforms: ["ios", "android"],
+    screens: [],
+    components: [],
+    navigation: "stack",
+    nativeFeatures: [],
+    integrationsNeeded: [],
+  }) as MobileBlueprint;
+
+  const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
+  let files: BuilderFile[] = rawFiles
+    .filter(
+      (f): f is { path: string; content: string; mimeType?: string } =>
+        typeof f === "object" &&
+        f !== null &&
+        typeof (f as { path?: unknown }).path === "string" &&
+        typeof (f as { content?: unknown }).content === "string",
+    )
+    .map((f) => ({
+      path: normalizePath(f.path),
+      content: f.content,
+      mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+    }));
+
+  // Mobile validation: check for required Expo structure
+  await onEvent?.("validating_output", "Validating Expo project structure…");
+  const mobileValidation = validateMobileFiles(files);
+
+  if (!mobileValidation.passed) {
+    logger.warn({ criticalErrors: mobileValidation.criticalErrors }, "Mobile build validation found critical errors — running correction pass");
+    await onEvent?.("validating_output", `Mobile structure validation: ${mobileValidation.criticalErrors.length} issue(s) — running correction…`);
+
+    const correctionMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      ...messages,
+      { role: "assistant", content: JSON.stringify(parsed) },
+      {
+        role: "user",
+        content: `The generated Expo project is missing required files. Please fix:\n${mobileValidation.criticalErrors.join("\n")}\n\nReturn ONLY the corrected/missing files with full content.`,
+      },
+    ];
+
+    try {
+      const corrected = await callWithRetry(correctionMessages, modelFor(agentMode), 32000, "mobile-build-correction");
+      const correctedRaw = Array.isArray(corrected.files) ? corrected.files : [];
+      const correctedFiles: BuilderFile[] = correctedRaw
+        .filter(
+          (f): f is { path: string; content: string; mimeType?: string } =>
+            typeof f === "object" && f !== null &&
+            typeof (f as { path?: unknown }).path === "string" &&
+            typeof (f as { content?: unknown }).content === "string",
+        )
+        .map((f) => ({
+          path: normalizePath(f.path),
+          content: f.content,
+          mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+        }));
+      const mergedMap = new Map(files.map((f) => [f.path, f]));
+      for (const cf of correctedFiles) mergedMap.set(cf.path, cf);
+      files = [...mergedMap.values()];
+    } catch (err) {
+      logger.warn({ err }, "Mobile correction pass failed — using original output");
+    }
+  }
+
+  // Ensure there's always an index.html for the preview route
+  if (!files.some((f) => f.path === "index.html")) {
+    files.push({
+      path: "index.html",
+      content: generateMobileFallbackPreview(projectName, blueprint.screens ?? []),
+      mimeType: "text/html",
+    });
+  }
+
+  const aiWarnings = Array.isArray(parsed.warnings)
+    ? parsed.warnings.filter((w): w is string => typeof w === "string")
+    : [];
+  const warnings = [...aiWarnings, ...mobileValidation.warnings];
+
+  const summary =
+    typeof parsed.summary === "string"
+      ? parsed.summary
+      : `Generated Expo/React Native app with ${files.length} files for ${projectName}.`;
+
+  const nextRecommendation =
+    typeof parsed.nextRecommendation === "string"
+      ? parsed.nextRecommendation
+      : "Open the Preview tab to see the web preview, then scan the QR code with Expo Go on your device.";
+
+  const report: TaskReport = {
+    userRequest: userPrompt,
+    blueprint: blueprint as unknown as Record<string, unknown>,
+    filesCreated: files.map((f) => f.path),
+    filesChanged: [],
+    filesRemoved: [],
+    previewUpdated: true,
+    warnings,
+    integrationsNeeded: blueprint.integrationsNeeded ?? [],
+    nextRecommendation,
+  };
+
+  return { blueprint, files, report, assistantSummary: summary };
+}
+
+export async function runMobileRefinePipeline(args: {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+  existingFiles: BuilderFile[];
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  onEvent?: (type: string, message: string) => Promise<void>;
+}): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  report: TaskReport;
+  assistantSummary: string;
+}> {
+  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext, onEvent } = args;
+
+  const fileManifest = makeCompactManifest(existingFiles, userPrompt);
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: MOBILE_REFINE_SYSTEM_PROMPT },
+    { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}` },
+  ];
+
+  if (knowledgeContext) {
+    messages.push({
+      role: "system",
+      content: `LEARNED LESSONS — apply these:\n${knowledgeContext}`,
+    });
+  }
+
+  messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
+
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  await onEvent?.("generating_code", "Applying change request to Expo project…");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "mobile-refine");
+
+  const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
+  const changedFiles: BuilderFile[] = rawFiles
+    .filter(
+      (f): f is { path: string; content: string; mimeType?: string } =>
+        typeof f === "object" &&
+        f !== null &&
+        typeof (f as { path?: unknown }).path === "string" &&
+        typeof (f as { content?: unknown }).content === "string",
+    )
+    .map((f) => ({
+      path: normalizePath(f.path),
+      content: f.content,
+      mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+    }));
+
+  const removedPaths = Array.isArray(parsed.filesRemoved)
+    ? parsed.filesRemoved
+        .filter((p): p is string => typeof p === "string")
+        .map(normalizePath)
+    : [];
+
+  const summary =
+    typeof parsed.summary === "string"
+      ? parsed.summary
+      : `Updated ${changedFiles.length} file(s) in the Expo project.`;
+
+  const aiWarnings = Array.isArray(parsed.warnings)
+    ? parsed.warnings.filter((w): w is string => typeof w === "string")
+    : [];
+
+  const integrationsNeeded = Array.isArray(parsed.integrationsNeeded)
+    ? (parsed.integrationsNeeded as TaskReport["integrationsNeeded"])
+    : [];
+
+  const nextRecommendation =
+    typeof parsed.nextRecommendation === "string"
+      ? parsed.nextRecommendation
+      : "Refresh the Preview tab to see changes, or open the Files tab to inspect the code.";
+
+  const existingPaths = new Set(existingFiles.map((f) => f.path));
+  const filesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
+  const filesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
+
+  const report: TaskReport = {
+    userRequest: userPrompt,
+    blueprint: null,
+    filesCreated,
+    filesChanged,
+    filesRemoved: removedPaths,
+    previewUpdated: changedFiles.length > 0 || removedPaths.length > 0,
+    warnings: aiWarnings,
+    integrationsNeeded,
+    nextRecommendation,
+  };
+
+  return { changedFiles, removedPaths, report, assistantSummary: summary };
+}
+
+/**
+ * Generate a minimal fallback HTML preview for a mobile project
+ * when the AI didn't produce an index.html.
+ */
+function generateMobileFallbackPreview(
+  projectName: string,
+  screens: Array<{ name?: string; route?: string; purpose?: string }>,
+): string {
+  const screenList = screens
+    .slice(0, 6)
+    .map((s) => `<li class="py-2 px-3 bg-gray-800 rounded-lg text-sm text-gray-200">${s.name ?? s.route ?? "Screen"}</li>`)
+    .join("");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${projectName} — Mobile Preview</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 min-h-screen flex items-center justify-center p-4">
+  <div class="w-full max-w-sm mx-auto">
+    <div class="bg-gray-900 rounded-[40px] border-4 border-gray-700 shadow-2xl overflow-hidden" style="min-height:720px">
+      <div class="bg-black h-10 flex items-center justify-center">
+        <div class="w-24 h-6 bg-gray-900 rounded-full"></div>
+      </div>
+      <div class="p-6 space-y-4">
+        <div class="text-center pt-4">
+          <h1 class="text-xl font-bold text-white">${projectName}</h1>
+          <p class="text-sm text-gray-400 mt-1">Expo/React Native App</p>
+        </div>
+        ${screens.length > 0 ? `
+        <div>
+          <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Screens</p>
+          <ul class="space-y-2">${screenList}</ul>
+        </div>` : ""}
+        <div class="bg-blue-900/30 border border-blue-700/40 rounded-xl p-4 text-center">
+          <p class="text-sm text-blue-300 font-medium">Generating your app…</p>
+          <p class="text-xs text-gray-500 mt-1">The AI is building your Expo project files. The preview will update after the first build.</p>
+        </div>
+      </div>
+      <div class="absolute bottom-0 left-0 right-0 bg-black flex justify-center py-2">
+        <div class="w-24 h-1 rounded-full bg-gray-700"></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 export async function runPlanPipeline(args: {
   projectName: string;
   projectKind: string;
@@ -1003,8 +1489,11 @@ export async function runPlanPipeline(args: {
 }): Promise<{ summary: string; plan: Record<string, unknown> | null }> {
   const { projectName, projectKind, userPrompt, agentMode, conversationHistory } = args;
 
+  const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(projectKind);
+  const planPrompt = isMobile ? MOBILE_PLAN_SYSTEM_PROMPT : PLAN_SYSTEM_PROMPT;
+
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-    { role: "system", content: PLAN_SYSTEM_PROMPT },
+    { role: "system", content: planPrompt },
     {
       role: "system",
       content: `Project: "${projectName}" (kind: ${projectKind}).`,
@@ -1067,6 +1556,8 @@ export function guessMime(path: string): string {
   if (lower.endsWith(".css")) return "text/css";
   if (lower.endsWith(".js") || lower.endsWith(".mjs"))
     return "application/javascript";
+  if (lower.endsWith(".ts") || lower.endsWith(".tsx"))
+    return "application/typescript";
   if (lower.endsWith(".json")) return "application/json";
   if (lower.endsWith(".svg")) return "image/svg+xml";
   if (lower.endsWith(".txt") || lower.endsWith(".md")) return "text/plain";

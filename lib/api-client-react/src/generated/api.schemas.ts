@@ -76,6 +76,7 @@ export const ProjectKind = {
   web: 'web',
   'mobile-ios': 'mobile-ios',
   'mobile-android': 'mobile-android',
+  'mobile-cross': 'mobile-cross',
   fullstack: 'fullstack',
   dashboard: 'dashboard',
   api: 'api',
@@ -84,6 +85,16 @@ export const ProjectKind = {
   marketplace: 'marketplace',
   chatbot: 'chatbot',
   spreadsheet: 'spreadsheet',
+} as const;
+
+export type ProjectPlatform = typeof ProjectPlatform[keyof typeof ProjectPlatform];
+
+
+export const ProjectPlatform = {
+  web: 'web',
+  ios: 'ios',
+  android: 'android',
+  cross: 'cross',
 } as const;
 
 export type ProjectStatus = typeof ProjectStatus[keyof typeof ProjectStatus];
@@ -115,6 +126,7 @@ export interface Project {
   /** @nullable */
   description?: string | null;
   kind: ProjectKind;
+  platform?: ProjectPlatform;
   status: ProjectStatus;
   agentMode: ProjectAgentMode;
   /** @nullable */
@@ -129,6 +141,8 @@ export interface Project {
   metaDescription?: string | null;
   /** @nullable */
   themeColor?: string | null;
+  /** @nullable */
+  mobilePreviewUrl?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -140,6 +154,7 @@ export const ProjectInputKind = {
   web: 'web',
   'mobile-ios': 'mobile-ios',
   'mobile-android': 'mobile-android',
+  'mobile-cross': 'mobile-cross',
   fullstack: 'fullstack',
   dashboard: 'dashboard',
   api: 'api',

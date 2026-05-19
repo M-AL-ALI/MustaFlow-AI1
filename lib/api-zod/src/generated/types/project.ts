@@ -7,6 +7,7 @@
  */
 import type { ProjectAgentMode } from './projectAgentMode';
 import type { ProjectKind } from './projectKind';
+import type { ProjectPlatform } from './projectPlatform';
 import type { ProjectStatus } from './projectStatus';
 
 export interface Project {
@@ -17,6 +18,7 @@ export interface Project {
   /** @nullable */
   description?: string | null;
   kind: ProjectKind;
+  platform?: ProjectPlatform;
   status: ProjectStatus;
   agentMode: ProjectAgentMode;
   /** @nullable */
@@ -31,6 +33,8 @@ export interface Project {
   metaDescription?: string | null;
   /** @nullable */
   themeColor?: string | null;
+  /** @nullable */
+  mobilePreviewUrl?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

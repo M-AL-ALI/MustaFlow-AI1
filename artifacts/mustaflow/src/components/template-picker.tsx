@@ -21,6 +21,8 @@ import {
   Link,
   PencilLine,
   X,
+  Smartphone,
+  MessageSquare,
 } from "lucide-react";
 import {
   TEMPLATES,
@@ -47,6 +49,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Search,
   Activity,
   Link,
+  Smartphone,
+  MessageSquare,
 };
 
 interface TemplatePickerProps {
@@ -54,6 +58,7 @@ interface TemplatePickerProps {
   onSelect: (template: TemplateDefinition) => void;
   onStartFromScratch?: () => void;
   compact?: boolean;
+  filterPlatform?: "web" | "mobile";
 }
 
 export function TemplatePicker({
@@ -61,11 +66,16 @@ export function TemplatePicker({
   onSelect,
   onStartFromScratch,
   compact = false,
+  filterPlatform,
 }: TemplatePickerProps) {
+  const MOBILE_KINDS = ["mobile-cross", "mobile-ios", "mobile-android"];
   const [activeCategory, setActiveCategory] = useState<TemplateCategory | "All">("All");
   const [search, setSearch] = useState("");
 
   const filtered = TEMPLATES.filter((t) => {
+    // Platform filter: "mobile" shows only mobile-* kinds; "web" hides them
+    if (filterPlatform === "mobile" && !MOBILE_KINDS.includes(t.projectKind)) return false;
+    if (filterPlatform === "web" && MOBILE_KINDS.includes(t.projectKind)) return false;
     const matchesCategory = activeCategory === "All" || t.category === activeCategory;
     const matchesSearch =
       search.trim() === "" ||

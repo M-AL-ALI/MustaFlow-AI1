@@ -74,16 +74,13 @@ router.post("/projects", async (req, res): Promise<void> => {
 
   const { initialPrompt, ...projectInput } = parsed.data;
 
-  // ── Mobile generation lock ────────────────────────────────────────────────
-  // Mobile (Expo/React Native) is not enabled. Only static web apps are supported.
-  const MOBILE_KINDS = ["mobile-ios", "mobile-android"];
-  if (MOBILE_KINDS.includes(projectInput.kind)) {
-    res.status(400).json({
-      error:
-        "Mobile generation is not enabled yet. MustaFlow AI currently supports static web apps only.",
-    });
-    return;
-  }
+  // Derive platform from kind
+  const platformMap: Record<string, string> = {
+    "mobile-ios": "ios",
+    "mobile-android": "android",
+    "mobile-cross": "cross",
+  };
+  const platform = platformMap[projectInput.kind] ?? "web";
 
   const [project] = await db
     .insert(projectsTable)
@@ -93,6 +90,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       name: projectInput.name,
       description: projectInput.description ?? null,
       kind: projectInput.kind,
+      platform,
       lastTaskSummary: initialPrompt
         ? `Initial idea: ${initialPrompt.slice(0, 120)}`
         : null,

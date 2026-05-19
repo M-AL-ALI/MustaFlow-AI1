@@ -27,12 +27,15 @@ import {
   PencilLine,
   ChevronLeft,
   Smartphone,
+  ShoppingCart,
+  MessageSquare,
+  CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TemplatePicker } from "@/components/template-picker";
 import { type TemplateDefinition } from "@/lib/templates";
 
-const PROJECT_TYPES = [
+const WEB_PROJECT_TYPES = [
   { label: "Website", kind: "web", icon: Monitor },
   { label: "Web App", kind: "fullstack", icon: Globe },
   { label: "Dashboard", kind: "dashboard", icon: LayoutDashboard },
@@ -41,18 +44,26 @@ const PROJECT_TYPES = [
   { label: "Mobile", kind: "mobile", icon: Smartphone },
 ] as const;
 
-type ProjectKind = (typeof PROJECT_TYPES)[number]["kind"];
+const MOBILE_PROJECT_TYPES = [
+  { label: "Cross-platform", kind: "mobile-cross", icon: Smartphone },
+  { label: "Store", kind: "mobile-cross", icon: ShoppingCart, preset: "mobile-ecommerce" },
+  { label: "Chat", kind: "mobile-cross", icon: MessageSquare, preset: "mobile-chat" },
+  { label: "SaaS", kind: "mobile-cross", icon: CreditCard, preset: "mobile-subscription-saas" },
+] as const;
+
+type PlatformTab = "web" | "mobile";
+
+type WebProjectKind = (typeof WEB_PROJECT_TYPES)[number]["kind"];
+type MobileProjectKind = "mobile-cross";
+type ProjectKind = WebProjectKind | MobileProjectKind;
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Pre-fill the first-prompt field (e.g. when triggered from home page). */
   initialPrompt?: string;
-  /** Pre-select a template (e.g. when triggered from home page template picker). */
   initialTemplate?: TemplateDefinition;
 }
 
-/** Derive a short project name from a prompt string (first 5 significant words). */
 function nameFromPrompt(prompt: string): string {
   const words = prompt.trim().split(/\s+/).slice(0, 5).join(" ");
   return words.charAt(0).toUpperCase() + words.slice(1);
@@ -72,9 +83,8 @@ export function CreateProjectModal({
   const { currentWorkspace } = useWorkspace();
 
   const [view, setView] = useState<View>("form");
+  const [platformTab, setPlatformTab] = useState<PlatformTab>("web");
   const [name, setName] = useState("");
-  // Track whether the user has manually edited the name so template-switching
-  // can safely overwrite an auto-filled value without stomping real user input.
   const [nameDirty, setNameDirty] = useState(false);
   const [kind, setKind] = useState<ProjectKind>("web");
   const [prompt, setPrompt] = useState(initialPrompt);
@@ -82,10 +92,6 @@ export function CreateProjectModal({
     initialTemplate,
   );
 
-  // Deterministically initialize form state whenever the modal opens.
-  // This covers both the internal toggle and external prop-driven opens
-  // (e.g. home page passing initialTemplate), since Radix does NOT call
-  // onOpenChange(true) when the parent flips `open` false→true.
   useEffect(() => {
     if (!open) return;
     setView("form");
@@ -94,14 +100,21 @@ export function CreateProjectModal({
       setSelectedTemplate(initialTemplate);
       setName(initialTemplate.title);
       setPrompt(initialTemplate.seedPrompt);
-      setKind(initialTemplate.projectKind as ProjectKind);
+      const templateKind = initialTemplate.projectKind as ProjectKind;
+      setKind(templateKind);
+      setPlatformTab(isMobileKind(templateKind) ? "mobile" : "web");
     } else {
       setSelectedTemplate(undefined);
       setName("");
       setPrompt(initialPrompt);
       setKind("web");
+      setPlatformTab("web");
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function isMobileKind(k: string): boolean {
+    return k === "mobile-cross" || k === "mobile-ios" || k === "mobile-android";
+  }
 
   function handleOpenChange(val: boolean) {
     onOpenChange(val);
@@ -110,20 +123,34 @@ export function CreateProjectModal({
   function applyTemplate(template: TemplateDefinition) {
     setSelectedTemplate(template);
     setPrompt(template.seedPrompt);
-    // Populate name when it hasn't been manually edited OR when the user has
-    // cleared it back to empty — preserves non-empty user-entered names only.
     if (!nameDirty || !name.trim()) {
       setName(template.title);
       setNameDirty(false);
     }
-    setKind(template.projectKind as ProjectKind);
+    const templateKind = template.projectKind as ProjectKind;
+    setKind(templateKind);
+    setPlatformTab(isMobileKind(templateKind) ? "mobile" : "web");
     setView("form");
   }
 
   function clearTemplate() {
     setSelectedTemplate(undefined);
     setPrompt("");
-    setKind("web");
+    if (platformTab === "mobile") {
+      setKind("mobile-cross");
+    } else {
+      setKind("web");
+    }
+  }
+
+  function handlePlatformTabChange(tab: PlatformTab) {
+    setPlatformTab(tab);
+    setSelectedTemplate(undefined);
+    if (tab === "mobile") {
+      setKind("mobile-cross");
+    } else {
+      setKind("web");
+    }
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -150,6 +177,8 @@ export function CreateProjectModal({
       },
     );
   }
+
+  const templateCount = platformTab === "mobile" ? "6 mobile templates" : "16 templates";
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -181,6 +210,7 @@ export function CreateProjectModal({
                   clearTemplate();
                   setView("form");
                 }}
+                filterPlatform={platformTab}
               />
             </div>
           </>
@@ -191,6 +221,49 @@ export function CreateProjectModal({
             </DialogHeader>
 
             <form onSubmit={handleSubmit} className="space-y-5 pt-1">
+
+              {/* Platform tab selector */}
+              <div className="flex items-center bg-muted border border-border rounded-lg p-1 gap-1">
+                <button
+                  type="button"
+                  onClick={() => handlePlatformTabChange("web")}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                    platformTab === "web"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Monitor className="h-4 w-4" />
+                  Web
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePlatformTabChange("mobile")}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                    platformTab === "mobile"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Smartphone className="h-4 w-4" />
+                  Mobile
+                </button>
+              </div>
+
+              {/* Mobile info banner */}
+              {platformTab === "mobile" && (
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-green-500/10 border border-green-500/20 text-xs text-green-400">
+                  <Smartphone className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-medium">Expo / React Native</span>
+                    {" — "}
+                    Generates iOS + Android source code with a web preview. Scan the QR code with Expo Go to run on your device.
+                  </div>
+                </div>
+              )}
+
               {/* Template selector strip */}
               <div
                 className={cn(
@@ -245,7 +318,7 @@ export function CreateProjectModal({
                     <LayoutTemplate className="h-4 w-4 group-hover:text-primary transition-colors" />
                     <span>Start from a template</span>
                     <span className="ml-auto text-xs text-muted-foreground/60 group-hover:text-muted-foreground">
-                      16 templates available
+                      {templateCount} available
                     </span>
                   </button>
                 )}
@@ -263,7 +336,9 @@ export function CreateProjectModal({
                       ? selectedTemplate.title
                       : prompt.trim()
                         ? nameFromPrompt(prompt)
-                        : "My towing company site"
+                        : platformTab === "mobile"
+                          ? "My mobile app"
+                          : "My towing company site"
                   }
                   autoFocus
                 />
@@ -272,6 +347,7 @@ export function CreateProjectModal({
                 </p>
               </div>
 
+<<<<<<< HEAD
               {/* Project type */}
               <div className="space-y-1.5">
                 <Label>Project type</Label>
@@ -292,8 +368,60 @@ export function CreateProjectModal({
                       {label}
                     </button>
                   ))}
+=======
+              {/* Project type — web only; mobile is always mobile-cross */}
+              {platformTab === "web" && (
+                <div className="space-y-1.5">
+                  <Label>Project type</Label>
+                  <div className="grid grid-cols-5 gap-2">
+                    {WEB_PROJECT_TYPES.map(({ label, kind: k, icon: Icon }) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setKind(k)}
+                        className={cn(
+                          "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-[11px] font-medium transition-colors",
+                          kind === k
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
+                        )}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+>>>>>>> ce914fa (feat: Mobile App Builder Foundation (Phase 4A))
                 </div>
-              </div>
+              )}
+
+              {/* Mobile type picker */}
+              {platformTab === "mobile" && (
+                <div className="space-y-1.5">
+                  <Label>App type</Label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {MOBILE_PROJECT_TYPES.map(({ label, icon: Icon }, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setKind("mobile-cross")}
+                        className={cn(
+                          "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-[11px] font-medium transition-colors",
+                          kind === "mobile-cross" && i === 0
+                            ? "border-primary bg-primary/10 text-primary"
+                            : kind === "mobile-cross" && i > 0
+                              ? "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+                              : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
+                        )}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">All mobile projects target iOS and Android via Expo.</p>
+                </div>
+              )}
 
               {/* First prompt */}
               <div className="space-y-1.5">
@@ -304,7 +432,11 @@ export function CreateProjectModal({
                   id="cp-prompt"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Describe what you want to build — e.g. A landing page for a local towing company with a hero section, services, and contact form."
+                  placeholder={
+                    platformTab === "mobile"
+                      ? "Describe your mobile app — e.g. A fitness tracker with workout logging, progress charts, and a home screen dashboard."
+                      : "Describe what you want to build — e.g. A landing page for a local towing company with a hero section, services, and contact form."
+                  }
                   rows={selectedTemplate ? 4 : 3}
                   className="resize-none"
                 />

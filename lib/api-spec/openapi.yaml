@@ -925,7 +925,10 @@ components:
         description: { type: ["string", "null"] }
         kind:
           type: string
-          enum: [web, mobile-ios, mobile-android, fullstack, dashboard, api, design, automation, marketplace, chatbot, spreadsheet]
+          enum: [web, mobile-ios, mobile-android, mobile-cross, fullstack, dashboard, api, design, automation, marketplace, chatbot, spreadsheet]
+        platform:
+          type: string
+          enum: [web, ios, android, cross]
         status:
           type: string
           enum: [draft, building, testing, published, failed]
@@ -938,6 +941,7 @@ components:
         siteTitle: { type: ["string", "null"] }
         metaDescription: { type: ["string", "null"] }
         themeColor: { type: ["string", "null"] }
+        mobilePreviewUrl: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -950,7 +954,7 @@ components:
         workspaceId: { type: integer }
         kind:
           type: string
-          enum: [web, mobile-ios, mobile-android, fullstack, dashboard, api, design, automation, marketplace, chatbot, spreadsheet]
+          enum: [web, mobile-ios, mobile-android, mobile-cross, fullstack, dashboard, api, design, automation, marketplace, chatbot, spreadsheet]
         initialPrompt: { type: string }
 
     ProjectUpdate:
