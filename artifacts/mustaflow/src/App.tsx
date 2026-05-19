@@ -23,6 +23,7 @@ import BillingPage from "./pages/billing";
 import PublishedPage from "./pages/published";
 import IntegrationsPage from "./pages/integrations";
 import SecurityPage from "./pages/security";
+import PricingPage from "./pages/pricing";
 
 // Components
 import { AppLayout } from "./components/layout/app-layout";
@@ -323,6 +324,11 @@ function ClerkProviderWithRoutes() {
             </Route>
 
             {/* ── Public info pages ── */}
+            <Route path="/pricing">
+              <AppLayout>
+                <PricingPage />
+              </AppLayout>
+            </Route>
             <Route path="/terms">
               <AppLayout>
                 <TermsPage />

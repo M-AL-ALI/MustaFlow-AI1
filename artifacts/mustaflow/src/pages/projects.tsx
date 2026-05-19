@@ -11,6 +11,12 @@ import {
   Plus,
   ArrowRight,
   Sparkles,
+  CheckSquare,
+  Square,
+  ChevronDown,
+  ChevronUp,
+  Rocket,
+  Eye,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 
 function QuickStartBox() {
   const [prompt, setPrompt] = useState("");
@@ -73,15 +80,174 @@ function QuickStartBox() {
   );
 }
 
+function WelcomeCard({ onCreateProject }: { onCreateProject: () => void }) {
+  return (
+    <div className="rounded-2xl border border-primary/20 bg-primary/5 p-8 text-center space-y-4">
+      <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto">
+        <Sparkles className="h-7 w-7 text-primary" />
+      </div>
+      <div>
+        <h2 className="text-xl font-bold mb-2">Welcome to MustaFlow AI</h2>
+        <p className="text-sm text-muted-foreground max-w-md mx-auto">
+          Describe any app in plain language and the AI will build it for you in seconds. No coding needed.
+        </p>
+      </div>
+      <Button onClick={onCreateProject} size="lg" className="gap-2">
+        <Plus className="h-4 w-4" />
+        Create your first project
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Or type your idea in the quick start box below
+      </p>
+    </div>
+  );
+}
+
+interface ChecklistItem {
+  id: string;
+  icon: React.ElementType;
+  label: string;
+  description: string;
+  done: boolean;
+  action?: () => void;
+  actionLabel?: string;
+}
+
+function GettingStartedChecklist({
+  hasProject,
+  hasBuilt,
+  hasPreviewed,
+  hasPublished,
+  onCreateProject,
+}: {
+  hasProject: boolean;
+  hasBuilt: boolean;
+  hasPreviewed: boolean;
+  hasPublished: boolean;
+  onCreateProject: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const allDone = hasProject && hasBuilt && hasPreviewed && hasPublished;
+
+  if (allDone) return null;
+
+  const items: ChecklistItem[] = [
+    {
+      id: "create",
+      icon: FolderKanban,
+      label: "Create your first project",
+      description: "Give your idea a name and describe what you want to build.",
+      done: hasProject,
+      action: hasProject ? undefined : onCreateProject,
+      actionLabel: "Create project",
+    },
+    {
+      id: "build",
+      icon: Sparkles,
+      label: "Run your first AI build",
+      description: "Send a message in the AI Builder chat and watch your app come to life.",
+      done: hasBuilt,
+    },
+    {
+      id: "preview",
+      icon: Eye,
+      label: "Preview your app",
+      description: "Open the Preview tab to see your generated app running live.",
+      done: hasPreviewed,
+    },
+    {
+      id: "publish",
+      icon: Rocket,
+      label: "Publish it",
+      description: "Share your app with a public URL from the Publishing tab.",
+      done: hasPublished,
+    },
+  ];
+
+  const doneCount = items.filter((i) => i.done).length;
+
+  return (
+    <div className="rounded-2xl border border-border bg-card overflow-hidden">
+      <button
+        className="w-full flex items-center gap-3 px-5 py-4 hover:bg-muted/40 transition-colors"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div className="flex-1 flex items-center gap-3 text-left">
+          <CheckSquare className="h-4 w-4 text-primary shrink-0" />
+          <div>
+            <div className="text-sm font-semibold">Getting started</div>
+            <div className="text-xs text-muted-foreground">{doneCount} of {items.length} steps complete</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="w-24 h-1.5 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full transition-all duration-500"
+              style={{ width: `${(doneCount / items.length) * 100}%` }}
+            />
+          </div>
+          {open ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t border-border divide-y divide-border">
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className={cn(
+                "flex items-start gap-4 px-5 py-4 transition-colors",
+                item.done && "opacity-60",
+              )}
+            >
+              <div className="mt-0.5 shrink-0">
+                {item.done ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                ) : (
+                  <Square className="h-4 w-4 text-muted-foreground/50" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className={cn("text-sm font-medium", item.done && "line-through text-muted-foreground")}>
+                  {item.label}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">{item.description}</div>
+              </div>
+              {item.action && !item.done && (
+                <Button size="sm" variant="outline" onClick={item.action} className="shrink-0 text-xs h-7">
+                  {item.actionLabel}
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ProjectsPage() {
   const { data: summary } = useGetProjectsSummary();
   const { data: activity } = useGetRecentActivity();
   const [modalOpen, setModalOpen] = useState(false);
 
   const hasProjects = (summary?.recent?.length ?? 0) > 0;
+  const totalProjects = summary?.total ?? 0;
+  const publishedCount = summary?.byStatus?.published ?? 0;
+  const isNewUser = totalProjects === 0;
+
+  // Infer checklist state from available data
+  const hasProject = totalProjects > 0;
+  const hasBuilt = (summary?.byStatus?.building ?? 0) > 0 || (summary?.byStatus?.published ?? 0) > 0 || (summary?.byStatus?.testing ?? 0) > 0 || totalProjects > 0;
+  const hasPreviewed = hasBuilt;
+  const hasPublished = publishedCount > 0;
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8 w-full">
+    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 w-full">
       <CreateProjectModal open={modalOpen} onOpenChange={setModalOpen} />
 
       <div className="flex items-center justify-between gap-4">
@@ -95,44 +261,63 @@ export default function ProjectsPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Projects</CardTitle>
-            <FolderKanban className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{summary?.total || 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Building</CardTitle>
-            <Activity className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{summary?.byStatus?.building || 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Published</CardTitle>
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{summary?.byStatus?.published || 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Failed</CardTitle>
-            <AlertCircle className="h-4 w-4 text-destructive" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{summary?.byStatus?.failed || 0}</div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Welcome card for brand new users */}
+      {isNewUser && (
+        <WelcomeCard onCreateProject={() => setModalOpen(true)} />
+      )}
+
+      {/* Stats row — only show once user has projects */}
+      {hasProjects && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Projects</CardTitle>
+              <FolderKanban className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{summary?.total || 0}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Building</CardTitle>
+              <Activity className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{summary?.byStatus?.building || 0}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Published</CardTitle>
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{summary?.byStatus?.published || 0}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Failed</CardTitle>
+              <AlertCircle className="h-4 w-4 text-destructive" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{summary?.byStatus?.failed || 0}</div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Getting started checklist — show for users who haven't published yet */}
+      {!hasPublished && hasProject && (
+        <GettingStartedChecklist
+          hasProject={hasProject}
+          hasBuilt={hasBuilt}
+          hasPreviewed={hasPreviewed}
+          hasPublished={hasPublished}
+          onCreateProject={() => setModalOpen(true)}
+        />
+      )}
 
       <QuickStartBox />
 
@@ -207,8 +392,12 @@ export default function ProjectsPage() {
               </div>
             ))}
             {(!activity || activity.length === 0) && (
-              <div className="text-center p-8 text-muted-foreground border border-dashed rounded-lg">
-                No recent activity.
+              <div className="rounded-xl border border-dashed border-border bg-card/50 p-8 text-center">
+                <Activity className="h-7 w-7 text-muted-foreground/30 mx-auto mb-2" />
+                <p className="text-sm font-medium text-foreground/60 mb-1">No activity yet</p>
+                <p className="text-xs text-muted-foreground">
+                  Build and publish projects to see your activity here.
+                </p>
               </div>
             )}
           </div>

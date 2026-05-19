@@ -15,6 +15,9 @@ import {
   ArrowRight,
   LayoutTemplate,
   X,
+  FileText,
+  Globe,
+  CheckCircle2,
 } from "lucide-react";
 import { useState } from "react";
 import { useCreateProject, useListProjects, getListProjectsQueryKey } from "@workspace/api-client-react";
@@ -36,6 +39,27 @@ const CHIPS = [
   { name: "API/Backend", icon: Database, kind: "api" },
   { name: "AI Chatbot", icon: MessageSquare, kind: "chatbot" },
   { name: "Marketplace", icon: Store, kind: "marketplace" },
+];
+
+const HOW_IT_WORKS = [
+  {
+    step: "1",
+    icon: FileText,
+    title: "Describe your idea",
+    description: "Write what you want to build in plain language. No jargon, no templates — just your idea.",
+  },
+  {
+    step: "2",
+    icon: Sparkles,
+    title: "AI builds it for you",
+    description: "MustaFlow AI plans, codes, and assembles your app in seconds. Preview it live as it takes shape.",
+  },
+  {
+    step: "3",
+    icon: Globe,
+    title: "Publish instantly",
+    description: "One click publishes your app to a public URL. Share it with anyone, no setup required.",
+  },
 ];
 
 export default function HomePage() {
@@ -83,13 +107,19 @@ export default function HomePage() {
     <>
       <div className="flex-1 overflow-y-auto pb-24">
         {/* Hero Section */}
-        <div className="max-w-4xl mx-auto pt-24 px-6">
-          <h1 className="text-5xl font-extrabold text-center mb-4 tracking-tight gradient-text">
-            What do you want to build?
-          </h1>
-          <p className="text-muted-foreground text-center mb-12 text-lg">
-            Describe your idea in natural language. MustaFlow AI will plan, build, and deploy it.
-          </p>
+        <div className="max-w-4xl mx-auto pt-20 px-6">
+          <div className="text-center mb-6">
+            <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-6">
+              <Sparkles className="h-3 w-3" />
+              No code required
+            </p>
+            <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight gradient-text mb-5 leading-tight">
+              Describe it.<br className="hidden sm:block" /> Watch it build.
+            </h1>
+            <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+              Type your idea in plain language. MustaFlow AI plans, builds, and publishes your app — no coding, no setup.
+            </p>
+          </div>
 
           <div className="relative max-w-2xl mx-auto mb-4">
             <div className="absolute -inset-6 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.18)_0%,transparent_70%)] blur-2xl rounded-full pointer-events-none" />
@@ -108,7 +138,7 @@ export default function HomePage() {
               />
               <Button
                 size="lg"
-                className="rounded-xl px-6 h-12"
+                className="rounded-xl px-6 h-12 shrink-0"
                 onClick={() => handleBuild()}
                 disabled={createProject.isPending || !prompt.trim()}
               >
@@ -119,7 +149,7 @@ export default function HomePage() {
           </div>
 
           {/* Template browser toggle */}
-          <div className="flex justify-center mb-8">
+          <div className="flex justify-center mb-6">
             <button
               type="button"
               onClick={() => setShowTemplateBrowser((v) => !v)}
@@ -162,7 +192,7 @@ export default function HomePage() {
             </div>
           )}
 
-          <div className="flex flex-wrap justify-center gap-2 max-w-3xl mx-auto">
+          <div className="flex flex-wrap justify-center gap-2 max-w-3xl mx-auto mb-6">
             {CHIPS.map((chip) => (
               <button
                 key={chip.name}
@@ -182,6 +212,62 @@ export default function HomePage() {
               </button>
             ))}
           </div>
+
+          {/* Social proof */}
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-xs text-muted-foreground/70 mb-20">
+            {[
+              "No credit card to start",
+              "Publish in seconds",
+              "Built for makers, not engineers",
+            ].map((item) => (
+              <span key={item} className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-3 w-3 text-primary/60" />
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* How it works */}
+        <div className="border-t border-border bg-muted/20">
+          <div className="max-w-4xl mx-auto px-6 py-20">
+            <div className="text-center mb-12">
+              <h2 className="text-2xl font-bold tracking-tight mb-2">How it works</h2>
+              <p className="text-muted-foreground text-sm max-w-md mx-auto">
+                From idea to live app in three simple steps — no experience required.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
+              {HOW_IT_WORKS.map((item) => (
+                <div key={item.step} className="flex flex-col items-center text-center gap-4">
+                  <div className="relative">
+                    <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                      <item.icon className="h-6 w-6 text-primary" />
+                    </div>
+                    <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
+                      {item.step}
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm mb-1">{item.title}</h3>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{item.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom CTA */}
+        <div className="max-w-4xl mx-auto px-6 py-16 text-center">
+          <h2 className="text-2xl font-bold mb-3">Ready to build something?</h2>
+          <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
+            Join makers, founders, and creators who build faster with MustaFlow AI.
+          </p>
+          <Button size="lg" onClick={() => setLocation("/sign-up")} className="gap-2">
+            Get started for free
+            <ArrowRight className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 

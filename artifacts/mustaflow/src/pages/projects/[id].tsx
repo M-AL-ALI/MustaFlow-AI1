@@ -402,14 +402,13 @@ const PROJECT_NAV = [
 
 const WORKSPACE_TABS = [
   { label: "Preview", value: "preview", icon: Monitor },
-  { label: "Files", value: "code", icon: FileCode2 },
+  { label: "Code", value: "code", icon: FileCode2 },
+  { label: "Tools & Files", value: "tools-files", icon: Blocks },
   { label: "Publishing", value: "publishing", icon: Rocket },
   { label: "Logs", value: "logs", icon: TerminalSquare },
-  { label: "Integrations", value: "tools-files", icon: Blocks },
   { label: "Resources", value: "resources", icon: BookOpen },
-  { label: "Canvas", value: "canvas", icon: Paintbrush2 },
-  { label: "Domains", value: "domains", icon: Globe },
   { label: "Analytics", value: "analytics", icon: Activity },
+  { label: "Canvas", value: "canvas", icon: Paintbrush2 },
   { label: "Manage", value: "manage", icon: Settings },
 ];
 

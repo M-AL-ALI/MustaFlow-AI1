@@ -268,6 +268,8 @@ export function Sidebar() {
               <span>·</span>
               <a href="/privacy" className="hover:text-muted-foreground transition-colors">Privacy</a>
               <span>·</span>
+              <a href="/pricing" className="hover:text-muted-foreground transition-colors">Pricing</a>
+              <span>·</span>
               <a href="/help" className="hover:text-muted-foreground transition-colors">Help</a>
             </div>
             <UserSection />
