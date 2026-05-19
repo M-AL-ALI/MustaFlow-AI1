@@ -141,6 +141,9 @@ export function PageMapTab({
   const viewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 1 });
   const queryClient = useQueryClient();
   const syncStartedRef = useRef(false);
+  // IDs of nodes deleted locally but not yet flushed to the server.
+  // Effect 1 filters these out so background refetches can't resurrect them.
+  const pendingDeletedNodeIdsRef = useRef<Set<string>>(new Set());
 
   const { data: mapResponse, isLoading, isFetching } = useGetPageMap(projectId, {
     query: {
@@ -171,6 +174,13 @@ export function PageMapTab({
   // Reset the one-time fitView guard whenever the platform changes so that
   // switching back to a platform re-frames all nodes correctly on the next onInit.
   useEffect(() => { initialisedRef.current = false; }, [platform]);
+
+  // When the user switches platforms, pending-delete IDs from the previous platform
+  // are irrelevant (node IDs are platform-scoped). Clear the set so Effect 1 doesn't
+  // accidentally filter nodes that happen to share an ID on the new platform.
+  useEffect(() => {
+    pendingDeletedNodeIdsRef.current.clear();
+  }, [platform]);
 
   const platformData = mapResponse?.pageMapData?.[platform];
   const hasNodes = (platformData?.nodes?.length ?? 0) > 0 || nodes.length > 0;
@@ -206,15 +216,43 @@ export function PageMapTab({
       handlePreviewClick,
     );
 
+    // Guard against deleted nodes reappearing from a stale background refetch.
+    //
+    // When a node is deleted, its ID is added to `pendingDeletedNodeIdsRef` immediately.
+    // The ID is removed lazily here — only once the server snapshot confirms the node
+    // is gone. This is intentionally server-driven rather than mutation-ACK-driven:
+    // clearing on `onSuccess` would be premature if an older in-flight save (that
+    // pre-dated the delete) ACKs first and triggers clearing before the delete save
+    // has been processed by the server.
+    //
+    // Reconcile: any pending-delete ID absent from the server snapshot means the
+    // server has already accepted the deletion — safe to evict from the guard.
+    const pendingDeletes = pendingDeletedNodeIdsRef.current;
+    if (pendingDeletes.size > 0) {
+      const serverNodeIds = new Set(rfNodes.map((n) => n.id));
+      for (const id of pendingDeletes) {
+        if (!serverNodeIds.has(id)) {
+          pendingDeletes.delete(id);
+        }
+      }
+    }
+    // Filter remaining pending-delete IDs (not yet confirmed deleted by server).
+    const filteredNodes = pendingDeletes.size > 0
+      ? rfNodes.filter((n) => !pendingDeletes.has(n.id))
+      : rfNodes;
+    const filteredEdges = pendingDeletes.size > 0
+      ? rfEdges.filter((e) => !pendingDeletes.has(e.source) && !pendingDeletes.has(e.target))
+      : rfEdges;
+
     // Auto-layout when all positions are (0,0) — sentinel for "never been positioned"
     const needsAutoLayout =
-      rfNodes.length > 0 &&
-      rfNodes.every((n) => n.position.x === 0 && n.position.y === 0);
+      filteredNodes.length > 0 &&
+      filteredNodes.every((n) => n.position.x === 0 && n.position.y === 0);
 
     if (needsAutoLayout) {
-      const laidOut = runDagreLayout(rfNodes, rfEdges);
+      const laidOut = runDagreLayout(filteredNodes, filteredEdges);
       setNodes(laidOut);
-      setEdges(rfEdges);
+      setEdges(filteredEdges);
       // Persist the auto-computed positions immediately so next load doesn't re-layout
       const currentMap = mapResponseRef.current?.pageMapData ?? {
         web: { nodes: [], edges: [] },
@@ -234,7 +272,7 @@ export function PageMapTab({
           notes: (n.data as PageNodeData).notes,
           planned: (n.data as PageNodeData).planned ?? false,
         })),
-        edges: rfEdges.map((e) => ({
+        edges: filteredEdges.map((e) => ({
           id: e.id,
           source: e.source,
           target: e.target,
@@ -245,8 +283,8 @@ export function PageMapTab({
       const payload: PageMapData = { ...currentMap, [platform]: updatedPlatform } as PageMapData;
       putPageMap.mutate({ id: projectId, data: payload });
     } else {
-      setNodes(rfNodes);
-      setEdges(rfEdges);
+      setNodes(filteredNodes);
+      setEdges(filteredEdges);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapResponse, platform, projectId]);
@@ -319,6 +357,9 @@ export function PageMapTab({
       // mapResponse to get a new object reference → Effect 1 resets all nodes → nodes
       // visually disappear/snap. The local state is already up-to-date; the next
       // scheduled refetch or explicit re-analyze will pick up server changes.
+      // NOTE: do not clear pendingDeletedNodeIdsRef here. Clearing on mutation ACK
+      // is premature — an older pre-delete in-flight save could ACK first. Instead,
+      // Effect 1 reconciles the set lazily once the server snapshot confirms deletion.
       putPageMap.mutate({ id: projectId, data: payload });
     }, 800);
   // mapResponseRef is a stable ref — intentionally excluded from deps so the timer
@@ -548,6 +589,9 @@ export function PageMapTab({
   }, [onSwitchToChat]);
 
   const handleDeleteNode = useCallback((nodeId: string) => {
+    // Register the deletion immediately so Effect 1 can filter it out of any
+    // background refetch that arrives before the debounced save completes.
+    pendingDeletedNodeIdsRef.current.add(nodeId);
     const updatedEdges = edges.filter((e) => e.source !== nodeId && e.target !== nodeId);
     setEdges(updatedEdges);
     setNodes((prev) => {
