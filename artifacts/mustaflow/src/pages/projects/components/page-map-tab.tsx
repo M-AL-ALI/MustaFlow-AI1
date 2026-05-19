@@ -558,13 +558,13 @@ export function PageMapTab({
           </>
         )}
 
-        {(isBuilding || isSyncingAfterEdit) && (
+        {(isBuilding || isSyncingAfterEdit || analyzePageMap.isPending) && (
           <div className="ml-auto flex items-center gap-1.5 text-[11px] text-primary font-medium">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
             </span>
-            {isSyncingAfterEdit ? "Syncing page map…" : "Updating map after build…"}
+            {(isSyncingAfterEdit || analyzePageMap.isPending) ? "Syncing page map…" : "Updating map after build…"}
           </div>
         )}
       </div>
