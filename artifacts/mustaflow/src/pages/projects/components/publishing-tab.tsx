@@ -481,6 +481,7 @@ type EasBuildEntry = {
   easBuildId: string | null;
   logsPageUrl: string | null;
   easStatus: string | null;
+  logSnippet: string | null;
   createdAt: string;
 };
 
@@ -534,6 +535,7 @@ function EasBuildPanel({
   const [linkExpanded, setLinkExpanded] = useState(false);
 
   const [refreshing, setRefreshing] = useState<number | null>(null);
+  const [expandedLogsId, setExpandedLogsId] = useState<number | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Ref tracks in-progress build log IDs so the interval can PATCH them without stale closure issues
@@ -938,6 +940,10 @@ function EasBuildPanel({
               const downloadUrl = build.publicUrl && !isExpUrl(build.publicUrl) ? build.publicUrl : null;
               const qrUrl = expUrl ?? downloadUrl;
 
+              const isLogsOpen = expandedLogsId === build.id;
+              // Show "View Logs" for any build with a URL/snippet, plus always for failed builds
+              const hasLogs = !!(build.logsPageUrl || build.logSnippet) || build.status === "failed";
+
               return (
                 <div key={build.id} className="px-4 py-3 space-y-2">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -968,19 +974,62 @@ function EasBuildPanel({
                         Check status
                       </button>
                     )}
+                    {hasLogs && (
+                      <button
+                        onClick={() => setExpandedLogsId(isLogsOpen ? null : build.id)}
+                        className={cn(
+                          "shrink-0 text-xs flex items-center gap-1 transition-colors",
+                          build.status === "failed"
+                            ? "text-destructive hover:text-destructive/80"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        <FileText className="h-3 w-3" />
+                        {isLogsOpen ? "Hide Logs" : "View Logs"}
+                        {isLogsOpen
+                          ? <ChevronUp className="h-3 w-3" />
+                          : <ChevronDown className="h-3 w-3" />}
+                      </button>
+                    )}
                   </div>
 
-                  {/* EAS build page link */}
-                  {build.logsPageUrl && (
-                    <a
-                      href={build.logsPageUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-1.5 text-xs text-primary hover:underline"
-                    >
-                      <ArrowUpRight className="h-3 w-3 shrink-0" />
-                      View on expo.dev
-                    </a>
+                  {/* Inline log panel */}
+                  {isLogsOpen && (
+                    <div className="border border-border rounded-lg overflow-hidden bg-zinc-950/80 text-xs">
+                      {build.logsPageUrl && (
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
+                          <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <span className="text-muted-foreground">Full log on Expo:</span>
+                          <a
+                            href={build.logsPageUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline truncate flex-1 min-w-0"
+                          >
+                            {build.logsPageUrl}
+                          </a>
+                          <a
+                            href={build.logsPageUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <ArrowUpRight className="h-3 w-3" />
+                          </a>
+                        </div>
+                      )}
+                      {build.logSnippet ? (
+                        <pre className="px-3 py-3 text-[11px] leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">
+                          {build.logSnippet}
+                        </pre>
+                      ) : (
+                        <div className="px-3 py-3 text-muted-foreground italic">
+                          {build.status === "started"
+                            ? "Log output will appear here once the build finishes."
+                            : "No inline log output available — view the full log on expo.dev."}
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {/* URL row — exp:// gets Expo Go label; other URLs get "Download" label */}

@@ -89,6 +89,23 @@ type EasBuildData = {
   expirationDate: string | null;
 };
 
+async function fetchLogSnippet(token: string, easBuildId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${EAS_API}/v2/builds/${easBuildId}/logs`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    if (!text.trim()) return null;
+    const lines = text.split("\n");
+    // Keep first 50 lines; trim trailing blank lines
+    const snippet = lines.slice(0, 50).join("\n").trimEnd();
+    return snippet || null;
+  } catch {
+    return null;
+  }
+}
+
 async function triggerEasGqlBuild(
   token: string,
   appId: string,
@@ -144,18 +161,26 @@ async function pollEasBuild(
         data?: {
           status?: string;
           platform?: string;
-          artifacts?: { buildUrl?: string };
+          logsPageUrl?: string;
+          artifacts?: { buildUrl?: string; logsUrl?: string; applicationArchiveUrl?: string };
           expirationDate?: string;
+          // Some EAS API versions surface the logs page URL at top level
+          buildPageUrl?: string;
         };
       };
       const b = rest.data;
       if (!b) return null;
+      // Prefer explicit logsPageUrl, fall back to buildPageUrl or construct from known expo.dev path
+      const restLogsUrl =
+        b.logsPageUrl ??
+        b.buildPageUrl ??
+        `https://expo.dev/builds/${easBuildId}`;
       return {
         id: easBuildId,
         status: b.status ?? "unknown",
         platform: b.platform ?? "unknown",
-        logsPageUrl: null,
-        artifacts: b.artifacts ? { buildUrl: b.artifacts.buildUrl ?? null } : null,
+        logsPageUrl: restLogsUrl,
+        artifacts: b.artifacts ? { buildUrl: b.artifacts.buildUrl ?? b.artifacts.applicationArchiveUrl ?? null } : null,
         expirationDate: b.expirationDate ?? null,
       };
     } catch {
@@ -412,6 +437,7 @@ router.get(
           easBuildId: (meta.easBuildId as string) ?? null,
           logsPageUrl: (meta.logsPageUrl as string) ?? null,
           easStatus: (meta.easStatus as string) ?? null,
+          logSnippet: (meta.logSnippet as string) ?? null,
         };
       }),
     });
@@ -538,11 +564,21 @@ router.patch(
     const newPublicUrl = build.artifacts?.buildUrl ?? existing.publicUrl;
     const logsPageUrl = build.logsPageUrl ?? (meta.logsPageUrl as string | undefined);
     const newNote = `EAS Build ${build.status} (${build.platform})`;
+
+    // Fetch log snippet when build has finished (pass or fail) or if we don't have one yet
+    const existingSnippet = meta.logSnippet as string | undefined;
+    let logSnippet = existingSnippet ?? null;
+    const isFinal = ["passed", "failed"].includes(newStatus);
+    if (isFinal && !existingSnippet) {
+      logSnippet = await fetchLogSnippet(token, easBuildId);
+    }
+
     const updatedMeta = {
       ...meta,
       easStatus: build.status,
       expirationDate: build.expirationDate,
       ...(logsPageUrl ? { logsPageUrl } : {}),
+      ...(logSnippet ? { logSnippet } : {}),
     };
 
     const [updated] = await db
@@ -558,6 +594,7 @@ router.patch(
       status: updated?.status ?? newStatus,
       publicUrl: updated?.publicUrl ?? newPublicUrl,
       logsPageUrl: logsPageUrl ?? null,
+      logSnippet: logSnippet ?? null,
       note: updated?.note ?? newNote,
       easBuildId,
       easStatus: build.status,
