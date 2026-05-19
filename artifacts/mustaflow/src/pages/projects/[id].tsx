@@ -95,6 +95,7 @@ type TaskReport = {
   }>;
   nextRecommendation?: string;
   knowledgeApplied?: Array<{ title: string; category: string }>;
+  nativeFeatures?: string[];
 };
 
 type ChatPlanPayload =
@@ -1176,6 +1177,17 @@ export default function ProjectWorkspacePage() {
                   if (!recentReport) return [];
                   const payload = recentReport.plan as { kind: "report"; report: TaskReport };
                   return payload.report?.warnings ?? [];
+                })()}
+                nativeFeatures={(() => {
+                  const latestReport = [...(messages ?? [])]
+                    .reverse()
+                    .find((m) => {
+                      const p = m.plan as ChatPlanPayload | null | undefined;
+                      return p && typeof p === "object" && (p as { kind?: string }).kind === "report";
+                    });
+                  if (!latestReport) return [];
+                  const payload = latestReport.plan as { kind: "report"; report: TaskReport };
+                  return payload.report?.nativeFeatures ?? [];
                 })()}
                 onFixPrompt={(text) => {
                   setPrompt(text);

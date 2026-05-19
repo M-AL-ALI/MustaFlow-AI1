@@ -19,6 +19,8 @@ import {
   FileCode2,
   RotateCcw,
   BookOpen,
+  ShieldAlert,
+  Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +33,7 @@ type TaskReport = {
   suggestions?: string[];
   nextRecommendation?: string;
   knowledgeApplied?: Array<{ title: string; category: string }>;
+  nativeFeatures?: string[];
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -257,6 +260,27 @@ function TaskRow({
               {filesChanged.slice(0, 6).map((p) => (
                 <div key={`m-${p}`} className="font-mono text-[10px] text-yellow-400 truncate">~ {p}</div>
               ))}
+            </div>
+          )}
+
+          {/* Native features */}
+          {report?.nativeFeatures && report.nativeFeatures.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                <ShieldAlert className="h-3 w-3 text-blue-400" /> Native device permissions
+              </div>
+              <div className="space-y-1">
+                {report.nativeFeatures.map((feature, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-blue-500/8 border border-blue-500/20 rounded-lg px-2.5 py-1.5">
+                    <Smartphone className="h-3 w-3 text-blue-400 shrink-0" />
+                    <span className="text-[11px] text-blue-300/90 flex-1">{feature}</span>
+                    <span className="text-[10px] text-blue-400/50 shrink-0">Device only</span>
+                  </div>
+                ))}
+                <p className="text-[10px] text-muted-foreground px-0.5">
+                  These permissions are added to app.json and require a real device to test — they will not work in the web preview.
+                </p>
+              </div>
             </div>
           )}
 

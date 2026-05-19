@@ -685,9 +685,13 @@ export async function runJob(input: JobInput): Promise<void> {
 
     // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
     void maybeEscalateWarnings(projectId, report.warnings ?? []);
+    const nativeFeaturesNote =
+      report.nativeFeatures && report.nativeFeatures.length > 0
+        ? ` Native features used: ${report.nativeFeatures.join(", ")} — these require a real device and cannot be previewed in the web iframe.`
+        : "";
     void writeKnowledge({
       title: `${kind === "build" ? "Build" : "Refinement"} completed: "${userPrompt.slice(0, 60)}"`,
-      content: `${assistantSummary.slice(0, 400)} — Files created: ${report.filesCreated.length}, changed: ${report.filesChanged.length}, removed: ${report.filesRemoved.length}. Warnings: ${report.warnings?.length ?? 0}.`,
+      content: `${assistantSummary.slice(0, 400)} — Files created: ${report.filesCreated.length}, changed: ${report.filesChanged.length}, removed: ${report.filesRemoved.length}. Warnings: ${report.warnings?.length ?? 0}.${nativeFeaturesNote}`,
       type: kind,
       category: kind === "build" ? "build" : "refinement",
       severity: (report.warnings?.length ?? 0) > 0 ? "warning" : "info",
@@ -695,7 +699,10 @@ export async function runJob(input: JobInput): Promise<void> {
       userId: project.ownerId,
       relatedTaskId: taskId,
       relatedVersionId: version?.id,
-      tags: report.integrationsNeeded?.map((i) => i.name),
+      tags: [
+        ...(report.integrationsNeeded?.map((i) => i.name) ?? []),
+        ...(report.nativeFeatures ?? []),
+      ],
       diffSummary,
     });
 

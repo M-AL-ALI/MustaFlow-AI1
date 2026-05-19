@@ -1068,6 +1068,26 @@ components:
         report:
           type: ["object", "null"]
           additionalProperties: true
+          properties:
+            userRequest: { type: string }
+            filesCreated: { type: array, items: { type: string } }
+            filesChanged: { type: array, items: { type: string } }
+            filesRemoved: { type: array, items: { type: string } }
+            previewUpdated: { type: boolean }
+            warnings: { type: array, items: { type: string } }
+            suggestions: { type: array, items: { type: string } }
+            nextRecommendation: { type: string }
+            nativeFeatures:
+              type: array
+              items: { type: string }
+              description: Native Expo/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.
+            knowledgeApplied:
+              type: array
+              items:
+                type: object
+                properties:
+                  title: { type: string }
+                  category: { type: string }
         userFeedback:
           type: ["string", "null"]
           enum: [positive, negative, null]

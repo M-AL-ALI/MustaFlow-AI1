@@ -1139,9 +1139,11 @@ OUTPUT STRICT JSON matching this exact shape:
   "summary": string,
   "warnings": string[],
   "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+  "nativeFeatures": string[],
   "nextRecommendation": string
 }
 
+"nativeFeatures" lists ALL native Expo SDK features used across the entire project after this change (e.g. "Camera", "Location", "Push Notifications", "Biometrics"). Include any that were already present plus any newly added. Empty array if none.
 Return ONLY files that were created or changed (full new content). Do NOT echo unchanged files.
 Always update index.html to reflect any UI changes made in the React Native screens.`;
 
@@ -1322,6 +1324,7 @@ export async function runMobileBuildPipeline(args: {
     warnings,
     integrationsNeeded: blueprint.integrationsNeeded ?? [],
     nextRecommendation,
+    nativeFeatures: blueprint.nativeFeatures?.length ? blueprint.nativeFeatures : undefined,
   };
 
   return { blueprint, files, report, assistantSummary: summary };
@@ -1414,6 +1417,10 @@ export async function runMobileRefinePipeline(args: {
   const filesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
   const filesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
 
+  const nativeFeatures = Array.isArray(parsed.nativeFeatures)
+    ? parsed.nativeFeatures.filter((f): f is string => typeof f === "string")
+    : undefined;
+
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: null,
@@ -1424,6 +1431,7 @@ export async function runMobileRefinePipeline(args: {
     warnings: aiWarnings,
     integrationsNeeded,
     nextRecommendation,
+    nativeFeatures: nativeFeatures?.length ? nativeFeatures : undefined,
   };
 
   return { changedFiles, removedPaths, report, assistantSummary: summary };

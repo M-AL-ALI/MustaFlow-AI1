@@ -9,4 +9,20 @@
 /**
  * @nullable
  */
-export type AgentTaskReport = { [key: string]: unknown } | null;
+export type AgentTaskReport = {
+  userRequest?: string;
+  filesCreated?: string[];
+  filesChanged?: string[];
+  filesRemoved?: string[];
+  previewUpdated?: boolean;
+  warnings?: string[];
+  suggestions?: string[];
+  nextRecommendation?: string;
+  /** Native Expo/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe. */
+  nativeFeatures?: string[];
+  knowledgeApplied?: {
+  title?: string;
+  category?: string;
+}[];
+  [key: string]: unknown;
+ } | null;

@@ -319,7 +319,21 @@ export const ListTasksResponseItem = zod.object({
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'completed', 'failed', 'canceled']),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
-  "report": zod.record(zod.string(), zod.unknown()).nullish(),
+  "report": zod.object({
+  "userRequest": zod.string().optional(),
+  "filesCreated": zod.array(zod.string()).optional(),
+  "filesChanged": zod.array(zod.string()).optional(),
+  "filesRemoved": zod.array(zod.string()).optional(),
+  "previewUpdated": zod.boolean().optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "nextRecommendation": zod.string().optional(),
+  "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
+  "knowledgeApplied": zod.array(zod.object({
+  "title": zod.string().optional(),
+  "category": zod.string().optional()
+})).optional()
+}).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
   "suggestions": zod.array(zod.string()).optional(),
   "createdAt": zod.coerce.date(),
@@ -365,7 +379,21 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'completed', 'failed', 'canceled']),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
-  "report": zod.record(zod.string(), zod.unknown()).nullish(),
+  "report": zod.object({
+  "userRequest": zod.string().optional(),
+  "filesCreated": zod.array(zod.string()).optional(),
+  "filesChanged": zod.array(zod.string()).optional(),
+  "filesRemoved": zod.array(zod.string()).optional(),
+  "previewUpdated": zod.boolean().optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "nextRecommendation": zod.string().optional(),
+  "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
+  "knowledgeApplied": zod.array(zod.object({
+  "title": zod.string().optional(),
+  "category": zod.string().optional()
+})).optional()
+}).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
   "suggestions": zod.array(zod.string()).optional(),
   "createdAt": zod.coerce.date(),

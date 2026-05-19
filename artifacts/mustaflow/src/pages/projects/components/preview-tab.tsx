@@ -21,6 +21,7 @@ import {
   Wrench,
   QrCode,
   Info,
+  ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -63,6 +64,7 @@ type PreviewTabProps = {
   focusMode?: boolean;
   onToggleFocusMode?: () => void;
   validationWarnings?: string[];
+  nativeFeatures?: string[];
   onFixPrompt?: (text: string) => void;
   onAutoSendPrompt?: (text: string) => void;
 };
@@ -85,6 +87,7 @@ export function PreviewTab({
   focusMode,
   onToggleFocusMode,
   validationWarnings = [],
+  nativeFeatures = [],
   onFixPrompt,
   onAutoSendPrompt,
 }: PreviewTabProps) {
@@ -96,7 +99,9 @@ export function PreviewTab({
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const [validationDismissed, setValidationDismissed] = useState(false);
+  const [nativeFeaturesDismissed, setNativeFeaturesDismissed] = useState(false);
   const prevWarningsRef = useRef<string[]>([]);
+  const prevNativeFeaturesRef = useRef<string[]>([]);
   const [crashBanner, setCrashBanner] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
 
@@ -111,6 +116,18 @@ export function PreviewTab({
       prevWarningsRef.current = validationWarnings;
     }
   }, [validationWarnings]);
+
+  // Reset native features dismissed state when nativeFeatures change (new build)
+  useEffect(() => {
+    const prev = prevNativeFeaturesRef.current;
+    const changed =
+      nativeFeatures.length !== prev.length ||
+      nativeFeatures.some((f, i) => f !== prev[i]);
+    if (changed) {
+      setNativeFeaturesDismissed(false);
+      prevNativeFeaturesRef.current = nativeFeatures;
+    }
+  }, [nativeFeatures]);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const prevStatusRef = useRef<string>(project.status);
@@ -429,6 +446,40 @@ export function PreviewTab({
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Native features notice — mobile projects only */}
+      {isMobile && nativeFeatures.length > 0 && !nativeFeaturesDismissed && (
+        <div className="shrink-0 border-b border-blue-500/20 bg-blue-500/8">
+          <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
+            <ShieldAlert className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+            <span className="flex-1 text-[11px] font-semibold text-blue-400">
+              Native device features detected — web preview may not show full functionality
+            </span>
+            <button
+              onClick={() => setNativeFeaturesDismissed(true)}
+              className="shrink-0 text-blue-400/60 hover:text-blue-400 transition-colors"
+              title="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="px-3 pb-2 space-y-1">
+            {nativeFeatures.map((feature, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-2 bg-blue-500/10 border border-blue-500/20 rounded-lg px-2.5 py-1.5"
+              >
+                <Smartphone className="h-3 w-3 text-blue-400 shrink-0" />
+                <span className="flex-1 text-[11px] text-blue-300/90">{feature}</span>
+                <span className="text-[10px] text-blue-400/60 shrink-0">Requires real device</span>
+              </div>
+            ))}
+            <p className="text-[10px] text-blue-400/60 px-0.5 pt-0.5">
+              These native capabilities are included in the Expo/React Native code but cannot run in the web preview iframe. Use Expo Go on a real device to test them.
+            </p>
           </div>
         </div>
       )}
