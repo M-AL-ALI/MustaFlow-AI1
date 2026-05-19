@@ -42,27 +42,27 @@ const EDGE_DEFAULTS = {
   markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
 };
 
-const DAGRE_GRAPH = new dagre.graphlib.Graph();
-DAGRE_GRAPH.setDefaultEdgeLabel(() => ({}));
-
 function runDagreLayout(
   nodes: Node[],
   edges: Edge[],
   direction = "LR",
 ): Node[] {
-  DAGRE_GRAPH.setGraph({ rankdir: direction, ranksep: 80, nodesep: 40 });
+  // Create a fresh graph each call — reusing a singleton accumulates stale nodes
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: direction, ranksep: 80, nodesep: 40 });
 
   nodes.forEach((n) => {
-    DAGRE_GRAPH.setNode(n.id, { width: 208, height: 160 });
+    g.setNode(n.id, { width: 208, height: 160 });
   });
   edges.forEach((e) => {
-    DAGRE_GRAPH.setEdge(e.source, e.target);
+    g.setEdge(e.source, e.target);
   });
 
-  dagre.layout(DAGRE_GRAPH);
+  dagre.layout(g);
 
   return nodes.map((n) => {
-    const pos = DAGRE_GRAPH.node(n.id);
+    const pos = g.node(n.id);
     return { ...n, position: { x: pos.x - 104, y: pos.y - 80 } };
   });
 }
@@ -148,22 +148,40 @@ export function PageMapTab({
     setSelectedNodeId(nodeId);
   }, []);
 
-  const handlePreviewClick = useCallback((filePath: string) => {
-    onSwitchToPreview(filePath);
-  }, [onSwitchToPreview]);
+  // Keep a stable ref to onSwitchToPreview so the callback identity
+  // never forces the data-loading effect to re-run
+  const onSwitchToPreviewRef = useRef(onSwitchToPreview);
+  useEffect(() => { onSwitchToPreviewRef.current = onSwitchToPreview; }, [onSwitchToPreview]);
 
+  const handlePreviewClick = useCallback((filePath: string) => {
+    onSwitchToPreviewRef.current(filePath);
+  }, []);
+
+  // Effect 1: load nodes from server — only when server data or platform changes,
+  // NOT when isBuilding/callbacks change (those triggered the disappearing-nodes bug)
   useEffect(() => {
     if (!platformData) return;
     const { nodes: rfNodes, edges: rfEdges } = platformMapToFlow(
       platformData as { nodes: PageMapNodeState[]; edges: { id: string; source: string; target: string; connectionType: string; aiGenerated: boolean }[] },
       projectId,
-      isBuilding,
+      false, // isBuilding is patched separately below; pass false here to avoid reset
       handleNodeClick,
       handlePreviewClick,
     );
     setNodes(rfNodes);
     setEdges(rfEdges);
-  }, [mapResponse, platform, projectId, isBuilding, handleNodeClick, handlePreviewClick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapResponse, platform, projectId]);
+
+  // Effect 2: patch isBuilding flag in-place so nodes don't get re-created/disappear
+  useEffect(() => {
+    setNodes((prev) =>
+      prev.map((n) => ({
+        ...n,
+        data: { ...(n.data as PageNodeData), isBuilding },
+      })),
+    );
+  }, [isBuilding, setNodes]);
 
   const debouncedSave = useCallback((updatedNodes: Node[], updatedEdges: Edge[]) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
