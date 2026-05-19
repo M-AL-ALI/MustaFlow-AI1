@@ -10,7 +10,6 @@ import {
   XCircle,
   AlertCircle,
   ChevronRight,
-  Lock,
   UserPlus,
   UserMinus,
   ScrollText,
@@ -85,10 +84,6 @@ export default function AdminPage() {
   const auditLoading = auditQuery.isPending || auditQuery.isFetching;
   const auditPage = auditQuery.data;
 
-  const isForbidden =
-    isHttpError(meQuery.error) &&
-    (meQuery.error.status === 401 || meQuery.error.status === 403);
-
   function refreshAll() {
     void queryClient.invalidateQueries({ queryKey: getGetAdminMeQueryKey() });
     void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() });
@@ -146,20 +141,6 @@ export default function AdminPage() {
     if (check.status === "fail") return "error";
     return "warn";
   };
-
-  if (isForbidden) {
-    return (
-      <div className="max-w-2xl mx-auto px-6 py-16 text-center space-y-4">
-        <div className="flex justify-center">
-          <Lock className="h-10 w-10 text-destructive" />
-        </div>
-        <h1 className="text-2xl font-bold">Access denied</h1>
-        <p className="text-muted-foreground text-sm">
-          You don't have admin privileges. Contact your platform administrator to request access.
-        </p>
-      </div>
-    );
-  }
 
   const stripeCheck = readinessCheck("stripe");
   const cfCheck = readinessCheck("cloudflare_ssl");
