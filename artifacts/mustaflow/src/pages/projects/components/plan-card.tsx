@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   BrainCircuit,
@@ -409,6 +409,42 @@ function SectionHeader({
   );
 }
 
+function getStorageKey(messageId: string | number | undefined) {
+  return messageId != null ? `plan_edits_${messageId}` : null;
+}
+
+function loadPersistedEdits(messageId: string | number | undefined): Partial<EditState> | null {
+  const key = getStorageKey(messageId);
+  if (!key) return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as Partial<EditState>;
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedEdits(messageId: string | number | undefined, state: EditState) {
+  const key = getStorageKey(messageId);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify(state));
+  } catch {
+    // storage quota or private-mode — silently ignore
+  }
+}
+
+function clearPersistedEdits(messageId: string | number | undefined) {
+  const key = getStorageKey(messageId);
+  if (!key) return;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
 export function PlanCard({
   plan,
   projectId,
@@ -417,6 +453,7 @@ export function PlanCard({
   onAddKey,
   disabled,
   readOnly = false,
+  messageId,
 }: {
   plan: StructuredPlan | null;
   projectId: number;
@@ -425,29 +462,64 @@ export function PlanCard({
   onAddKey?: (keyName: string) => void;
   disabled: boolean;
   readOnly?: boolean;
+  messageId?: string | number;
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("structure");
   const [localMode, setLocalMode] = useState<AgentMode>(
     (plan?.recommendedMode as AgentMode | undefined) ?? initialAgentMode,
   );
-  const [editState, setEditState] = useState<EditState>(() => ({
-    goal: plan?.goal ?? "",
-    approach: plan?.approach ?? "",
-    sitemap: plan?.sitemap ?? [],
-    pages: plan?.pages ?? [],
-    backend: plan?.backend ?? [],
-    database: plan?.database ?? [],
-    integrations: plan?.integrations ?? [],
-    apiEndpoints: plan?.apiEndpoints ?? [],
-    dataModel: plan?.dataModel ?? [],
-    uxNotes: plan?.uxNotes ?? {},
-    risks: plan?.risks ?? [],
-    testPlan: plan?.testPlan ?? [],
-    removedSitemapRoutes: [],
-    removedIntegrations: [],
-    removedEndpoints: [],
-    removedTables: [],
-  }));
+  const [editState, setEditState] = useState<EditState>(() => {
+    const base: EditState = {
+      goal: plan?.goal ?? "",
+      approach: plan?.approach ?? "",
+      sitemap: plan?.sitemap ?? [],
+      pages: plan?.pages ?? [],
+      backend: plan?.backend ?? [],
+      database: plan?.database ?? [],
+      integrations: plan?.integrations ?? [],
+      apiEndpoints: plan?.apiEndpoints ?? [],
+      dataModel: plan?.dataModel ?? [],
+      uxNotes: plan?.uxNotes ?? {},
+      risks: plan?.risks ?? [],
+      testPlan: plan?.testPlan ?? [],
+      removedSitemapRoutes: [],
+      removedIntegrations: [],
+      removedEndpoints: [],
+      removedTables: [],
+    };
+    if (readOnly) return base;
+    const persisted = loadPersistedEdits(messageId);
+    return persisted ? { ...base, ...persisted } : base;
+  });
+
+  // Debounced localStorage write whenever editState changes
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistEdits = useCallback((state: EditState) => {
+    if (readOnly) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      savePersistedEdits(messageId, state);
+    }, 400);
+  }, [messageId, readOnly]);
+
+  useEffect(() => {
+    persistEdits(editState);
+  }, [editState, persistEdits]);
+
+  // Cancel any pending debounced save on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  const cancelAndClear = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    clearPersistedEdits(messageId);
+  }, [messageId]);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [editingUxKey, setEditingUxKey] = useState<string | null>(null);
   const [editingUxValue, setEditingUxValue] = useState("");
@@ -1233,7 +1305,10 @@ export function PlanCard({
             <Button
               size="sm"
               className="flex-1 h-7 text-xs"
-              onClick={() => onBuild(constructBuildPrompt(), localMode, false)}
+              onClick={() => {
+                cancelAndClear();
+                onBuild(constructBuildPrompt(), localMode, false);
+              }}
               disabled={disabled}
             >
               Build now
@@ -1242,7 +1317,10 @@ export function PlanCard({
               size="sm"
               variant="secondary"
               className="flex-1 h-7 text-xs"
-              onClick={() => onBuild(constructBuildPrompt(), localMode, true)}
+              onClick={() => {
+                cancelAndClear();
+                onBuild(constructBuildPrompt(), localMode, true);
+              }}
               disabled={disabled}
             >
               <ServerCog className="h-3 w-3 mr-1" /> Background

@@ -822,6 +822,7 @@ export default function ProjectWorkspacePage() {
                         onBuild={runPlanned}
                         onAddKey={handleAddKey}
                         disabled={sendMessage.isPending}
+                        messageId={msg.id}
                       />
                     )}
                   </div>
