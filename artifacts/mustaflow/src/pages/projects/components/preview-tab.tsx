@@ -51,30 +51,6 @@ type Project = {
   name?: string;
 };
 
-// Bridge script injected into the preview iframe via srcdoc.
-// Uses only double quotes to avoid any escaping issues inside the template literal.
-// The script overrides console methods and forwards them to the parent via postMessage.
-const BRIDGE_SCRIPT = `(function(){
-  var _o={log:console.log,warn:console.warn,error:console.error,info:console.info};
-  function relay(lv,args){
-    try{
-      window.parent.postMessage({__mustaflow:true,level:lv,args:Array.prototype.slice.call(args).map(function(a){
-        try{return typeof a==="object"?JSON.stringify(a):String(a);}catch(e){return String(a);}
-      })},"*");
-    }catch(_){}
-  }
-  console.log=function(){relay("log",arguments);_o.log.apply(console,arguments);};
-  console.warn=function(){relay("warn",arguments);_o.warn.apply(console,arguments);};
-  console.error=function(){relay("error",arguments);_o.error.apply(console,arguments);};
-  console.info=function(){relay("info",arguments);_o.info.apply(console,arguments);};
-  window.addEventListener("error",function(e){
-    window.parent.postMessage({__mustaflow:true,level:"error",args:[(e.message||"Script error")+(e.filename?" ("+e.filename+":"+e.lineno+")":"")]},"*");
-  });
-  window.addEventListener("unhandledrejection",function(e){
-    var m=e.reason&&e.reason.message?e.reason.message:String(e.reason);
-    window.parent.postMessage({__mustaflow:true,level:"error",args:["Unhandled rejection: "+m]},"*");
-  });
-})();`;
 
 export function PreviewTab({
   project,
@@ -90,8 +66,6 @@ export function PreviewTab({
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
-  const [srcdoc, setSrcdoc] = useState<string | null>(null);
-  const [loadingPreview, setLoadingPreview] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const prevStatusRef = useRef<string>(project.status);
@@ -109,44 +83,6 @@ export function PreviewTab({
   const hasFiles = (files?.length ?? 0) > 0;
   const isLoading = filesLoading && files === undefined;
   const previewSrc = `/api/projects/${project.id}/preview/?t=${iframeKey}`;
-
-  // Fetch preview HTML and inject console bridge + base tag so relative URLs still resolve
-  const loadWithBridge = useCallback(async (src: string) => {
-    setLoadingPreview(true);
-    setSrcdoc(null);
-    try {
-      const res = await fetch(src);
-      if (!res.ok) {
-        setLoadingPreview(false);
-        return;
-      }
-      const html = await res.text();
-      const baseHref = new URL(src, window.location.href).href;
-      const bridgeTag = `<script>${BRIDGE_SCRIPT}<\/script>`;
-      const baseTag = `<base href="${baseHref}">`;
-      let injected: string;
-      if (/<head[\s>]/i.test(html)) {
-        injected = html.replace(/(<head[^>]*>)/i, `$1${baseTag}${bridgeTag}`);
-      } else if (/<html[\s>]/i.test(html)) {
-        injected = html.replace(/(<html[^>]*>)/i, `$1<head>${baseTag}${bridgeTag}</head>`);
-      } else {
-        injected = `<head>${baseTag}${bridgeTag}</head>${html}`;
-      }
-      setSrcdoc(injected);
-    } catch {
-      setSrcdoc(null);
-    } finally {
-      setLoadingPreview(false);
-    }
-  }, []);
-
-  // Reload bridge whenever iframeKey, project, or file presence changes.
-  // Including previewSrc ensures stale srcdoc doesn't persist on project switches.
-  useEffect(() => {
-    if (!hasFiles) return;
-    void loadWithBridge(previewSrc);
-    // loadWithBridge is stable (useCallback with no deps); previewSrc encodes project.id + iframeKey
-  }, [iframeKey, hasFiles, previewSrc, loadWithBridge]);
 
   // postMessage listener — only accept messages from our preview iframe.
   // Requires both a mounted iframe ref AND a matching source window.
@@ -206,33 +142,20 @@ export function PreviewTab({
   const errorCount = consoleEntries.filter((e) => e.level === "error").length;
   const warnCount = consoleEntries.filter((e) => e.level === "warn").length;
 
-  // Shared iframe renderer based on current srcdoc/src state
+  // Shared iframe renderer — the console bridge is injected server-side in the
+  // preview route, so we always use a plain src iframe.
   const renderIframe = (extraClass?: string, extraStyle?: React.CSSProperties) => (
-    srcdoc != null ? (
-      <iframe
-        key={`srcdoc-${device}-${iframeKey}`}
-        ref={iframeRef}
-        srcDoc={srcdoc}
-        title="App preview"
-        aria-label="App preview"
-        className={cn("w-full border-0", extraClass)}
-        style={extraStyle}
-        sandbox="allow-scripts allow-forms allow-popups"
-        onLoad={handleIframeLoad}
-      />
-    ) : (
-      <iframe
-        key={`src-${device}-${iframeKey}`}
-        ref={iframeRef}
-        src={previewSrc}
-        title="App preview"
-        aria-label="App preview"
-        className={cn("w-full border-0", extraClass)}
-        style={extraStyle}
-        sandbox="allow-scripts allow-forms allow-popups"
-        onLoad={handleIframeLoad}
-      />
-    )
+    <iframe
+      key={`src-${device}-${iframeKey}`}
+      ref={iframeRef}
+      src={previewSrc}
+      title="App preview"
+      aria-label="App preview"
+      className={cn("w-full border-0", extraClass)}
+      style={extraStyle}
+      sandbox="allow-scripts allow-forms allow-popups"
+      onLoad={handleIframeLoad}
+    />
   );
 
   return (
@@ -387,7 +310,7 @@ export function PreviewTab({
 
       {/* Preview area */}
       <div className="flex-1 min-h-0 bg-[#1a1a1f] overflow-auto flex items-start justify-center p-4">
-        {isLoading || loadingPreview ? (
+        {isLoading ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
             <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
             <span className="text-sm">Loading preview…</span>
