@@ -1042,6 +1042,36 @@ export const VerifySecretResponse = zod.object({
 
 
 /**
+ * @summary Recent audit events for a specific secret (ownership-gated)
+ */
+export const GetSecretAuditLogParams = zod.object({
+  "id": zod.coerce.number(),
+  "secretId": zod.coerce.number()
+})
+
+export const getSecretAuditLogQueryLimitDefault = 20;
+export const getSecretAuditLogQueryLimitMax = 100;
+
+
+
+export const GetSecretAuditLogQueryParams = zod.object({
+  "limit": zod.coerce.number().max(getSecretAuditLogQueryLimitMax).default(getSecretAuditLogQueryLimitDefault)
+})
+
+export const GetSecretAuditLogResponseItem = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "secretId": zod.number().nullish(),
+  "secretName": zod.string(),
+  "action": zod.enum(['created', 'updated', 'deleted', 'accessed', 'verified', 'verification_failed']),
+  "actorId": zod.string(),
+  "metadata": zod.record(zod.string(), zod.unknown()).nullish(),
+  "createdAt": zod.coerce.date()
+})
+export const GetSecretAuditLogResponse = zod.array(GetSecretAuditLogResponseItem)
+
+
+/**
  * @summary Deployment history for a project
  */
 export const ListDeploymentsParams = zod.object({

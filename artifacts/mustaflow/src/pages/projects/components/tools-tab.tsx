@@ -20,6 +20,9 @@ import {
   ToggleRight,
   KeyRound,
   Package,
+  ChevronDown,
+  ChevronUp,
+  Clock,
 } from "lucide-react";
 import { IntegrationsRegistry } from "./integrations-registry";
 import { VersionTimeline } from "./version-timeline";
@@ -33,6 +36,8 @@ import {
   getGetProjectFileQueryKey,
   useListVersions,
   getListVersionsQueryKey,
+  useGetSecretAuditLog,
+  getGetSecretAuditLogQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -102,6 +107,110 @@ const MOBILE_MODULES = [
     packageDependencies: ["expo-camera", "expo-image-picker"],
   },
 ];
+
+const ACTION_LABELS: Record<string, string> = {
+  created: "Created",
+  updated: "Updated",
+  deleted: "Deleted",
+  accessed: "Accessed",
+  verified: "Verified",
+  verification_failed: "Verify failed",
+};
+
+const ACTION_COLORS: Record<string, string> = {
+  created: "text-blue-400 bg-blue-500/10 border-blue-500/20",
+  updated: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20",
+  deleted: "text-red-400 bg-red-500/10 border-red-500/20",
+  accessed: "text-muted-foreground bg-muted border-border",
+  verified: "text-green-400 bg-green-500/10 border-green-500/20",
+  verification_failed: "text-destructive bg-destructive/10 border-destructive/20",
+};
+
+function relativeTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function SecretAuditTimeline({
+  secretId,
+  projectId,
+}: {
+  secretId: number;
+  projectId: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const { data: entries, isLoading } = useGetSecretAuditLog(projectId, secretId, undefined, {
+    query: { queryKey: getGetSecretAuditLogQueryKey(projectId, secretId) },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="px-3 pb-3 pt-0">
+        <div className="text-[10px] text-muted-foreground animate-pulse">Loading history…</div>
+      </div>
+    );
+  }
+
+  if (!entries || entries.length === 0) {
+    return (
+      <div className="px-3 pb-3 pt-0">
+        <div className="text-[10px] text-muted-foreground">No activity recorded yet.</div>
+      </div>
+    );
+  }
+
+  const visibleEntries = expanded ? entries : entries.slice(0, 5);
+  const hasMore = entries.length > 5;
+
+  return (
+    <div className="px-3 pb-3 pt-0 space-y-1.5">
+      {visibleEntries.map((entry, i) => (
+        <div key={entry.id} className="flex items-start gap-2 min-w-0">
+          <div className="relative flex flex-col items-center shrink-0 mt-0.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
+            {i < visibleEntries.length - 1 && (
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 w-px h-full bg-border" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0 flex items-baseline gap-2 flex-wrap">
+            <span
+              className={`inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border ${ACTION_COLORS[entry.action] ?? ACTION_COLORS.accessed}`}
+            >
+              {ACTION_LABELS[entry.action] ?? entry.action}
+            </span>
+            <span className="text-[10px] text-muted-foreground shrink-0">
+              {relativeTime(entry.createdAt)}
+            </span>
+          </div>
+        </div>
+      ))}
+
+      {hasMore && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors mt-0.5"
+        >
+          {expanded ? (
+            <>
+              <ChevronUp className="h-3 w-3" /> Show less
+            </>
+          ) : (
+            <>
+              <ChevronDown className="h-3 w-3" /> Show {entries.length - 5} more
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
 
 function SecretVerifyButton({
   secretId,
@@ -378,6 +487,48 @@ function ModuleLibrary({
   );
 }
 
+function SecretRowWithAudit({
+  secret,
+  projectId,
+}: {
+  secret: { id: number; name: string; masked: string; verificationStatus?: string | null };
+  projectId: number;
+}) {
+  const [showAudit, setShowAudit] = useState(false);
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 p-3 text-sm min-w-0">
+        <div className="font-mono text-foreground truncate flex-1 min-w-0">{secret.name}</div>
+        <div className="font-mono text-muted-foreground flex items-center gap-1.5 shrink-0">
+          <Lock className="h-3 w-3 shrink-0" />
+          {secret.masked}
+        </div>
+        <SecretVerifyButton
+          secretId={secret.id}
+          projectId={projectId}
+          initialStatus={secret.verificationStatus ?? "unverified"}
+        />
+        <button
+          onClick={() => setShowAudit((v) => !v)}
+          title={showAudit ? "Hide activity" : "Show activity"}
+          className={`flex items-center gap-1 text-[10px] transition-colors shrink-0 ${
+            showAudit ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Clock className="h-3 w-3" />
+          {showAudit ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </button>
+      </div>
+      {showAudit && (
+        <div className="border-t border-border bg-background/40">
+          <SecretAuditTimeline secretId={secret.id} projectId={projectId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ToolsTab({
   projectId,
   projectKind,
@@ -602,18 +753,11 @@ export function ToolsTab({
                         </div>
                         <div className="divide-y divide-border">
                           {envSecrets.map((s) => (
-                            <div key={s.id} className="flex items-center gap-3 p-3 text-sm min-w-0">
-                              <div className="font-mono text-foreground truncate flex-1 min-w-0">{s.name}</div>
-                              <div className="font-mono text-muted-foreground flex items-center gap-1.5 shrink-0">
-                                <Lock className="h-3 w-3 shrink-0" />
-                                {s.masked}
-                              </div>
-                              <SecretVerifyButton
-                                secretId={s.id}
-                                projectId={projectId}
-                                initialStatus={s.verificationStatus ?? "unverified"}
-                              />
-                            </div>
+                            <SecretRowWithAudit
+                              key={s.id}
+                              secret={s}
+                              projectId={projectId}
+                            />
                           ))}
                         </div>
                       </div>

@@ -42,6 +42,7 @@ import type {
   DuplicateProjectResult,
   GetAdminAuditLogParams,
   GetPublishReadinessParams,
+  GetSecretAuditLogParams,
   GrantAdminRole200,
   HealthStatus,
   KnowledgeEntry,
@@ -77,6 +78,7 @@ import type {
   ReadinessResult,
   RevokeAdminRole200,
   RollbackResult,
+  SecretAuditEntry,
   SecretEntry,
   SecretInput,
   SecretVerifyResult,
@@ -2937,6 +2939,100 @@ export const useVerifySecret = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getVerifySecretMutationOptions(options));
     }
+
+export const getGetSecretAuditLogUrl = (id: number,
+    secretId: number,
+    params?: GetSecretAuditLogParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/secrets/${secretId}/audit-log?${stringifiedParams}` : `/api/projects/${id}/secrets/${secretId}/audit-log`
+}
+
+/**
+ * @summary Recent audit events for a specific secret (ownership-gated)
+ */
+export const getSecretAuditLog = async (id: number,
+    secretId: number,
+    params?: GetSecretAuditLogParams, options?: RequestInit): Promise<SecretAuditEntry[]> => {
+
+  return customFetch<SecretAuditEntry[]>(getGetSecretAuditLogUrl(id,secretId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSecretAuditLogQueryKey = (id: number,
+    secretId: number,
+    params?: GetSecretAuditLogParams,) => {
+    return [
+    `/api/projects/${id}/secrets/${secretId}/audit-log`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSecretAuditLogQueryOptions = <TData = Awaited<ReturnType<typeof getSecretAuditLog>>, TError = ErrorType<unknown>>(id: number,
+    secretId: number,
+    params?: GetSecretAuditLogParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSecretAuditLog>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSecretAuditLogQueryKey(id,secretId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSecretAuditLog>>> = ({ signal }) => getSecretAuditLog(id,secretId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && secretId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSecretAuditLog>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSecretAuditLogQueryResult = NonNullable<Awaited<ReturnType<typeof getSecretAuditLog>>>
+export type GetSecretAuditLogQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Recent audit events for a specific secret (ownership-gated)
+ */
+
+export function useGetSecretAuditLog<TData = Awaited<ReturnType<typeof getSecretAuditLog>>, TError = ErrorType<unknown>>(
+ id: number,
+    secretId: number,
+    params?: GetSecretAuditLogParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSecretAuditLog>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSecretAuditLogQueryOptions(id,secretId,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListDeploymentsUrl = (id: number,) => {
 

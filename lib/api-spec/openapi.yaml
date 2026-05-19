@@ -744,6 +744,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/SecretVerifyResult"
 
+  /projects/{id}/secrets/{secretId}/audit-log:
+    get:
+      operationId: getSecretAuditLog
+      tags: [secrets]
+      summary: Recent audit events for a specific secret (ownership-gated)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: secretId, in: path, required: true, schema: { type: integer } }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        "200":
+          description: Audit log entries for the secret
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SecretAuditEntry"
+
   /projects/{id}/deployments:
     get:
       operationId: listDeployments
@@ -1615,6 +1636,23 @@ components:
         verificationStatus: { type: string }
         category: { type: ["string", "null"] }
         envWarning: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+
+    SecretAuditEntry:
+      type: object
+      required: [id, projectId, secretName, action, actorId, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        secretId: { type: ["integer", "null"] }
+        secretName: { type: string }
+        action:
+          type: string
+          enum: [created, updated, deleted, accessed, verified, verification_failed]
+        actorId: { type: string }
+        metadata:
+          type: ["object", "null"]
+          additionalProperties: true
         createdAt: { type: string, format: date-time }
 
     SecretInput:

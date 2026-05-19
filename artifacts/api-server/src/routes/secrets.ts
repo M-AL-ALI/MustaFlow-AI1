@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db, secretsTable, secretAuditLogTable, type Secret } from "@workspace/db";
 import {
   ListSecretsParams,
@@ -397,6 +397,55 @@ router.get(
       .orderBy(desc(secretAuditLogTable.createdAt))
       .limit(100);
     res.json(rows);
+  },
+);
+
+router.get(
+  "/projects/:id/secrets/:secretId/audit-log",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const secretId = Number(req.params.secretId);
+    if (!Number.isFinite(projectId) || !Number.isFinite(secretId)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+
+    // Confirm the secret belongs to this project before returning any audit data
+    const [secret] = await db
+      .select({ id: secretsTable.id })
+      .from(secretsTable)
+      .where(and(eq(secretsTable.id, secretId), eq(secretsTable.projectId, projectId)));
+
+    if (!secret) {
+      res.status(404).json({ error: "Secret not found" });
+      return;
+    }
+
+    const rawLimit = Number(req.query.limit ?? 20);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 20;
+
+    // Scope the query to both secretId AND projectId so orphaned rows from
+    // other projects are never returned even if secretIds collide.
+    const rows = await db
+      .select()
+      .from(secretAuditLogTable)
+      .where(and(eq(secretAuditLogTable.secretId, secretId), eq(secretAuditLogTable.projectId, projectId)))
+      .orderBy(desc(secretAuditLogTable.createdAt))
+      .limit(limit);
+
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        projectId: r.projectId,
+        secretId: r.secretId,
+        secretName: r.secretName,
+        action: r.action,
+        actorId: r.actorId,
+        metadata: r.metadata,
+        createdAt: r.createdAt,
+      })),
+    );
   },
 );
 

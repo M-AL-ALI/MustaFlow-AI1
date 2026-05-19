@@ -483,6 +483,36 @@ export interface SecretEntry {
   createdAt: string;
 }
 
+export type SecretAuditEntryAction = typeof SecretAuditEntryAction[keyof typeof SecretAuditEntryAction];
+
+
+export const SecretAuditEntryAction = {
+  created: 'created',
+  updated: 'updated',
+  deleted: 'deleted',
+  accessed: 'accessed',
+  verified: 'verified',
+  verification_failed: 'verification_failed',
+} as const;
+
+/**
+ * @nullable
+ */
+export type SecretAuditEntryMetadata = { [key: string]: unknown } | null;
+
+export interface SecretAuditEntry {
+  id: number;
+  projectId: number;
+  /** @nullable */
+  secretId?: number | null;
+  secretName: string;
+  action: SecretAuditEntryAction;
+  actorId: string;
+  /** @nullable */
+  metadata?: SecretAuditEntryMetadata;
+  createdAt: string;
+}
+
 export type SecretInputEnvironment = typeof SecretInputEnvironment[keyof typeof SecretInputEnvironment];
 
 
@@ -1025,6 +1055,13 @@ export const GetPublishReadinessEnv = {
 export type DeleteSecret200 = {
   deleted: boolean;
   id: number;
+};
+
+export type GetSecretAuditLogParams = {
+/**
+ * @maximum 100
+ */
+limit?: number;
 };
 
 export type ListDeployments200 = {

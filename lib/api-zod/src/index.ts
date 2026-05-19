@@ -4,3 +4,4 @@ export type * from "./generated/types";
 // and a TypeScript type file (types/) with the same name. Prefer the Zod schema value.
 export { GetPublishReadinessParams } from "./generated/api";
 export { AnalyzePageMapParams } from "./generated/api";
+export { GetSecretAuditLogParams } from "./generated/api";
