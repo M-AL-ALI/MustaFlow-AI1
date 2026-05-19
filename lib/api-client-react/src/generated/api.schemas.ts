@@ -693,6 +693,7 @@ export interface PageMapNode {
   hasError: boolean;
   aiGenerated: boolean;
   notes: string;
+  planned?: boolean;
 }
 
 export type PageMapEdgeConnectionType = typeof PageMapEdgeConnectionType[keyof typeof PageMapEdgeConnectionType];

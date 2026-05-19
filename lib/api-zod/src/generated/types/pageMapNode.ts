@@ -18,4 +18,5 @@ export interface PageMapNode {
   hasError: boolean;
   aiGenerated: boolean;
   notes: string;
+  planned?: boolean;
 }

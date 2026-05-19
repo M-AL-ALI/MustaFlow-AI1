@@ -31,6 +31,7 @@ export type PageMapNode = {
   hasError: boolean;
   aiGenerated: boolean;
   notes: string;
+  planned?: boolean;
 };
 
 export type PageMapEdge = {
@@ -106,22 +107,57 @@ function buildAutoLayout(nodes: PageMapNode[]): PageMapNode[] {
   }));
 }
 
+function normalizeLabel(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 function mergeWithExisting(
   aiNodes: PageMapNode[],
   aiEdges: PageMapEdge[],
   existing: PageMapPlatform,
 ): PageMapPlatform {
-  const existingPositions = new Map(
-    existing.nodes.map((n) => [n.id, n.position]),
-  );
-  const existingNotes = new Map(existing.nodes.map((n) => [n.id, n.notes]));
+  const existingById = new Map(existing.nodes.map((n) => [n.id, n]));
 
-  const nodes = aiNodes.map((n) => ({
-    ...n,
-    position: existingPositions.get(n.id) ?? n.position,
-    notes: existingNotes.get(n.id) ?? n.notes,
-    aiGenerated: true,
-  }));
+  // Build a normalized-label index of AI nodes for planned-to-built matching
+  const aiNodesByLabel = new Map(aiNodes.map((n) => [normalizeLabel(n.label), n]));
+
+  // Preserve user-customised positions and notes on AI nodes (matched by ID)
+  const mergedAiNodes = aiNodes.map((n) => {
+    const prev = existingById.get(n.id);
+    return {
+      ...n,
+      position: prev?.position ?? n.position,
+      notes: prev?.notes ?? n.notes,
+      aiGenerated: true,
+      planned: false, // AI confirmed the file exists — no longer planned
+    };
+  });
+
+  // Retain planned nodes only when no AI node matches by ID or normalized label.
+  // When a planned node's label matches an AI node, the AI node absorbs its
+  // position and notes via the ID map above (if IDs match) or it is simply
+  // retired here (if only the label matched) — the built AI node replaces it.
+  const aiNodeIds = new Set(aiNodes.map((n) => n.id));
+  const plannedNodes = existing.nodes.filter((n) => {
+    if (!n.planned) return false;
+    if (aiNodeIds.has(n.id)) return false; // matched by ID — AI node absorbs it
+    const aiMatch = aiNodesByLabel.get(normalizeLabel(n.label));
+    if (aiMatch) {
+      // Transfer position and notes to the matched AI node
+      const idx = mergedAiNodes.findIndex((m) => m.id === aiMatch.id);
+      if (idx !== -1) {
+        mergedAiNodes[idx] = {
+          ...mergedAiNodes[idx],
+          position: n.position,
+          notes: n.notes || mergedAiNodes[idx].notes,
+        };
+      }
+      return false; // retire the planned placeholder
+    }
+    return true; // no match — keep as planned
+  });
+
+  const nodes = [...mergedAiNodes, ...plannedNodes];
 
   const aiEdgeIds = new Set(aiEdges.map((e) => e.id));
   const userEdges = existing.edges.filter(

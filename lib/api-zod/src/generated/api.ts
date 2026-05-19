@@ -554,7 +554,8 @@ export const GetPageMapResponse = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -577,7 +578,8 @@ export const GetPageMapResponse = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -600,7 +602,8 @@ export const GetPageMapResponse = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -635,7 +638,8 @@ export const PutPageMapBody = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -658,7 +662,8 @@ export const PutPageMapBody = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -681,7 +686,8 @@ export const PutPageMapBody = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -708,7 +714,8 @@ export const PutPageMapResponse = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -731,7 +738,8 @@ export const PutPageMapResponse = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -754,7 +762,8 @@ export const PutPageMapResponse = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -796,7 +805,8 @@ export const AnalyzePageMapResponse = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -819,7 +829,8 @@ export const AnalyzePageMapResponse = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),
@@ -842,7 +853,8 @@ export const AnalyzePageMapResponse = zod.object({
   "isNew": zod.boolean(),
   "hasError": zod.boolean(),
   "aiGenerated": zod.boolean(),
-  "notes": zod.string()
+  "notes": zod.string(),
+  "planned": zod.boolean().optional()
 })),
   "edges": zod.array(zod.object({
   "id": zod.string(),

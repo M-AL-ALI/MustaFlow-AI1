@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, ExternalLink, Pencil, FileCode2 } from "lucide-react";
+import { X, ExternalLink, Pencil, FileCode2, FilePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PageType } from "./page-node";
@@ -14,6 +14,7 @@ export type PageMapNodeState = {
   hasError: boolean;
   aiGenerated: boolean;
   notes: string;
+  planned?: boolean;
 };
 
 const WEB_PAGE_TYPES: { value: PageType; label: string }[] = [
@@ -123,23 +124,28 @@ export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPag
           />
         </div>
 
-        {/* File path */}
-        <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-            File Path
-          </label>
-          <button
-            onClick={() => onFileOpen(node.filePath)}
-            className="w-full flex items-center gap-2 bg-muted border border-border rounded-lg px-3 py-2 text-left hover:border-primary/40 hover:bg-muted/80 transition-colors group"
-          >
-            <FileCode2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="text-[11px] font-mono text-muted-foreground truncate flex-1">{node.filePath}</span>
-            <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-60 shrink-0 transition-opacity" />
-          </button>
-        </div>
+        {/* File path — only shown for built pages */}
+        {!node.planned && (
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+              File Path
+            </label>
+            <button
+              onClick={() => onFileOpen(node.filePath)}
+              className="w-full flex items-center gap-2 bg-muted border border-border rounded-lg px-3 py-2 text-left hover:border-primary/40 hover:bg-muted/80 transition-colors group"
+            >
+              <FileCode2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-[11px] font-mono text-muted-foreground truncate flex-1">{node.filePath}</span>
+              <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-60 shrink-0 transition-opacity" />
+            </button>
+          </div>
+        )}
 
         {/* Metadata badges */}
         <div className="flex flex-wrap gap-1.5">
+          {node.planned && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold">Planned — not built yet</span>
+          )}
           {node.aiGenerated && (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold">AI-generated</span>
           )}
@@ -159,8 +165,8 @@ export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPag
           variant="outline"
           className="w-full h-8 text-xs gap-1.5"
         >
-          <Pencil className="h-3 w-3" />
-          Modify this page
+          {node.planned ? <FilePlus className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+          {node.planned ? "Build this page" : "Modify this page"}
         </Button>
         <Button
           onClick={handleSave}

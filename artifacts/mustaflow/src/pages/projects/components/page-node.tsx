@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { cn } from "@/lib/utils";
-import { Globe, Lock, FileText, LayoutDashboard, Settings, AlertCircle, Layers, PanelLeft, ChevronRight, List, Info, Monitor } from "lucide-react";
+import { Globe, Lock, FileText, LayoutDashboard, Settings, AlertCircle, Layers, PanelLeft, ChevronRight, List, Info, Monitor, FilePlus } from "lucide-react";
 
 export type PageType =
   | "landing"
@@ -27,6 +27,7 @@ export type PageNodeData = {
   aiGenerated: boolean;
   notes: string;
   projectId: number;
+  planned?: boolean;
   isBuilding?: boolean;
   onNodeClick?: (nodeId: string) => void;
   onPreviewClick?: (filePath: string) => void;
@@ -53,6 +54,55 @@ export const PageNode = memo(function PageNode({ id, data, selected }: NodeProps
   const Icon = config.Icon;
 
   const previewUrl = `/api/projects/${data.projectId}/preview/${data.filePath}`;
+
+  if (data.planned) {
+    return (
+      <div
+        className={cn(
+          "relative bg-card/60 border-2 border-dashed rounded-xl shadow-md overflow-hidden cursor-pointer transition-all duration-200",
+          "w-52",
+          selected
+            ? "border-primary shadow-primary/20 ring-2 ring-primary ring-offset-1 ring-offset-background"
+            : "border-primary/40 hover:border-primary/70 hover:shadow-lg",
+          data.isBuilding && "animate-pulse",
+        )}
+        onClick={() => data.onNodeClick?.(id)}
+      >
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!w-2.5 !h-2.5 !bg-border !border-2 !border-background hover:!bg-primary transition-colors"
+        />
+
+        {/* Card header */}
+        <div className="px-3 py-2 border-b border-dashed border-border/60 bg-card/50">
+          <div className="flex items-center gap-2">
+            <div className={cn("flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border", config.bg, config.color)}>
+              <Icon className="h-2.5 w-2.5 shrink-0" />
+              {config.label}
+            </div>
+            <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary font-bold border border-primary/20">PLANNED</span>
+          </div>
+          <div className="mt-1.5 text-xs font-semibold text-foreground truncate">{data.label || "Untitled Page"}</div>
+          {data.notes && (
+            <div className="text-[10px] text-muted-foreground truncate mt-0.5 italic">{data.notes}</div>
+          )}
+        </div>
+
+        {/* Placeholder body */}
+        <div className="flex flex-col items-center justify-center gap-1.5 bg-muted/20" style={{ height: 72 }}>
+          <FilePlus className="h-5 w-5 text-primary/40" />
+          <span className="text-[9px] text-muted-foreground font-medium">No file yet — build to create</span>
+        </div>
+
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!w-2.5 !h-2.5 !bg-border !border-2 !border-background hover:!bg-primary transition-colors"
+        />
+      </div>
+    );
+  }
 
   return (
     <div

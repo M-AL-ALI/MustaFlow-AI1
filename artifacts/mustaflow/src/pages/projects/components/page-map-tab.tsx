@@ -24,7 +24,7 @@ import {
 } from "@workspace/api-client-react";
 import type { PageMapData } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Globe, Smartphone, Tablet, RefreshCw, Layout, Download, Layers, MapPin } from "lucide-react";
+import { Globe, Smartphone, Tablet, RefreshCw, Layout, Download, Layers, MapPin, FilePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PageNode, type PageNodeData, type PageType } from "./page-node";
@@ -86,6 +86,7 @@ function platformMapToFlow(
       hasError: n.hasError,
       aiGenerated: n.aiGenerated,
       notes: n.notes,
+      planned: (n as PageMapNodeState).planned ?? false,
       projectId,
       isBuilding,
       onNodeClick,
@@ -129,6 +130,7 @@ export function PageMapTab({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 1 });
   const queryClient = useQueryClient();
 
   const { data: mapResponse, isLoading } = useGetPageMap(projectId, {
@@ -142,7 +144,7 @@ export function PageMapTab({
   const analyzePageMap = useAnalyzePageMap();
 
   const platformData = mapResponse?.pageMapData?.[platform];
-  const hasNodes = (platformData?.nodes?.length ?? 0) > 0;
+  const hasNodes = (platformData?.nodes?.length ?? 0) > 0 || nodes.length > 0;
 
   const handleNodeClick = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId);
@@ -198,6 +200,7 @@ export function PageMapTab({
           hasError: (n.data as PageNodeData).hasError,
           aiGenerated: (n.data as PageNodeData).aiGenerated,
           notes: (n.data as PageNodeData).notes,
+          planned: (n.data as PageNodeData).planned ?? false,
         })),
         edges: updatedEdges.map((e) => ({
           id: e.id,
@@ -288,6 +291,7 @@ export function PageMapTab({
         hasError: selectedNode.hasError,
         aiGenerated: selectedNode.aiGenerated,
         notes: selectedNode.notes,
+        planned: selectedNode.planned,
       }
     : null;
 
@@ -311,8 +315,79 @@ export function PageMapTab({
     onSwitchToCode(filePath);
   }, [onSwitchToCode]);
 
+  const handleAddPage = useCallback(() => {
+    const id = `user-${Date.now()}`;
+
+    // Compute canvas center in flow coordinates from current viewport
+    const vp = viewportRef.current;
+    const containerEl = canvasRef.current;
+    const containerW = containerEl?.clientWidth ?? 800;
+    const containerH = containerEl?.clientHeight ?? 600;
+    const flowX = (containerW / 2 - vp.x) / vp.zoom - 104; // offset by half node width
+    const flowY = (containerH / 2 - vp.y) / vp.zoom - 80;  // offset by half node height
+
+    const newNode: Node = {
+      id,
+      type: "pageNode",
+      position: { x: flowX, y: flowY },
+      data: {
+        label: "New Page",
+        pageType: "other" as PageType,
+        filePath: "",
+        isNew: false,
+        hasError: false,
+        aiGenerated: false,
+        notes: "",
+        planned: true,
+        projectId,
+        isBuilding: false,
+        onNodeClick: handleNodeClick,
+        onPreviewClick: handlePreviewClick,
+      } satisfies PageNodeData,
+    };
+
+    setNodes((prev) => {
+      const updated = [...prev, newNode];
+
+      // Immediate (non-debounced) save for the add action
+      const currentMap = mapResponse?.pageMapData ?? { web: { nodes: [], edges: [] }, ios: { nodes: [], edges: [] }, android: { nodes: [], edges: [] } };
+      const updatedPlatform = {
+        nodes: updated.map((n) => ({
+          id: n.id,
+          label: (n.data as PageNodeData).label,
+          pageType: (n.data as PageNodeData).pageType,
+          filePath: (n.data as PageNodeData).filePath,
+          position: n.position,
+          isNew: (n.data as PageNodeData).isNew,
+          hasError: (n.data as PageNodeData).hasError,
+          aiGenerated: (n.data as PageNodeData).aiGenerated,
+          notes: (n.data as PageNodeData).notes,
+          planned: (n.data as PageNodeData).planned ?? false,
+        })),
+        edges: edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          connectionType: ((e.data as { connectionType?: string })?.connectionType ?? "nav") as ConnectionType,
+          aiGenerated: (e.data as { aiGenerated?: boolean })?.aiGenerated ?? false,
+        })),
+      };
+      const payload: PageMapData = { ...currentMap, [platform]: updatedPlatform } as PageMapData;
+      putPageMap.mutate(
+        { id: projectId, data: payload },
+        { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getGetPageMapQueryKey(projectId) }); } },
+      );
+
+      return updated;
+    });
+    setSelectedNodeId(id);
+  }, [edges, projectId, platform, mapResponse, handleNodeClick, handlePreviewClick, setNodes, putPageMap, queryClient]);
+
   const handleModifyPage = useCallback((node: PageMapNodeState) => {
-    onSwitchToChat(`Modify the ${node.label} page: `);
+    const isPlanned = node.planned;
+    const base = isPlanned ? `Build the ${node.label} page` : `Modify the ${node.label} page`;
+    const suffix = node.notes ? `: ${node.notes}` : ": ";
+    onSwitchToChat(base + suffix);
   }, [onSwitchToChat]);
 
   const PLATFORMS: { key: Platform; label: string; Icon: React.ElementType }[] = [
@@ -348,6 +423,15 @@ export function PageMapTab({
 
         {platform === "web" && (
           <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1.5"
+              onClick={handleAddPage}
+            >
+              <FilePlus className="h-3 w-3" />
+              Add page
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -402,6 +486,7 @@ export function PageMapTab({
           <EmptyState
             onAnalyze={handleReanalyze}
             isAnalyzing={analyzePageMap.isPending}
+            onAddPage={handleAddPage}
           />
         ) : (
           <ReactFlow
@@ -412,6 +497,7 @@ export function PageMapTab({
             onConnect={onConnect}
             onNodeDragStop={onNodeDragStop}
             onEdgesDelete={onEdgesDelete}
+            onMove={(_evt, viewport) => { viewportRef.current = viewport; }}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
             defaultEdgeOptions={EDGE_DEFAULTS}
@@ -447,7 +533,7 @@ export function PageMapTab({
   );
 }
 
-function EmptyState({ onAnalyze, isAnalyzing }: { onAnalyze: () => void; isAnalyzing: boolean }) {
+function EmptyState({ onAnalyze, isAnalyzing, onAddPage }: { onAnalyze: () => void; isAnalyzing: boolean; onAddPage: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-5 text-center px-8">
       <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
@@ -456,13 +542,19 @@ function EmptyState({ onAnalyze, isAnalyzing }: { onAnalyze: () => void; isAnaly
       <div>
         <div className="text-base font-semibold text-foreground">No pages mapped yet</div>
         <div className="text-sm text-muted-foreground mt-1 max-w-xs">
-          Run an AI analysis to automatically discover all pages in your app and map how they connect.
+          Analyze your app to discover existing pages, or add placeholder pages to plan your structure first.
         </div>
       </div>
-      <Button onClick={onAnalyze} disabled={isAnalyzing} className="gap-2">
-        <RefreshCw className={cn("h-4 w-4", isAnalyzing && "animate-spin")} />
-        {isAnalyzing ? "Analyzing app…" : "Analyze my app"}
-      </Button>
+      <div className="flex items-center gap-3">
+        <Button onClick={onAnalyze} disabled={isAnalyzing} className="gap-2">
+          <RefreshCw className={cn("h-4 w-4", isAnalyzing && "animate-spin")} />
+          {isAnalyzing ? "Analyzing app…" : "Analyze my app"}
+        </Button>
+        <Button variant="outline" onClick={onAddPage} className="gap-2">
+          <FilePlus className="h-4 w-4" />
+          Add a page
+        </Button>
+      </div>
     </div>
   );
 }
