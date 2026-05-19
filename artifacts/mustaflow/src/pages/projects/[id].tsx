@@ -77,6 +77,7 @@ import { ManageTab } from "./components/manage-tab";
 import { ActivityStream } from "./components/activity-stream";
 import { HistoryTab } from "./components/history-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
+import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { cn } from "@/lib/utils";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -238,10 +239,12 @@ function ErrorCard({
   message,
   suggestions,
   onTryFix,
+  onBuyCredits,
 }: {
   message: string;
   suggestions?: string[];
   onTryFix?: (text: string) => void;
+  onBuyCredits?: () => void;
 }) {
   const isInsufficientCredits = message.startsWith("Insufficient credits");
   return (
@@ -252,13 +255,13 @@ function ErrorCard({
       </div>
       {isInsufficientCredits && (
         <div className="border-t border-destructive/20 pt-2">
-          <a
-            href="/settings?tab=credits"
+          <button
+            onClick={onBuyCredits}
             className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-2.5 py-1 rounded-lg transition-colors"
           >
             <CreditCard className="h-3 w-3" />
-            Top up credits
-          </a>
+            Buy credits
+          </button>
         </div>
       )}
       {suggestions && suggestions.length > 0 && (
@@ -378,6 +381,19 @@ export default function ProjectWorkspacePage() {
   const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history">("chat");
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
+  const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
+  const [creditsSuccess, setCreditsSuccess] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("credits_success") === "1";
+  });
+
+  useEffect(() => {
+    if (!creditsSuccess) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("credits_success");
+    window.history.replaceState({}, "", url.toString());
+  }, [creditsSuccess]);
   const [focusMode, setFocusMode] = useState(false);
   const [pageMapSyncing, setPageMapSyncing] = useState(false);
   const pageMapSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -436,7 +452,7 @@ export default function ProjectWorkspacePage() {
     }
     return undefined;
   }, [messages]);
-=======
+
   useEffect(() => {
     localStorage.setItem(`mustaflow_tab_${projectId}`, activeTab);
   }, [projectId, activeTab]);
@@ -949,6 +965,11 @@ export default function ProjectWorkspacePage() {
             ref={scrollRef}
             className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
           >
+            {creditsSuccess && (
+              <div className="sticky top-0 z-10 pb-1">
+                <CreditsSuccessBanner onDismiss={() => setCreditsSuccess(false)} />
+              </div>
+            )}
             {messages?.slice(-20).map((msg) => {
               const planPayload = msg.plan as ChatPlanPayload | null | undefined;
               const payloadKind = planPayload && typeof planPayload === "object" ? (planPayload as { kind?: string }).kind : undefined;
@@ -1005,6 +1026,7 @@ export default function ProjectWorkspacePage() {
                         message={(planPayload as { message: string }).message}
                         suggestions={(planPayload as { suggestions?: string[] }).suggestions}
                         onTryFix={(text) => { setPrompt(text); }}
+                        onBuyCredits={() => setBuyCreditsOpen(true)}
                       />
                     )}
                     {isPlanCard && (
@@ -1386,6 +1408,11 @@ export default function ProjectWorkspacePage() {
           </div>
         </div>
       </div>
+      <BuyCreditsSheet
+        open={buyCreditsOpen}
+        onClose={() => setBuyCreditsOpen(false)}
+        returnUrl={`${window.location.origin}/projects/${projectId}?credits_success=1`}
+      />
     </div>
   );
 }
