@@ -1168,6 +1168,11 @@ export default function ProjectWorkspacePage() {
                   if (isMobileLayout) setChatDrawerOpen(true);
                   setTimeout(() => promptInputRef.current?.focus(), 50);
                 }}
+                onAutoSendPrompt={(text) => {
+                  setLeftPanelTab("chat");
+                  if (isMobileLayout) setChatDrawerOpen(true);
+                  send(text);
+                }}
               />
             )}
             {activeTab === "code" && <CodeEditorTab projectId={projectId} initialFileId={selectedCodeFileId} />}

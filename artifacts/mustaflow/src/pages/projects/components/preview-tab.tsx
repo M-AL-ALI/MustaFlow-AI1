@@ -64,6 +64,7 @@ type PreviewTabProps = {
   onToggleFocusMode?: () => void;
   validationWarnings?: string[];
   onFixPrompt?: (text: string) => void;
+  onAutoSendPrompt?: (text: string) => void;
 };
 
 // ─── Security note ────────────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ export function PreviewTab({
   onToggleFocusMode,
   validationWarnings = [],
   onFixPrompt,
+  onAutoSendPrompt,
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
   const [platform, setPlatform] = useState<Platform>("web");
@@ -439,11 +441,16 @@ export function PreviewTab({
         >
           <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px" />
           <span className="flex-1 line-clamp-2 break-all">{crashBanner}</span>
-          {onFixPrompt && (
+          {(onAutoSendPrompt || onFixPrompt) && (
             <button
               type="button"
               onClick={() => {
-                onFixPrompt(`Fix this runtime error: ${crashBanner}`);
+                const fixText = `Fix this runtime error: ${crashBanner}`;
+                if (onAutoSendPrompt) {
+                  onAutoSendPrompt(fixText);
+                } else {
+                  onFixPrompt!(fixText);
+                }
                 setCrashBanner(null);
               }}
               className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-destructive/20 border border-destructive/30 text-destructive hover:bg-destructive/30 transition-colors whitespace-nowrap mt-px"
