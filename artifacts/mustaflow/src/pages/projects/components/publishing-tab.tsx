@@ -548,6 +548,7 @@ function EasBuildPanel({
   const [reloadingLogsId, setReloadingLogsId] = useState<number | null>(null);
   const [logFetchedAt, setLogFetchedAt] = useState<Map<number, Date>>(() => new Map());
 
+  const logPreRef = useRef<HTMLPreElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Ref tracks in-progress build log IDs so the interval can PATCH them without stale closure issues
   const inProgressRef = useRef<number[]>([]);
@@ -702,6 +703,11 @@ function EasBuildPanel({
             : prev,
         );
         setLogFetchedAt((prev) => new Map(prev).set(logId, new Date()));
+        requestAnimationFrame(() => {
+          if (logPreRef.current) {
+            logPreRef.current.scrollTop = logPreRef.current.scrollHeight;
+          }
+        });
       }
     } finally {
       setReloadingLogsId(null);
@@ -1074,7 +1080,7 @@ function EasBuildPanel({
                         )}
                       </div>
                       {build.logSnippet ? (
-                        <pre className="px-3 py-3 text-[11px] leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">
+                        <pre ref={expandedLogsId === build.id ? logPreRef : null} className="px-3 py-3 text-[11px] leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">
                           {build.logSnippet}
                         </pre>
                       ) : (
