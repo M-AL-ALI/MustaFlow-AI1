@@ -339,7 +339,11 @@ export default function ProjectWorkspacePage() {
   const [deviceMode, setDeviceMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [activeTab, setActiveTab] = useState("preview");
   const [newProjectOpen, setNewProjectOpen] = useState(false);
-  const [splitPct, setSplitPct] = useState(40);
+  const [splitPct, setSplitPct] = useState<number>(() => {
+    const stored = localStorage.getItem("mustaflow_split_pct");
+    return stored ? Math.min(65, Math.max(25, parseFloat(stored))) : 40;
+  });
+  const [isDragging, setIsDragging] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoAnalyzedRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -416,21 +420,32 @@ export default function ProjectWorkspacePage() {
     send(`Execute this plan now:\n${planMessageContent}`, { planMode: false, background });
   };
 
+  const updateSplit = useCallback((pct: number) => {
+    const clamped = Math.min(65, Math.max(25, pct));
+    setSplitPct(clamped);
+    localStorage.setItem("mustaflow_split_pct", String(clamped));
+  }, []);
+
   const startSplitDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     isDraggingRef.current = true;
+    setIsDragging(true);
   }, []);
 
   const handleSplitDrag = useCallback((e: React.MouseEvent) => {
     if (!isDraggingRef.current || !splitContainerRef.current) return;
     const rect = splitContainerRef.current.getBoundingClientRect();
-    const pct = Math.min(68, Math.max(26, ((e.clientX - rect.left) / rect.width) * 100));
-    setSplitPct(pct);
-  }, []);
+    updateSplit(((e.clientX - rect.left) / rect.width) * 100);
+  }, [updateSplit]);
 
   const stopSplitDrag = useCallback(() => {
     isDraggingRef.current = false;
+    setIsDragging(false);
   }, []);
+
+  const resetSplit = useCallback(() => {
+    updateSplit(40);
+  }, [updateSplit]);
 
   if (projectError || (!projectLoading && !project))
     return (
@@ -512,7 +527,10 @@ export default function ProjectWorkspacePage() {
       {/* ── Main split: chat LEFT + preview RIGHT ── */}
       <div
         ref={splitContainerRef}
-        className="flex-1 flex min-h-0 overflow-hidden select-none"
+        className={cn(
+          "flex-1 flex min-h-0 overflow-hidden select-none",
+          isDragging && "cursor-col-resize",
+        )}
         onMouseMove={handleSplitDrag}
         onMouseUp={stopSplitDrag}
         onMouseLeave={stopSplitDrag}
@@ -726,9 +744,31 @@ export default function ProjectWorkspacePage() {
 
         {/* ── Drag handle ── */}
         <div
-          className="w-1 shrink-0 bg-border hover:bg-primary/50 cursor-col-resize transition-colors active:bg-primary/70"
+          className={cn(
+            "w-[5px] shrink-0 relative flex items-center justify-center group cursor-col-resize transition-colors duration-100",
+            isDragging ? "bg-primary/40" : "bg-border hover:bg-primary/30",
+          )}
           onMouseDown={startSplitDrag}
-        />
+          onDoubleClick={resetSplit}
+          title="Drag to resize · Double-click to reset"
+        >
+          {/* Wider invisible grab zone so it's easy to click */}
+          <div className="absolute inset-y-0 -left-[5px] -right-[5px] z-10" />
+          {/* Grip dot indicator */}
+          <div className="relative z-20 flex flex-col gap-[4px]">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className={cn(
+                  "w-[3px] h-[3px] rounded-full transition-colors duration-100",
+                  isDragging
+                    ? "bg-primary"
+                    : "bg-muted-foreground/25 group-hover:bg-primary/60",
+                )}
+              />
+            ))}
+          </div>
+        </div>
 
         {/* ── RIGHT: Preview / Tab Content ── */}
         <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background">
