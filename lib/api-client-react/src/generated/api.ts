@@ -46,6 +46,7 @@ import type {
   ProjectInput,
   ProjectUpdate,
   ProjectVersion,
+  ProjectVersionDetail,
   ProjectVersionInput,
   ProjectsSummary,
   PublishResult,
@@ -1512,6 +1513,88 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getCreateVersionMutationOptions(options));
     }
+
+export const getGetVersionUrl = (id: number,
+    versionId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/versions/${versionId}`
+}
+
+/**
+ * @summary Get a single version including full files snapshot
+ */
+export const getVersion = async (id: number,
+    versionId: number, options?: RequestInit): Promise<ProjectVersionDetail> => {
+
+  return customFetch<ProjectVersionDetail>(getGetVersionUrl(id,versionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVersionQueryKey = (id: number,
+    versionId: number,) => {
+    return [
+    `/api/projects/${id}/versions/${versionId}`
+    ] as const;
+    }
+
+
+export const getGetVersionQueryOptions = <TData = Awaited<ReturnType<typeof getVersion>>, TError = ErrorType<ApiError>>(id: number,
+    versionId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVersion>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVersionQueryKey(id,versionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVersion>>> = ({ signal }) => getVersion(id,versionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && versionId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVersion>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVersionQueryResult = NonNullable<Awaited<ReturnType<typeof getVersion>>>
+export type GetVersionQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get a single version including full files snapshot
+ */
+
+export function useGetVersion<TData = Awaited<ReturnType<typeof getVersion>>, TError = ErrorType<ApiError>>(
+ id: number,
+    versionId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVersion>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVersionQueryOptions(id,versionId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getRollbackVersionUrl = (id: number,
     versionId: number,) => {

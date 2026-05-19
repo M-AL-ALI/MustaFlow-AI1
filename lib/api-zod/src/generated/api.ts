@@ -374,6 +374,7 @@ export const ListVersionsResponseItem = zod.object({
   "projectId": zod.number(),
   "label": zod.string(),
   "note": zod.string().nullish(),
+  "filesCount": zod.number(),
   "createdAt": zod.coerce.date()
 })
 export const ListVersionsResponse = zod.array(ListVersionsResponseItem)
@@ -389,6 +390,28 @@ export const CreateVersionParams = zod.object({
 export const CreateVersionBody = zod.object({
   "label": zod.string().min(1),
   "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Get a single version including full files snapshot
+ */
+export const GetVersionParams = zod.object({
+  "id": zod.coerce.number(),
+  "versionId": zod.coerce.number()
+})
+
+export const GetVersionResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "label": zod.string(),
+  "note": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "filesSnapshot": zod.array(zod.object({
+  "path": zod.string(),
+  "content": zod.string(),
+  "mimeType": zod.string()
+}))
 })
 
 

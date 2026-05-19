@@ -366,6 +366,7 @@ export interface ProjectVersion {
   label: string;
   /** @nullable */
   note?: string | null;
+  filesCount: number;
   createdAt: string;
 }
 
@@ -373,6 +374,22 @@ export interface ProjectVersionInput {
   /** @minLength 1 */
   label: string;
   note?: string;
+}
+
+export type ProjectVersionDetailFilesSnapshotItem = {
+  path: string;
+  content: string;
+  mimeType: string;
+};
+
+export interface ProjectVersionDetail {
+  id: number;
+  projectId: number;
+  label: string;
+  /** @nullable */
+  note?: string | null;
+  createdAt: string;
+  filesSnapshot: ProjectVersionDetailFilesSnapshotItem[];
 }
 
 export type SecretEntryEnvironment = typeof SecretEntryEnvironment[keyof typeof SecretEntryEnvironment];

@@ -370,6 +370,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProjectVersion"
 
+  /projects/{id}/versions/{versionId}:
+    get:
+      operationId: getVersion
+      tags: [versions]
+      summary: Get a single version including full files snapshot
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: versionId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Version detail with files snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectVersionDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/versions/{versionId}/rollback:
     post:
       operationId: rollbackVersion
@@ -943,12 +965,13 @@ components:
 
     ProjectVersion:
       type: object
-      required: [id, projectId, label, createdAt]
+      required: [id, projectId, label, createdAt, filesCount]
       properties:
         id: { type: integer }
         projectId: { type: integer }
         label: { type: string }
         note: { type: ["string", "null"] }
+        filesCount: { type: integer }
         createdAt: { type: string, format: date-time }
 
     ProjectVersionInput:
@@ -957,6 +980,25 @@ components:
       properties:
         label: { type: string, minLength: 1 }
         note: { type: string }
+
+    ProjectVersionDetail:
+      type: object
+      required: [id, projectId, label, createdAt, filesSnapshot]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        label: { type: string }
+        note: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+        filesSnapshot:
+          type: array
+          items:
+            type: object
+            required: [path, content, mimeType]
+            properties:
+              path: { type: string }
+              content: { type: string }
+              mimeType: { type: string }
 
     SecretEntry:
       type: object

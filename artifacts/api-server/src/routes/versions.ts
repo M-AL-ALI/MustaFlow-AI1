@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, sql, type SQL } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -48,6 +48,7 @@ router.get(
         projectId: projectVersionsTable.projectId,
         label: projectVersionsTable.label,
         note: projectVersionsTable.note,
+        filesCount: sql<number>`COALESCE(jsonb_array_length(${projectVersionsTable.filesSnapshot}), 0)`,
         createdAt: projectVersionsTable.createdAt,
       })
       .from(projectVersionsTable)
@@ -97,6 +98,35 @@ router.post(
       label: parsed.data.label,
       note: parsed.data.note ?? null,
       createdAt: v?.createdAt,
+    });
+  },
+);
+
+router.get(
+  "/projects/:id/versions/:versionId",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const versionId = Number(req.params.versionId);
+    if (!Number.isFinite(versionId)) {
+      res.status(400).json({ error: "Invalid version id" });
+      return;
+    }
+    const [version] = await db
+      .select()
+      .from(projectVersionsTable)
+      .where(eq(projectVersionsTable.id, versionId));
+    if (!version || version.projectId !== projectId) {
+      res.status(404).json({ error: "Version not found" });
+      return;
+    }
+    res.json({
+      id: version.id,
+      projectId: version.projectId,
+      label: version.label,
+      note: version.note ?? null,
+      createdAt: version.createdAt,
+      filesSnapshot: version.filesSnapshot ?? [],
     });
   },
 );

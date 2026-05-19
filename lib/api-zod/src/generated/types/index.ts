@@ -57,6 +57,8 @@ export * from './projectUpdate';
 export * from './projectUpdateAgentMode';
 export * from './projectUpdateStatus';
 export * from './projectVersion';
+export * from './projectVersionDetail';
+export * from './projectVersionDetailFilesSnapshotItem';
 export * from './projectVersionInput';
 export * from './publishResult';
 export * from './readinessCheck';
