@@ -26,6 +26,8 @@ router.get("/knowledge", async (req, res): Promise<void> => {
 
   const typeFilter = typeof req.query.type === "string" ? req.query.type : null;
   const severityFilter = typeof req.query.severity === "string" ? req.query.severity : null;
+  const categoryFilter = typeof req.query.category === "string" ? req.query.category : null;
+  const approvedOnly = req.query.approvedOnly === "true";
   const includeArchived = req.query.archived === "true";
   const limit = Math.min(
     200,
@@ -67,6 +69,8 @@ router.get("/knowledge", async (req, res): Promise<void> => {
   if (!includeArchived) conditions.push(isNull(knowledgeEntriesTable.archivedAt) as SQL);
   if (typeFilter) conditions.push(eq(knowledgeEntriesTable.type, typeFilter) as SQL);
   if (severityFilter) conditions.push(eq(knowledgeEntriesTable.severity, severityFilter) as SQL);
+  if (categoryFilter) conditions.push(eq(knowledgeEntriesTable.category, categoryFilter) as SQL);
+  if (approvedOnly) conditions.push(eq(knowledgeEntriesTable.approvedForReuse, true) as SQL);
 
   const whereClause = conditions.length === 1 ? conditions[0]! : and(...conditions);
 

@@ -695,6 +695,9 @@ export const listKnowledgeQueryOffsetDefault = 0;
 export const ListKnowledgeQueryParams = zod.object({
   "projectId": zod.coerce.number().optional(),
   "type": zod.coerce.string().optional(),
+  "severity": zod.enum(['info', 'warning', 'error']).optional(),
+  "approvedOnly": zod.coerce.boolean().optional(),
+  "category": zod.coerce.string().optional(),
   "archived": zod.coerce.boolean().optional(),
   "limit": zod.coerce.number().default(listKnowledgeQueryLimitDefault),
   "offset": zod.coerce.number().default(listKnowledgeQueryOffsetDefault)

@@ -707,6 +707,18 @@ paths:
           in: query
           required: false
           schema: { type: string }
+        - name: severity
+          in: query
+          required: false
+          schema: { type: string, enum: [info, warning, error] }
+        - name: approvedOnly
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: category
+          in: query
+          required: false
+          schema: { type: string }
         - name: archived
           in: query
           required: false

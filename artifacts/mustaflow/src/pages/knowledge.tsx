@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   useListKnowledge,
   useListProjects,
@@ -30,6 +30,7 @@ import {
   Clock,
   MoreHorizontal,
   FolderOpen,
+  SlidersHorizontal,
 } from "lucide-react";
 
 function getTypeIcon(type: string) {
@@ -78,14 +79,78 @@ function getTypeLabel(type: string) {
   return map[type] ?? type;
 }
 
-const FILTER_OPTIONS = [
-  { label: "All", value: "" },
-  { label: "Builds", value: "build" },
-  { label: "Refines", value: "refine" },
-  { label: "Errors", value: "error" },
-  { label: "Publishes", value: "publish" },
-  { label: "Secrets", value: "secret_change" },
+const CATEGORY_FILTER_OPTIONS = [
+  { label: "Build", value: "build" },
+  { label: "Refine", value: "refine" },
+  { label: "Rollback", value: "rollback" },
+  { label: "Publish", value: "publish" },
+  { label: "Secret", value: "secret_change" },
+  { label: "Note", value: "note" },
 ];
+
+const SEVERITY_FILTER_OPTIONS = [
+  { label: "Info", value: "info" },
+  { label: "Warning", value: "warning" },
+  { label: "Error", value: "error" },
+];
+
+function useUrlFilter(key: string, defaultValue = "") {
+  const [value, setValue] = useState(() => {
+    return new URLSearchParams(window.location.search).get(key) ?? defaultValue;
+  });
+
+  const setValueAndUrl = useCallback(
+    (newValue: string) => {
+      setValue(newValue);
+      const params = new URLSearchParams(window.location.search);
+      if (newValue) {
+        params.set(key, newValue);
+      } else {
+        params.delete(key);
+      }
+      const newSearch = params.toString();
+      const newUrl = `${window.location.pathname}${newSearch ? `?${newSearch}` : ""}`;
+      window.history.replaceState(null, "", newUrl);
+    },
+    [key],
+  );
+
+  return [value, setValueAndUrl] as const;
+}
+
+function PillButton({
+  active,
+  onClick,
+  children,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  count?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "text-xs px-3 py-1 rounded-full border font-medium transition-colors flex items-center gap-1.5",
+        active
+          ? "bg-primary/15 border-primary/40 text-primary"
+          : "border-border text-muted-foreground hover:text-foreground hover:border-primary/30",
+      )}
+    >
+      {children}
+      {count !== undefined && (
+        <span className={cn(
+          "text-[10px] px-1.5 py-0.5 rounded-full font-medium leading-none",
+          active ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground",
+        )}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
 
 function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: () => void }) {
   const [expanded, setExpanded] = useState(false);
@@ -317,13 +382,16 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
 export default function KnowledgePage() {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const queryClient = useQueryClient();
 
+  // URL-persisted filters — keys match the API query param names
+  const [approvedOnly, setApprovedOnly] = useUrlFilter("approvedOnly");
+  const [severityFilter, setSeverityFilter] = useUrlFilter("severity");
+  const [typeFilter, setTypeFilter] = useUrlFilter("type");
+
   const { data: projects = [] } = useListProjects();
 
-  // All entries for the current user's projects (+ global). Server-side project scoping.
   const allEntriesParams = {
     archived: showArchived,
     limit: 200,
@@ -333,7 +401,6 @@ export default function KnowledgePage() {
     { query: { queryKey: getListKnowledgeQueryKey(allEntriesParams) } },
   );
 
-  // Project-specific fetch (when a project is selected)
   const projectParams = {
     projectId: selectedProjectId ?? undefined,
     archived: showArchived,
@@ -351,28 +418,80 @@ export default function KnowledgePage() {
 
   const isLoading = isLoadingAll || (selectedProjectId !== null && isLoadingProject);
 
-  // Apply search + type filter
-  const filterEntries = (entries: KnowledgeEntry[]) =>
-    entries.filter((e) => {
-      if (typeFilter === "error" && e.severity !== "error") return false;
-      if (typeFilter && typeFilter !== "error" && e.type !== typeFilter) return false;
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return e.title.toLowerCase().includes(q) || e.content.toLowerCase().includes(q);
-      }
-      return true;
-    });
+  // The base pool of entries for count calculations (all entries, pre-filter, matching search only)
+  const basePool = useMemo(() => {
+    const pool = selectedProjectId !== null ? projectEntries : allEntries;
+    if (!searchQuery) return pool;
+    const q = searchQuery.toLowerCase();
+    return pool.filter(
+      (e) => e.title.toLowerCase().includes(q) || e.content.toLowerCase().includes(q),
+    );
+  }, [allEntries, projectEntries, selectedProjectId, searchQuery]);
 
-  // Global lessons from all entries
-  const filteredGlobal = filterEntries(allEntries.filter((e) => e.approvedForReuse));
+  // Counts per filter option (computed from base pool, independent of active filters)
+  const countApproved = useMemo(() => basePool.filter((e) => e.approvedForReuse).length, [basePool]);
+  const countBySeverity = useMemo(
+    () => ({
+      info: basePool.filter((e) => e.severity === "info").length,
+      warning: basePool.filter((e) => e.severity === "warning").length,
+      error: basePool.filter((e) => e.severity === "error").length,
+    }),
+    [basePool],
+  );
+  const countByType = useMemo(
+    () =>
+      Object.fromEntries(
+        CATEGORY_FILTER_OPTIONS.map((opt) => [
+          opt.value,
+          basePool.filter((e) => e.type === opt.value).length,
+        ]),
+      ),
+    [basePool],
+  );
 
-  // Project history: either filtered by selected project, or grouped by project across all
-  const baseProjectHistory = selectedProjectId !== null
-    ? projectEntries.filter((e) => !e.approvedForReuse && e.projectId === selectedProjectId)
-    : allEntries.filter((e) => !e.approvedForReuse && e.projectId !== null);
-  const filteredProjectHistory = filterEntries(baseProjectHistory);
+  // Apply all active filters
+  const applyFilters = useCallback(
+    (entries: KnowledgeEntry[]) =>
+      entries.filter((e) => {
+        if (approvedOnly === "true" && !e.approvedForReuse) return false;
+        if (severityFilter && e.severity !== severityFilter) return false;
+        if (typeFilter && e.type !== typeFilter) return false;
+        if (searchQuery) {
+          const q = searchQuery.toLowerCase();
+          return e.title.toLowerCase().includes(q) || e.content.toLowerCase().includes(q);
+        }
+        return true;
+      }),
+    [approvedOnly, severityFilter, typeFilter, searchQuery],
+  );
 
-  // Group by project when no specific project is selected
+  const hasActiveFilter = approvedOnly === "true" || !!severityFilter || !!typeFilter;
+
+  const resetFilters = () => {
+    setApprovedOnly("");
+    setSeverityFilter("");
+    setTypeFilter("");
+  };
+
+  // Global lessons (approved for reuse)
+  const filteredGlobal = useMemo(
+    () => applyFilters(allEntries.filter((e) => e.approvedForReuse)),
+    [applyFilters, allEntries],
+  );
+
+  // Project history (not approved)
+  const baseProjectHistory = useMemo(
+    () =>
+      selectedProjectId !== null
+        ? projectEntries.filter((e) => !e.approvedForReuse && e.projectId === selectedProjectId)
+        : allEntries.filter((e) => !e.approvedForReuse && e.projectId !== null),
+    [selectedProjectId, projectEntries, allEntries],
+  );
+  const filteredProjectHistory = useMemo(
+    () => applyFilters(baseProjectHistory),
+    [applyFilters, baseProjectHistory],
+  );
+
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects]);
   const groupedByProject = useMemo(() => {
     if (selectedProjectId !== null) return null;
@@ -400,6 +519,8 @@ export default function KnowledgePage() {
     }
   };
 
+  const totalVisible = filteredGlobal.length + filteredProjectHistory.length;
+
   return (
     <div className="p-8 max-w-5xl mx-auto w-full space-y-8">
       {/* Header */}
@@ -412,6 +533,7 @@ export default function KnowledgePage() {
 
       {/* Controls */}
       <div className="space-y-3">
+        {/* Top row: project selector + search + archive toggle */}
         <div className="flex items-center gap-3 flex-wrap">
           <select
             value={selectedProjectId ?? ""}
@@ -449,99 +571,170 @@ export default function KnowledgePage() {
             {showArchived ? "Hide archived" : "Show archived"}
           </button>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {FILTER_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setTypeFilter(opt.value === typeFilter ? "" : opt.value)}
-              className={cn(
-                "text-xs px-3 py-1 rounded-full border font-medium transition-colors",
-                typeFilter === opt.value
-                  ? "bg-primary/15 border-primary/40 text-primary"
-                  : "border-border text-muted-foreground hover:text-foreground hover:border-primary/30",
-              )}
+
+        {/* Filter bar */}
+        <div className="rounded-lg border border-border bg-card/50 p-3 space-y-2.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+              <SlidersHorizontal className="h-3 w-3" />
+              <span className="font-medium">Filter</span>
+            </div>
+            <div className="h-3 w-px bg-border shrink-0" />
+
+            {/* Status */}
+            <PillButton
+              active={!hasActiveFilter}
+              onClick={resetFilters}
+              count={totalVisible}
             >
-              {opt.label}
-            </button>
-          ))}
+              All
+            </PillButton>
+            <PillButton
+              active={approvedOnly === "true"}
+              onClick={() => setApprovedOnly(approvedOnly === "true" ? "" : "true")}
+              count={countApproved}
+            >
+              <Star className="h-3 w-3" />
+              Approved Only
+            </PillButton>
+
+            {hasActiveFilter && (
+              <button
+                onClick={resetFilters}
+                className="text-xs text-muted-foreground/70 hover:text-foreground flex items-center gap-1 transition-colors ml-auto"
+              >
+                <X className="h-3 w-3" /> Clear filters
+              </button>
+            )}
+          </div>
+
+          {/* Severity row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-14 shrink-0">Severity</span>
+            {SEVERITY_FILTER_OPTIONS.map((opt) => (
+              <PillButton
+                key={opt.value}
+                active={severityFilter === opt.value}
+                onClick={() => setSeverityFilter(severityFilter === opt.value ? "" : opt.value)}
+                count={countBySeverity[opt.value as keyof typeof countBySeverity]}
+              >
+                {opt.value === "error" && <AlertTriangle className="h-3 w-3" />}
+                {opt.value === "warning" && <AlertTriangle className="h-3 w-3" />}
+                {opt.value === "info" && <Info className="h-3 w-3" />}
+                {opt.label}
+              </PillButton>
+            ))}
+          </div>
+
+          {/* Type row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-14 shrink-0">Type</span>
+            {CATEGORY_FILTER_OPTIONS.map((opt) => {
+              const count = countByType[opt.value] ?? 0;
+              if (count === 0 && typeFilter !== opt.value) return null;
+              return (
+                <PillButton
+                  key={opt.value}
+                  active={typeFilter === opt.value}
+                  onClick={() => setTypeFilter(typeFilter === opt.value ? "" : opt.value)}
+                  count={count}
+                >
+                  {opt.label}
+                </PillButton>
+              );
+            })}
+          </div>
         </div>
+
+        {/* Active filter summary */}
+        {hasActiveFilter && (
+          <p className="text-xs text-muted-foreground/70">
+            Showing <span className="text-foreground font-medium">{totalVisible}</span> {totalVisible === 1 ? "entry" : "entries"} matching active filters
+          </p>
+        )}
       </div>
 
       {/* Global Lessons */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Star className="h-4 w-4 text-yellow-400" />
-          <h2 className="text-lg font-semibold">Global Lessons</h2>
-          <span className="text-xs text-muted-foreground ml-1">({filteredGlobal.length})</span>
-          <p className="text-xs text-muted-foreground ml-2">— Approved for reuse across all projects</p>
-        </div>
-        {isLoading ? (
-          <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">
-            Loading…
+      {approvedOnly !== "true" || filteredGlobal.length > 0 ? (
+        <section className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Star className="h-4 w-4 text-yellow-400" />
+            <h2 className="text-lg font-semibold">Global Lessons</h2>
+            <span className="text-xs text-muted-foreground ml-1">({filteredGlobal.length})</span>
+            <p className="text-xs text-muted-foreground ml-2">— Approved for reuse across all projects</p>
           </div>
-        ) : filteredGlobal.length === 0 ? (
-          <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">
-            No global lessons yet. Promote an entry to make it available to the AI across all projects.
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            {filteredGlobal.map((entry) => (
-              <KnowledgeCard key={entry.id} entry={entry} onUpdate={invalidate} />
-            ))}
-          </div>
-        )}
-      </section>
+          {isLoading ? (
+            <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">
+              Loading…
+            </div>
+          ) : filteredGlobal.length === 0 ? (
+            <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">
+              {hasActiveFilter
+                ? "No global lessons match the active filters."
+                : "No global lessons yet. Promote an entry to make it available to the AI across all projects."}
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {filteredGlobal.map((entry) => (
+                <KnowledgeCard key={entry.id} entry={entry} onUpdate={invalidate} />
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
 
-      {/* Project History */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Clock className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">
-            Project History
-            {selectedProject && (
-              <span className="text-muted-foreground font-normal text-base ml-2">
-                — {selectedProject.name}
-              </span>
-            )}
-          </h2>
-          <span className="text-xs text-muted-foreground ml-1">({filteredProjectHistory.length})</span>
-        </div>
+      {/* Project History — hidden when Approved Only is active and there are no results */}
+      {approvedOnly !== "true" && (
+        <section className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-lg font-semibold">
+              Project History
+              {selectedProject && (
+                <span className="text-muted-foreground font-normal text-base ml-2">
+                  — {selectedProject.name}
+                </span>
+              )}
+            </h2>
+            <span className="text-xs text-muted-foreground ml-1">({filteredProjectHistory.length})</span>
+          </div>
 
-        {isLoading ? (
-          <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">Loading…</div>
-        ) : filteredProjectHistory.length === 0 ? (
-          <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">
-            {selectedProjectId !== null
-              ? "No history entries for this project yet."
-              : "No project history yet. History is recorded automatically as you build."}
-          </div>
-        ) : selectedProjectId !== null ? (
-          // Single project: flat list
-          <div className="grid gap-3">
-            {filteredProjectHistory.map((entry) => (
-              <KnowledgeCard key={entry.id} entry={entry} onUpdate={invalidate} />
-            ))}
-          </div>
-        ) : (
-          // All projects: grouped by project
-          <div className="space-y-6">
-            {(groupedByProject ?? []).map(({ projectName, entries }) => (
-              <div key={projectName} className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <FolderOpen className="h-3.5 w-3.5 text-muted-foreground/60" />
-                  <span className="text-sm font-medium text-muted-foreground">{projectName}</span>
-                  <span className="text-xs text-muted-foreground/50">({entries.length})</span>
+          {isLoading ? (
+            <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">Loading…</div>
+          ) : filteredProjectHistory.length === 0 ? (
+            <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">
+              {hasActiveFilter
+                ? "No project history entries match the active filters."
+                : selectedProjectId !== null
+                ? "No history entries for this project yet."
+                : "No project history yet. History is recorded automatically as you build."}
+            </div>
+          ) : selectedProjectId !== null ? (
+            <div className="grid gap-3">
+              {filteredProjectHistory.map((entry) => (
+                <KnowledgeCard key={entry.id} entry={entry} onUpdate={invalidate} />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {(groupedByProject ?? []).map(({ projectName, entries }) => (
+                <div key={projectName} className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <FolderOpen className="h-3.5 w-3.5 text-muted-foreground/60" />
+                    <span className="text-sm font-medium text-muted-foreground">{projectName}</span>
+                    <span className="text-xs text-muted-foreground/50">({entries.length})</span>
+                  </div>
+                  <div className="grid gap-2 pl-5 border-l border-border/40">
+                    {entries.map((entry) => (
+                      <KnowledgeCard key={entry.id} entry={entry} onUpdate={invalidate} />
+                    ))}
+                  </div>
                 </div>
-                <div className="grid gap-2 pl-5 border-l border-border/40">
-                  {entries.map((entry) => (
-                    <KnowledgeCard key={entry.id} entry={entry} onUpdate={invalidate} />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

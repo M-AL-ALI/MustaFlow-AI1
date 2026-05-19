@@ -726,10 +726,22 @@ export type ListCreditTransactions200 = {
 export type ListKnowledgeParams = {
 projectId?: number;
 type?: string;
+severity?: ListKnowledgeSeverity;
+approvedOnly?: boolean;
+category?: string;
 archived?: boolean;
 limit?: number;
 offset?: number;
 };
+
+export type ListKnowledgeSeverity = typeof ListKnowledgeSeverity[keyof typeof ListKnowledgeSeverity];
+
+
+export const ListKnowledgeSeverity = {
+  info: 'info',
+  warning: 'warning',
+  error: 'error',
+} as const;
 
 export type DeleteKnowledge200 = {
   ok: boolean;

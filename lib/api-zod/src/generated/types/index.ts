@@ -43,6 +43,7 @@ export * from './knowledgeUpdate';
 export * from './listCreditTransactions200';
 export * from './listDeployments200';
 export * from './listKnowledgeParams';
+export * from './listKnowledgeSeverity';
 export * from './listProjectsParams';
 export * from './project';
 export * from './projectAgentMode';
