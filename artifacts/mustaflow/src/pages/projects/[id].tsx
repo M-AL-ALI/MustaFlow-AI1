@@ -345,6 +345,7 @@ export default function ProjectWorkspacePage() {
   const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history">("chat");
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
+  const [focusMode, setFocusMode] = useState(false);
   const [splitPct, setSplitPct] = useState<number>(() => {
     const stored = localStorage.getItem("mustaflow_split_pct");
     return stored ? Math.min(65, Math.max(25, parseFloat(stored))) : 38;
@@ -1133,6 +1134,21 @@ export default function ProjectWorkspacePage() {
                 project={project}
                 focusMode={focusMode}
                 onToggleFocusMode={() => setFocusMode((f) => !f)}
+                validationWarnings={(() => {
+                  const recentReport = [...(messages ?? [])]
+                    .reverse()
+                    .find((m) => {
+                      const p = m.plan as ChatPlanPayload | null | undefined;
+                      return p && typeof p === "object" && (p as { kind?: string }).kind === "report";
+                    });
+                  if (!recentReport) return [];
+                  const payload = recentReport.plan as { kind: "report"; report: TaskReport };
+                  return payload.report?.warnings ?? [];
+                })()}
+                onFixPrompt={(text) => {
+                  setPrompt(text);
+                  setLeftPanelTab("chat");
+                }}
               />
             )}
             {activeTab === "code" && <CodeEditorTab projectId={projectId} initialFileId={selectedCodeFileId} />}

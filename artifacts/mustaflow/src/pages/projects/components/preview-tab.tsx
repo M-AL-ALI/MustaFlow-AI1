@@ -17,6 +17,10 @@ import {
   Maximize2,
   Minimize2,
   Trash2,
+  ShieldAlert,
+  Maximize2,
+  Minimize2,
+  Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -51,21 +55,54 @@ type Project = {
   name?: string;
 };
 
+type PreviewTabProps = {
+  project: Project;
+  focusMode?: boolean;
+  onToggleFocusMode?: () => void;
+  validationWarnings?: string[];
+  onFixPrompt?: (text: string) => void;
+};
+
+// ─── Security note ────────────────────────────────────────────────────────────
+// The preview iframe uses sandbox="allow-scripts allow-forms allow-popups".
+// allow-same-origin is intentionally OMITTED so the iframe receives a null origin
+// and cannot read parent window data, cookies, localStorage, or secrets.
+//
+// Consequence: contentWindow access is cross-origin and will throw SecurityError.
+// Console capture and health-check DOM inspection are therefore not available.
+//
+// TODO (multi-user launch): serve previews from a separate subdomain with
+// short-lived signed URLs, or use a container-based preview system.
+// This will restore full isolation AND allow opt-in postMessage console bridging.
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function PreviewTab({
   project,
   focusMode,
   onToggleFocusMode,
-}: {
-  project: Project;
-  focusMode?: boolean;
-  onToggleFocusMode?: () => void;
-}) {
+  validationWarnings = [],
+  onFixPrompt,
+}: PreviewTabProps) {
+  const [platform, setPlatform] = useState<Platform>("web");
   const [device, setDevice] = useState<DeviceFrame>("desktop");
   const [iframeKey, setIframeKey] = useState(0);
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
+  const [validationDismissed, setValidationDismissed] = useState(false);
+  const prevWarningsRef = useRef<string[]>([]);
+
+  // Reset dismissed state when warnings change (new build completed)
+  useEffect(() => {
+    const prev = prevWarningsRef.current;
+    const changed =
+      validationWarnings.length !== prev.length ||
+      validationWarnings.some((w, i) => w !== prev[i]);
+    if (changed) {
+      setValidationDismissed(false);
+      prevWarningsRef.current = validationWarnings;
+    }
+  }, [validationWarnings]);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const prevStatusRef = useRef<string>(project.status);
@@ -305,6 +342,44 @@ export function PreviewTab({
           <button onClick={() => setHealthWarning(null)} className="shrink-0 hover:opacity-70 transition-opacity">
             <X className="h-3.5 w-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* Validation warnings banner */}
+      {validationWarnings.length > 0 && !validationDismissed && (
+        <div className="shrink-0 border-b border-orange-500/20 bg-orange-500/8">
+          <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 text-orange-400 shrink-0" />
+            <span className="flex-1 text-[11px] font-semibold text-orange-400">
+              {validationWarnings.length} validation {validationWarnings.length === 1 ? "issue" : "issues"} found — the AI flagged problems it could not fully resolve
+            </span>
+            <button
+              onClick={() => setValidationDismissed(true)}
+              className="shrink-0 text-orange-400/60 hover:text-orange-400 transition-colors"
+              title="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="px-3 pb-2 space-y-1.5">
+            {validationWarnings.map((warning, idx) => (
+              <div
+                key={idx}
+                className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/20 rounded-lg px-2.5 py-2"
+              >
+                <Wrench className="h-3 w-3 text-orange-400 shrink-0 mt-0.5" />
+                <span className="flex-1 text-[11px] text-orange-300/90 leading-relaxed">{warning}</span>
+                {onFixPrompt && (
+                  <button
+                    onClick={() => onFixPrompt(`Fix this issue: ${warning}`)}
+                    className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-orange-500/20 border border-orange-500/30 text-orange-300 hover:bg-orange-500/30 transition-colors whitespace-nowrap"
+                  >
+                    Ask AI to fix this
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
