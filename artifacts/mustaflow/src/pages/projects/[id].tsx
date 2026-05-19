@@ -1210,7 +1210,13 @@ export default function ProjectWorkspacePage() {
                 isBuilding={project.status === "building"}
                 onSwitchToPreview={() => setActiveTab("preview")}
                 onSwitchToCode={() => setActiveTab("code")}
-                onSwitchToChat={(prefill) => { if (prefill) setChatPrefill(prefill); }}
+                onSwitchToChat={(prefill) => {
+                  if (prefill) setPrompt(prefill);
+                  setLeftPanelTab("chat");
+                  setActiveTab("preview");
+                  if (isMobileLayout) setChatDrawerOpen(true);
+                  setTimeout(() => promptInputRef.current?.focus(), 50);
+                }}
               />
             )}
             {activeTab === "tools-files" && (
