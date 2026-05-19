@@ -644,7 +644,7 @@ export function PreviewTab({
                   <div
                     key={entry.id}
                     className={cn(
-                      "flex items-start gap-2 px-3 py-0.5 border-b border-zinc-900 hover:bg-zinc-900/50",
+                      "group flex items-start gap-2 px-3 py-0.5 border-b border-zinc-900 hover:bg-zinc-900/50",
                       entry.isCrash ? "bg-destructive/10 text-destructive" :
                       entry.level === "error" ? "text-red-400 bg-red-950/20" :
                       entry.level === "warn" ? "text-yellow-400" :
@@ -663,6 +663,18 @@ export function PreviewTab({
                       {entry.isCrash ? "CRASH" : entry.level}
                     </span>
                     <span className="flex-1 break-all whitespace-pre-wrap">{entry.args.join(" ")}</span>
+                    {entry.level === "error" && onFixPrompt && (
+                      <button
+                        onClick={() => {
+                          onFixPrompt(`Fix this runtime error: ${entry.args.join(" ")}`);
+                        }}
+                        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-red-900/60 hover:bg-red-800/80 text-red-300 hover:text-red-100 border border-red-800/50 mt-0.5"
+                        title="Fix with AI"
+                      >
+                        <Wrench className="h-2.5 w-2.5" />
+                        Fix with AI
+                      </button>
+                    )}
                     <span className="text-zinc-700 text-[9px] shrink-0 mt-0.5">
                       {new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </span>
