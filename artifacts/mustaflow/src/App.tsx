@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { applyTheme, syncThemeDom, getStoredTheme } from "@/lib/theme";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
+import { useToast } from "@/hooks/use-toast";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -148,6 +149,23 @@ function isHttpError(err: unknown): err is { status: number } {
   return err != null && typeof err === "object" && "status" in err && typeof (err as { status: unknown }).status === "number";
 }
 
+// Redirects to /projects and shows a toast explaining the reason.
+function AdminRedirect() {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    toast({
+      title: "Admin access is required",
+      description: "You don't have permission to view that page.",
+      variant: "destructive",
+    });
+    setLocation("/projects", { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null;
+}
+
 // Admin route guard — redirects to /projects if the user is not an admin.
 // Shows a neutral loading shell while the check is in flight, then either
 // renders children (admin confirmed) or redirects (auth denied). Non-auth
@@ -170,7 +188,7 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
       (meQuery.error.status === 401 || meQuery.error.status === 403);
 
     if (isAuthError) {
-      return <Redirect to="/projects" />;
+      return <AdminRedirect />;
     }
 
     return (
