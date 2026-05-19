@@ -17,19 +17,31 @@ import {
   XCircle,
   ChevronDown,
   X,
+  Search,
+  BookOpen,
+  GitBranch,
+  ShieldCheck,
+  Database,
+  GraduationCap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type EventType =
   | "queued"
+  | "analyzing_request"
+  | "loading_context"
   | "planning"
+  | "planning_changes"
   | "reading_files"
   | "generating_code"
   | "editing_files"
+  | "validating_output"
   | "testing"
   | "fixing_errors"
+  | "saving_files"
   | "updating_preview"
   | "saving_version"
+  | "writing_lessons"
   | "completed"
   | "failed";
 
@@ -38,7 +50,22 @@ const EVENT_META: Record<
   { icon: React.ElementType; color: string; label: string }
 > = {
   queued: { icon: Clock, color: "text-muted-foreground", label: "Queued" },
+  analyzing_request: {
+    icon: Search,
+    color: "text-violet-400",
+    label: "Analysing request",
+  },
+  loading_context: {
+    icon: BookOpen,
+    color: "text-blue-300",
+    label: "Loading context",
+  },
   planning: { icon: BrainCircuit, color: "text-violet-400", label: "Planning" },
+  planning_changes: {
+    icon: GitBranch,
+    color: "text-violet-300",
+    label: "Planning changes",
+  },
   reading_files: {
     icon: FolderOpen,
     color: "text-blue-400",
@@ -54,6 +81,11 @@ const EVENT_META: Record<
     color: "text-yellow-400",
     label: "Editing files",
   },
+  validating_output: {
+    icon: ShieldCheck,
+    color: "text-cyan-300",
+    label: "Validating output",
+  },
   testing: {
     icon: FlaskConical,
     color: "text-cyan-400",
@@ -64,6 +96,11 @@ const EVENT_META: Record<
     color: "text-orange-400",
     label: "Fixing errors",
   },
+  saving_files: {
+    icon: Database,
+    color: "text-yellow-300",
+    label: "Saving files",
+  },
   updating_preview: {
     icon: RefreshCw,
     color: "text-sky-400",
@@ -73,6 +110,11 @@ const EVENT_META: Record<
     icon: Save,
     color: "text-secondary",
     label: "Saving version",
+  },
+  writing_lessons: {
+    icon: GraduationCap,
+    color: "text-emerald-400",
+    label: "Writing lessons",
   },
   completed: {
     icon: CheckCircle2,

@@ -172,6 +172,9 @@ importers:
       '@clerk/shared':
         specifier: ^4.12.0
         version: 4.12.0(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+      '@types/acorn':
+        specifier: ^6.0.4
+        version: 6.0.4
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../../lib/api-zod
@@ -181,6 +184,9 @@ importers:
       '@workspace/integrations-openai-ai-server':
         specifier: workspace:*
         version: link:../../lib/integrations-openai-ai-server
+      acorn:
+        specifier: ^8.16.0
+        version: 8.16.0
       archiver:
         specifier: ^8.0.0
         version: 8.0.0
@@ -1736,6 +1742,10 @@ packages:
     resolution: {integrity: sha512-Oa44XkaI3kCNN6ME0KByU3xT3SEUNOMfZpHxL6+wFoTm+OeUFYHKdeYVe0aOXlRDm/f15sgLwEt2HDorIdW8+A==}
     peerDependencies:
       react: ^18 || ^19
+
+  '@types/acorn@6.0.4':
+    resolution: {integrity: sha512-DafqcBAjbOOmgqIx3EF9EAdBKAKgspv00aQVIW3fVQ0TXo5ZPBeSRey1SboVAUzjw8Ucm7cd1gtTSlosYoEQLA==}
+    deprecated: This is a stub types definition. acorn provides its own type definitions, so you do not need this installed.
 
   '@types/archiver@7.0.0':
     resolution: {integrity: sha512-/3vwGwx9n+mCQdYZ2IKGGHEFL30I96UgBlk8EtRDDFQ9uxM1l4O5Ci6r00EMAkiDaTqD9DQ6nVrWRICnBPtzzg==}
@@ -4703,6 +4713,10 @@ snapshots:
     dependencies:
       '@tanstack/query-core': 5.100.9
       react: 19.1.0
+
+  '@types/acorn@6.0.4':
+    dependencies:
+      acorn: 8.16.0
 
   '@types/archiver@7.0.0':
     dependencies:

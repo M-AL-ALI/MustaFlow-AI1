@@ -1,4 +1,5 @@
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { parse as acornParse } from "acorn";
 import { logger } from "./logger";
 import type { AgentMode } from "./ai";
 import type { TaskReport } from "@workspace/db";
@@ -10,11 +11,34 @@ const MODEL_FOR_MODE: Record<AgentMode, string> = {
   pro: "gpt-5.4",
 };
 
-const MODE_QUALITY_HINTS: Record<AgentMode, string> = {
-  lite: "Speed over polish. Generate minimal, working code quickly. Keep it simple.",
-  eco: "Balance quality and brevity. Write clean, readable code without over-engineering.",
-  power: "Production-grade quality. Prioritize completeness, accessibility, polished UX, and thorough error handling.",
-  pro: "Highest quality. Focus on UX excellence, accessibility, robust error handling, edge cases, clean code structure, and long-term maintainability.",
+const MODE_QUALITY_STANDARDS: Record<AgentMode, string> = {
+  lite: `QUALITY STANDARD — Lite (speed-first):
+- Minimal working implementation only. Prioritise speed and correctness over polish.
+- Single-page preferred. Skip decorative animations and complex layouts.
+- Functional forms, basic responsive layout, readable typography.
+- Skip empty states, loading skeletons, and complex error handling unless directly requested.`,
+
+  eco: `QUALITY STANDARD — Eco (balanced):
+- Clean, readable code without over-engineering.
+- Responsive layout with a sensible grid or flex structure.
+- Functional and clean UI — avoid decorative complexity.
+- Basic error messaging on forms. Consistent spacing and colour usage.`,
+
+  power: `QUALITY STANDARD — Power (production-grade):
+- Production-quality code. Completeness and robustness are non-negotiable.
+- Full responsive design: mobile-first, tablet, and desktop breakpoints handled.
+- Accessible: colour contrast ≥4.5:1 for text, focus-visible outlines on interactive elements, aria-labels on icon-only buttons, semantic HTML elements.
+- Loading states on async actions, empty states with helpful copy, client-side form validation with inline error messages.
+- Polished UX: smooth hover/focus transitions (150–200ms), consistent spacing scale, no orphaned UI elements.`,
+
+  pro: `QUALITY STANDARD — Pro (highest quality):
+- Highest standard of UX, accessibility, and code structure.
+- WCAG AA accessibility: contrast ratios, keyboard navigation, screen-reader labels, focus management.
+- Full responsive: fluid grids, no overflow on any viewport, touch targets ≥44px.
+- Complete error handling: network failures, empty data, validation errors — all states designed.
+- Loading skeletons or spinners for every async operation. Optimistic UI where appropriate.
+- Rich micro-interactions: hover lift effects, active states, animated transitions. Never feel static.
+- Long-term maintainability: logical file structure, named CSS custom properties for theme tokens, no magic numbers.`,
 };
 
 export type BuilderFile = {
@@ -49,6 +73,12 @@ export type BuilderResult = {
 export type ConversationTurn = {
   role: "user" | "assistant";
   content: string;
+};
+
+export type ValidationResult = {
+  passed: boolean;
+  criticalErrors: string[];
+  warnings: string[];
 };
 
 const PREVIEW_NOTE = `IMPORTANT preview-runtime constraints:
@@ -112,13 +142,16 @@ OUTPUT STRICT JSON matching this exact shape:
 
 The "files" array must contain every file needed. Always include "index.html" as path. CSS/JS files are optional; inline is fine.`;
 
-const REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE. You receive the current project files and a change request. You modify the affected files and return the FULL updated file contents (not patches).
+const REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE. You receive the current project files and a change request. You modify the affected files and return the FULL updated file contents.
+
+For files larger than 3KB, you MAY also return a "patches" array to surgically update specific sections. Each patch has: { "path": string, "find": string, "replace": string } where "find" is a unique excerpt from the file and "replace" is the new content that should replace it.
 
 ${PREVIEW_NOTE}
 
 OUTPUT STRICT JSON matching this exact shape:
 {
   "files": [{ "path": string, "content": string, "mimeType": string }],
+  "patches": [{ "path": string, "find": string, "replace": string }],
   "filesRemoved": string[],
   "summary": string,
   "warnings": string[],
@@ -126,7 +159,7 @@ OUTPUT STRICT JSON matching this exact shape:
   "nextRecommendation": string
 }
 
-The "files" array should contain ONLY the files that were created or changed (full new content). The "filesRemoved" array lists files to delete. Do NOT echo files that are unchanged.`;
+The "files" array should contain ONLY the files that were created or changed (full new content). The "patches" array is optional — use it for large files where only a section changes. The "filesRemoved" array lists files to delete. Do NOT echo files that are unchanged.`;
 
 const PLAN_SYSTEM_PROMPT = `You are the MustaFlow AI Planner. You do NOT generate code in this mode. You output a structured plan as STRICT JSON only:
 {
@@ -149,25 +182,315 @@ function modelFor(mode: AgentMode): string {
 }
 
 /**
- * For refine mode: if the full file manifest is too large (> 20k chars),
- * truncate each file body to the first 400 chars to keep the prompt manageable
- * while still giving the AI full awareness of all file paths and types.
+ * Extract structural summary of a file — function/class names, IDs, key patterns.
+ * Used for "related but not directly referenced" files in the tiered manifest.
  */
-function makeCompactManifest(files: BuilderFile[]): string {
+function extractStructuralSummary(content: string, mimeType: string): string {
+  const lines: string[] = [];
+
+  if (mimeType === "text/html" || content.includes("<!DOCTYPE") || content.includes("<html")) {
+    const idMatches = content.match(/id="([^"]{1,40})"/g) ?? [];
+    const tagMatches = content.match(/<(h[1-6]|nav|main|section|article|form|table)[^>]*>/g) ?? [];
+    if (tagMatches.length > 0) lines.push(`Structural tags: ${tagMatches.slice(0, 8).join(", ")}`);
+    if (idMatches.length > 0) lines.push(`IDs: ${idMatches.slice(0, 10).join(", ")}`);
+  } else if (mimeType === "application/javascript" || mimeType === "text/javascript") {
+    const fnMatches = content.match(/(?:function\s+(\w+)|const\s+(\w+)\s*=\s*(?:async\s+)?(?:function|\())/g) ?? [];
+    const classMatches = content.match(/class\s+\w+/g) ?? [];
+    if (fnMatches.length > 0) lines.push(`Functions: ${fnMatches.slice(0, 10).join(", ")}`);
+    if (classMatches.length > 0) lines.push(`Classes: ${classMatches.slice(0, 5).join(", ")}`);
+  } else if (mimeType === "text/css") {
+    const selectorMatches = content.match(/^[.#][\w-]+\s*\{/gm) ?? [];
+    const varMatches = content.match(/--[\w-]+:/g) ?? [];
+    if (selectorMatches.length > 0) lines.push(`Selectors: ${selectorMatches.slice(0, 8).join(", ")}`);
+    if (varMatches.length > 0) lines.push(`CSS vars: ${varMatches.slice(0, 8).join(", ")}`);
+  }
+
+  return lines.length > 0 ? lines.join("; ") : "";
+}
+
+/**
+ * Tiered file manifest for refine mode:
+ * - Files directly mentioned in the prompt → full content
+ * - Files in the same directory as mentioned files → first 800 chars + structural summary
+ * - All others → single-line descriptor only
+ *
+ * Falls back to full content if the total is under 20k chars.
+ */
+export function makeCompactManifest(
+  files: BuilderFile[],
+  userPrompt?: string,
+): string {
   const full = files
     .map((f) => `--- ${f.path} (${f.mimeType}) ---\n${f.content}`)
     .join("\n\n");
   if (full.length <= 20000) return full;
+
+  const promptLower = (userPrompt ?? "").toLowerCase();
+  const directlyReferenced = new Set<string>();
+  const referencedDirs = new Set<string>();
+
+  for (const f of files) {
+    const fileName = f.path.split("/").pop()?.toLowerCase() ?? "";
+    const pathLower = f.path.toLowerCase();
+    if (
+      promptLower.includes(pathLower) ||
+      promptLower.includes(fileName) ||
+      f.path === "index.html"
+    ) {
+      directlyReferenced.add(f.path);
+      const dir = f.path.includes("/") ? f.path.split("/").slice(0, -1).join("/") : "";
+      referencedDirs.add(dir);
+    }
+  }
+
   return files
     .map((f) => {
-      const body =
-        f.content.length > 400
-          ? f.content.slice(0, 400) +
-            `\n…(${f.content.length - 400} more chars)`
-          : f.content;
-      return `--- ${f.path} (${f.mimeType}, ${f.content.length} chars total) ---\n${body}`;
+      if (directlyReferenced.has(f.path)) {
+        return `--- ${f.path} (${f.mimeType}, FULL — directly referenced) ---\n${f.content}`;
+      }
+
+      const dir = f.path.includes("/") ? f.path.split("/").slice(0, -1).join("/") : "";
+      if (referencedDirs.has(dir)) {
+        const preview = f.content.slice(0, 800);
+        const structural = extractStructuralSummary(f.content, f.mimeType);
+        const tail = f.content.length > 800
+          ? `\n…(${f.content.length - 800} more chars)${structural ? ` | Structure: ${structural}` : ""}`
+          : "";
+        return `--- ${f.path} (${f.mimeType}, ${f.content.length} chars — related dir) ---\n${preview}${tail}`;
+      }
+
+      const structural = extractStructuralSummary(f.content, f.mimeType);
+      const desc = structural ? ` [${structural}]` : "";
+      return `--- ${f.path} (${f.mimeType}, ${f.content.length} chars — unchanged)${desc} ---`;
     })
     .join("\n\n");
+}
+
+export type FilePatch = {
+  path: string;
+  find: string;
+  replace: string;
+};
+
+/**
+ * Apply a patch to a file's content. Returns the patched content, or null if
+ * the find string was not found (caller should fall back to full replacement).
+ */
+export function applyPatch(content: string, patch: FilePatch): string | null {
+  const idx = content.indexOf(patch.find);
+  if (idx === -1) {
+    logger.warn({ path: patch.path, findPreview: patch.find.slice(0, 80) }, "Patch find string not located — falling back to full replacement");
+    return null;
+  }
+  return content.slice(0, idx) + patch.replace + content.slice(idx + patch.find.length);
+}
+
+/**
+ * Runtime-guard a raw patch from AI output. Returns a valid FilePatch or null
+ * if the object is malformed — prevents crashes from unexpected AI output shapes.
+ */
+function guardPatch(raw: unknown): FilePatch | null {
+  if (
+    typeof raw !== "object" ||
+    raw === null ||
+    typeof (raw as Record<string, unknown>).path !== "string" ||
+    typeof (raw as Record<string, unknown>).find !== "string" ||
+    typeof (raw as Record<string, unknown>).replace !== "string"
+  ) {
+    logger.warn({ raw }, "Malformed patch entry from AI — skipping");
+    return null;
+  }
+  return raw as FilePatch;
+}
+
+/**
+ * Apply a list of patches to a set of existing files.
+ * Returns:
+ *   patched — map of path → successfully patched content
+ *   failed  — paths where one or more patches could not be applied (find string not found)
+ *
+ * Malformed patch entries are ignored with a warning (never crash the pipeline).
+ * Callers must fall back to full file replacement for failed paths.
+ */
+export function applyPatches(
+  existingFiles: BuilderFile[],
+  rawPatches: unknown[],
+): { patched: Map<string, string>; failed: string[] } {
+  const byPath = new Map(existingFiles.map((f) => [f.path, f.content]));
+  const patched = new Map<string, string>();
+  const failed: string[] = [];
+
+  const grouped = new Map<string, FilePatch[]>();
+  for (const raw of rawPatches) {
+    const patch = guardPatch(raw);
+    if (!patch) continue;
+    const list = grouped.get(patch.path) ?? [];
+    list.push(patch);
+    grouped.set(patch.path, list);
+  }
+
+  for (const [path, filePatches] of grouped) {
+    let content = byPath.get(path);
+    if (content === undefined) {
+      logger.warn({ path }, "Patch targets unknown file — skipping");
+      failed.push(path);
+      continue;
+    }
+    let allApplied = true;
+    for (const patch of filePatches) {
+      const result = applyPatch(content, patch);
+      if (result === null) {
+        allApplied = false;
+        break;
+      }
+      content = result;
+    }
+    if (allApplied) {
+      patched.set(path, content);
+    } else {
+      failed.push(path);
+    }
+  }
+
+  return { patched, failed };
+}
+
+/**
+ * Check whether a CDN URL is reachable using a HEAD request with a short timeout.
+ * Returns true if reachable, false otherwise. Best-effort — never throws.
+ */
+async function checkUrlReachable(url: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(url, { method: "HEAD", signal: controller.signal });
+    clearTimeout(timeoutId);
+    return res.ok || res.status < 500;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Parse a JS string using acorn and return the first syntax error message, or null if valid.
+ */
+function parseJsSyntax(code: string): string | null {
+  try {
+    acornParse(code, { ecmaVersion: "latest", sourceType: "script" });
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+const APPROVED_CDN_HOSTNAMES = new Set([
+  "cdn.tailwindcss.com",
+  "unpkg.com",
+  "cdn.jsdelivr.net",
+  "cdnjs.cloudflare.com",
+  "fonts.googleapis.com",
+  "fonts.gstatic.com",
+  "images.unsplash.com",
+  "picsum.photos",
+  "tile.openstreetmap.org",
+  "js.stripe.com",
+  "maps.googleapis.com",
+  "www.gstatic.com",
+]);
+
+/**
+ * Lightweight self-validation of generated/changed files.
+ * Validates ALL file types in the given array:
+ * - HTML: structure check + inline <script> acorn parse + CDN URL reachability
+ * - JS/MJS standalone files: full acorn parse
+ * Async because CDN reachability requires network calls.
+ */
+export async function validateFiles(files: BuilderFile[]): Promise<ValidationResult> {
+  const criticalErrors: string[] = [];
+  const warnings: string[] = [];
+  const cdnUrlsToCheck: string[] = [];
+
+  for (const f of files) {
+    const isHtml = f.mimeType === "text/html" || f.path.endsWith(".html") || f.path.endsWith(".htm");
+    const isJs = f.mimeType === "application/javascript" ||
+      f.mimeType === "text/javascript" ||
+      f.path.endsWith(".js") ||
+      f.path.endsWith(".mjs");
+
+    if (isHtml) {
+      const c = f.content;
+
+      // Check for basic HTML structure
+      if (!c.includes("<html") && !c.includes("<!DOCTYPE")) {
+        warnings.push(`${f.path}: Missing <!DOCTYPE> or <html> — may render incorrectly`);
+      }
+      if (!c.includes("<head") && !c.includes("<body")) {
+        criticalErrors.push(`${f.path}: Missing <head> and <body> — incomplete HTML structure`);
+      }
+
+      // Check for unbalanced common tags (heuristic)
+      const openCount = (tag: string) => (c.match(new RegExp(`<${tag}[\\s>]`, "gi")) ?? []).length;
+      const closeCount = (tag: string) => (c.match(new RegExp(`</${tag}>`, "gi")) ?? []).length;
+      for (const tag of ["div", "ul", "ol", "table", "form", "script", "style"]) {
+        const opens = openCount(tag);
+        const closes = closeCount(tag);
+        if (opens > 0 && Math.abs(opens - closes) > opens * 0.3) {
+          warnings.push(`${f.path}: Possibly unbalanced <${tag}> tags (${opens} open, ${closes} close)`);
+        }
+      }
+
+      // Collect CDN URLs for reachability check
+      const scriptSrcs = [...c.matchAll(/src="(https?:\/\/[^"]+)"/g)].map((m) => m[1]!);
+      const linkHrefs = [...c.matchAll(/href="(https?:\/\/[^"]+)"/g)].map((m) => m[1]!);
+      for (const url of [...scriptSrcs, ...linkHrefs]) {
+        try {
+          const hostname = new URL(url).hostname;
+          if (!APPROVED_CDN_HOSTNAMES.has(hostname)) {
+            warnings.push(`${f.path}: External URL from unrecognised host may not load in preview: ${url.slice(0, 100)}`);
+          } else {
+            cdnUrlsToCheck.push(url);
+          }
+        } catch {
+          warnings.push(`${f.path}: Malformed URL detected: ${url.slice(0, 100)}`);
+        }
+      }
+
+      // Parse inline <script> blocks (non-babel, non-src) with acorn
+      const scriptBlocks = [
+        ...c.matchAll(/<script(?![^>]*type=["']text\/babel["'])(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/gi),
+      ];
+      for (const match of scriptBlocks) {
+        const code = (match[1] ?? "").trim();
+        if (code.length === 0) continue;
+        const syntaxError = parseJsSyntax(code);
+        if (syntaxError) {
+          criticalErrors.push(`${f.path}: JavaScript syntax error in inline <script>: ${syntaxError}`);
+        }
+      }
+    }
+
+    if (isJs) {
+      // Parse standalone JS files with acorn
+      const code = f.content.trim();
+      if (code.length > 0) {
+        const syntaxError = parseJsSyntax(code);
+        if (syntaxError) {
+          criticalErrors.push(`${f.path}: JavaScript syntax error: ${syntaxError}`);
+        }
+      }
+    }
+  }
+
+  // CDN reachability — check up to 3 unique CDN URLs (bounded to keep validation fast)
+  const uniqueCdnUrls = [...new Set(cdnUrlsToCheck)].slice(0, 3);
+  for (const url of uniqueCdnUrls) {
+    const reachable = await checkUrlReachable(url);
+    if (!reachable) {
+      warnings.push(`CDN URL may not be reachable in preview: ${url.slice(0, 100)}`);
+    }
+  }
+
+  return { passed: criticalErrors.length === 0, criticalErrors, warnings };
 }
 
 async function callWithRetry(
@@ -224,6 +547,79 @@ async function callWithRetry(
   throw lastError;
 }
 
+/**
+ * Run correction pass after validation failure.
+ *
+ * Accepts the current full file set so it can merge corrections in — the model
+ * may return only the fixed file(s), so we merge into the originals rather than
+ * replacing them. The merged set is then re-validated.
+ *
+ * Returns the merged+corrected file set if re-validation passes, otherwise null
+ * (caller persists originals and flags validation_failed).
+ */
+async function runCorrectionPass(
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  parsed: Record<string, unknown>,
+  criticalErrors: string[],
+  currentFiles: BuilderFile[],
+  mode: AgentMode,
+  label: string,
+  requireIndexHtml = false,
+): Promise<BuilderFile[] | null> {
+  try {
+    const correctionMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      ...messages,
+      { role: "assistant", content: JSON.stringify(parsed) },
+      {
+        role: "user",
+        content: `Your generated files have the following critical errors that must be fixed:\n${criticalErrors.join("\n")}\n\nReturn ONLY the files that need corrections (with full corrected content). Other files are unchanged.`,
+      },
+    ];
+    const corrected = await callWithRetry(correctionMessages, modelFor(mode), 32000, label);
+    const rawFiles = Array.isArray(corrected.files) ? corrected.files : [];
+    const correctedSubset: BuilderFile[] = rawFiles
+      .filter(
+        (f): f is { path: string; content: string; mimeType?: string } =>
+          typeof f === "object" && f !== null &&
+          typeof (f as { path?: unknown }).path === "string" &&
+          typeof (f as { content?: unknown }).content === "string",
+      )
+      .map((f) => ({
+        path: normalizePath(f.path),
+        content: f.content,
+        mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+      }));
+
+    if (correctedSubset.length === 0) return null;
+
+    // Merge corrected files into the full current set — never drop uncorrected files
+    const mergedMap = new Map(currentFiles.map((f) => [f.path, f]));
+    for (const cf of correctedSubset) {
+      mergedMap.set(cf.path, cf);
+    }
+    const mergedFiles = [...mergedMap.values()];
+
+    // Hard invariant for builds: merged set must still contain index.html
+    if (requireIndexHtml && !mergedFiles.some((f) => f.path === "index.html")) {
+      logger.warn({ label }, "Correction pass did not preserve index.html — falling back to original");
+      return null;
+    }
+
+    // Re-validate the full merged set — only accept if critical errors are cleared
+    const revalidation = await validateFiles(mergedFiles);
+    if (revalidation.passed) {
+      logger.info({ label }, "Correction pass succeeded — merged output passed re-validation");
+      return mergedFiles;
+    }
+
+    logger.warn({ label, stillFailing: revalidation.criticalErrors }, "Correction pass output still has critical errors — falling back to original");
+    return null;
+  } catch (err) {
+    logger.warn({ err, label }, "Correction pass threw — falling back to original");
+    return null;
+  }
+}
+
 export async function runBuildPipeline(args: {
   projectName: string;
   projectKind: string;
@@ -231,8 +627,10 @@ export async function runBuildPipeline(args: {
   agentMode: AgentMode;
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
+  integrationContext?: string;
+  onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<BuilderResult> {
-  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext } = args;
+  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext, integrationContext, onEvent } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: BUILD_SYSTEM_PROMPT },
@@ -249,9 +647,16 @@ export async function runBuildPipeline(args: {
     });
   }
 
+  if (integrationContext) {
+    messages.push({
+      role: "system",
+      content: integrationContext,
+    });
+  }
+
   messages.push({
     role: "system",
-    content: `Quality mode: ${MODE_QUALITY_HINTS[agentMode]}`,
+    content: MODE_QUALITY_STANDARDS[agentMode],
   });
 
   if (conversationHistory && conversationHistory.length > 0) {
@@ -262,6 +667,7 @@ export async function runBuildPipeline(args: {
 
   messages.push({ role: "user", content: userPrompt });
 
+  await onEvent?.("generating_code", "Generating app blueprint and code…");
   const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "build");
 
   const blueprint = (parsed.blueprint ?? {
@@ -274,7 +680,7 @@ export async function runBuildPipeline(args: {
   }) as Blueprint;
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
-  const files: BuilderFile[] = rawFiles
+  let files: BuilderFile[] = rawFiles
     .filter(
       (f): f is { path: string; content: string; mimeType?: string } =>
         typeof f === "object" &&
@@ -292,17 +698,44 @@ export async function runBuildPipeline(args: {
     throw new Error("AI builder did not produce an index.html file.");
   }
 
-  const summary =
-    typeof parsed.summary === "string"
-      ? parsed.summary
-      : `Generated ${files.length} files for ${projectName}.`;
-  const warnings = Array.isArray(parsed.warnings)
+  // Self-validation pass
+  await onEvent?.("validating_output", "Validating generated files…");
+  const validation = await validateFiles(files);
+  let correctionFailed = false;
+  let postCorrectionWarnings: string[] = [];
+
+  if (!validation.passed) {
+    logger.warn({ criticalErrors: validation.criticalErrors }, "Build validation found critical errors — running correction pass");
+    await onEvent?.("validating_output", `Validation found ${validation.criticalErrors.length} issue(s) — running correction…`);
+
+    const corrected = await runCorrectionPass(messages, parsed, validation.criticalErrors, files, agentMode, "build-correction", true);
+    if (corrected !== null) {
+      files = corrected;
+    } else {
+      correctionFailed = true;
+      postCorrectionWarnings = validation.criticalErrors.map((e) => `[validation_failed] ${e}`);
+    }
+  } else {
+    // Validation passed — surface non-critical warnings (CDN, unbalanced tags, etc.)
+    postCorrectionWarnings = validation.warnings;
+  }
+
+  const aiWarnings = Array.isArray(parsed.warnings)
     ? parsed.warnings.filter((w): w is string => typeof w === "string")
     : [];
+  const warnings = correctionFailed
+    ? [...aiWarnings, ...validation.warnings, ...postCorrectionWarnings]
+    : [...aiWarnings, ...postCorrectionWarnings];
+
   const nextRecommendation =
     typeof parsed.nextRecommendation === "string"
       ? parsed.nextRecommendation
       : "Open the Preview tab to see your app, then tell me what to change.";
+
+  const summary =
+    typeof parsed.summary === "string"
+      ? parsed.summary
+      : `Generated ${files.length} files for ${projectName}.`;
 
   const report: TaskReport = {
     userRequest: userPrompt,
@@ -327,15 +760,17 @@ export async function runRefinePipeline(args: {
   existingFiles: BuilderFile[];
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
+  integrationContext?: string;
+  onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
   report: TaskReport;
   assistantSummary: string;
 }> {
-  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext } = args;
+  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext, integrationContext, onEvent } = args;
 
-  const fileManifest = makeCompactManifest(existingFiles);
+  const fileManifest = makeCompactManifest(existingFiles, userPrompt);
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: REFINE_SYSTEM_PROMPT },
@@ -352,9 +787,16 @@ export async function runRefinePipeline(args: {
     });
   }
 
+  if (integrationContext) {
+    messages.push({
+      role: "system",
+      content: integrationContext,
+    });
+  }
+
   messages.push({
     role: "system",
-    content: `Quality mode: ${MODE_QUALITY_HINTS[agentMode]}`,
+    content: MODE_QUALITY_STANDARDS[agentMode],
   });
 
   if (conversationHistory && conversationHistory.length > 0) {
@@ -365,8 +807,10 @@ export async function runRefinePipeline(args: {
 
   messages.push({ role: "user", content: userPrompt });
 
+  await onEvent?.("generating_code", "Applying change request with AI…");
   const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "refine");
 
+  // Build changedFiles from full replacements returned by AI
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
   const changedFiles: BuilderFile[] = rawFiles
     .filter(
@@ -382,6 +826,81 @@ export async function runRefinePipeline(args: {
       mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
     }));
 
+  const fullReplacementPaths = new Set(changedFiles.map((f) => f.path));
+
+  // Apply runtime-guarded patches for large files if provided
+  const rawPatches = Array.isArray(parsed.patches) ? parsed.patches : [];
+  const patchWarnings: string[] = [];
+
+  if (rawPatches.length > 0) {
+    const { patched: patchedContents, failed: failedPaths } = applyPatches(existingFiles, rawPatches);
+
+    // Merge successfully patched files (full replacement wins if also present)
+    for (const [path, patchedContent] of patchedContents) {
+      if (!fullReplacementPaths.has(path)) {
+        const original = existingFiles.find((f) => f.path === path);
+        changedFiles.push({
+          path,
+          content: patchedContent,
+          mimeType: original?.mimeType ?? guessMime(path),
+        });
+        fullReplacementPaths.add(path);
+      }
+    }
+
+    // For failed patches: fall back to full replacement from files[] if available,
+    // otherwise keep original content (no change) and warn.
+    for (const failedPath of failedPaths) {
+      if (!fullReplacementPaths.has(failedPath)) {
+        patchWarnings.push(`Patch could not be applied to ${failedPath} — the file was not changed. Try rephrasing the request.`);
+        logger.warn({ failedPath }, "Patch failed and no full replacement available — file unchanged");
+      }
+    }
+  }
+
+  // Self-validation pass on ALL changed files (HTML + standalone JS)
+  const filesToValidate = changedFiles.filter(
+    (f) =>
+      f.mimeType === "text/html" ||
+      f.path.endsWith(".html") ||
+      f.path.endsWith(".htm") ||
+      f.mimeType === "application/javascript" ||
+      f.mimeType === "text/javascript" ||
+      f.path.endsWith(".js") ||
+      f.path.endsWith(".mjs"),
+  );
+
+  let correctionFailed = false;
+  let validationWarnings: string[] = [];
+
+  if (filesToValidate.length > 0) {
+    await onEvent?.("validating_output", "Validating changed files…");
+    const validation = await validateFiles(filesToValidate);
+
+    if (!validation.passed) {
+      logger.warn({ criticalErrors: validation.criticalErrors }, "Refine validation found critical errors — running correction pass");
+      await onEvent?.("validating_output", `Validation found ${validation.criticalErrors.length} issue(s) — running correction…`);
+
+      // Pass changedFiles as currentFiles — runCorrectionPass merges the corrected subset in
+      const corrected = await runCorrectionPass(messages, parsed, validation.criticalErrors, changedFiles, agentMode, "refine-correction", false);
+      if (corrected !== null) {
+        // corrected is already the fully merged set — replace changedFiles in-place
+        changedFiles.splice(0, changedFiles.length, ...corrected);
+        // Correction succeeded — only surface non-critical warnings
+        validationWarnings = validation.warnings;
+      } else {
+        correctionFailed = true;
+        validationWarnings = [
+          ...validation.warnings,
+          ...validation.criticalErrors.map((e) => `[validation_failed] ${e}`),
+        ];
+      }
+    } else {
+      // Passed — surface non-critical warnings (CDN reachability, tag balance, etc.)
+      validationWarnings = validation.warnings;
+    }
+  }
+
   const removedPaths = Array.isArray(parsed.filesRemoved)
     ? parsed.filesRemoved
         .filter((p): p is string => typeof p === "string")
@@ -392,9 +911,12 @@ export async function runRefinePipeline(args: {
     typeof parsed.summary === "string"
       ? parsed.summary
       : `Updated ${changedFiles.length} file(s).`;
-  const warnings = Array.isArray(parsed.warnings)
+
+  const aiWarnings = Array.isArray(parsed.warnings)
     ? parsed.warnings.filter((w): w is string => typeof w === "string")
     : [];
+  const warnings = [...aiWarnings, ...validationWarnings, ...patchWarnings];
+
   const integrationsNeeded = Array.isArray(parsed.integrationsNeeded)
     ? (parsed.integrationsNeeded as TaskReport["integrationsNeeded"])
     : [];
