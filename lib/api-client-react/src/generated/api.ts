@@ -48,6 +48,7 @@ import type {
   PageMapResponse,
   Project,
   ProjectFileContent,
+  ProjectFileCreate,
   ProjectFileSummary,
   ProjectFileUpdate,
   ProjectInput,
@@ -1751,6 +1752,78 @@ export function useListProjectFiles<TData = Awaited<ReturnType<typeof listProjec
 
 
 
+
+export const getCreateProjectFileUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files`
+}
+
+/**
+ * @summary Create a new file in the project
+ */
+export const createProjectFile = async (id: number,
+    projectFileCreate: ProjectFileCreate, options?: RequestInit): Promise<ProjectFileContent> => {
+
+  return customFetch<ProjectFileContent>(getCreateProjectFileUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      projectFileCreate,)
+  }
+);}
+
+
+
+
+export const getCreateProjectFileMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createProjectFile>>, TError,{id: number;data: BodyType<ProjectFileCreate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createProjectFile>>, TError,{id: number;data: BodyType<ProjectFileCreate>}, TContext> => {
+
+const mutationKey = ['createProjectFile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createProjectFile>>, {id: number;data: BodyType<ProjectFileCreate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  createProjectFile(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateProjectFileMutationResult = NonNullable<Awaited<ReturnType<typeof createProjectFile>>>
+    export type CreateProjectFileMutationBody = BodyType<ProjectFileCreate>
+    export type CreateProjectFileMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Create a new file in the project
+ */
+export const useCreateProjectFile = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createProjectFile>>, TError,{id: number;data: BodyType<ProjectFileCreate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createProjectFile>>,
+        TError,
+        {id: number;data: BodyType<ProjectFileCreate>},
+        TContext
+      > => {
+      return useMutation(getCreateProjectFileMutationOptions(options));
+    }
 
 export const getGetProjectFileUrl = (id: number,
     fileId: number,) => {

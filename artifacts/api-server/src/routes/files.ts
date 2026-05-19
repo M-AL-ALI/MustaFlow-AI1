@@ -38,6 +38,76 @@ router.get(
   },
 );
 
+router.post(
+  "/projects/:id/files",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const { path: filePath, content = "" } = req.body as {
+      path?: unknown;
+      content?: unknown;
+    };
+
+    if (typeof filePath !== "string" || filePath.trim() === "") {
+      res.status(400).json({ error: "path must be a non-empty string" });
+      return;
+    }
+    if (typeof content !== "string") {
+      res.status(400).json({ error: "content must be a string" });
+      return;
+    }
+
+    const normalizedPath = filePath.trim();
+
+    const existing = await db
+      .select({ id: projectFilesTable.id })
+      .from(projectFilesTable)
+      .where(
+        and(
+          eq(projectFilesTable.projectId, projectId),
+          eq(projectFilesTable.path, normalizedPath),
+        ),
+      );
+
+    if (existing.length > 0) {
+      res.status(409).json({ error: "A file with that path already exists" });
+      return;
+    }
+
+    const mimeType = guessMime(normalizedPath);
+    const [created] = await db
+      .insert(projectFilesTable)
+      .values({
+        projectId,
+        path: normalizedPath,
+        content,
+        mimeType,
+      })
+      .returning();
+
+    res.status(201).json({
+      id: created.id,
+      path: created.path,
+      mimeType: created.mimeType,
+      content: created.content,
+      updatedAt: created.updatedAt,
+    });
+
+    const isHtml =
+      created.mimeType === "text/html" ||
+      created.path.toLowerCase().endsWith(".html") ||
+      created.path.toLowerCase().endsWith(".htm");
+    if (isHtml) {
+      extractPageMap(projectId).catch((err: unknown) => {
+        logger.warn(
+          { err, projectId },
+          "page map re-extraction failed after new file created",
+        );
+      });
+    }
+  },
+);
+
 router.get(
   "/projects/:id/files/:fileId",
   requireProjectOwnership,
@@ -118,7 +188,9 @@ router.patch(
     });
 
     const isHtml =
-      updated.mimeType === "text/html" || updated.path.endsWith(".html");
+      updated.mimeType === "text/html" ||
+      updated.path.toLowerCase().endsWith(".html") ||
+      updated.path.toLowerCase().endsWith(".htm");
     if (isHtml) {
       extractPageMap(projectId).catch((err: unknown) => {
         logger.warn({ err, projectId }, "page map re-extraction failed after manual file save");

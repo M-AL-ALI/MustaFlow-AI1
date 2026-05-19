@@ -426,6 +426,31 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ProjectFileSummary"
+    post:
+      operationId: createProjectFile
+      tags: [projects]
+      summary: Create a new file in the project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectFileCreate"
+      responses:
+        "201":
+          description: Created file contents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFileContent"
+        "409":
+          description: File path already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /projects/{id}/files/{fileId}:
     get:
@@ -1246,6 +1271,13 @@ components:
         mimeType: { type: string }
         content: { type: string }
         updatedAt: { type: string, format: date-time }
+
+    ProjectFileCreate:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string }
+        content: { type: string }
 
     ProjectFileUpdate:
       type: object

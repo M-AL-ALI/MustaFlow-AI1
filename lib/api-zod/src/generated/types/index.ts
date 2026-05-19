@@ -58,6 +58,7 @@ export * from './pageMapResponse';
 export * from './project';
 export * from './projectAgentMode';
 export * from './projectFileContent';
+export * from './projectFileCreate';
 export * from './projectFileSummary';
 export * from './projectFileUpdate';
 export * from './projectInput';

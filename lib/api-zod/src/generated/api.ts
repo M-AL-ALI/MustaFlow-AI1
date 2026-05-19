@@ -485,6 +485,19 @@ export const ListProjectFilesResponse = zod.array(ListProjectFilesResponseItem)
 
 
 /**
+ * @summary Create a new file in the project
+ */
+export const CreateProjectFileParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const CreateProjectFileBody = zod.object({
+  "path": zod.string(),
+  "content": zod.string().optional()
+})
+
+
+/**
  * @summary Get the contents of one generated file by id
  */
 export const GetProjectFileParams = zod.object({

@@ -552,6 +552,11 @@ export interface ProjectFileContent {
   updatedAt: string;
 }
 
+export interface ProjectFileCreate {
+  path: string;
+  content?: string;
+}
+
 export interface ProjectFileUpdate {
   content: string;
 }
