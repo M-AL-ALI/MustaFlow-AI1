@@ -12,14 +12,12 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  AlertCircle,
   Terminal,
   X,
   Maximize2,
   Minimize2,
   Trash2,
-  ShieldAlert,
-  Maximize2,
-  Minimize2,
   Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -27,6 +25,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { useListProjectFiles, getListProjectFilesQueryKey } from "@workspace/api-client-react";
 
+type Platform = "web" | "ios" | "android";
 type DeviceFrame = "desktop" | "tablet" | "mobile";
 
 const DEVICE_LABELS: Record<DeviceFrame, string> = {
@@ -46,6 +45,7 @@ type ConsoleEntry = {
   level: "log" | "warn" | "error" | "info";
   args: string[];
   ts: number;
+  isCrash?: boolean;
 };
 
 type Project = {
@@ -91,6 +91,7 @@ export function PreviewTab({
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const [validationDismissed, setValidationDismissed] = useState(false);
   const prevWarningsRef = useRef<string[]>([]);
+  const [crashBanner, setCrashBanner] = useState<string | null>(null);
 
   // Reset dismissed state when warnings change (new build completed)
   useEffect(() => {
@@ -136,8 +137,12 @@ export function PreviewTab({
         ? (rawLevel as ValidLevel)
         : "log";
       const args = Array.isArray(data.args) ? (data.args as string[]) : [String(data.args)];
+      const isCrash = data.type === "crash";
       const id = entryIdRef.current++;
-      setConsoleEntries((prev) => [...prev.slice(-199), { id, level: level as ConsoleEntry["level"], args, ts: Date.now() }]);
+      setConsoleEntries((prev) => [...prev.slice(-199), { id, level: level as ConsoleEntry["level"], args, ts: Date.now(), isCrash }]);
+      if (isCrash) {
+        setCrashBanner(args.join(" "));
+      }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
@@ -153,6 +158,7 @@ export function PreviewTab({
   const refresh = useCallback(() => {
     setHealthWarning(null);
     setConsoleEntries([]);
+    setCrashBanner(null);
     setIframeKey((k) => k + 1);
   }, []);
 
@@ -163,6 +169,7 @@ export function PreviewTab({
     if (prev === "building" && project.status !== "building" && hasFiles) {
       setHealthWarning(null);
       setConsoleEntries([]);
+      setCrashBanner(null);
       setIframeKey((k) => k + 1);
     }
   }, [project.status, hasFiles]);
@@ -383,6 +390,32 @@ export function PreviewTab({
         </div>
       )}
 
+      {/* Runtime crash banner */}
+      {crashBanner && !consoleOpen && (
+        <div
+          role="alert"
+          className="shrink-0 flex items-start gap-2 px-3 py-2 bg-destructive/10 border-b border-destructive/25 text-destructive text-xs"
+        >
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px" />
+          <span className="flex-1 line-clamp-2 break-all">{crashBanner}</span>
+          <button
+            type="button"
+            onClick={() => { setConsoleOpen(true); setCrashBanner(null); }}
+            className="shrink-0 text-[10px] font-medium text-destructive/70 hover:text-destructive transition-colors whitespace-nowrap mt-px underline-offset-2 hover:underline"
+          >
+            Open Console
+          </button>
+          <button
+            type="button"
+            onClick={() => setCrashBanner(null)}
+            className="shrink-0 hover:opacity-70 transition-opacity"
+            aria-label="Dismiss error"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Preview area */}
       <div className="flex-1 min-h-0 bg-[#1a1a1f] overflow-auto flex items-start justify-center p-4">
         {isLoading ? (
@@ -523,7 +556,7 @@ export function PreviewTab({
             <div className="flex-1" />
             {consoleEntries.length > 0 && (
               <button
-                onClick={() => setConsoleEntries([])}
+                onClick={() => { setConsoleEntries([]); setCrashBanner(null); }}
                 className="text-zinc-600 hover:text-zinc-400 transition-colors p-0.5 rounded"
                 title="Clear console"
               >

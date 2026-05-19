@@ -15,11 +15,11 @@ const CONSOLE_BRIDGE_SCRIPT = `<script>(function(){
   console.error=function(){relay("error",arguments);_o.error.apply(console,arguments);};
   console.info=function(){relay("info",arguments);_o.info.apply(console,arguments);};
   window.addEventListener("error",function(e){
-    window.parent.postMessage({__mustaflow:true,level:"error",args:[(e.message||"Script error")+(e.filename?" ("+e.filename+":"+e.lineno+")":"")]},"*");
+    window.parent.postMessage({__mustaflow:true,type:"crash",level:"error",args:[(e.message||"Script error")+(e.filename?" ("+e.filename+":"+e.lineno+")":"")]},"*");
   });
   window.addEventListener("unhandledrejection",function(e){
     var m=e.reason&&e.reason.message?e.reason.message:String(e.reason);
-    window.parent.postMessage({__mustaflow:true,level:"error",args:["Unhandled rejection: "+m]},"*");
+    window.parent.postMessage({__mustaflow:true,type:"crash",level:"error",args:["Unhandled rejection: "+m]},"*");
   });
 })();<\/script>`;
 
