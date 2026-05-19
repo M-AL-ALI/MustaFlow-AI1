@@ -133,13 +133,29 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
+// Redirects to /sign-in and shows a toast explaining why.
+function SignInRedirect() {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    toast({
+      title: "Sign in to continue",
+      description: "You need to be signed in to access that page.",
+    });
+    setLocation("/sign-in", { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null;
+}
+
 // Auth guard — shows children to signed-in users, redirects others to /sign-in.
 function Protected({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Show when="signed-in">{children}</Show>
       <Show when="signed-out">
-        <Redirect to="/sign-in" />
+        <SignInRedirect />
       </Show>
     </>
   );
