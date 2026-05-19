@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useUser } from "@clerk/react";
+import { useUser, useClerk } from "@clerk/react";
 import {
   Sun,
   Moon,
@@ -113,6 +113,7 @@ export default function SettingsPage() {
 
 function AccountTab() {
   const { user, isLoaded } = useUser();
+  const { openUserProfile } = useClerk();
 
   const [displayName, setDisplayName] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
@@ -245,6 +246,19 @@ function AccountTab() {
             {savingProfile ? "Saving…" : "Save Profile"}
           </button>
           {profileSaved && <span className="text-sm text-green-500">Saved</span>}
+        </div>
+
+        <div className="pt-2 border-t border-border">
+          <p className="text-xs text-muted-foreground mb-3">
+            Manage your password, connected accounts, and security settings.
+          </p>
+          <button
+            onClick={() => openUserProfile()}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-md border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/60 transition-colors"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Manage Account
+          </button>
         </div>
       </div>
 
