@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, ExternalLink, Pencil, FileCode2, FilePlus } from "lucide-react";
+import { X, ExternalLink, Pencil, FileCode2, FilePlus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PageType } from "./page-node";
@@ -36,13 +36,15 @@ type PageDetailPanelProps = {
   onSave: (updated: PageMapNodeState) => void;
   onFileOpen: (filePath: string) => void;
   onModifyPage: (node: PageMapNodeState) => void;
+  onDelete: (nodeId: string) => void;
 };
 
-export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPage }: PageDetailPanelProps) {
+export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPage, onDelete }: PageDetailPanelProps) {
   const [label, setLabel] = useState("");
   const [pageType, setPageType] = useState<PageType>("other");
   const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (node) {
@@ -50,6 +52,7 @@ export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPag
       setPageType(node.pageType);
       setNotes(node.notes ?? "");
       setDirty(false);
+      setConfirmDelete(false);
     }
   }, [node?.id]);
 
@@ -175,6 +178,43 @@ export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPag
         >
           Save changes
         </Button>
+        {node.planned ? (
+          <Button
+            onClick={() => onDelete(node.id)}
+            variant="ghost"
+            className="w-full h-8 text-xs gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="h-3 w-3" />
+            Remove from map
+          </Button>
+        ) : confirmDelete ? (
+          <div className="flex gap-2">
+            <Button
+              onClick={() => onDelete(node.id)}
+              variant="destructive"
+              className="flex-1 h-8 text-xs gap-1.5"
+            >
+              <Trash2 className="h-3 w-3" />
+              Confirm remove
+            </Button>
+            <Button
+              onClick={() => setConfirmDelete(false)}
+              variant="ghost"
+              className="flex-1 h-8 text-xs"
+            >
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <Button
+            onClick={() => setConfirmDelete(true)}
+            variant="ghost"
+            className="w-full h-8 text-xs gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="h-3 w-3" />
+            Remove from map
+          </Button>
+        )}
       </div>
     </div>
   );

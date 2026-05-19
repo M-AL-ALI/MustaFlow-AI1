@@ -473,6 +473,17 @@ export function PageMapTab({
     onSwitchToChat(base + suffix);
   }, [onSwitchToChat]);
 
+  const handleDeleteNode = useCallback((nodeId: string) => {
+    const updatedEdges = edges.filter((e) => e.source !== nodeId && e.target !== nodeId);
+    setEdges(updatedEdges);
+    setNodes((prev) => {
+      const updated = prev.filter((n) => n.id !== nodeId);
+      debouncedSave(updated, updatedEdges);
+      return updated;
+    });
+    setSelectedNodeId(null);
+  }, [edges, setNodes, setEdges, debouncedSave]);
+
   const PLATFORMS: { key: Platform; label: string; Icon: React.ElementType }[] = [
     { key: "web", label: "Web", Icon: Globe },
     { key: "ios", label: "iOS", Icon: Smartphone },
@@ -612,6 +623,7 @@ export function PageMapTab({
           onSave={handleDetailSave}
           onFileOpen={handleFileOpen}
           onModifyPage={handleModifyPage}
+          onDelete={handleDeleteNode}
         />
         <EdgeDetailPanel
           edge={selectedNodeId ? null : selectedEdgeState}
