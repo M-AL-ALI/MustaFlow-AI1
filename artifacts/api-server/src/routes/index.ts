@@ -25,6 +25,7 @@ import billingRouter, { billingWebhookRouter } from "./billing";
 import workspacesRouter from "./workspaces";
 import buildsRouter from "./builds";
 import queueRouter from "./queue";
+import easRouter from "./eas";
 import { attachUser } from "../lib/auth";
 import {
   aiBuilderLimiter,
@@ -61,6 +62,7 @@ const KNOWN_PREFIXES = [
   "/admin",
   "/billing",
   "/queue",
+  "/eas",
   "/builds",
 ];
 
@@ -113,6 +115,7 @@ router.use(adminRouter);
 router.use(billingRouter);
 router.use(buildsRouter);
 router.use(queueRouter);
+router.use(easRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

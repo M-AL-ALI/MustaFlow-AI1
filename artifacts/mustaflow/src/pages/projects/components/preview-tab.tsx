@@ -105,6 +105,36 @@ export function PreviewTab({
   const [crashBanner, setCrashBanner] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
 
+  // EAS build status — fetch latest completed build for native QR
+  type EasBuildEntry = {
+    id: number;
+    env: string;
+    status: string;
+    publicUrl: string | null;
+    note: string | null;
+    easBuildId: string | null;
+    createdAt: string;
+  };
+  const [easBuild, setEasBuild] = useState<EasBuildEntry | null>(null);
+
+  const fetchEasBuilds = useCallback(async () => {
+    if (!isMobile) return;
+    try {
+      const res = await fetch(`/api/projects/${project.id}/eas/builds`);
+      if (res.ok) {
+        const data = (await res.json()) as { builds: EasBuildEntry[] };
+        // Pick the most recent completed build (any platform)
+        const ready = (data.builds ?? []).find((b) => b.status === "passed" && !!b.publicUrl);
+        setEasBuild(ready ?? null);
+      }
+    } catch { /* ignore */ }
+  }, [project.id, isMobile]);
+
+  useEffect(() => {
+    void fetchEasBuilds();
+    // Re-fetch when the project finishes building
+  }, [fetchEasBuilds, project.status]);
+
   // Reset dismissed state when warnings change (new build completed)
   useEffect(() => {
     const prev = prevWarningsRef.current;
@@ -268,40 +298,91 @@ export function PreviewTab({
                 "flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors border",
                 qrOpen
                   ? "bg-green-500/15 text-green-400 border-green-500/30"
-                  : "bg-muted text-muted-foreground border-border hover:text-foreground",
+                  : easBuild
+                    ? "bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/15"
+                    : "bg-muted text-muted-foreground border-border hover:text-foreground",
               )}
-              title="Scan with Expo Go"
+              title={easBuild ? "Native Expo Go build ready" : "Scan with Expo Go (web preview)"}
             >
               <QrCode className="h-3 w-3" />
-              <span className="hidden sm:inline">Expo Go</span>
+              <span className="hidden sm:inline">{easBuild ? "Expo Go" : "Expo Go"}</span>
+              {easBuild && (
+                <span className="hidden sm:inline text-[9px] bg-green-500/20 text-green-400 border border-green-500/30 px-1 rounded font-bold">
+                  NATIVE
+                </span>
+              )}
             </button>
             {qrOpen && (
-              <div className="absolute top-full left-0 mt-2 z-50 w-72 bg-popover border border-border rounded-xl shadow-2xl p-4">
+              <div className="absolute top-full left-0 mt-2 z-50 w-80 bg-popover border border-border rounded-xl shadow-2xl p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div className="font-semibold text-foreground text-sm flex items-center gap-1.5">
                     <Smartphone className="h-4 w-4 text-green-400" />
-                    Scan with Expo Go
+                    {easBuild ? "Native Expo Go" : "Expo Go Preview"}
                   </div>
                   <button onClick={() => setQrOpen(false)} className="text-muted-foreground hover:text-foreground">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="flex justify-center mb-3">
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(window.location.origin + previewSrc)}&size=180x180&bgcolor=ffffff&color=000000&margin=8`}
-                    alt="QR code for Expo Go"
-                    className="rounded-lg border border-border"
-                    width={180}
-                    height={180}
-                  />
-                </div>
-                <div className="flex items-start gap-2 bg-muted/60 rounded-lg p-2.5 text-xs text-muted-foreground">
-                  <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-green-400" />
-                  <div>
-                    <p className="text-foreground font-medium mb-0.5">Web preview only</p>
-                    <p>This opens the web preview in your mobile browser. For native Expo Go testing with real device sensors, use EAS Build (coming in Phase 4B).</p>
-                  </div>
-                </div>
+
+                {easBuild ? (
+                  /* ── Native EAS build QR ── */
+                  (() => {
+                    const url = easBuild.publicUrl!;
+                    const isExp = url.startsWith("exp://") || url.startsWith("exp+");
+                    return (
+                      <>
+                        <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2 mb-3">
+                          <span className="text-[10px] bg-green-500/20 text-green-400 border border-green-500/30 px-1.5 py-0.5 rounded font-bold">
+                            {isExp ? "EXPO GO" : "NATIVE"}
+                          </span>
+                          <span className="text-xs text-green-400 flex-1 truncate font-medium">
+                            {isExp ? "Expo Go launch URL ready" : "Native build ready — scan to install"}
+                          </span>
+                        </div>
+                        <div className="flex justify-center mb-3">
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(url)}&size=180x180&bgcolor=ffffff&color=000000&margin=8`}
+                            alt={isExp ? "Expo Go QR code" : "Install QR code"}
+                            className="rounded-lg border border-border"
+                            width={180}
+                            height={180}
+                          />
+                        </div>
+                        <div className="bg-muted/60 rounded-lg px-3 py-2 mb-2">
+                          <p className="text-[10px] font-mono text-muted-foreground break-all">{url}</p>
+                        </div>
+                        <div className="flex items-start gap-2 bg-muted/60 rounded-lg p-2.5 text-xs text-muted-foreground">
+                          <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-green-400" />
+                          <p>
+                            {isExp
+                              ? "Open Expo Go on your device and scan to launch the native app."
+                              : "Scan with your camera to download the APK/IPA, then open with Expo Go or install directly."}
+                          </p>
+                        </div>
+                      </>
+                    );
+                  })()
+                ) : (
+                  /* ── Web preview QR (fallback) ── */
+                  <>
+                    <div className="flex justify-center mb-3">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(window.location.origin + previewSrc)}&size=180x180&bgcolor=ffffff&color=000000&margin=8`}
+                        alt="QR code for web preview"
+                        className="rounded-lg border border-border"
+                        width={180}
+                        height={180}
+                      />
+                    </div>
+                    <div className="flex items-start gap-2 bg-muted/60 rounded-lg p-2.5 text-xs text-muted-foreground">
+                      <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-yellow-400" />
+                      <div>
+                        <p className="text-foreground font-medium mb-0.5">Web preview</p>
+                        <p>Opens the web preview in your mobile browser. For native device sensors, configure EAS Build in the Publishing tab.</p>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
