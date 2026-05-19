@@ -5,6 +5,7 @@ import {
   timestamp,
   integer,
   boolean,
+  jsonb,
 } from "drizzle-orm/pg-core";
 
 export const KNOWLEDGE_TYPES = [
@@ -15,14 +16,24 @@ export const KNOWLEDGE_TYPES = [
   "publish_failed",
   "duplicate",
   "secret_warning",
+  "secret_change",
   "integration_needed",
   "test_report",
+  "manual_edit",
   "note",
 ] as const;
 export type KnowledgeType = (typeof KNOWLEDGE_TYPES)[number];
 
 export const KNOWLEDGE_SEVERITIES = ["info", "warning", "error"] as const;
 export type KnowledgeSeverity = (typeof KNOWLEDGE_SEVERITIES)[number];
+
+export interface DiffSummary {
+  filesAdded: string[];
+  filesModified: string[];
+  filesRemoved: string[];
+  linesAdded?: number;
+  linesRemoved?: number;
+}
 
 export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   id: serial("id").primaryKey(),
@@ -44,6 +55,12 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   severity: text("severity").notNull().default("info"),
   // Has a human approved this for reuse across projects?
   approvedForReuse: boolean("approved_for_reuse").notNull().default(false),
+  // Compact file diff summary stored as JSONB
+  diffSummary: jsonb("diff_summary").$type<DiffSummary>(),
+  // User-written annotation / note on this entry
+  annotation: text("annotation"),
+  // Soft-delete: when set, the entry is archived and hidden by default
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -5,12 +5,11 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
-import type { KnowledgeInputCategory } from './knowledgeInputCategory';
 
 export interface KnowledgeInput {
   /** @minLength 1 */
   title: string;
-  category: KnowledgeInputCategory;
+  category: string;
   type?: string;
   severity?: string;
   /** @minLength 1 */

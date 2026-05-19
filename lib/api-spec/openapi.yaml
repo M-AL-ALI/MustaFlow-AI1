@@ -664,6 +664,27 @@ paths:
     get:
       operationId: listKnowledge
       tags: [knowledge]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: archived
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
       responses:
         "200":
           description: Knowledge Vault entries
@@ -694,11 +715,9 @@ paths:
     patch:
       operationId: updateKnowledge
       tags: [knowledge]
+      summary: Update annotation, approvedForReuse, or archivedAt on a knowledge entry
       parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: integer }
+        - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:
         required: true
         content:
@@ -707,19 +726,22 @@ paths:
               $ref: "#/components/schemas/KnowledgeUpdate"
       responses:
         "200":
-          description: Updated
+          description: Updated entry
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/KnowledgeEntry"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
     delete:
       operationId: deleteKnowledge
       tags: [knowledge]
       parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: integer }
+        - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         "200":
           description: Deleted
@@ -1036,18 +1058,25 @@ components:
 
     KnowledgeEntry:
       type: object
-      required: [id, title, category, content, createdAt]
+      required: [id, title, category, content, type, severity, approvedForReuse, createdAt]
       properties:
         id: { type: integer }
         title: { type: string }
-        category:
-          type: string
-          enum: [lesson, pattern, fix, diagnostic, note]
+        category: { type: string }
+        content: { type: string }
         type: { type: string }
         severity: { type: string }
-        content: { type: string }
-        approvedForReuse: { type: boolean }
         projectId: { type: ["integer", "null"] }
+        userId: { type: ["string", "null"] }
+        relatedTaskId: { type: ["integer", "null"] }
+        relatedVersionId: { type: ["integer", "null"] }
+        tags: { type: ["string", "null"] }
+        approvedForReuse: { type: boolean }
+        diffSummary:
+          type: ["object", "null"]
+          additionalProperties: true
+        annotation: { type: ["string", "null"] }
+        archivedAt: { type: ["string", "null"], format: date-time }
         createdAt: { type: string, format: date-time }
 
     KnowledgeInput:
@@ -1055,9 +1084,7 @@ components:
       required: [title, category, content]
       properties:
         title: { type: string, minLength: 1 }
-        category:
-          type: string
-          enum: [lesson, pattern, fix, diagnostic, note]
+        category: { type: string }
         type: { type: string }
         severity: { type: string }
         content: { type: string, minLength: 1 }
@@ -1066,13 +1093,13 @@ components:
       type: object
       properties:
         title: { type: string, minLength: 1 }
-        category:
-          type: string
-          enum: [lesson, pattern, fix, diagnostic, note]
+        category: { type: string }
         type: { type: string }
         severity: { type: string }
         content: { type: string, minLength: 1 }
+        annotation: { type: ["string", "null"] }
         approvedForReuse: { type: boolean }
+        archived: { type: boolean }
 
     ProjectFileSummary:
       type: object

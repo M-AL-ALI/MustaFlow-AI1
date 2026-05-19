@@ -5,15 +5,17 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
-import type { KnowledgeUpdateCategory } from './knowledgeUpdateCategory';
 
 export interface KnowledgeUpdate {
   /** @minLength 1 */
   title?: string;
-  category?: KnowledgeUpdateCategory;
+  category?: string;
   type?: string;
   severity?: string;
   /** @minLength 1 */
   content?: string;
+  /** @nullable */
+  annotation?: string | null;
   approvedForReuse?: boolean;
+  archived?: boolean;
 }

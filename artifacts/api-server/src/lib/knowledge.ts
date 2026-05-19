@@ -4,7 +4,7 @@
 // All writes are best-effort: a failure never blocks the main operation.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { db, knowledgeEntriesTable } from "@workspace/db";
+import { db, knowledgeEntriesTable, type DiffSummary } from "@workspace/db";
 import { logger } from "./logger";
 
 export interface KnowledgeWriteOpts {
@@ -18,6 +18,7 @@ export interface KnowledgeWriteOpts {
   relatedTaskId?: number;
   relatedVersionId?: number;
   tags?: string[];
+  diffSummary?: DiffSummary;
 }
 
 export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
@@ -34,6 +35,7 @@ export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
       relatedVersionId: opts.relatedVersionId ?? null,
       tags: opts.tags ? opts.tags.join(",") : null,
       approvedForReuse: false,
+      diffSummary: opts.diffSummary ?? null,
     });
   } catch (err) {
     logger.error({ err }, "Failed to write Knowledge Vault entry — non-fatal");

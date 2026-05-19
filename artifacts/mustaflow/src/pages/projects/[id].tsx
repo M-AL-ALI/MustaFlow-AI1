@@ -5,7 +5,6 @@ import {
   useListMessages,
   useListVersions,
   useListProjectFiles,
-  useRollbackVersion,
   useSendMessage,
   getGetProjectQueryKey,
   getListMessagesQueryKey,
@@ -51,9 +50,8 @@ import {
   Plus,
   MessageSquare,
   ExternalLink,
-  GitCommit,
-  RotateCcw,
-  BookOpen,
+
+
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -67,6 +65,7 @@ import { AnalyticsTab } from "./components/analytics-tab";
 import { ResourcesTab } from "./components/resources-tab";
 import { ManageTab } from "./components/manage-tab";
 import { ActivityStream } from "./components/activity-stream";
+import { HistoryTab } from "./components/history-tab";
 import { cn } from "@/lib/utils";
 
 type TaskReport = {
@@ -432,7 +431,6 @@ export default function ProjectWorkspacePage() {
   const { data: files = [] } = useListProjectFiles(projectId, {
     query: { enabled: !!projectId, queryKey: getListProjectFilesQueryKey(projectId) },
   });
-  const rollbackVersion = useRollbackVersion();
   const queryClient = useQueryClient();
 
   const [prompt, setPrompt] = useState("");
@@ -701,8 +699,6 @@ export default function ProjectWorkspacePage() {
               const badge =
                 t === "files" && files.length > 0
                   ? files.length
-                  : t === "history" && (versions ?? []).length > 0
-                  ? (versions ?? []).length
                   : null;
               return (
                 <button
@@ -1011,66 +1007,13 @@ export default function ProjectWorkspacePage() {
 
           {/* ── HISTORY TAB ── */}
           {leftPanelTab === "history" && (
-            <div className="flex-1 min-h-0 flex flex-col">
-              <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2">
-                <GitCommit className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  {(versions ?? []).length} checkpoint{(versions ?? []).length !== 1 ? "s" : ""}
-                </span>
-              </div>
-              <div className="flex-1 overflow-y-auto py-3 px-3">
-                {(versions ?? []).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
-                    <GitCommit className="h-8 w-8 opacity-25" />
-                    <div className="text-center">
-                      <div className="text-xs font-medium text-foreground/60">No checkpoints yet</div>
-                      <div className="text-[10px] opacity-50 mt-0.5">Each successful build saves a checkpoint</div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-0">
-                    {(versions ?? []).map((v, idx) => (
-                      <div key={v.id} className="relative flex gap-3 pb-4">
-                        {idx < (versions ?? []).length - 1 && (
-                          <div className="absolute left-[9px] top-5 bottom-0 w-px bg-border/60" />
-                        )}
-                        <div className={cn(
-                          "mt-0.5 w-[18px] h-[18px] rounded-full border-2 shrink-0 flex items-center justify-center z-10",
-                          idx === 0 ? "bg-primary/20 border-primary" : "bg-muted border-border",
-                        )}>
-                          <GitCommit className={cn("h-2.5 w-2.5", idx === 0 ? "text-primary" : "text-muted-foreground")} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <span className={cn("text-[11px] font-semibold", idx === 0 ? "text-primary" : "text-foreground")}>
-                              {idx === 0 ? "Latest" : `v${(versions ?? []).length - idx}`}
-                            </span>
-                            {idx === 0 && (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-medium">current</span>
-                            )}
-                            <span className="text-[9px] text-muted-foreground ml-auto shrink-0">
-                              {new Date(v.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                            </span>
-                          </div>
-                          {idx > 0 && (
-                            <button
-                              onClick={() => rollbackVersion.mutate(
-                                { id: projectId, versionId: v.id },
-                                { onSuccess: () => void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) }) }
-                              )}
-                              disabled={rollbackVersion.isPending}
-                              className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors disabled:opacity-40"
-                            >
-                              <RotateCcw className="h-2.5 w-2.5" /> Restore this version
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+            <HistoryTab
+              projectId={projectId}
+              onRetry={(text) => {
+                setPrompt(text);
+                setLeftPanelTab("chat");
+              }}
+            />
           )}
         </div>
 

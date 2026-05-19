@@ -22,6 +22,7 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import type { AgentMode } from "./ai";
 import { logger } from "./logger";
 import { writeKnowledge } from "./knowledge";
+import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, deductCredits } from "../routes/credits";
 
 /** Credit cost per AI call, keyed by agentMode. */
@@ -140,167 +141,134 @@ async function deleteFiles(
   );
 }
 
-/**
- * Tokenise a string into a set of meaningful lowercase words (≥3 chars).
- */
-function tokenise(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .split(/[\s,.:;_\-/()[\]{}'"!?]+/)
-      .filter((w) => w.length >= 3),
-  );
-}
+/** Map of integration name → required secret key names (subset of the frontend registry). */
+const INTEGRATION_KEY_MAP: Array<{ name: string; keys: string[] }> = [
+  { name: "OpenAI", keys: ["OPENAI_API_KEY"] },
+  { name: "Anthropic", keys: ["ANTHROPIC_API_KEY"] },
+  { name: "Gemini", keys: ["GEMINI_API_KEY"] },
+  { name: "Clerk", keys: ["CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"] },
+  { name: "Auth0", keys: ["AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"] },
+  { name: "Supabase Auth", keys: ["SUPABASE_URL", "SUPABASE_ANON_KEY"] },
+  { name: "Firebase Auth", keys: ["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN", "FIREBASE_PROJECT_ID"] },
+  { name: "PostgreSQL / Neon", keys: ["DATABASE_URL"] },
+  { name: "Supabase", keys: ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY"] },
+  { name: "Firebase Firestore", keys: ["FIREBASE_PROJECT_ID", "FIREBASE_API_KEY"] },
+  { name: "AWS S3", keys: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_S3_BUCKET", "AWS_REGION"] },
+  { name: "Cloudflare R2", keys: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_ACCOUNT_ID"] },
+  { name: "Supabase Storage", keys: ["SUPABASE_URL", "SUPABASE_SERVICE_KEY"] },
+  { name: "Stripe", keys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"] },
+  { name: "Stripe Connect", keys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_CONNECT_CLIENT_ID"] },
+  { name: "Google Maps", keys: ["GOOGLE_MAPS_API_KEY"] },
+  { name: "Apple Maps", keys: ["APPLE_MAPS_KEY_ID", "APPLE_MAPS_TEAM_ID", "APPLE_MAPS_PRIVATE_KEY"] },
+  { name: "Mapbox", keys: ["MAPBOX_PUBLIC_TOKEN"] },
+  { name: "Resend", keys: ["RESEND_API_KEY"] },
+  { name: "SendGrid", keys: ["SENDGRID_API_KEY"] },
+  { name: "Mailgun", keys: ["MAILGUN_API_KEY", "MAILGUN_DOMAIN"] },
+  { name: "Twilio", keys: ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"] },
+  { name: "Firebase Cloud Messaging", keys: ["FIREBASE_PROJECT_ID", "FIREBASE_SERVER_KEY"] },
+  { name: "PostHog", keys: ["POSTHOG_API_KEY", "POSTHOG_HOST"] },
+  { name: "Sentry", keys: ["SENTRY_DSN"] },
+  { name: "Google Analytics", keys: ["GA_MEASUREMENT_ID"] },
+  { name: "GitHub", keys: ["GITHUB_TOKEN"] },
+  { name: "Vercel", keys: ["VERCEL_TOKEN"] },
+  { name: "Render", keys: ["RENDER_API_KEY"] },
+  { name: "Fly.io", keys: ["FLY_API_TOKEN"] },
+  { name: "Railway", keys: ["RAILWAY_API_TOKEN"] },
+];
 
-/**
- * Relevance-ranked knowledge injection.
- * Scores each knowledge entry by keyword overlap with the current user prompt,
- * then returns the top 15 most relevant (not just the 40 most recent).
- */
-async function loadKnowledgeContext(
-  projectId: number,
-  userPrompt?: string,
-): Promise<string> {
+async function loadActiveIntegrations(projectId: number): Promise<string> {
   try {
-    const entries = await db
-      .select()
-      .from(knowledgeEntriesTable)
-      .where(
-        or(
-          eq(knowledgeEntriesTable.approvedForReuse, true),
-          eq(knowledgeEntriesTable.projectId, projectId),
-        ),
-      )
-      .orderBy(desc(knowledgeEntriesTable.createdAt))
-      .limit(80);
-
-    if (entries.length === 0) return "";
-
-    if (userPrompt && userPrompt.length > 0) {
-      const promptTokens = tokenise(userPrompt);
-      const scored = entries.map((e) => {
-        const entryTokens = tokenise(`${e.title} ${e.content} ${e.tags ?? ""}`);
-        let overlap = 0;
-        for (const t of promptTokens) {
-          if (entryTokens.has(t)) overlap++;
-        }
-        const score = promptTokens.size > 0 ? overlap / promptTokens.size : 0;
-        return { entry: e, score };
-      });
-      scored.sort((a, b) => b.score - a.score);
-      const topEntries = scored.slice(0, 15).map((s) => s.entry);
-      return topEntries
-        .map((e) => `[${e.category}] ${e.title}: ${e.content}`)
-        .join("\n");
+    const rows = await db
+      .select({ name: secretsTable.name, verificationStatus: secretsTable.verificationStatus })
+      .from(secretsTable)
+      .where(eq(secretsTable.projectId, projectId));
+    const secretMap = new Map(rows.map((r) => [r.name, r.verificationStatus ?? "unverified"]));
+    const active = INTEGRATION_KEY_MAP.filter((integration) =>
+      integration.keys.every((k) => secretMap.has(k) && secretMap.get(k) === "verified"),
+    ).map((i) => i.name);
+    const partial = INTEGRATION_KEY_MAP.filter((integration) => {
+      const isActive = active.includes(integration.name);
+      if (isActive) return false;
+      const somePresent = integration.keys.some((k) => secretMap.has(k));
+      return somePresent;
+    }).map((i) => i.name);
+    const parts: string[] = [];
+    if (active.length > 0) {
+      parts.push(`ACTIVE INTEGRATIONS (connected and verified): ${active.join(", ")}. When generating or refining code, prefer these services over alternatives and reference their environment variables from project secrets.`);
     }
-
-    // No prompt available — fall back to most recent 15
-    return entries
-      .slice(0, 15)
-      .map((e) => `[${e.category}] ${e.title}: ${e.content}`)
-      .join("\n");
+    if (partial.length > 0) {
+      parts.push(`PARTIALLY CONFIGURED (keys present but not yet verified): ${partial.join(", ")}. These may work but have not been verified — mention them if the user asks.`);
+    }
+    return parts.join("\n");
   } catch {
     return "";
   }
 }
 
 /**
- * Integration catalog: maps known secret key name patterns to precise usage blocks.
- * Injected into the AI prompt when matching secrets are set on the project.
+ * Compute a diff summary for an initial build (previous = empty).
  */
-const INTEGRATION_CATALOG: Array<{
-  name: string;
-  keyPatterns: RegExp[];
-  usageBlock: string;
-}> = [
-  {
-    name: "Stripe",
-    keyPatterns: [/stripe/i, /STRIPE/],
-    usageBlock: `INTEGRATION — Stripe (payment processing):
-CDN: <script src="https://js.stripe.com/v3/"></script>
-Init: const stripe = Stripe(/* STRIPE_PUBLISHABLE_KEY from project secrets */);
-Usage: const elements = stripe.elements(); const card = elements.create('card'); card.mount('#card-element');
-Confirm payment: stripe.confirmCardPayment(clientSecret, { payment_method: { card } });
-Note: Use publishable key (pk_test_... or pk_live_...) in frontend. Never expose secret key.`,
-  },
-  {
-    name: "Google Maps",
-    keyPatterns: [/google.*map/i, /GOOGLE_MAPS/i, /MAPS_API/i],
-    usageBlock: `INTEGRATION — Google Maps:
-CDN: <script src="https://maps.googleapis.com/maps/api/js?key=/* GOOGLE_MAPS_API_KEY */&callback=initMap" async></script>
-Init: function initMap() { const map = new google.maps.Map(document.getElementById('map'), { zoom: 13, center: { lat: 40.7128, lng: -74.006 } }); }
-Marker: new google.maps.Marker({ position: { lat, lng }, map, title: 'Label' });
-Note: Replace /* GOOGLE_MAPS_API_KEY */ with the variable reference — do not hardcode.`,
-  },
-  {
-    name: "Firebase",
-    keyPatterns: [/firebase/i, /FIREBASE/i],
-    usageBlock: `INTEGRATION — Firebase:
-CDN: <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
-     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
-Init: firebase.initializeApp({ apiKey: '/* FIREBASE_API_KEY */', authDomain: '/* FIREBASE_AUTH_DOMAIN */', projectId: '/* FIREBASE_PROJECT_ID */' });
-      const db = firebase.firestore();
-Read: const snap = await db.collection('items').get(); snap.forEach(doc => console.log(doc.data()));
-Write: await db.collection('items').add({ name: 'value', createdAt: firebase.firestore.Timestamp.now() });`,
-  },
-  {
-    name: "OpenAI",
-    keyPatterns: [/openai/i, /OPENAI/i],
-    usageBlock: `INTEGRATION — OpenAI API:
-Note: OpenAI API keys must NEVER be embedded in frontend HTML/JS — they would be publicly visible.
-Instead: show a placeholder UI with a note "This feature requires a server-side API call" and mark it in integrationsNeeded.
-If building a demo, simulate AI responses with setTimeout and hardcoded example outputs.`,
-  },
-  {
-    name: "Mailchimp / Email Marketing",
-    keyPatterns: [/mailchimp/i, /MAILCHIMP/i, /sendgrid/i, /SENDGRID/i],
-    usageBlock: `INTEGRATION — Email Marketing (Mailchimp/SendGrid):
-Note: Email API keys must NEVER appear in frontend code.
-For newsletter signup forms: collect email client-side, show success state, mark integrationsNeeded.
-Use a placeholder fetch: fetch('/api/subscribe', { method: 'POST', body: JSON.stringify({ email }) }) and handle the response gracefully.`,
-  },
-  {
-    name: "Supabase",
-    keyPatterns: [/supabase/i, /SUPABASE/i],
-    usageBlock: `INTEGRATION — Supabase:
-CDN: <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-Init: const { createClient } = supabase; const sb = createClient('/* SUPABASE_URL */', '/* SUPABASE_ANON_KEY */');
-Read: const { data, error } = await sb.from('table_name').select('*');
-Insert: const { data, error } = await sb.from('table_name').insert([{ column: 'value' }]);
-Note: Use anon key (public) — never the service_role key in frontend code.`,
-  },
-];
+function computeBuildDiff(newFiles: BuilderFile[]): DiffSummary {
+  const filesAdded = newFiles.map((f) => f.path);
+  const linesAdded = newFiles.reduce((sum, f) => sum + f.content.split("\n").length, 0);
+  return { filesAdded, filesModified: [], filesRemoved: [], linesAdded, linesRemoved: 0 };
+}
 
 /**
- * Load project secrets and build an integration-aware context block for the AI prompt.
- * Matches secret key names against the integration catalog to inject precise usage instructions.
+ * Compute a diff summary for a refine operation from the existing file set.
  */
-async function loadIntegrationContext(projectId: number): Promise<string> {
-  try {
-    const secrets = await db
-      .select({ name: secretsTable.name, category: secretsTable.category })
-      .from(secretsTable)
-      .where(eq(secretsTable.projectId, projectId));
+function computeRefineDiff(
+  existingFiles: BuilderFile[],
+  changedFiles: BuilderFile[],
+  removedPaths: string[],
+): DiffSummary {
+  const prevMap = new Map(existingFiles.map((f) => [f.path, f.content]));
+  const filesAdded: string[] = [];
+  const filesModified: string[] = [];
+  let linesAdded = 0;
+  let linesRemoved = 0;
 
-    if (secrets.length === 0) return "";
-
-    const secretNames = secrets.map((s) => s.name);
-    const matchedIntegrations: string[] = [];
-
-    for (const integration of INTEGRATION_CATALOG) {
-      const isConnected = secretNames.some((name) =>
-        integration.keyPatterns.some((pattern) => pattern.test(name)),
-      );
-      if (isConnected) {
-        matchedIntegrations.push(integration.usageBlock);
-      }
+  for (const f of changedFiles) {
+    if (!prevMap.has(f.path)) {
+      filesAdded.push(f.path);
+      linesAdded += f.content.split("\n").length;
+    } else if (prevMap.get(f.path) !== f.content) {
+      filesModified.push(f.path);
+      const newLines = f.content.split("\n").length;
+      const prevLines = (prevMap.get(f.path) ?? "").split("\n").length;
+      linesAdded += Math.max(0, newLines - prevLines);
+      linesRemoved += Math.max(0, prevLines - newLines);
     }
+  }
 
-    if (matchedIntegrations.length === 0) return "";
+  for (const path of removedPaths) {
+    linesRemoved += (prevMap.get(path) ?? "").split("\n").length;
+  }
 
-    return `CONNECTED INTEGRATIONS — use these exact patterns when implementing integration features:\n\n${matchedIntegrations.join("\n\n")}`;
-  } catch (err) {
-    logger.warn({ err, projectId }, "Failed to load integration context — non-fatal");
+  return { filesAdded, filesModified, filesRemoved: removedPaths, linesAdded, linesRemoved };
+}
+
+async function loadKnowledgeContext(projectId: number): Promise<string> {
+  try {
+    const [entries, integrationsNote] = await Promise.all([
+      db
+        .select()
+        .from(knowledgeEntriesTable)
+        .where(
+          or(
+            eq(knowledgeEntriesTable.approvedForReuse, true),
+            eq(knowledgeEntriesTable.projectId, projectId),
+          ),
+        )
+        .orderBy(knowledgeEntriesTable.createdAt)
+        .limit(40),
+      loadActiveIntegrations(projectId),
+    ]);
+    const knowledgePart = entries.length > 0
+      ? entries.map((e) => `[${e.category}] ${e.title}: ${e.content}`).join("\n")
+      : "";
+    return [integrationsNote, knowledgePart].filter(Boolean).join("\n\n");
+  } catch {
     return "";
   }
 }
@@ -402,52 +370,10 @@ async function maybeEscalateWarnings(
   }
 }
 
-/**
- * Write a proactive build pattern lesson to the Knowledge Vault.
- * Called after every successful build/refine (not just failures) so the vault
- * grows with positive knowledge about what works.
- */
-async function writeSuccessLesson(opts: {
-  kind: JobKind;
-  userPrompt: string;
-  assistantSummary: string;
-  report: TaskReport;
-  projectId: number;
-  userId?: string;
-  taskId: number;
-  versionId?: number | null;
-}): Promise<void> {
-  const { kind, userPrompt, assistantSummary, report, projectId, userId, taskId, versionId } = opts;
-  const integrationNames = report.integrationsNeeded?.map((i) => i.name) ?? [];
-  const integrationNote = integrationNames.length > 0
-    ? ` Integrations referenced: ${integrationNames.join(", ")}.`
-    : "";
-  const warningNote = (report.warnings?.length ?? 0) > 0
-    ? ` Warnings: ${report.warnings!.slice(0, 2).join("; ")}.`
-    : "";
-
-  await writeKnowledge({
-    title: `${kind === "build" ? "Build" : "Refinement"} pattern: "${userPrompt.slice(0, 50)}"`,
-    category: kind === "build" ? "build" : "refinement",
-    content: `${assistantSummary.slice(0, 300)}${integrationNote}${warningNote} Files: created=${report.filesCreated.length}, changed=${report.filesChanged.length}, removed=${report.filesRemoved.length}.`,
-    type: "build_pattern",
-    severity: "info",
-    projectId,
-    userId,
-    relatedTaskId: taskId,
-    relatedVersionId: versionId ?? undefined,
-    tags: integrationNames,
-  });
-}
-
 export async function runJob(input: JobInput): Promise<void> {
   const { taskId, projectId, kind, userPrompt, agentMode, conversationHistory } = input;
 
-  // Convenience wrapper: emit an event and return a promise for use as onEvent callback
-  const emit = (type: string, message: string, filePath?: string) =>
-    emitEvent(taskId, type, message, filePath);
-
-  await emit("queued", "Task received, starting pipeline…");
+  await emitEvent(taskId, "queued", "Task received, starting pipeline…");
 
   await db
     .update(agentTasksTable)
@@ -459,7 +385,7 @@ export async function runJob(input: JobInput): Promise<void> {
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
   if (!project) {
-    await emit("failed", "Project not found.");
+    await emitEvent(taskId, "failed", "Project not found.");
     await db
       .update(agentTasksTable)
       .set({
@@ -476,7 +402,7 @@ export async function runJob(input: JobInput): Promise<void> {
   if (MOBILE_KINDS.includes(project.kind)) {
     const msg =
       "Mobile generation is not enabled yet. MustaFlow AI currently supports static web apps only.";
-    await emit("failed", msg);
+    await emitEvent(taskId, "failed", msg);
     await db
       .update(agentTasksTable)
       .set({ status: "failed", result: msg, completedAt: sql`now()` })
@@ -484,13 +410,15 @@ export async function runJob(input: JobInput): Promise<void> {
     return;
   }
 
+  const knowledgeContext = await loadKnowledgeContext(projectId);
+
   // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
   const creditCost = CREDIT_COST[agentMode] ?? 1;
   if (project.ownerId) {
     const credits = await getOrCreateCredits(project.ownerId);
     if (credits.balance < creditCost) {
       const msg = `Insufficient credits. This ${agentMode} build costs ${creditCost} credit(s) but your balance is ${credits.balance}. Top up in Billing to continue.`;
-      await emit("failed", msg);
+      await emitEvent(taskId, "failed", msg);
       await db
         .update(agentTasksTable)
         .set({ status: "failed", result: msg, completedAt: sql`now()` })
@@ -503,22 +431,15 @@ export async function runJob(input: JobInput): Promise<void> {
     let report: TaskReport;
     let assistantSummary: string;
     let nextVersionLabel: string;
-
-    // Step 1: Analyse request
-    await emit("analyzing_request", "Analysing your request…");
-
-    // Step 2: Load context (knowledge + integrations)
-    await emit("loading_context", "Loading knowledge and integration context…");
-    const [knowledgeContext, integrationContext] = await Promise.all([
-      loadKnowledgeContext(projectId, userPrompt),
-      loadIntegrationContext(projectId),
-    ]);
+    let diffSummary: DiffSummary | undefined;
 
     if (kind === "build") {
-      await emit("planning_changes", "Planning file structure and approach…");
-
-      // onEvent bridge: forward pipeline events to the task event stream
-      const onEvent = (type: string, message: string) => emit(type, message);
+      await emitEvent(taskId, "planning", "Reading project configuration…");
+      await emitEvent(
+        taskId,
+        "generating_code",
+        "Generating app blueprint and code with AI…",
+      );
 
       const result = await runBuildPipeline({
         projectName: project.name,
@@ -527,35 +448,38 @@ export async function runJob(input: JobInput): Promise<void> {
         agentMode,
         conversationHistory,
         knowledgeContext: knowledgeContext || undefined,
-        integrationContext: integrationContext || undefined,
-        onEvent,
       });
 
-      await emit(
+      await emitEvent(
+        taskId,
         "generating_code",
         `Blueprint created: ${result.files.length} file(s) planned.`,
       );
 
-      await emit("saving_files", "Writing generated files…");
+      await emitEvent(taskId, "editing_files", "Writing generated files…");
       for (const f of result.files) {
-        await emit("saving_files", `Writing ${f.path}`, f.path);
+        await emitEvent(taskId, "editing_files", `Writing ${f.path}`, f.path);
       }
       await writeFiles(projectId, result.files, true);
+      diffSummary = computeBuildDiff(result.files);
 
       report = result.report;
       assistantSummary = result.assistantSummary;
       nextVersionLabel = "Initial build";
     } else {
-      await emit("reading_files", "Reading current project files…");
+      await emitEvent(taskId, "reading_files", "Reading current project files…");
       const existingFiles = await loadFiles(projectId);
-      await emit(
+      await emitEvent(
+        taskId,
         "reading_files",
         `Loaded ${existingFiles.length} existing file(s).`,
       );
 
-      await emit("planning_changes", "Planning changes…");
-
-      const onEvent = (type: string, message: string) => emit(type, message);
+      await emitEvent(
+        taskId,
+        "generating_code",
+        "Applying change request with AI…",
+      );
 
       const result = await runRefinePipeline({
         projectName: project.name,
@@ -565,35 +489,43 @@ export async function runJob(input: JobInput): Promise<void> {
         existingFiles,
         conversationHistory,
         knowledgeContext: knowledgeContext || undefined,
-        integrationContext: integrationContext || undefined,
-        onEvent,
       });
 
-      await emit(
-        "generating_code",
+      await emitEvent(
+        taskId,
+        "editing_files",
         `AI returned ${result.changedFiles.length} changed file(s).`,
       );
 
-      await emit("saving_files", "Writing changed files…");
       if (result.changedFiles.length > 0) {
         for (const f of result.changedFiles) {
-          await emit("saving_files", `Updating ${f.path}`, f.path);
+          await emitEvent(
+            taskId,
+            "editing_files",
+            `Updating ${f.path}`,
+            f.path,
+          );
         }
         await writeFiles(projectId, result.changedFiles, false);
       }
       if (result.removedPaths.length > 0) {
         for (const p of result.removedPaths) {
-          await emit("saving_files", `Removing ${p}`, p);
+          await emitEvent(taskId, "editing_files", `Removing ${p}`, p);
         }
         await deleteFiles(projectId, result.removedPaths);
       }
+      diffSummary = computeRefineDiff(existingFiles, result.changedFiles, result.removedPaths);
 
       report = result.report;
       assistantSummary = result.assistantSummary;
       nextVersionLabel = userPrompt.slice(0, 40) || "Refinement";
     }
 
-    await emit("saving_version", "Saving version rollback point…");
+    await emitEvent(
+      taskId,
+      "saving_version",
+      "Saving version rollback point…",
+    );
     const snapshot = await snapshotFilesForVersion(projectId);
     const [version] = await db
       .insert(projectVersionsTable)
@@ -606,7 +538,7 @@ export async function runJob(input: JobInput): Promise<void> {
       .returning();
     report.versionId = version?.id ?? null;
 
-    await emit("updating_preview", "Refreshing preview…");
+    await emitEvent(taskId, "updating_preview", "Refreshing preview…");
 
     await db
       .update(agentTasksTable)
@@ -629,7 +561,7 @@ export async function runJob(input: JobInput): Promise<void> {
       })
       .where(eq(projectsTable.id, projectId));
 
-    await emit("completed", "Task completed.");
+    await emitEvent(taskId, "completed", "Task completed.");
 
     // --- Deduct credits after a successful AI build/refine ---
     if (project.ownerId) {
@@ -640,18 +572,20 @@ export async function runJob(input: JobInput): Promise<void> {
       }).catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
     }
 
-    // Fire-and-forget: write lessons to the knowledge vault
-    await emit("writing_lessons", "Writing lessons to Knowledge Vault…");
+    // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
     void maybeEscalateWarnings(projectId, report.warnings ?? []);
-    void writeSuccessLesson({
-      kind,
-      userPrompt,
-      assistantSummary,
-      report,
+    void writeKnowledge({
+      title: `${kind === "build" ? "Build" : "Refinement"} completed: "${userPrompt.slice(0, 60)}"`,
+      content: `${assistantSummary.slice(0, 400)} — Files created: ${report.filesCreated.length}, changed: ${report.filesChanged.length}, removed: ${report.filesRemoved.length}. Warnings: ${report.warnings?.length ?? 0}.`,
+      type: kind,
+      category: kind === "build" ? "build" : "refinement",
+      severity: (report.warnings?.length ?? 0) > 0 ? "warning" : "info",
       projectId,
       userId: project.ownerId,
-      taskId,
-      versionId: version?.id,
+      relatedTaskId: taskId,
+      relatedVersionId: version?.id,
+      tags: report.integrationsNeeded?.map((i) => i.name),
+      diffSummary,
     });
 
     // Append a system message so the chat shows the report was produced
@@ -667,7 +601,7 @@ export async function runJob(input: JobInput): Promise<void> {
     logger.error({ err, taskId, projectId }, "Builder job failed");
     const message =
       err instanceof Error ? err.message : "Unknown builder error";
-    await emit("failed", message);
+    await emitEvent(taskId, "failed", message);
 
     // Generate specific fix suggestions via AI (parallel with DB writes)
     const [suggestions] = await Promise.all([

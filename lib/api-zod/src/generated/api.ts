@@ -654,15 +654,33 @@ export const ListCreditTransactionsResponse = zod.object({
 })
 
 
+export const listKnowledgeQueryLimitDefault = 50;
+export const listKnowledgeQueryOffsetDefault = 0;
+
+export const ListKnowledgeQueryParams = zod.object({
+  "projectId": zod.coerce.number().optional(),
+  "type": zod.coerce.string().optional(),
+  "archived": zod.coerce.boolean().optional(),
+  "limit": zod.coerce.number().default(listKnowledgeQueryLimitDefault),
+  "offset": zod.coerce.number().default(listKnowledgeQueryOffsetDefault)
+})
+
 export const ListKnowledgeResponseItem = zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "category": zod.enum(['lesson', 'pattern', 'fix', 'diagnostic', 'note']),
-  "type": zod.string().optional(),
-  "severity": zod.string().optional(),
+  "category": zod.string(),
   "content": zod.string(),
-  "approvedForReuse": zod.boolean().optional(),
+  "type": zod.string(),
+  "severity": zod.string(),
   "projectId": zod.number().nullish(),
+  "userId": zod.string().nullish(),
+  "relatedTaskId": zod.number().nullish(),
+  "relatedVersionId": zod.number().nullish(),
+  "tags": zod.string().nullish(),
+  "approvedForReuse": zod.boolean(),
+  "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
+  "annotation": zod.string().nullish(),
+  "archivedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListKnowledgeResponse = zod.array(ListKnowledgeResponseItem)
@@ -674,13 +692,16 @@ export const ListKnowledgeResponse = zod.array(ListKnowledgeResponseItem)
 
 export const CreateKnowledgeBody = zod.object({
   "title": zod.string().min(1),
-  "category": zod.enum(['lesson', 'pattern', 'fix', 'diagnostic', 'note']),
+  "category": zod.string(),
   "type": zod.string().optional(),
   "severity": zod.string().optional(),
   "content": zod.string().min(1)
 })
 
 
+/**
+ * @summary Update annotation, approvedForReuse, or archivedAt on a knowledge entry
+ */
 export const UpdateKnowledgeParams = zod.object({
   "id": zod.coerce.number()
 })
@@ -691,22 +712,31 @@ export const UpdateKnowledgeParams = zod.object({
 
 export const UpdateKnowledgeBody = zod.object({
   "title": zod.string().min(1).optional(),
-  "category": zod.enum(['lesson', 'pattern', 'fix', 'diagnostic', 'note']).optional(),
+  "category": zod.string().optional(),
   "type": zod.string().optional(),
   "severity": zod.string().optional(),
   "content": zod.string().min(1).optional(),
-  "approvedForReuse": zod.boolean().optional()
+  "annotation": zod.string().nullish(),
+  "approvedForReuse": zod.boolean().optional(),
+  "archived": zod.boolean().optional()
 })
 
 export const UpdateKnowledgeResponse = zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "category": zod.enum(['lesson', 'pattern', 'fix', 'diagnostic', 'note']),
-  "type": zod.string().optional(),
-  "severity": zod.string().optional(),
+  "category": zod.string(),
   "content": zod.string(),
-  "approvedForReuse": zod.boolean().optional(),
+  "type": zod.string(),
+  "severity": zod.string(),
   "projectId": zod.number().nullish(),
+  "userId": zod.string().nullish(),
+  "relatedTaskId": zod.number().nullish(),
+  "relatedVersionId": zod.number().nullish(),
+  "tags": zod.string().nullish(),
+  "approvedForReuse": zod.boolean(),
+  "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
+  "annotation": zod.string().nullish(),
+  "archivedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
 })
 

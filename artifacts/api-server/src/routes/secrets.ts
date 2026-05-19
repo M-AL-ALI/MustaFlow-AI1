@@ -9,6 +9,7 @@ import {
 } from "@workspace/api-zod";
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService, maskValue } from "../lib/encryption";
+import { writeKnowledge } from "../lib/knowledge";
 
 // Environment mismatch: warn if a key labelled for one env is being used in another.
 // This is informational only — we surface a warning flag in the response so the UI can show it.
@@ -131,6 +132,16 @@ router.post(
       metadata: { environment: row.environment, category: row.category },
     });
 
+    void writeKnowledge({
+      title: `Secret ${parsed.data.name} added`,
+      content: `Secret "${parsed.data.name}" was added to the ${row.environment} environment.`,
+      type: "secret_change",
+      category: "diagnostic",
+      severity: "info",
+      projectId: params.data.id,
+      userId: req.userId,
+    });
+
     res.status(201).json(toEntry(row));
   },
 );
@@ -163,6 +174,16 @@ router.delete(
       action: "deleted",
       actorId: req.userId ?? "unknown",
       metadata: { environment: row.environment },
+    });
+
+    void writeKnowledge({
+      title: `Secret ${row.name} deleted`,
+      content: `Secret "${row.name}" was removed from the ${row.environment} environment.`,
+      type: "secret_change",
+      category: "diagnostic",
+      severity: "info",
+      projectId,
+      userId: req.userId,
     });
 
     res.json({ deleted: true, id: secretId });
@@ -224,6 +245,17 @@ router.patch(
       action: "updated",
       actorId: req.userId ?? "unknown",
       metadata: { fields: Object.keys(body) },
+    });
+
+    const changedFields = Object.keys(body).filter((k) => k !== "value").join(", ");
+    void writeKnowledge({
+      title: `Secret ${row.name} updated`,
+      content: `Secret "${row.name}" in the ${row.environment} environment was updated${changedFields ? ` (${changedFields} changed)` : ""}.`,
+      type: "secret_change",
+      category: "diagnostic",
+      severity: "info",
+      projectId,
+      userId: req.userId,
     });
 
     res.json(toEntry(row));

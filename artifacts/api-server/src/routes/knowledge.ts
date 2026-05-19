@@ -1,61 +1,82 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, isNull, or, and } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db, knowledgeEntriesTable, projectsTable } from "@workspace/db";
-import type { KnowledgeSeverity, KnowledgeType } from "@workspace/db";
 import { isAdminUser } from "../lib/adminAuth";
+import type { SQL } from "drizzle-orm";
 
 const router: IRouter = Router();
 
 // GET /api/knowledge — list knowledge entries visible to the current user.
-// Returns:
-//   - globally approved entries (approvedForReuse = true)
-//   - entries created by the current user (userId = req.userId)
-// Query params: ?projectId=<id>  — also include project-specific entries, but
-//   only if the requesting user owns that project (or is admin). Unauthorized
-//   projectId is silently ignored so as not to leak project existence.
+// Query params:
+//   ?projectId=<id>  — entries for a specific project (+ global)
+//   ?type=<type>     — filter by entry type
+//   ?severity=<sev>  — filter by severity (info|warning|error)
+//   ?archived=true   — include archived entries (default: only non-archived)
+//   ?limit=<n>       — max entries to return (default 20, max 200)
+//   ?offset=<n>      — pagination offset (default 0)
+//
+// Without projectId: if authenticated, returns entries for ALL of the user's projects
+// plus global (approvedForReuse=true) entries. If unauthenticated, returns only global entries.
 router.get("/knowledge", async (req, res): Promise<void> => {
   const projectIdParam = req.query.projectId;
-  const rawProjectId =
+  const projectId =
     typeof projectIdParam === "string" && /^\d+$/.test(projectIdParam)
       ? parseInt(projectIdParam, 10)
       : null;
 
-  const userId = req.userId;
+  const typeFilter = typeof req.query.type === "string" ? req.query.type : null;
+  const severityFilter = typeof req.query.severity === "string" ? req.query.severity : null;
+  const includeArchived = req.query.archived === "true";
+  const limit = Math.min(
+    200,
+    typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) || 20 : 20,
+  );
+  const offset =
+    typeof req.query.offset === "string" ? parseInt(req.query.offset, 10) || 0 : 0;
 
-  let authorizedProjectId: number | null = null;
-  if (rawProjectId && userId) {
-    const admin = await isAdminUser(userId);
-    if (admin) {
-      authorizedProjectId = rawProjectId;
+  let projectCondition: SQL;
+
+  if (projectId !== null) {
+    // Specific project: entries for that project + global
+    projectCondition = or(
+      eq(knowledgeEntriesTable.approvedForReuse, true),
+      eq(knowledgeEntriesTable.projectId, projectId),
+    ) as SQL;
+  } else if (req.userId) {
+    // Authenticated, no project filter: return entries for ALL of the user's projects + global
+    const ownedProjects = await db
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.ownerId, req.userId), isNull(projectsTable.deletedAt)));
+    const ownedIds = ownedProjects.map((p) => p.id);
+
+    if (ownedIds.length > 0) {
+      projectCondition = or(
+        eq(knowledgeEntriesTable.approvedForReuse, true),
+        inArray(knowledgeEntriesTable.projectId, ownedIds),
+      ) as SQL;
     } else {
-      const [proj] = await db
-        .select({ id: projectsTable.id })
-        .from(projectsTable)
-        .where(
-          and(
-            eq(projectsTable.id, rawProjectId),
-            eq(projectsTable.ownerId, userId),
-            isNull(projectsTable.deletedAt),
-          ),
-        );
-      if (proj) authorizedProjectId = rawProjectId;
+      projectCondition = eq(knowledgeEntriesTable.approvedForReuse, true) as SQL;
     }
+  } else {
+    // Unauthenticated: only global entries
+    projectCondition = eq(knowledgeEntriesTable.approvedForReuse, true) as SQL;
   }
 
-  const conditions = [eq(knowledgeEntriesTable.approvedForReuse, true)];
-  if (userId) {
-    conditions.push(eq(knowledgeEntriesTable.userId, userId));
-  }
-  if (authorizedProjectId) {
-    conditions.push(eq(knowledgeEntriesTable.projectId, authorizedProjectId));
-  }
+  const conditions: SQL[] = [projectCondition];
+  if (!includeArchived) conditions.push(isNull(knowledgeEntriesTable.archivedAt) as SQL);
+  if (typeFilter) conditions.push(eq(knowledgeEntriesTable.type, typeFilter) as SQL);
+  if (severityFilter) conditions.push(eq(knowledgeEntriesTable.severity, severityFilter) as SQL);
+
+  const whereClause = conditions.length === 1 ? conditions[0]! : and(...conditions);
 
   const rows = await db
     .select()
     .from(knowledgeEntriesTable)
-    .where(or(...conditions))
+    .where(whereClause)
     .orderBy(desc(knowledgeEntriesTable.createdAt))
-    .limit(100);
+    .limit(limit)
+    .offset(offset);
 
   res.json(rows);
 });
@@ -95,100 +116,73 @@ router.post("/knowledge", async (req, res): Promise<void> => {
   res.status(201).json(row);
 });
 
-// PATCH /api/knowledge/:id — update a knowledge entry.
-// Allowed if: current user owns the entry OR current user is admin/owner.
+// PATCH /api/knowledge/:id — update annotation, approvedForReuse, or archivedAt.
+// Authorization: requester must own the entry (entry.userId === req.userId) OR be admin.
+// System entries (userId = null) can only be updated by admin.
 router.patch("/knowledge/:id", async (req, res): Promise<void> => {
-  const id = parseInt(req.params.id, 10);
-  if (!id || isNaN(id)) {
-    res.status(400).json({ error: "invalid id" });
+  const entryId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(entryId)) {
+    res.status(400).json({ error: "Invalid entry id" });
     return;
   }
 
   const userId = req.userId;
   if (!userId) {
-    res.status(401).json({ error: "Unauthenticated" });
+    res.status(401).json({ error: "Authentication required" });
     return;
   }
-
-  const body = req.body as {
-    title?: string;
-    content?: string;
-    category?: string;
-    type?: KnowledgeType;
-    severity?: KnowledgeSeverity;
-    approvedForReuse?: boolean;
-  };
 
   const [existing] = await db
     .select()
     .from(knowledgeEntriesTable)
-    .where(eq(knowledgeEntriesTable.id, id));
+    .where(eq(knowledgeEntriesTable.id, entryId));
 
   if (!existing) {
-    res.status(404).json({ error: "Not found" });
+    res.status(404).json({ error: "Entry not found" });
     return;
   }
 
-  const isOwner = existing.userId === userId;
+  // Authorization:
+  // - Entry has an owner: only owner can edit (or admin)
+  // - Entry has no owner (system): only admin can edit
+  const isOwner = existing.userId !== null && existing.userId === userId;
   const isAdmin = await isAdminUser(userId);
 
   if (!isOwner && !isAdmin) {
-    res.status(403).json({ error: "Forbidden — you do not own this entry" });
+    res.status(403).json({ error: "You do not have permission to update this entry" });
+    return;
+  }
+
+  const body = req.body as {
+    annotation?: string | null;
+    approvedForReuse?: boolean;
+    archived?: boolean;
+  };
+
+  const updates: Partial<{
+    annotation: string | null;
+    approvedForReuse: boolean;
+    archivedAt: Date | null;
+  }> = {};
+
+  if ("annotation" in body) updates.annotation = body.annotation ?? null;
+  if (typeof body.approvedForReuse === "boolean")
+    updates.approvedForReuse = body.approvedForReuse;
+  if (typeof body.archived === "boolean")
+    updates.archivedAt = body.archived ? new Date() : null;
+
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ error: "No valid fields to update" });
     return;
   }
 
   const [updated] = await db
     .update(knowledgeEntriesTable)
-    .set({
-      ...(body.title !== undefined && { title: body.title }),
-      ...(body.content !== undefined && { content: body.content }),
-      ...(body.category !== undefined && { category: body.category }),
-      ...(body.type !== undefined && { type: body.type }),
-      ...(body.severity !== undefined && { severity: body.severity }),
-      ...(body.approvedForReuse !== undefined && { approvedForReuse: body.approvedForReuse }),
-    })
-    .where(eq(knowledgeEntriesTable.id, id))
+    .set(updates)
+    .where(eq(knowledgeEntriesTable.id, entryId))
     .returning();
 
   res.json(updated);
-});
-
-// DELETE /api/knowledge/:id — delete a knowledge entry.
-// Allowed if: current user owns the entry OR current user is admin/owner.
-router.delete("/knowledge/:id", async (req, res): Promise<void> => {
-  const id = parseInt(req.params.id, 10);
-  if (!id || isNaN(id)) {
-    res.status(400).json({ error: "invalid id" });
-    return;
-  }
-
-  const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthenticated" });
-    return;
-  }
-
-  const [existing] = await db
-    .select()
-    .from(knowledgeEntriesTable)
-    .where(eq(knowledgeEntriesTable.id, id));
-
-  if (!existing) {
-    res.status(404).json({ error: "Not found" });
-    return;
-  }
-
-  const isOwner = existing.userId === userId;
-  const isAdmin = await isAdminUser(userId);
-
-  if (!isOwner && !isAdmin) {
-    res.status(403).json({ error: "Forbidden — you do not own this entry" });
-    return;
-  }
-
-  await db.delete(knowledgeEntriesTable).where(eq(knowledgeEntriesTable.id, id));
-
-  res.json({ ok: true });
 });
 
 export default router;

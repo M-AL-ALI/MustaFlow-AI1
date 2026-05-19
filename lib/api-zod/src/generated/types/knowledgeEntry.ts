@@ -5,17 +5,31 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
-import type { KnowledgeEntryCategory } from './knowledgeEntryCategory';
+import type { KnowledgeEntryDiffSummary } from './knowledgeEntryDiffSummary';
 
 export interface KnowledgeEntry {
   id: number;
   title: string;
-  category: KnowledgeEntryCategory;
-  type?: string;
-  severity?: string;
+  category: string;
   content: string;
-  approvedForReuse?: boolean;
+  type: string;
+  severity: string;
   /** @nullable */
   projectId?: number | null;
+  /** @nullable */
+  userId?: string | null;
+  /** @nullable */
+  relatedTaskId?: number | null;
+  /** @nullable */
+  relatedVersionId?: number | null;
+  /** @nullable */
+  tags?: string | null;
+  approvedForReuse: boolean;
+  /** @nullable */
+  diffSummary?: KnowledgeEntryDiffSummary;
+  /** @nullable */
+  annotation?: string | null;
+  /** @nullable */
+  archivedAt?: Date | null;
   createdAt: Date;
 }

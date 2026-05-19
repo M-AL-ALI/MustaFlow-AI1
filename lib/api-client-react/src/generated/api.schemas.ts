@@ -446,71 +446,60 @@ export interface TaskFeedbackInput {
   feedback: TaskFeedbackInputFeedback;
 }
 
-export type KnowledgeEntryCategory = typeof KnowledgeEntryCategory[keyof typeof KnowledgeEntryCategory];
-
-
-export const KnowledgeEntryCategory = {
-  lesson: 'lesson',
-  pattern: 'pattern',
-  fix: 'fix',
-  diagnostic: 'diagnostic',
-  note: 'note',
-} as const;
+/**
+ * @nullable
+ */
+export type KnowledgeEntryDiffSummary = { [key: string]: unknown } | null;
 
 export interface KnowledgeEntry {
   id: number;
   title: string;
-  category: KnowledgeEntryCategory;
-  type?: string;
-  severity?: string;
+  category: string;
   content: string;
-  approvedForReuse?: boolean;
+  type: string;
+  severity: string;
   /** @nullable */
   projectId?: number | null;
+  /** @nullable */
+  userId?: string | null;
+  /** @nullable */
+  relatedTaskId?: number | null;
+  /** @nullable */
+  relatedVersionId?: number | null;
+  /** @nullable */
+  tags?: string | null;
+  approvedForReuse: boolean;
+  /** @nullable */
+  diffSummary?: KnowledgeEntryDiffSummary;
+  /** @nullable */
+  annotation?: string | null;
+  /** @nullable */
+  archivedAt?: string | null;
   createdAt: string;
 }
-
-export type KnowledgeInputCategory = typeof KnowledgeInputCategory[keyof typeof KnowledgeInputCategory];
-
-
-export const KnowledgeInputCategory = {
-  lesson: 'lesson',
-  pattern: 'pattern',
-  fix: 'fix',
-  diagnostic: 'diagnostic',
-  note: 'note',
-} as const;
 
 export interface KnowledgeInput {
   /** @minLength 1 */
   title: string;
-  category: KnowledgeInputCategory;
+  category: string;
   type?: string;
   severity?: string;
   /** @minLength 1 */
   content: string;
 }
 
-export type KnowledgeUpdateCategory = typeof KnowledgeUpdateCategory[keyof typeof KnowledgeUpdateCategory];
-
-
-export const KnowledgeUpdateCategory = {
-  lesson: 'lesson',
-  pattern: 'pattern',
-  fix: 'fix',
-  diagnostic: 'diagnostic',
-  note: 'note',
-} as const;
-
 export interface KnowledgeUpdate {
   /** @minLength 1 */
   title?: string;
-  category?: KnowledgeUpdateCategory;
+  category?: string;
   type?: string;
   severity?: string;
   /** @minLength 1 */
   content?: string;
+  /** @nullable */
+  annotation?: string | null;
   approvedForReuse?: boolean;
+  archived?: boolean;
 }
 
 export interface ProjectFileSummary {
@@ -701,6 +690,14 @@ export type ListDeployments200 = {
 
 export type ListCreditTransactions200 = {
   transactions: CreditTransaction[];
+};
+
+export type ListKnowledgeParams = {
+projectId?: number;
+type?: string;
+archived?: boolean;
+limit?: number;
+offset?: number;
 };
 
 export type DeleteKnowledge200 = {

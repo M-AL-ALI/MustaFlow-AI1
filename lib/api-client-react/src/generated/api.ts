@@ -38,6 +38,7 @@ import type {
   KnowledgeUpdate,
   ListCreditTransactions200,
   ListDeployments200,
+  ListKnowledgeParams,
   ListProjectsParams,
   Project,
   ProjectFileContent,
@@ -2694,17 +2695,24 @@ export function useListCreditTransactions<TData = Awaited<ReturnType<typeof list
 
 
 
-export const getListKnowledgeUrl = () => {
+export const getListKnowledgeUrl = (params?: ListKnowledgeParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/knowledge`
+  return stringifiedParams.length > 0 ? `/api/knowledge?${stringifiedParams}` : `/api/knowledge`
 }
 
-export const listKnowledge = async ( options?: RequestInit): Promise<KnowledgeEntry[]> => {
+export const listKnowledge = async (params?: ListKnowledgeParams, options?: RequestInit): Promise<KnowledgeEntry[]> => {
 
-  return customFetch<KnowledgeEntry[]>(getListKnowledgeUrl(),
+  return customFetch<KnowledgeEntry[]>(getListKnowledgeUrl(params),
   {
     ...options,
     method: 'GET'
@@ -2717,23 +2725,23 @@ export const listKnowledge = async ( options?: RequestInit): Promise<KnowledgeEn
 
 
 
-export const getListKnowledgeQueryKey = () => {
+export const getListKnowledgeQueryKey = (params?: ListKnowledgeParams,) => {
     return [
-    `/api/knowledge`
+    `/api/knowledge`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListKnowledgeQueryOptions = <TData = Awaited<ReturnType<typeof listKnowledge>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getListKnowledgeQueryOptions = <TData = Awaited<ReturnType<typeof listKnowledge>>, TError = ErrorType<unknown>>(params?: ListKnowledgeParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListKnowledgeQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListKnowledgeQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listKnowledge>>> = ({ signal }) => listKnowledge({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listKnowledge>>> = ({ signal }) => listKnowledge(params, { signal, ...requestOptions });
 
 
 
@@ -2748,11 +2756,11 @@ export type ListKnowledgeQueryError = ErrorType<unknown>
 
 
 export function useListKnowledge<TData = Awaited<ReturnType<typeof listKnowledge>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: ListKnowledgeParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getListKnowledgeQueryOptions(options)
+  const queryOptions = getListKnowledgeQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -2838,6 +2846,9 @@ export const getUpdateKnowledgeUrl = (id: number,) => {
   return `/api/knowledge/${id}`
 }
 
+/**
+ * @summary Update annotation, approvedForReuse, or archivedAt on a knowledge entry
+ */
 export const updateKnowledge = async (id: number,
     knowledgeUpdate: KnowledgeUpdate, options?: RequestInit): Promise<KnowledgeEntry> => {
 
@@ -2854,7 +2865,7 @@ export const updateKnowledge = async (id: number,
 
 
 
-export const getUpdateKnowledgeMutationOptions = <TError = ErrorType<unknown>,
+export const getUpdateKnowledgeMutationOptions = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateKnowledge>>, TError,{id: number;data: BodyType<KnowledgeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateKnowledge>>, TError,{id: number;data: BodyType<KnowledgeUpdate>}, TContext> => {
 
@@ -2883,9 +2894,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateKnowledgeMutationResult = NonNullable<Awaited<ReturnType<typeof updateKnowledge>>>
     export type UpdateKnowledgeMutationBody = BodyType<KnowledgeUpdate>
-    export type UpdateKnowledgeMutationError = ErrorType<unknown>
+    export type UpdateKnowledgeMutationError = ErrorType<ApiError>
 
-    export const useUpdateKnowledge = <TError = ErrorType<unknown>,
+    /**
+ * @summary Update annotation, approvedForReuse, or archivedAt on a knowledge entry
+ */
+export const useUpdateKnowledge = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateKnowledge>>, TError,{id: number;data: BodyType<KnowledgeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateKnowledge>>,
