@@ -50,8 +50,7 @@ import {
   Plus,
   MessageSquare,
   ExternalLink,
-
-
+  BookOpen,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
