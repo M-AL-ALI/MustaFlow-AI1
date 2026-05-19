@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
+import { useGetAdminMe } from "@workspace/api-client-react";
 import NotFound from "@/pages/not-found";
 
 // Pages
@@ -141,6 +142,51 @@ function Protected({ children }: { children: React.ReactNode }) {
       </Show>
     </>
   );
+}
+
+function isHttpError(err: unknown): err is { status: number } {
+  return err != null && typeof err === "object" && "status" in err && typeof (err as { status: unknown }).status === "number";
+}
+
+// Admin route guard — redirects to /projects if the user is not an admin.
+// Shows a neutral loading shell while the check is in flight, then either
+// renders children (admin confirmed) or redirects (auth denied). Non-auth
+// errors (network, 5xx) show a retry prompt so legitimate admins aren't
+// silently bounced on transient failures.
+function AdminGuard({ children }: { children: React.ReactNode }) {
+  const meQuery = useGetAdminMe();
+
+  if (meQuery.isPending) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="h-5 w-5 rounded-full border-2 border-border border-t-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (meQuery.isError) {
+    const isAuthError =
+      isHttpError(meQuery.error) &&
+      (meQuery.error.status === 401 || meQuery.error.status === 403);
+
+    if (isAuthError) {
+      return <Redirect to="/projects" />;
+    }
+
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <p className="text-sm text-muted-foreground">Could not verify admin access.</p>
+        <button
+          onClick={() => void meQuery.refetch()}
+          className="text-sm text-primary hover:underline"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
 }
 
 // Apply theme on mount and react to changes via storage and custom events.
@@ -289,9 +335,11 @@ function ClerkProviderWithRoutes() {
             </Route>
             <Route path="/admin">
               <Protected>
-                <AppLayout>
-                  <AdminPage />
-                </AppLayout>
+                <AdminGuard>
+                  <AppLayout>
+                    <AdminPage />
+                  </AppLayout>
+                </AdminGuard>
               </Protected>
             </Route>
             <Route path="/billing">
