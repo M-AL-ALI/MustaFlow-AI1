@@ -342,8 +342,12 @@ export default function ProjectWorkspacePage() {
   const [deviceMode, setDeviceMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [activeTab, setActiveTab] = useState("preview");
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [splitPct, setSplitPct] = useState(40);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoAnalyzedRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const submitFeedback = useSubmitTaskFeedback();
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -416,6 +420,22 @@ export default function ProjectWorkspacePage() {
     send(`Execute this plan now:\n${planMessageContent}`, { planMode: false, background });
   };
 
+  const startSplitDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+  }, []);
+
+  const handleSplitDrag = useCallback((e: React.MouseEvent) => {
+    if (!isDraggingRef.current || !splitContainerRef.current) return;
+    const rect = splitContainerRef.current.getBoundingClientRect();
+    const pct = Math.min(68, Math.max(26, ((e.clientX - rect.left) / rect.width) * 100));
+    setSplitPct(pct);
+  }, []);
+
+  const stopSplitDrag = useCallback(() => {
+    isDraggingRef.current = false;
+  }, []);
+
   if (projectError || (!projectLoading && !project))
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background gap-4 px-6 text-center">
@@ -437,17 +457,8 @@ export default function ProjectWorkspacePage() {
       </div>
     );
 
-  const statusColor =
-    project.status === "building"
-      ? "bg-primary/20 text-primary"
-      : project.status === "published"
-      ? "bg-green-500/20 text-green-500"
-      : project.status === "failed"
-      ? "bg-destructive/20 text-destructive"
-      : "bg-muted text-muted-foreground";
-
   return (
-    <div className="flex h-full bg-background w-full overflow-hidden text-foreground">
+    <div className="flex flex-col h-full bg-background w-full overflow-hidden text-foreground">
 
       {/* ── Slim icon rail ── */}
       <div className="w-14 bg-sidebar border-r border-border flex flex-col items-center py-3 gap-1.5 shrink-0 z-10">

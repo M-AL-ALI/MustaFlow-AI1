@@ -1,0 +1,149 @@
+Also add a “Create Workspace” option.
+
+MustaFlow AI should support both:
+1. Workspace
+2. Project
+
+Workspace = container for multiple projects.
+Project = one app, website, dashboard, automation, or generated build.
+
+Example:
+Workspace: Mustafa Business Apps
+  - Project: Towing Website
+  - Project: Mechanic App
+  - Project: Admin Dashboard
+
+Workspace: Client Projects
+  - Project: Restaurant Website
+  - Project: Cleaning Service Booking App
+
+==================================================
+REQUIRED CREATE WORKSPACE FEATURE
+==================================================
+
+Add visible “Create Workspace” option in these places:
+
+1. Workspace switcher
+- At the top of the left sidebar
+- User can click current workspace name
+- Dropdown should show:
+  - current workspaces
+  - Create Workspace
+  - Manage Workspaces
+
+2. Sidebar
+- Add small “+ Create Workspace” option near workspace switcher
+
+3. Settings
+- Add Workspace Settings page/section
+- User can rename workspace
+- User can create new workspace
+- User can switch workspace
+
+==================================================
+CREATE WORKSPACE MODAL
+==================================================
+
+When user clicks Create Workspace, open modal with:
+
+Fields:
+- Workspace name
+- Optional description
+- Workspace type:
+  - Personal
+  - Business
+  - Client Work
+  - Team placeholder
+
+Buttons:
+- Create Workspace
+- Cancel
+
+After create:
+- Workspace is saved
+- User is switched to the new workspace
+- User can create projects inside that workspace
+
+==================================================
+DATABASE / BACKEND REQUIREMENTS
+==================================================
+
+Add or verify workspace model/table:
+
+workspaces:
+- id
+- ownerUserId
+- name
+- description
+- type
+- createdAt
+- updatedAt
+- deletedAt optional
+
+projects must belong to workspace:
+
+projects:
+- workspaceId
+
+API routes:
+- GET /api/workspaces
+- POST /api/workspaces
+- GET /api/workspaces/:workspaceId
+- PATCH /api/workspaces/:workspaceId
+- DELETE /api/workspaces/:workspaceId or soft delete
+
+Ownership:
+- User can only see their own workspaces
+- User can only create projects inside their own workspace
+- User cannot access another user’s workspace
+- Deleted workspace should not show in sidebar
+
+==================================================
+WORKSPACE SWITCHING BEHAVIOR
+==================================================
+
+When user switches workspace:
+- Sidebar project list changes
+- Projects dashboard filters by selected workspace
+- Create New Project creates project inside selected workspace
+- Workspace selection should persist in local storage or user preference
+
+If user has no workspace:
+- Automatically create default workspace:
+  “My Workspace”
+
+==================================================
+UI REQUIREMENTS
+==================================================
+
+Workspace switcher should show:
+- Current workspace name
+- Dropdown arrow
+- List of workspaces
+- Create Workspace button
+- Manage Workspaces link
+
+Do not make it confusing with project creation.
+
+Clear difference:
+- Create Workspace = create container/group
+- Create Project = create new app/site inside the workspace
+
+==================================================
+ACCEPTANCE CRITERIA
+==================================================
+
+1. Create Workspace button exists.
+2. Workspace switcher exists in sidebar.
+3. User can create workspace.
+4. User can switch workspace.
+5. User can create project inside selected workspace.
+6. Projects dashboard filters by selected workspace.
+7. Workspace ownership is protected.
+8. Default workspace is created if user has none.
+9. Typecheck passes.
+10. API health passes.
+11. Unknown API route returns JSON 404.
+
+Do not publish production.
+Give me a short validation report after this is complete.
