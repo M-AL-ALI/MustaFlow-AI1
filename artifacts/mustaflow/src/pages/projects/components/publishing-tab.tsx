@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Globe,
   Smartphone,
@@ -27,6 +27,7 @@ import {
   Save,
   Key,
   ExternalLink,
+  Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -405,6 +406,124 @@ type MobileBuildLog = {
   createdAt: string;
 };
 
+const ACTIVE_BUILD_STATUSES = new Set(["queued", "building", "submitting"]);
+
+type BuildLogResponse = {
+  buildId?: string;
+  status: string;
+  platform?: string | null;
+  downloadUrl?: string | null;
+  testflightUrl?: string | null;
+  note?: string | null;
+  logs: string;
+};
+
+function BuildLogViewer({
+  projectId,
+  buildLogId,
+  buildStatus,
+}: {
+  projectId: number;
+  buildLogId: number;
+  buildStatus: string;
+}) {
+  const [data, setData] = useState<BuildLogResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const isActive = ACTIVE_BUILD_STATUSES.has(buildStatus);
+
+  const fetchLogs = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/builds/${buildLogId}/logs`);
+      if (!res.ok) {
+        setError(`HTTP ${res.status}`);
+        return;
+      }
+      const json = (await res.json()) as BuildLogResponse;
+      setData(json);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to fetch logs");
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId, buildLogId]);
+
+  useEffect(() => {
+    void fetchLogs();
+    if (!isActive) return;
+    const interval = setInterval(() => void fetchLogs(), 5000);
+    return () => clearInterval(interval);
+  }, [fetchLogs, isActive]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [data?.logs]);
+
+  return (
+    <div className="border-t border-border bg-zinc-950">
+      {/* Log viewer header */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
+        <div className="flex items-center gap-1.5 text-[10px] text-zinc-400">
+          <Terminal className="h-3 w-3" />
+          <span>EAS Build Logs</span>
+          {isActive && (
+            <span className="flex items-center gap-1 text-primary">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              Live
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => void fetchLogs()}
+          className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+        >
+          <RefreshCw className="h-2.5 w-2.5" />
+          Refresh
+        </button>
+      </div>
+
+      {/* Log content */}
+      <div className="h-56 overflow-y-auto font-mono text-[11px] leading-relaxed p-3 space-y-0.5">
+        {loading && (
+          <div className="flex items-center gap-2 text-zinc-500">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Loading logs…
+          </div>
+        )}
+        {error && (
+          <div className="text-destructive">{error}</div>
+        )}
+        {!loading && !error && (!data?.logs || data.logs.trim() === "") && (
+          <div className="text-zinc-600">
+            {data?.note ?? "No log output yet. Build may still be initializing…"}
+          </div>
+        )}
+        {data?.logs && data.logs.trim() !== "" && (
+          data.logs.split("\n").map((line, i) => {
+            const isError = /error|fail|exception/i.test(line);
+            const isWarn = /warn/i.test(line);
+            const isSuccess = /success|passed|complete/i.test(line);
+            return (
+              <div
+                key={i}
+                className={cn(
+                  "whitespace-pre-wrap break-all",
+                  isError ? "text-red-400" : isWarn ? "text-yellow-400" : isSuccess ? "text-green-400" : "text-zinc-400",
+                )}
+              >
+                {line || "\u00A0"}
+              </div>
+            );
+          })
+        )}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+}
+
 function MobileBuildStatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { label: string; className: string; spin?: boolean }> = {
     queued: { label: "Queued", className: "bg-muted text-muted-foreground border-border" },
@@ -471,6 +590,7 @@ export function PublishingTab({
   const [triggeringBuild, setTriggeringBuild] = useState<"ios" | "android" | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [credsMissing, setCredsMissing] = useState<string | null>(null);
+  const [openLogBuildId, setOpenLogBuildId] = useState<number | null>(null);
 
   // Expandable credentials panels
   const [iosCredsOpen, setIosCredsOpen] = useState(true);
@@ -1658,18 +1778,45 @@ export function PublishingTab({
               <div className="border border-border rounded-xl overflow-hidden bg-card">
                 <div className="px-4 py-3 border-b border-border text-sm font-semibold">iOS Build History</div>
                 <div className="divide-y divide-border">
-                  {mobileBuilds.filter((b) => b.platform === "ios").slice(0, 10).map((b) => (
-                    <div key={b.id} className="flex items-center gap-3 px-4 py-2.5 text-xs">
-                      <MobileBuildStatusBadge status={b.status} />
-                      {b.buildId && <span className="font-mono text-muted-foreground truncate">{b.buildId.slice(0, 8)}…</span>}
-                      {b.testflightUrl && (
-                        <a href={b.testflightUrl} target="_blank" rel="noreferrer" className="text-green-500 hover:underline flex items-center gap-0.5">
-                          TestFlight <ArrowUpRight className="h-2.5 w-2.5" />
-                        </a>
-                      )}
-                      <span className="ml-auto text-muted-foreground shrink-0">{new Date(b.createdAt).toLocaleDateString()}</span>
-                    </div>
-                  ))}
+                  {mobileBuilds.filter((b) => b.platform === "ios").slice(0, 10).map((b) => {
+                    const isOpen = openLogBuildId === b.id;
+                    return (
+                      <div key={b.id}>
+                        <div className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-muted/30 transition-colors">
+                          <MobileBuildStatusBadge status={b.status} />
+                          {b.buildId && <span className="font-mono text-muted-foreground truncate">{b.buildId.slice(0, 8)}…</span>}
+                          {b.testflightUrl && (
+                            <a
+                              href={b.testflightUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-green-500 hover:underline flex items-center gap-0.5"
+                            >
+                              TestFlight <ArrowUpRight className="h-2.5 w-2.5" />
+                            </a>
+                          )}
+                          <span className="ml-auto text-muted-foreground shrink-0">{new Date(b.createdAt).toLocaleDateString()}</span>
+                          <button
+                            type="button"
+                            aria-expanded={isOpen}
+                            title={isOpen ? "Hide build logs" : "View build logs"}
+                            onClick={() => setOpenLogBuildId(isOpen ? null : b.id)}
+                            className="shrink-0 flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors rounded px-1 py-0.5 hover:bg-muted"
+                          >
+                            <Terminal className="h-3 w-3" />
+                            {isOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                          </button>
+                        </div>
+                        {isOpen && (
+                          <BuildLogViewer
+                            projectId={projectId}
+                            buildLogId={b.id}
+                            buildStatus={b.status}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1947,18 +2094,45 @@ export function PublishingTab({
               <div className="border border-border rounded-xl overflow-hidden bg-card">
                 <div className="px-4 py-3 border-b border-border text-sm font-semibold">Android Build History</div>
                 <div className="divide-y divide-border">
-                  {mobileBuilds.filter((b) => b.platform === "android").slice(0, 10).map((b) => (
-                    <div key={b.id} className="flex items-center gap-3 px-4 py-2.5 text-xs">
-                      <MobileBuildStatusBadge status={b.status} />
-                      {b.buildId && <span className="font-mono text-muted-foreground truncate">{b.buildId.slice(0, 8)}…</span>}
-                      {b.testflightUrl && (
-                        <a href={b.testflightUrl} target="_blank" rel="noreferrer" className="text-green-500 hover:underline flex items-center gap-0.5">
-                          Play Console <ArrowUpRight className="h-2.5 w-2.5" />
-                        </a>
-                      )}
-                      <span className="ml-auto text-muted-foreground shrink-0">{new Date(b.createdAt).toLocaleDateString()}</span>
-                    </div>
-                  ))}
+                  {mobileBuilds.filter((b) => b.platform === "android").slice(0, 10).map((b) => {
+                    const isOpen = openLogBuildId === b.id;
+                    return (
+                      <div key={b.id}>
+                        <div className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-muted/30 transition-colors">
+                          <MobileBuildStatusBadge status={b.status} />
+                          {b.buildId && <span className="font-mono text-muted-foreground truncate">{b.buildId.slice(0, 8)}…</span>}
+                          {b.testflightUrl && (
+                            <a
+                              href={b.testflightUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-green-500 hover:underline flex items-center gap-0.5"
+                            >
+                              Play Console <ArrowUpRight className="h-2.5 w-2.5" />
+                            </a>
+                          )}
+                          <span className="ml-auto text-muted-foreground shrink-0">{new Date(b.createdAt).toLocaleDateString()}</span>
+                          <button
+                            type="button"
+                            aria-expanded={isOpen}
+                            title={isOpen ? "Hide build logs" : "View build logs"}
+                            onClick={() => setOpenLogBuildId(isOpen ? null : b.id)}
+                            className="shrink-0 flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors rounded px-1 py-0.5 hover:bg-muted"
+                          >
+                            <Terminal className="h-3 w-3" />
+                            {isOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                          </button>
+                        </div>
+                        {isOpen && (
+                          <BuildLogViewer
+                            projectId={projectId}
+                            buildLogId={b.id}
+                            buildStatus={b.status}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
