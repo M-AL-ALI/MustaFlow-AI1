@@ -62,7 +62,7 @@ export default function HomePage() {
     <div className="flex-1 overflow-y-auto pb-24">
       {/* Hero Section */}
       <div className="max-w-4xl mx-auto pt-24 px-6">
-        <h1 className="text-5xl font-bold text-center mb-4 tracking-tight">
+        <h1 className="text-5xl font-extrabold text-center mb-4 tracking-tight gradient-text">
           What do you want to build?
         </h1>
         <p className="text-muted-foreground text-center mb-12 text-lg">
@@ -70,8 +70,8 @@ export default function HomePage() {
         </p>
 
         <div className="relative max-w-2xl mx-auto mb-8">
-          <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full mix-blend-multiply" />
-          <div className="relative bg-card border border-border shadow-xl rounded-2xl p-2 flex items-center gap-2">
+          <div className="absolute -inset-6 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.18)_0%,transparent_70%)] blur-2xl rounded-full pointer-events-none" />
+          <div className="relative bg-card border border-border shadow-xl rounded-2xl p-2 flex items-center gap-2 input-glow">
             <div className="pl-4 text-primary">
               <Sparkles className="h-6 w-6" />
             </div>
@@ -109,9 +109,9 @@ export default function HomePage() {
                   handleBuild(chip.kind);
                 }
               }}
-              className="flex items-center gap-2 px-4 py-2 rounded-full border border-border bg-card hover:bg-muted hover:border-primary/50 transition-colors text-sm font-medium text-foreground"
+              className="group flex items-center gap-2 px-4 py-2 rounded-full border border-border bg-card hover:bg-muted chip-hover text-sm font-medium text-foreground"
             >
-              <chip.icon className="h-4 w-4 text-muted-foreground" />
+              <chip.icon className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors duration-150" />
               {chip.name}
             </button>
           ))}

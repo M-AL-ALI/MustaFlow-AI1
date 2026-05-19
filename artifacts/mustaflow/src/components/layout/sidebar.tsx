@@ -55,7 +55,7 @@ function NavGroup({
   return (
     <div className="px-3 py-2">
       {title && !collapsed && (
-        <h3 className="mb-2 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        <h3 className="mb-2 px-4 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
           {title}
         </h3>
       )}
@@ -68,10 +68,10 @@ function NavGroup({
             <Link key={item.href} href={item.href}>
               <div
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
                   isActive
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
+                    : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
                 )}
               >
                 <item.icon className="h-4 w-4 shrink-0" />
@@ -109,10 +109,10 @@ function AdminNavItem() {
       <Link href="/admin">
         <div
           className={cn(
-            "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+            "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
             isActive
-              ? "bg-primary/10 text-primary"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
+              : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
           )}
         >
           <LayoutDashboard className="h-4 w-4" />
