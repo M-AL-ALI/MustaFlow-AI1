@@ -51,6 +51,9 @@ import {
   MessageSquare,
   ExternalLink,
   BookOpen,
+  ChevronRight,
+  FilePen,
+  FolderOpen,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
