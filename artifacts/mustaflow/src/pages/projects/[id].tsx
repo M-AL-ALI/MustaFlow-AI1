@@ -367,7 +367,11 @@ export default function ProjectWorkspacePage() {
   const [runInBackground, setRunInBackground] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
-  const [activeTab, setActiveTab] = useState("preview");
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const stored = localStorage.getItem(`mustaflow_tab_${projectId}`);
+    const valid = WORKSPACE_TABS.map((t) => t.value);
+    return stored && valid.includes(stored) ? stored : "preview";
+  });
   const [prefillSecretName, setPrefillSecretName] = useState<string | null>(null);
   const [viewingHistoryPlan, setViewingHistoryPlan] = useState<StructuredPlan | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
@@ -401,6 +405,10 @@ export default function ProjectWorkspacePage() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem(`mustaflow_tab_${projectId}`, activeTab);
+  }, [projectId, activeTab]);
+
   const isMobileLayout = windowWidth < 768;
 
   // Derive active module IDs from the most recent completed task report
@@ -428,6 +436,10 @@ export default function ProjectWorkspacePage() {
     }
     return undefined;
   }, [messages]);
+=======
+  useEffect(() => {
+    localStorage.setItem(`mustaflow_tab_${projectId}`, activeTab);
+  }, [projectId, activeTab]);
 
   useEffect(() => {
     if (scrollRef.current) {
