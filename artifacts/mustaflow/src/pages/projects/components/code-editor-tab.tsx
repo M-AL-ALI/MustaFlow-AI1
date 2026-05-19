@@ -43,9 +43,11 @@ function FileIcon({ path }: { path: string }) {
 export function CodeEditorTab({
   projectId,
   initialFileId,
+  onHtmlFileSaved,
 }: {
   projectId: number;
   initialFileId?: number | null;
+  onHtmlFileSaved?: () => void;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -127,6 +129,9 @@ export function CodeEditorTab({
         queryKey: getGetProjectFileQueryKey(projectId, selectedFileId),
       });
       toast({ title: "File saved", description: selectedFile?.path });
+      const lowerPath = selectedFile?.path.toLowerCase() ?? "";
+      const isHtml = lowerPath.endsWith(".html") || lowerPath.endsWith(".htm");
+      if (isHtml) onHtmlFileSaved?.();
       return true;
     } catch {
       toast({

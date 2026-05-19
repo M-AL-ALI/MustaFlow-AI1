@@ -351,6 +351,8 @@ export default function ProjectWorkspacePage() {
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
   const [focusMode, setFocusMode] = useState(false);
+  const [pageMapSyncing, setPageMapSyncing] = useState(false);
+  const pageMapSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [splitPct, setSplitPct] = useState<number>(() => {
     const stored = localStorage.getItem("mustaflow_split_pct");
     return stored ? Math.min(65, Math.max(25, parseFloat(stored))) : 38;
@@ -552,6 +554,26 @@ export default function ProjectWorkspacePage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [focusMode]);
+
+  const handleHtmlFileSaved = useCallback(() => {
+    setPageMapSyncing(true);
+    if (pageMapSyncTimerRef.current) clearTimeout(pageMapSyncTimerRef.current);
+    pageMapSyncTimerRef.current = setTimeout(() => setPageMapSyncing(false), 15000);
+  }, []);
+
+  const handlePageMapSyncCleared = useCallback(() => {
+    setPageMapSyncing(false);
+    if (pageMapSyncTimerRef.current) {
+      clearTimeout(pageMapSyncTimerRef.current);
+      pageMapSyncTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (pageMapSyncTimerRef.current) clearTimeout(pageMapSyncTimerRef.current);
+    };
+  }, []);
 
   // Discover the active task ID during sendMessage.isPending so BuildProgressFeed
   // can show real events even before the API call resolves (for synchronous builds).
@@ -1232,12 +1254,14 @@ export default function ProjectWorkspacePage() {
                 }}
               />
             )}
-            {activeTab === "code" && <CodeEditorTab projectId={projectId} initialFileId={selectedCodeFileId} />}
+            {activeTab === "code" && <CodeEditorTab projectId={projectId} initialFileId={selectedCodeFileId} onHtmlFileSaved={handleHtmlFileSaved} />}
             {activeTab === "canvas" && <CanvasTab projectId={projectId} />}
             {activeTab === "page-map" && (
               <PageMapTab
                 projectId={projectId}
                 isBuilding={project.status === "building"}
+                isSyncingAfterEdit={pageMapSyncing}
+                onSyncCleared={handlePageMapSyncCleared}
                 onSwitchToPreview={() => setActiveTab("preview")}
                 onSwitchToCode={() => setActiveTab("code")}
                 onSwitchToChat={(prefill) => {

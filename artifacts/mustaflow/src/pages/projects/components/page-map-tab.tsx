@@ -114,6 +114,8 @@ function platformMapToFlow(
 type PageMapTabProps = {
   projectId: number;
   isBuilding: boolean;
+  isSyncingAfterEdit?: boolean;
+  onSyncCleared?: () => void;
   onSwitchToPreview: (filePath?: string) => void;
   onSwitchToCode: (filePath?: string) => void;
   onSwitchToChat: (prefill?: string) => void;
@@ -122,6 +124,8 @@ type PageMapTabProps = {
 export function PageMapTab({
   projectId,
   isBuilding,
+  isSyncingAfterEdit = false,
+  onSyncCleared,
   onSwitchToPreview,
   onSwitchToCode,
   onSwitchToChat,
@@ -135,13 +139,17 @@ export function PageMapTab({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 1 });
   const queryClient = useQueryClient();
+  const syncStartedRef = useRef(false);
 
-  const { data: mapResponse, isLoading } = useGetPageMap(projectId, {
+  const { data: mapResponse, isLoading, isFetching } = useGetPageMap(projectId, {
     query: {
       enabled: !!projectId,
       queryKey: getGetPageMapQueryKey(projectId),
+      refetchInterval: isSyncingAfterEdit ? 2000 : false,
     },
   });
+
+  const fetchStartedDuringSyncRef = useRef(false);
 
   const putPageMap = usePutPageMap();
   const analyzePageMap = useAnalyzePageMap();
@@ -193,6 +201,32 @@ export function PageMapTab({
       })),
     );
   }, [isBuilding, setNodes]);
+
+  // Effect 3: When sync-after-edit starts, trigger an immediate refetch to kick off polling
+  useEffect(() => {
+    if (isSyncingAfterEdit) {
+      syncStartedRef.current = true;
+      fetchStartedDuringSyncRef.current = false;
+      void queryClient.invalidateQueries({ queryKey: getGetPageMapQueryKey(projectId) });
+    } else {
+      syncStartedRef.current = false;
+      fetchStartedDuringSyncRef.current = false;
+    }
+  }, [isSyncingAfterEdit, projectId, queryClient]);
+
+  // Effect 4: Use isFetching lifecycle to detect when a sync-initiated fetch completes.
+  // When isFetching transitions true → false after a fetch was started during sync,
+  // the AI re-extraction has been picked up by the query and we can clear the indicator.
+  useEffect(() => {
+    if (!syncStartedRef.current) return;
+    if (isFetching) {
+      fetchStartedDuringSyncRef.current = true;
+    } else if (fetchStartedDuringSyncRef.current) {
+      // A fetch that started during sync just completed — dismiss indicator
+      onSyncCleared?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFetching]);
 
   const debouncedSave = useCallback((updatedNodes: Node[], updatedEdges: Edge[]) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -514,13 +548,13 @@ export function PageMapTab({
           </>
         )}
 
-        {isBuilding && (
+        {(isBuilding || isSyncingAfterEdit) && (
           <div className="ml-auto flex items-center gap-1.5 text-[11px] text-primary font-medium">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
             </span>
-            Updating map after build…
+            {isSyncingAfterEdit ? "Syncing page map…" : "Updating map after build…"}
           </div>
         )}
       </div>
