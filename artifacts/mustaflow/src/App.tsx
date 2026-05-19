@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { applyTheme, syncThemeDom, getStoredTheme } from "@/lib/theme";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -141,10 +142,34 @@ function Protected({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Apply dark theme class on mount.
+// Apply theme on mount and react to changes via storage and custom events.
+// NOTE: event listeners call syncThemeDom (not applyTheme) to avoid a
+// recursive loop: applyTheme dispatches mf-theme-change → listener →
+// applyTheme → dispatch → … (stack overflow / infinite loop).
 function ThemeApplier() {
   useEffect(() => {
-    document.documentElement.classList.add("dark");
+    syncThemeDom(getStoredTheme());
+
+    // Cross-tab storage changes
+    const handleStorage = () => syncThemeDom(getStoredTheme());
+    window.addEventListener("storage", handleStorage);
+
+    // Same-tab changes triggered by Settings (applyTheme dispatches this)
+    const handleThemeChange = () => syncThemeDom(getStoredTheme());
+    window.addEventListener("mf-theme-change", handleThemeChange);
+
+    // System preference changes when mode is "system"
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const onMqlChange = () => {
+      if (getStoredTheme() === "system") syncThemeDom("system");
+    };
+    mql.addEventListener("change", onMqlChange);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("mf-theme-change", handleThemeChange);
+      mql.removeEventListener("change", onMqlChange);
+    };
   }, []);
   return null;
 }

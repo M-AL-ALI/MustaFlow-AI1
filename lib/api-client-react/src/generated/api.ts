@@ -27,6 +27,7 @@ import type {
   ChatExchange,
   ChatMessage,
   ChatMessageInput,
+  DeleteKnowledge200,
   DeleteSecret200,
   DeleteWorkspace200,
   DuplicateProjectResult,
@@ -34,6 +35,7 @@ import type {
   HealthStatus,
   KnowledgeEntry,
   KnowledgeInput,
+  KnowledgeUpdate,
   ListCreditTransactions200,
   ListDeployments200,
   ListProjectsParams,
@@ -2743,6 +2745,136 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getCreateKnowledgeMutationOptions(options));
+    }
+
+export const getUpdateKnowledgeUrl = (id: number,) => {
+
+
+
+
+  return `/api/knowledge/${id}`
+}
+
+export const updateKnowledge = async (id: number,
+    knowledgeUpdate: KnowledgeUpdate, options?: RequestInit): Promise<KnowledgeEntry> => {
+
+  return customFetch<KnowledgeEntry>(getUpdateKnowledgeUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      knowledgeUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdateKnowledgeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateKnowledge>>, TError,{id: number;data: BodyType<KnowledgeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateKnowledge>>, TError,{id: number;data: BodyType<KnowledgeUpdate>}, TContext> => {
+
+const mutationKey = ['updateKnowledge'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateKnowledge>>, {id: number;data: BodyType<KnowledgeUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateKnowledge(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateKnowledgeMutationResult = NonNullable<Awaited<ReturnType<typeof updateKnowledge>>>
+    export type UpdateKnowledgeMutationBody = BodyType<KnowledgeUpdate>
+    export type UpdateKnowledgeMutationError = ErrorType<unknown>
+
+    export const useUpdateKnowledge = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateKnowledge>>, TError,{id: number;data: BodyType<KnowledgeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateKnowledge>>,
+        TError,
+        {id: number;data: BodyType<KnowledgeUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateKnowledgeMutationOptions(options));
+    }
+
+export const getDeleteKnowledgeUrl = (id: number,) => {
+
+
+
+
+  return `/api/knowledge/${id}`
+}
+
+export const deleteKnowledge = async (id: number, options?: RequestInit): Promise<DeleteKnowledge200> => {
+
+  return customFetch<DeleteKnowledge200>(getDeleteKnowledgeUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteKnowledgeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteKnowledge>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteKnowledge>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteKnowledge'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteKnowledge>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteKnowledge(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteKnowledgeMutationResult = NonNullable<Awaited<ReturnType<typeof deleteKnowledge>>>
+
+    export type DeleteKnowledgeMutationError = ErrorType<unknown>
+
+    export const useDeleteKnowledge = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteKnowledge>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteKnowledge>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteKnowledgeMutationOptions(options));
     }
 
 export const getGetRecentActivityUrl = () => {

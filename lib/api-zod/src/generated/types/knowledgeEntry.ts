@@ -11,6 +11,11 @@ export interface KnowledgeEntry {
   id: number;
   title: string;
   category: KnowledgeEntryCategory;
+  type?: string;
+  severity?: string;
   content: string;
+  approvedForReuse?: boolean;
+  /** @nullable */
+  projectId?: number | null;
   createdAt: Date;
 }

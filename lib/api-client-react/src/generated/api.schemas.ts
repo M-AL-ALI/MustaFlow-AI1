@@ -444,7 +444,12 @@ export interface KnowledgeEntry {
   id: number;
   title: string;
   category: KnowledgeEntryCategory;
+  type?: string;
+  severity?: string;
   content: string;
+  approvedForReuse?: boolean;
+  /** @nullable */
+  projectId?: number | null;
   createdAt: string;
 }
 
@@ -463,8 +468,32 @@ export interface KnowledgeInput {
   /** @minLength 1 */
   title: string;
   category: KnowledgeInputCategory;
+  type?: string;
+  severity?: string;
   /** @minLength 1 */
   content: string;
+}
+
+export type KnowledgeUpdateCategory = typeof KnowledgeUpdateCategory[keyof typeof KnowledgeUpdateCategory];
+
+
+export const KnowledgeUpdateCategory = {
+  lesson: 'lesson',
+  pattern: 'pattern',
+  fix: 'fix',
+  diagnostic: 'diagnostic',
+  note: 'note',
+} as const;
+
+export interface KnowledgeUpdate {
+  /** @minLength 1 */
+  title?: string;
+  category?: KnowledgeUpdateCategory;
+  type?: string;
+  severity?: string;
+  /** @minLength 1 */
+  content?: string;
+  approvedForReuse?: boolean;
 }
 
 export interface ProjectFileSummary {
@@ -655,5 +684,9 @@ export type ListDeployments200 = {
 
 export type ListCreditTransactions200 = {
   transactions: CreditTransaction[];
+};
+
+export type DeleteKnowledge200 = {
+  ok: boolean;
 };
 

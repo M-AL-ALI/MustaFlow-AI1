@@ -11,6 +11,8 @@ import {
   AlertCircle,
   ChevronRight,
   Lock,
+  UserPlus,
+  UserMinus,
 } from "lucide-react";
 
 interface AdminCheck {
@@ -46,13 +48,44 @@ interface AdminMe {
   grantedBy: string | null;
 }
 
+interface RoleGrant {
+  userId: string;
+  role: string;
+  grantedBy: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export default function AdminPage() {
   const [me, setMe] = useState<AdminMe | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [readiness, setReadiness] = useState<LaunchReadiness | null>(null);
+  const [roles, setRoles] = useState<RoleGrant[]>([]);
   const [loading, setLoading] = useState(true);
   const [readinessLoading, setReadinessLoading] = useState(false);
+  const [rolesLoading, setRolesLoading] = useState(false);
+
+  const [roleUserId, setRoleUserId] = useState("");
+  const [roleValue, setRoleValue] = useState<"admin" | "owner" | "user">("admin");
+  const [roleGranting, setRoleGranting] = useState(false);
+  const [roleError, setRoleError] = useState<string | null>(null);
+  const [roleSuccess, setRoleSuccess] = useState<string | null>(null);
+
+  const fetchRoles = useCallback(async () => {
+    setRolesLoading(true);
+    try {
+      const r = await fetch("/api/admin/roles");
+      if (r.ok) {
+        const data = (await r.json()) as { roles: RoleGrant[] };
+        setRoles(data.roles ?? []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setRolesLoading(false);
+    }
+  }, []);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -66,7 +99,7 @@ export default function AdminPage() {
         setMe((await meRes.json()) as AdminMe);
       }
 
-      const [statsRes] = await Promise.all([fetch("/api/admin/stats")]);
+      const statsRes = await fetch("/api/admin/stats");
       if (statsRes.ok) setStats((await statsRes.json()) as AdminStats);
     } catch {
       // ignore
@@ -90,7 +123,56 @@ export default function AdminPage() {
   useEffect(() => {
     void fetchAll();
     void fetchReadiness();
-  }, [fetchAll, fetchReadiness]);
+    void fetchRoles();
+  }, [fetchAll, fetchReadiness, fetchRoles]);
+
+  const handleGrantRole = async () => {
+    if (!roleUserId.trim()) {
+      setRoleError("User ID is required.");
+      return;
+    }
+    setRoleGranting(true);
+    setRoleError(null);
+    setRoleSuccess(null);
+    try {
+      const res = await fetch("/api/admin/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: roleUserId.trim(), role: roleValue }),
+      });
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string };
+        setRoleError(err.error ?? "Failed to update role");
+        return;
+      }
+      setRoleSuccess(`Role "${roleValue}" granted to ${roleUserId.trim()}`);
+      setRoleUserId("");
+      void fetchRoles();
+    } catch {
+      setRoleError("Request failed");
+    } finally {
+      setRoleGranting(false);
+    }
+  };
+
+  const handleRevokeRole = async (userId: string) => {
+    try {
+      await fetch(`/api/admin/roles/${encodeURIComponent(userId)}`, { method: "DELETE" });
+      void fetchRoles();
+    } catch {
+      // ignore
+    }
+  };
+
+  const readinessCheck = (id: string): AdminCheck | undefined =>
+    readiness?.checks.find((c) => c.id === id);
+
+  const checkToStatus = (check?: AdminCheck): "ok" | "warn" | "error" => {
+    if (!check) return "warn";
+    if (check.status === "pass") return "ok";
+    if (check.status === "fail") return "error";
+    return "warn";
+  };
 
   if (forbidden) {
     return (
@@ -106,6 +188,9 @@ export default function AdminPage() {
     );
   }
 
+  const stripeCheck = readinessCheck("stripe");
+  const cfCheck = readinessCheck("cloudflare_ssl");
+
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -119,7 +204,7 @@ export default function AdminPage() {
           </div>
         </div>
         <button
-          onClick={() => { void fetchAll(); void fetchReadiness(); }}
+          onClick={() => { void fetchAll(); void fetchReadiness(); void fetchRoles(); }}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <RefreshCw className="h-3.5 w-3.5" />
@@ -139,7 +224,6 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Stats grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
           icon={FolderKanban}
@@ -167,7 +251,6 @@ export default function AdminPage() {
         />
       </div>
 
-      {/* Launch readiness checklist */}
       <div className="border border-border rounded-xl bg-card overflow-hidden">
         <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -218,7 +301,96 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* Status sections */}
+      <div className="border border-border rounded-xl bg-card overflow-hidden">
+        <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <Users className="h-3.5 w-3.5" />
+            Role Management
+          </h3>
+          {rolesLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
+        </div>
+
+        <div className="px-4 py-4 border-b border-border space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Grant or revoke admin/owner roles for any user by their Clerk user ID.
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <input
+              type="text"
+              value={roleUserId}
+              onChange={(e) => setRoleUserId(e.target.value)}
+              placeholder="Clerk user ID (e.g. user_abc123)"
+              className="flex-1 min-w-0 px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <select
+              value={roleValue}
+              onChange={(e) => setRoleValue(e.target.value as "admin" | "owner" | "user")}
+              className="px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="admin">Admin</option>
+              <option value="owner">Owner</option>
+              <option value="user">User (revoke)</option>
+            </select>
+            <button
+              onClick={() => void handleGrantRole()}
+              disabled={roleGranting || !roleUserId.trim()}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              {roleGranting ? "Saving…" : "Grant Role"}
+            </button>
+          </div>
+          {roleError && <p className="text-sm text-destructive">{roleError}</p>}
+          {roleSuccess && <p className="text-sm text-green-500">{roleSuccess}</p>}
+        </div>
+
+        {roles.length === 0 && !rolesLoading && (
+          <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+            No role grants found. Admins may be configured via the ADMIN_USER_IDS environment variable.
+          </div>
+        )}
+
+        {roles.length > 0 && (
+          <div className="divide-y divide-border">
+            {roles.map((r) => (
+              <div
+                key={r.userId}
+                className="flex items-center justify-between px-4 py-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <code className="font-mono text-xs text-foreground">{r.userId}</code>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span
+                      className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
+                        r.role === "owner"
+                          ? "bg-purple-500/10 text-purple-500"
+                          : r.role === "admin"
+                            ? "bg-blue-500/10 text-blue-500"
+                            : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {r.role}
+                    </span>
+                    {r.grantedBy && (
+                      <span className="text-xs text-muted-foreground">
+                        granted by {r.grantedBy}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => void handleRevokeRole(r.userId)}
+                  title="Revoke role"
+                  className="p-1.5 rounded hover:bg-destructive/10 transition-colors text-muted-foreground hover:text-destructive"
+                >
+                  <UserMinus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <AdminSection title="Security">
           <AdminItem label="Encryption" value="AES-256-GCM active" status="ok" />
@@ -238,9 +410,13 @@ export default function AdminPage() {
           <AdminItem
             label="Cloudflare SSL"
             value={
-              process.env.CF_ZONE_ID ? "Configured" : "Not configured (manual cert)"
+              cfCheck
+                ? cfCheck.status === "pass"
+                  ? "Configured — automated SSL active"
+                  : "Not configured (manual cert)"
+                : "Checking…"
             }
-            status="warn"
+            status={checkToStatus(cfCheck)}
           />
           <AdminItem
             label="Deployments logged"
@@ -269,8 +445,14 @@ export default function AdminPage() {
           />
           <AdminItem
             label="Stripe payments"
-            value="Setup required — see /billing"
-            status="warn"
+            value={
+              stripeCheck
+                ? stripeCheck.status === "pass"
+                  ? "Configured — billing active"
+                  : "Setup required — see /billing"
+                : "Checking…"
+            }
+            status={checkToStatus(stripeCheck)}
           />
           <AdminItem
             label="Transactions"
@@ -390,3 +572,4 @@ function AdminItem({
     </div>
   );
 }
+

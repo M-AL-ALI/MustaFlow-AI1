@@ -11,6 +11,8 @@ export interface KnowledgeInput {
   /** @minLength 1 */
   title: string;
   category: KnowledgeInputCategory;
+  type?: string;
+  severity?: string;
   /** @minLength 1 */
   content: string;
 }

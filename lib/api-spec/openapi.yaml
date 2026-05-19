@@ -668,6 +668,47 @@ paths:
               schema:
                 $ref: "#/components/schemas/KnowledgeEntry"
 
+  /knowledge/{id}:
+    patch:
+      operationId: updateKnowledge
+      tags: [knowledge]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeEntry"
+    delete:
+      operationId: deleteKnowledge
+      tags: [knowledge]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+
   /activity:
     get:
       operationId: getRecentActivity
@@ -960,7 +1001,11 @@ components:
         category:
           type: string
           enum: [lesson, pattern, fix, diagnostic, note]
+        type: { type: string }
+        severity: { type: string }
         content: { type: string }
+        approvedForReuse: { type: boolean }
+        projectId: { type: ["integer", "null"] }
         createdAt: { type: string, format: date-time }
 
     KnowledgeInput:
@@ -971,7 +1016,21 @@ components:
         category:
           type: string
           enum: [lesson, pattern, fix, diagnostic, note]
+        type: { type: string }
+        severity: { type: string }
         content: { type: string, minLength: 1 }
+
+    KnowledgeUpdate:
+      type: object
+      properties:
+        title: { type: string, minLength: 1 }
+        category:
+          type: string
+          enum: [lesson, pattern, fix, diagnostic, note]
+        type: { type: string }
+        severity: { type: string }
+        content: { type: string, minLength: 1 }
+        approvedForReuse: { type: boolean }
 
     ProjectFileSummary:
       type: object

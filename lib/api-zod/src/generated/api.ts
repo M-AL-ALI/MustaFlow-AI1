@@ -635,7 +635,11 @@ export const ListKnowledgeResponseItem = zod.object({
   "id": zod.number(),
   "title": zod.string(),
   "category": zod.enum(['lesson', 'pattern', 'fix', 'diagnostic', 'note']),
+  "type": zod.string().optional(),
+  "severity": zod.string().optional(),
   "content": zod.string(),
+  "approvedForReuse": zod.boolean().optional(),
+  "projectId": zod.number().nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListKnowledgeResponse = zod.array(ListKnowledgeResponseItem)
@@ -648,7 +652,48 @@ export const ListKnowledgeResponse = zod.array(ListKnowledgeResponseItem)
 export const CreateKnowledgeBody = zod.object({
   "title": zod.string().min(1),
   "category": zod.enum(['lesson', 'pattern', 'fix', 'diagnostic', 'note']),
+  "type": zod.string().optional(),
+  "severity": zod.string().optional(),
   "content": zod.string().min(1)
+})
+
+
+export const UpdateKnowledgeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+
+
+
+export const UpdateKnowledgeBody = zod.object({
+  "title": zod.string().min(1).optional(),
+  "category": zod.enum(['lesson', 'pattern', 'fix', 'diagnostic', 'note']).optional(),
+  "type": zod.string().optional(),
+  "severity": zod.string().optional(),
+  "content": zod.string().min(1).optional(),
+  "approvedForReuse": zod.boolean().optional()
+})
+
+export const UpdateKnowledgeResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.enum(['lesson', 'pattern', 'fix', 'diagnostic', 'note']),
+  "type": zod.string().optional(),
+  "severity": zod.string().optional(),
+  "content": zod.string(),
+  "approvedForReuse": zod.boolean().optional(),
+  "projectId": zod.number().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+export const DeleteKnowledgeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteKnowledgeResponse = zod.object({
+  "ok": zod.boolean()
 })
 
 
