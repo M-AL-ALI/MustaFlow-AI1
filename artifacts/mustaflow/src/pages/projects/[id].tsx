@@ -13,6 +13,7 @@ import {
   getListTasksQueryKey,
 } from "@workspace/api-client-react";
 import { CodeEditorTab } from "./components/code-editor-tab";
+import { ChatHistory } from "./components/chat-history";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // used by inner components only
 import { Button } from "@/components/ui/button";
 import {
@@ -453,6 +454,7 @@ export default function ProjectWorkspacePage() {
   const [activeTab, setActiveTab] = useState("preview");
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history">("chat");
+  const [showChatHistory, setShowChatHistory] = useState(false);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
   const [splitPct, setSplitPct] = useState<number>(() => {
     const stored = localStorage.getItem("mustaflow_split_pct");
@@ -753,16 +755,46 @@ export default function ProjectWorkspacePage() {
               <Sparkles style={{ width: 10, height: 10 }} className="text-white" />
             </div>
             <span className="text-xs font-semibold text-foreground">AI Builder</span>
-            <span className={cn(
-              "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-              sendMessage.isPending ? "bg-primary/15 text-primary" : "bg-green-500/15 text-green-400"
-            )}>
-              {sendMessage.isPending ? "Working…" : "Ready"}
-            </span>
+            {!showChatHistory && (
+              <span className={cn(
+                "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                sendMessage.isPending ? "bg-primary/15 text-primary" : "bg-green-500/15 text-green-400"
+              )}>
+                {sendMessage.isPending ? "Working…" : "Ready"}
+              </span>
+            )}
+            <button
+              onClick={() => setShowChatHistory((v) => !v)}
+              title={showChatHistory ? "Back to live chat" : "View chat history"}
+              className={cn(
+                "ml-auto flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
+                showChatHistory
+                  ? "bg-primary/10 text-primary border-primary/20"
+                  : "text-muted-foreground border-border hover:text-foreground hover:bg-muted",
+              )}
+            >
+              <History className="h-3 w-3" />
+              {showChatHistory ? "Live" : "History"}
+            </button>
           </div>
 
-          {/* Messages */}
-          <div
+          {/* Chat History overlay */}
+          {showChatHistory && (
+            <div className="flex-1 min-h-0 relative">
+              <ChatHistory
+                messages={messages}
+                isLoading={messages === undefined}
+                onViewFile={(path) => {
+                  const f = files.find((x) => x.path === path);
+                  if (f) { setSelectedCodeFileId(f.id); setActiveTab("code"); }
+                }}
+                onClose={() => setShowChatHistory(false)}
+              />
+            </div>
+          )}
+
+          {/* Messages + controls (hidden in history mode) */}
+          {!showChatHistory && <><div
             ref={scrollRef}
             className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
           >
@@ -978,6 +1010,7 @@ export default function ProjectWorkspacePage() {
               </div>
             </div>
           </div>
+          </>}
           </>
           )}
 
