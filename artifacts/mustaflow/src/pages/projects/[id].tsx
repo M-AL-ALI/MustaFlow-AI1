@@ -1313,11 +1313,16 @@ export default function ProjectWorkspacePage() {
                 onSwitchToPreview={() => setActiveTab("preview")}
                 onSwitchToCode={() => setActiveTab("code")}
                 onSwitchToChat={(prefill) => {
-                  if (prefill) setPrompt(prefill);
                   setLeftPanelTab("chat");
-                  setActiveTab("preview");
                   if (isMobileLayout) setChatDrawerOpen(true);
-                  setTimeout(() => promptInputRef.current?.focus(), 50);
+                  if (prefill) {
+                    // Auto-send so the build starts immediately without the user
+                    // having to press Send, and stay on the Page Map so they can
+                    // watch "Updating map after build…" progress.
+                    send(prefill);
+                  } else {
+                    setTimeout(() => promptInputRef.current?.focus(), 50);
+                  }
                 }}
               />
             )}

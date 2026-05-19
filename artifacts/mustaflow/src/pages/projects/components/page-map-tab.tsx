@@ -254,12 +254,13 @@ export function PageMapTab({
         })),
       };
       const payload: PageMapData = { ...currentMap, [platform]: updatedPlatform } as PageMapData;
-      putPageMap.mutate(
-        { id: projectId, data: payload },
-        { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getGetPageMapQueryKey(projectId) }); } },
-      );
+      // Do NOT invalidate the query on save — refetching after every drag/edit causes
+      // mapResponse to get a new object reference → Effect 1 resets all nodes → nodes
+      // visually disappear/snap. The local state is already up-to-date; the next
+      // scheduled refetch or explicit re-analyze will pick up server changes.
+      putPageMap.mutate({ id: projectId, data: payload });
     }, 800);
-  }, [mapResponse, platform, projectId, putPageMap, queryClient]);
+  }, [mapResponse, platform, projectId, putPageMap]);
 
   const onNodeDragStop: OnNodeDrag = useCallback((_evt, _node, allNodes) => {
     debouncedSave(allNodes, edges);
@@ -456,15 +457,13 @@ export function PageMapTab({
         })),
       };
       const payload: PageMapData = { ...currentMap, [platform]: updatedPlatform } as PageMapData;
-      putPageMap.mutate(
-        { id: projectId, data: payload },
-        { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getGetPageMapQueryKey(projectId) }); } },
-      );
+      // Do NOT invalidate query on save (same reason as debouncedSave — avoid node reset)
+      putPageMap.mutate({ id: projectId, data: payload });
 
       return updated;
     });
     setSelectedNodeId(id);
-  }, [edges, projectId, platform, mapResponse, handleNodeClick, handlePreviewClick, setNodes, putPageMap, queryClient]);
+  }, [edges, projectId, platform, mapResponse, handleNodeClick, handlePreviewClick, setNodes, putPageMap]);
 
   const handleModifyPage = useCallback((node: PageMapNodeState) => {
     const isPlanned = node.planned;
