@@ -1,8 +1,10 @@
 import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { workspacesTable } from "./workspaces";
 
 export const projectsTable = pgTable("projects", {
   id: serial("id").primaryKey(),
   ownerId: text("owner_id").notNull().default("demo-user"),
+  workspaceId: integer("workspace_id").references(() => workspacesTable.id),
   name: text("name").notNull(),
   description: text("description"),
   kind: text("kind").notNull().default("web"),

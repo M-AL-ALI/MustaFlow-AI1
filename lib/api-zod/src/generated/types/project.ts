@@ -11,6 +11,8 @@ import type { ProjectStatus } from './projectStatus';
 
 export interface Project {
   id: number;
+  /** @nullable */
+  workspaceId?: number | null;
   name: string;
   /** @nullable */
   description?: string | null;

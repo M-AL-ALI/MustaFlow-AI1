@@ -17,10 +17,91 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary List user workspaces (auto-creates default if empty)
+ */
+export const ListWorkspacesResponseItem = zod.object({
+  "id": zod.number(),
+  "ownerUserId": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "type": zod.enum(['personal', 'business', 'client', 'team']),
+  "deletedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const ListWorkspacesResponse = zod.array(ListWorkspacesResponseItem)
+
+
+/**
+ * @summary Create a workspace
+ */
+
+export const createWorkspaceBodyTypeDefault = `personal`;
+
+export const CreateWorkspaceBody = zod.object({
+  "name": zod.string().min(1),
+  "description": zod.string().optional(),
+  "type": zod.enum(['personal', 'business', 'client', 'team']).default(createWorkspaceBodyTypeDefault)
+})
+
+
+export const GetWorkspaceParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetWorkspaceResponse = zod.object({
+  "id": zod.number(),
+  "ownerUserId": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "type": zod.enum(['personal', 'business', 'client', 'team']),
+  "deletedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+export const UpdateWorkspaceParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateWorkspaceBody = zod.object({
+  "name": zod.string().optional(),
+  "description": zod.string().optional(),
+  "type": zod.enum(['personal', 'business', 'client', 'team']).optional()
+})
+
+export const UpdateWorkspaceResponse = zod.object({
+  "id": zod.number(),
+  "ownerUserId": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "type": zod.enum(['personal', 'business', 'client', 'team']),
+  "deletedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+export const DeleteWorkspaceParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteWorkspaceResponse = zod.object({
+  "deleted": zod.boolean()
+})
+
+
+/**
  * @summary List all projects
  */
+export const ListProjectsQueryParams = zod.object({
+  "workspaceId": zod.coerce.number().optional()
+})
+
 export const ListProjectsResponseItem = zod.object({
   "id": zod.number(),
+  "workspaceId": zod.number().nullish(),
   "name": zod.string(),
   "description": zod.string().nullish(),
   "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
@@ -47,6 +128,7 @@ export const ListProjectsResponse = zod.array(ListProjectsResponseItem)
 export const CreateProjectBody = zod.object({
   "name": zod.string().min(1),
   "description": zod.string().optional(),
+  "workspaceId": zod.number().optional(),
   "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
   "initialPrompt": zod.string().optional()
 })
@@ -58,6 +140,7 @@ export const GetProjectParams = zod.object({
 
 export const GetProjectResponse = zod.object({
   "id": zod.number(),
+  "workspaceId": zod.number().nullish(),
   "name": zod.string(),
   "description": zod.string().nullish(),
   "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
@@ -90,6 +173,7 @@ export const UpdateProjectBody = zod.object({
 
 export const UpdateProjectResponse = zod.object({
   "id": zod.number(),
+  "workspaceId": zod.number().nullish(),
   "name": zod.string(),
   "description": zod.string().nullish(),
   "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
@@ -120,6 +204,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "byKind": zod.record(zod.string(), zod.number()),
   "recent": zod.array(zod.object({
   "id": zod.number(),
+  "workspaceId": zod.number().nullish(),
   "name": zod.string(),
   "description": zod.string().nullish(),
   "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),

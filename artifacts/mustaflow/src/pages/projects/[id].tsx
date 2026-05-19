@@ -10,7 +10,6 @@ import {
   getListProjectFilesQueryKey,
   getListVersionsQueryKey,
   getListTasksQueryKey,
-  useSubmitTaskFeedback,
 } from "@workspace/api-client-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // used by inner components only
 import { Button } from "@/components/ui/button";
@@ -45,8 +44,6 @@ import {
   Monitor,
   Tablet,
   Smartphone,
-  ThumbsUp,
-  ThumbsDown,
   Wrench,
   Plus,
 } from "lucide-react";
@@ -347,7 +344,6 @@ export default function ProjectWorkspacePage() {
   const autoAnalyzedRef = useRef(false);
   const isDraggingRef = useRef(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
-  const submitFeedback = useSubmitTaskFeedback();
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -460,158 +456,318 @@ export default function ProjectWorkspacePage() {
   return (
     <div className="flex flex-col h-full bg-background w-full overflow-hidden text-foreground">
 
-      {/* ── Slim icon rail ── */}
-      <div className="w-14 bg-sidebar border-r border-border flex flex-col items-center py-3 gap-1.5 shrink-0 z-10">
-        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center mb-2 shadow-lg shadow-primary/20">
-          <Cpu className="text-white" style={{ width: 16, height: 16 }} />
-        </div>
-        {[
-          { Icon: Globe, active: activeTab === "preview", title: "Go to Preview", tab: "preview" },
-          { Icon: FileCode2, active: activeTab === "tools-files", title: "Go to Files", tab: "tools-files" },
-          { Icon: Blocks, active: activeTab === "canvas", title: "Go to Canvas", tab: "canvas" },
-          { Icon: Activity, active: activeTab === "analytics", title: "Go to Analytics", tab: "analytics" },
-          { Icon: Settings, active: activeTab === "manage", title: "Go to Settings", tab: "manage" },
-        ].map(({ Icon, active, title, tab }) => (
-          <button
-            key={title}
-            title={title}
-            onClick={() => setActiveTab(tab)}
-            className={cn(
-              "w-10 h-10 flex items-center justify-center rounded-xl transition-colors",
-              active
-                ? "bg-sidebar-accent text-sidebar-foreground"
-                : "text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
-            )}
-          >
-            <Icon style={{ width: 17, height: 17 }} />
-          </button>
-        ))}
-        <div className="flex-1" />
-        <div className="w-8 h-8 rounded-full bg-primary/80 border border-primary/40 flex items-center justify-center text-[11px] font-bold text-white">
-          D
-        </div>
-      </div>
+      <CreateProjectModal open={newProjectOpen} onOpenChange={setNewProjectOpen} />
 
-      {/* ── Main workspace column ── */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-
-        {/* ── Top bar ── */}
-        <div className="border-b border-border bg-card shrink-0 flex items-center gap-3 px-4 h-12 z-20 relative">
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="w-5 h-5 rounded bg-primary/20 border border-primary/30 flex items-center justify-center">
-              <Globe className="h-3 w-3 text-primary" />
-            </div>
-            <span className="text-sm font-semibold text-foreground truncate max-w-[140px]">{project.name}</span>
-            <span className={cn("text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
-              project.status === "building" ? "bg-primary/10 text-primary border-primary/20"
-              : project.status === "published" ? "bg-green-500/10 text-green-400 border-green-500/20"
-              : project.status === "failed" ? "bg-destructive/10 text-destructive border-destructive/20"
-              : "bg-muted text-muted-foreground border-border"
-            )}>
-              {project.status}
-            </span>
+      {/* ── Top bar ── */}
+      <div className="border-b border-border bg-card shrink-0 flex items-center gap-2 px-4 h-12 z-20 relative">
+        <div className="flex items-center gap-2 shrink-0 mr-1">
+          <div className="w-5 h-5 rounded bg-primary/20 border border-primary/30 flex items-center justify-center">
+            <Globe className="h-3 w-3 text-primary" />
           </div>
-          {/* Plain tab buttons — no shadcn Tabs context */}
-          <div className="flex-1 overflow-x-auto min-w-0">
-            <div className="flex items-stretch h-full">
-              {WORKSPACE_TABS.map((tab) => (
-                <button
-                  key={tab.value}
-                  aria-label={`Switch to ${tab.label} tab`}
-                  data-tab={tab.value}
-                  onClick={() => setActiveTab(tab.value)}
-                  className={cn(
-                    "px-3 py-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2",
-                    activeTab === tab.value
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {/* Device selector */}
-          <div className="flex items-center gap-0.5 bg-muted rounded-xl p-1 shrink-0">
-            {([
-              { mode: "desktop", Icon: Monitor, label: "Desktop" },
-              { mode: "tablet", Icon: Tablet, label: "Tablet" },
-              { mode: "mobile", Icon: Smartphone, label: "Mobile" },
-            ] as const).map(({ mode, Icon, label }) => (
+          <span className="text-sm font-semibold text-foreground truncate max-w-[130px]">{project.name}</span>
+          <span className={cn("text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
+            project.status === "building" ? "bg-primary/10 text-primary border-primary/20"
+            : project.status === "published" ? "bg-green-500/10 text-green-400 border-green-500/20"
+            : project.status === "failed" ? "bg-destructive/10 text-destructive border-destructive/20"
+            : "bg-muted text-muted-foreground border-border"
+          )}>
+            {project.status}
+          </span>
+        </div>
+        <div className="w-px h-5 bg-border shrink-0" />
+        <div className="flex-1 overflow-x-auto min-w-0">
+          <div className="flex items-stretch h-12">
+            {WORKSPACE_TABS.map((tab) => (
               <button
-                key={mode}
-                onClick={() => setDeviceMode(mode)}
-                aria-label={label}
+                key={tab.value}
+                onClick={() => setActiveTab(tab.value)}
                 className={cn(
-                  "px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-[11px] font-medium transition-colors",
-                  deviceMode === mode
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
+                  "px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full",
+                  activeTab === tab.value
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
-                <Icon style={{ width: 13, height: 13 }} />
-                <span className="hidden lg:inline">{label}</span>
+                {tab.label}
               </button>
             ))}
           </div>
-          {/* Publish button */}
-          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold hover:bg-green-500/15 transition-colors shrink-0">
-            <Rocket style={{ width: 12, height: 12 }} /> Publish
-          </button>
-          {/* New Project button */}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => setNewProjectOpen(true)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-border text-muted-foreground text-xs font-medium hover:bg-muted hover:text-foreground transition-colors shrink-0"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-border text-muted-foreground text-xs font-medium hover:bg-muted hover:text-foreground transition-colors"
           >
-            <Plus style={{ width: 12, height: 12 }} /> New
+            <Plus style={{ width: 11, height: 11 }} /> New
+          </button>
+          <button
+            onClick={() => setActiveTab("publishing")}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold hover:bg-green-500/15 transition-colors"
+          >
+            <Rocket style={{ width: 12, height: 12 }} /> Publish
           </button>
         </div>
-        <CreateProjectModal open={newProjectOpen} onOpenChange={setNewProjectOpen} />
+      </div>
 
-        {/* Tab content — fills remaining space above chat */}
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {activeTab === "preview" && (
-            <div className="flex h-full">
-              <div className="flex-1 min-w-0">
-                <PreviewTab project={project} />
+      {/* ── Main split: chat LEFT + preview RIGHT ── */}
+      <div
+        ref={splitContainerRef}
+        className="flex-1 flex min-h-0 overflow-hidden select-none"
+        onMouseMove={handleSplitDrag}
+        onMouseUp={stopSplitDrag}
+        onMouseLeave={stopSplitDrag}
+      >
+        {/* ── LEFT: AI Chat Panel ── */}
+        <div
+          className="flex flex-col min-h-0 border-r border-border bg-card/40"
+          style={{ width: `${splitPct}%`, minWidth: 260, maxWidth: "72%" }}
+        >
+          {/* Chat panel header */}
+          <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
+            <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
+              <Sparkles style={{ width: 10, height: 10 }} className="text-white" />
+            </div>
+            <span className="text-xs font-semibold text-foreground">AI Builder</span>
+            <span className={cn(
+              "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+              sendMessage.isPending ? "bg-primary/15 text-primary" : "bg-green-500/15 text-green-400"
+            )}>
+              {sendMessage.isPending ? "Working…" : "Ready"}
+            </span>
+          </div>
+
+          {/* Messages */}
+          <div
+            ref={scrollRef}
+            className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
+          >
+            {messages?.slice(-20).map((msg) => {
+              const planPayload = msg.plan as ChatPlanPayload | null | undefined;
+              const payloadKind = planPayload && typeof planPayload === "object" ? (planPayload as { kind?: string }).kind : undefined;
+              const isReport = payloadKind === "report";
+              const isQueued = payloadKind === "task-queued";
+              const isError = payloadKind === "error";
+              const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
+              const structuredPlan = isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
+              return (
+                <div
+                  key={msg.id}
+                  className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}
+                >
+                  <div className={cn(
+                    "max-w-[90%] px-3 py-2 rounded-xl text-xs",
+                    msg.role === "user"
+                      ? "bg-primary text-primary-foreground rounded-br-sm"
+                      : isError
+                      ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
+                      : "bg-muted text-foreground rounded-bl-sm border border-border",
+                  )}>
+                    <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                    {isReport && (
+                      <ReportCard report={(planPayload as { kind: "report"; report: TaskReport }).report} />
+                    )}
+                    {isQueued && (
+                      <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
+                        <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary" />
+                        Background task #{(planPayload as { taskId: number }).taskId} running…
+                      </div>
+                    )}
+                    {isError && (
+                      <ErrorCard
+                        message={(planPayload as { message: string }).message}
+                        suggestions={(planPayload as { suggestions?: string[] }).suggestions}
+                        onTryFix={(text) => { setPrompt(text); }}
+                      />
+                    )}
+                    {isPlanCard && (
+                      <PlanCard
+                        plan={structuredPlan}
+                        onMain={() => runPlanned(msg.content, false)}
+                        onBackground={() => runPlanned(msg.content, true)}
+                        disabled={sendMessage.isPending}
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {sendMessage.isPending && !activeTaskId && (
+              <div className="flex justify-start">
+                <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
+                  <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-primary" />
+                  <span className="text-muted-foreground">MustaFlow is working…</span>
+                </div>
               </div>
-              {/* ── What's Next right panel ── */}
-              <div className="w-52 bg-card border-l border-border flex flex-col p-3 gap-3 overflow-y-auto shrink-0">
-                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">What's next</div>
-                {[
-                  { Icon: BrainCircuit, label: "Plan full app", desc: "Blueprint before building", color: "text-violet-400", bg: "bg-violet-500/10 border-violet-500/20", onClick: () => { setPlanMode(true); } },
-                  { Icon: Zap, label: "Build first draft", desc: "Generate from your prompt", color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20", onClick: () => { setPlanMode(false); } },
-                  { Icon: Blocks, label: "Add integrations", desc: "Auth, payments, APIs", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20", onClick: () => { setActiveTab("tools-files"); } },
-                  { Icon: Rocket, label: "Publish app", desc: "Go live in one click", color: "text-green-400", bg: "bg-green-500/10 border-green-500/20", onClick: () => { setActiveTab("publishing"); } },
-                ].map((action) => (
-                  <button key={action.label} onClick={action.onClick} className={cn("flex items-start gap-2.5 p-2.5 rounded-xl border text-left transition-all hover:scale-[1.01] active:scale-[0.99]", action.bg)}>
-                    <action.Icon className={cn("h-4 w-4 mt-0.5 shrink-0", action.color)} />
-                    <div className="min-w-0">
-                      <div className={cn("text-xs font-semibold", action.color)}>{action.label}</div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{action.desc}</div>
+            )}
+
+            {activeTaskId !== null && (
+              <ActivityStream
+                projectId={projectId}
+                taskId={activeTaskId}
+                onDismiss={() => setActiveTaskId(null)}
+              />
+            )}
+          </div>
+
+          {/* Activity ticker */}
+          <div className="shrink-0 px-3 py-1.5 border-t border-border/40 flex items-center gap-2">
+            {sendMessage.isPending ? (
+              <>
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                </span>
+                <span className="text-[11px] font-semibold text-primary shrink-0">AI is working</span>
+                <div className="flex items-center gap-1 overflow-x-auto hide-scrollbar">
+                  {[
+                    { type: "reading_files", Icon: FolderOpen, msg: "Reading files" },
+                    { type: "generating_code", Icon: Code2, msg: "Generating code" },
+                    { type: "editing_files", Icon: FilePen, msg: "Writing files" },
+                  ].map((ev, i, arr) => (
+                    <div key={ev.type} className="flex items-center gap-1 shrink-0">
+                      <div className={cn(
+                        "flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px]",
+                        i === arr.length - 1 ? "bg-primary/15 text-primary border border-primary/25" : "text-muted-foreground/50",
+                      )}>
+                        <ev.Icon className={cn("h-3 w-3", i === arr.length - 1 && "animate-pulse")} />
+                        {ev.msg}
+                        {i < arr.length - 1 && <CheckCircle2 className="h-3 w-3 text-green-500/60 ml-0.5" />}
+                      </div>
+                      {i < arr.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground/30 shrink-0" />}
                     </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground w-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                Ready
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    onClick={() => setPlanMode(!planMode)}
+                    className={cn(
+                      "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
+                      planMode ? "bg-secondary/15 text-secondary border-secondary/30" : "text-muted-foreground border-border hover:text-foreground",
+                    )}
+                  >
+                    <CheckSquare className="h-3 w-3" /> Plan
+                  </button>
+                  <button
+                    onClick={() => setRunInBackground((v) => !v)}
+                    className={cn(
+                      "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
+                      runInBackground ? "bg-primary/10 text-primary border-primary/30" : "text-muted-foreground border-border hover:text-foreground",
+                    )}
+                  >
+                    <ServerCog className="h-3 w-3" /> Background
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Chat input */}
+          <div className="shrink-0 px-3 py-2.5 border-t border-border">
+            <div className="flex items-start gap-2">
+              <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shrink-0 shadow-md shadow-primary/20 mt-0.5">
+                <Sparkles style={{ width: 12, height: 12 }} className="text-white" />
+              </div>
+              <div className="flex-1 bg-muted border border-border rounded-2xl rounded-tl-sm overflow-hidden">
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder={planMode ? "Describe your app — I'll create a plan first…" : "Describe what to build or change…"}
+                  rows={2}
+                  className="w-full bg-transparent px-4 pt-3 pb-1 text-sm resize-none focus:outline-none text-foreground placeholder:text-muted-foreground/60"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                  }}
+                />
+                <div className="h-px bg-border/40 mx-4" />
+                <div className="flex items-center gap-2 px-3 py-1.5">
+                  <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Attach file">
+                    <Paperclip className="h-3.5 w-3.5" />
+                  </button>
+                  <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Attach design">
+                    <Paintbrush2 className="h-3.5 w-3.5" />
+                  </button>
+                  <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Voice">
+                    <Mic className="h-3.5 w-3.5" />
+                  </button>
+                  <div className="ml-auto flex items-center gap-2">
+                    <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
+                      {(["lite", "eco", "power", "pro"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => setAgentMode(mode)}
+                          className={cn(
+                            "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
+                            agentMode === mode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {mode}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleSend}
+                      disabled={sendMessage.isPending || !prompt.trim()}
+                      className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shadow-md shadow-primary/30 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Send style={{ width: 14, height: 14 }} className="text-primary-foreground" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Drag handle ── */}
+        <div
+          className="w-1 shrink-0 bg-border hover:bg-primary/50 cursor-col-resize transition-colors active:bg-primary/70"
+          onMouseDown={startSplitDrag}
+        />
+
+        {/* ── RIGHT: Preview / Tab Content ── */}
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background">
+          {activeTab === "preview" && (
+            <div className="shrink-0 border-b border-border px-3 py-1.5 flex items-center gap-2 bg-card">
+              <div className="flex items-center bg-muted border border-border rounded-lg p-0.5 gap-0.5">
+                {([
+                  { mode: "desktop", Icon: Monitor },
+                  { mode: "tablet", Icon: Tablet },
+                  { mode: "mobile", Icon: Smartphone },
+                ] as const).map(({ mode, Icon }) => (
+                  <button
+                    key={mode}
+                    onClick={() => setDeviceMode(mode)}
+                    className={cn(
+                      "w-7 h-6 flex items-center justify-center rounded-md transition-colors",
+                      deviceMode === mode ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                    )}
+                    title={mode}
+                  >
+                    <Icon style={{ width: 13, height: 13 }} />
                   </button>
                 ))}
-                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mt-1">Recent versions</div>
-                {(versions ?? []).slice(0, 5).map((v, i) => (
-                  <div key={v.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 cursor-pointer">
-                    <History className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="text-[11px] text-muted-foreground truncate">{v.label ?? `Version ${v.id}`}</span>
-                    {i === 0 && <span className="ml-auto text-[9px] text-muted-foreground/50 shrink-0">latest</span>}
-                  </div>
-                ))}
-                {(versions ?? []).length === 0 && (
-                  <div className="text-[11px] text-muted-foreground/50 italic px-2">No versions yet</div>
-                )}
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Live Preview</span>
+                <div className={cn("w-1.5 h-1.5 rounded-full shrink-0",
+                  project.status === "building" ? "bg-primary animate-pulse" : "bg-green-500"
+                )} />
               </div>
             </div>
           )}
-          {activeTab === "canvas" && <div className="h-full"><CanvasTab projectId={projectId} /></div>}
-          {activeTab === "tools-files" && <div className="h-full"><ToolsTab projectId={projectId} /></div>}
-          {activeTab === "publishing" && <div className="h-full"><PublishingTab projectId={projectId} /></div>}
-          {activeTab === "logs" && (
-            <div className="h-full">
+
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {activeTab === "preview" && <PreviewTab project={project} />}
+            {activeTab === "canvas" && <CanvasTab projectId={projectId} />}
+            {activeTab === "tools-files" && <ToolsTab projectId={projectId} />}
+            {activeTab === "publishing" && <PublishingTab projectId={projectId} />}
+            {activeTab === "logs" && (
               <LogsTab
                 projectId={projectId}
                 onTryFix={(text) => {
@@ -619,215 +775,13 @@ export default function ProjectWorkspacePage() {
                   setActiveTab("preview");
                 }}
               />
-            </div>
-          )}
-          {activeTab === "analytics" && <div className="h-full"><AnalyticsTab /></div>}
-          {activeTab === "resources" && <div className="h-full"><ResourcesTab /></div>}
-          {activeTab === "domains" && <div className="h-full"><DomainsTab /></div>}
-          {activeTab === "manage" && <div className="h-full"><ManageTab projectId={projectId} /></div>}
-        </div>
-
-          {/* ── AI Builder Chat ── */}
-          <div className="shrink-0 border-t border-border bg-card/95 backdrop-blur-sm flex flex-col" style={{ height: 290 }}>
-
-            {/* Messages scroll area */}
-            <div
-              className="flex-1 overflow-y-auto px-4 py-2 space-y-2 min-h-0 hide-scrollbar"
-              ref={scrollRef}
-            >
-              {messages?.slice(-12).map((msg) => {
-                const planPayload = msg.plan as ChatPlanPayload | null | undefined;
-                const payloadKind = planPayload && typeof planPayload === "object" ? (planPayload as { kind?: string }).kind : undefined;
-                const isReport = payloadKind === "report";
-                const isQueued = payloadKind === "task-queued";
-                const isError = payloadKind === "error";
-                const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
-                const structuredPlan = isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
-                return (
-                  <div
-                    key={msg.id}
-                    className={cn(
-                      "flex",
-                      msg.role === "user" ? "justify-end" : "justify-start",
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "max-w-[80%] px-3 py-2 rounded-xl text-xs",
-                        msg.role === "user"
-                          ? "bg-primary text-primary-foreground rounded-br-sm"
-                          : isError
-                          ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
-                          : "bg-muted text-foreground rounded-bl-sm border border-border",
-                      )}
-                    >
-                      <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
-                      {isReport && (
-                        <ReportCard report={(planPayload as { kind: "report"; report: TaskReport }).report} />
-                      )}
-                      {isQueued && (
-                        <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
-                          <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary" />
-                          Background task #{(planPayload as { taskId: number }).taskId} running…
-                        </div>
-                      )}
-                      {isError && (
-                        <ErrorCard
-                          message={(planPayload as { message: string }).message}
-                          suggestions={(planPayload as { suggestions?: string[] }).suggestions}
-                          onTryFix={(text) => { setPrompt(text); }}
-                        />
-                      )}
-                      {isPlanCard && (
-                        <PlanCard
-                          plan={structuredPlan}
-                          onMain={() => runPlanned(msg.content, false)}
-                          onBackground={() => runPlanned(msg.content, true)}
-                          disabled={sendMessage.isPending}
-                        />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {sendMessage.isPending && !activeTaskId && (
-                <div className="flex justify-start">
-                  <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
-                    <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-primary" />
-                    <span className="text-muted-foreground">MustaFlow is working…</span>
-                  </div>
-                </div>
-              )}
-
-              {activeTaskId !== null && (
-                <ActivityStream
-                  projectId={projectId}
-                  taskId={activeTaskId}
-                  onDismiss={() => setActiveTaskId(null)}
-                />
-              )}
-            </div>
-
-            {/* Activity ticker */}
-            <div className="shrink-0 px-4 py-1.5 border-t border-border/40 flex items-center gap-3">
-              {sendMessage.isPending ? (
-                <>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                    </span>
-                    <span className="text-[11px] font-semibold text-primary">AI is working</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar">
-                    {[
-                      { type: "reading_files", Icon: FolderOpen, msg: "Reading files" },
-                      { type: "generating_code", Icon: Code2, msg: "Generating code" },
-                      { type: "editing_files", Icon: FilePen, msg: "Writing files" },
-                    ].map((ev, i, arr) => (
-                      <div key={ev.type} className="flex items-center gap-1 shrink-0">
-                        <div className={cn(
-                          "flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px]",
-                          i === arr.length - 1
-                            ? "bg-primary/15 text-primary border border-primary/25"
-                            : "text-muted-foreground/50",
-                        )}>
-                          <ev.Icon className={cn("h-3 w-3", i === arr.length - 1 && "animate-pulse")} />
-                          {ev.msg}
-                          {i < arr.length - 1 && <CheckCircle2 className="h-3 w-3 text-green-500/60 ml-0.5" />}
-                        </div>
-                        {i < arr.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground/30 shrink-0" />}
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-                  Ready
-                  <div className="ml-auto flex items-center gap-2">
-                    <button
-                      onClick={() => setPlanMode(!planMode)}
-                      className={cn(
-                        "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
-                        planMode ? "bg-secondary/15 text-secondary border-secondary/30" : "text-muted-foreground border-border hover:text-foreground",
-                      )}
-                    >
-                      <CheckSquare className="h-3 w-3" /> Plan
-                    </button>
-                    <button
-                      onClick={() => setRunInBackground((v) => !v)}
-                      className={cn(
-                        "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
-                        runInBackground ? "bg-primary/10 text-primary border-primary/30" : "text-muted-foreground border-border hover:text-foreground",
-                      )}
-                    >
-                      <ServerCog className="h-3 w-3" /> Background
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Input section — AI avatar + unified input card */}
-            <div className="shrink-0 px-3 py-2">
-              <div className="flex items-start gap-2.5">
-                {/* AI avatar */}
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shrink-0 shadow-lg shadow-primary/20 mt-0.5">
-                  <Sparkles style={{ width: 14, height: 14 }} className="text-white" />
-                </div>
-                {/* Input card */}
-                <div className="flex-1 bg-muted border border-border rounded-2xl rounded-tl-sm overflow-hidden">
-                  <textarea
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder={planMode ? "Describe your app — I'll create a plan first…" : "Describe what to build or ask for a change…"}
-                    rows={2}
-                    className="w-full bg-transparent px-4 pt-3 pb-1 text-sm resize-none focus:outline-none text-foreground placeholder:text-muted-foreground/60"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
-                    }}
-                  />
-                  <div className="h-px bg-border/40 mx-4" />
-                  <div className="flex items-center gap-2 px-3 py-1.5">
-                    <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Attach file">
-                      <Paperclip className="h-3.5 w-3.5" />
-                    </button>
-                    <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Attach design">
-                      <Paintbrush2 className="h-3.5 w-3.5" />
-                    </button>
-                    <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Voice">
-                      <Mic className="h-3.5 w-3.5" />
-                    </button>
-                    <div className="ml-auto flex items-center gap-2">
-                      <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
-                        {(["lite", "eco", "power", "pro"] as const).map((mode) => (
-                          <button
-                            key={mode}
-                            onClick={() => setAgentMode(mode)}
-                            className={cn(
-                              "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
-                              agentMode === mode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                            )}
-                          >
-                            {mode}
-                          </button>
-                        ))}
-                      </div>
-                      <button
-                        onClick={handleSend}
-                        disabled={sendMessage.isPending || !prompt.trim()}
-                        className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shadow-md shadow-primary/30 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        <Send style={{ width: 14, height: 14 }} className="text-primary-foreground" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            )}
+            {activeTab === "analytics" && <AnalyticsTab />}
+            {activeTab === "resources" && <ResourcesTab />}
+            {activeTab === "domains" && <DomainsTab />}
+            {activeTab === "manage" && <ManageTab projectId={projectId} />}
           </div>
+        </div>
       </div>
     </div>
   );

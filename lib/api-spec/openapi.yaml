@@ -24,6 +24,8 @@ tags:
     description: Project secrets (masked)
   - name: openai
     description: OpenAI AI chat operations
+  - name: workspaces
+    description: User workspaces (containers for projects)
 paths:
   /healthz:
     get:
@@ -38,11 +40,95 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
 
+  /workspaces:
+    get:
+      operationId: listWorkspaces
+      tags: [workspaces]
+      summary: List user workspaces (auto-creates default if empty)
+      responses:
+        "200":
+          description: List of workspaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Workspace"
+    post:
+      operationId: createWorkspace
+      tags: [workspaces]
+      summary: Create a workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+
+  /workspaces/{id}:
+    get:
+      operationId: getWorkspace
+      tags: [workspaces]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+    patch:
+      operationId: updateWorkspace
+      tags: [workspaces]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceUpdate"
+      responses:
+        "200":
+          description: Updated workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+    delete:
+      operationId: deleteWorkspace
+      tags: [workspaces]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted: { type: boolean }
+
   /projects:
     get:
       operationId: listProjects
       tags: [projects]
       summary: List all projects
+      parameters:
+        - name: workspaceId
+          in: query
+          required: false
+          schema: { type: integer }
       responses:
         "200":
           description: List of projects
@@ -565,11 +651,47 @@ components:
         error: { type: string }
       required: [error]
 
+    Workspace:
+      type: object
+      required: [id, ownerUserId, name, type, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        ownerUserId: { type: string }
+        name: { type: string }
+        description: { type: ["string", "null"] }
+        type:
+          type: string
+          enum: [personal, business, client, team]
+        deletedAt: { type: ["string", "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    WorkspaceInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+        type:
+          type: string
+          enum: [personal, business, client, team]
+          default: personal
+
+    WorkspaceUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        type:
+          type: string
+          enum: [personal, business, client, team]
+
     Project:
       type: object
       required: [id, name, kind, status, agentMode, createdAt, updatedAt]
       properties:
         id: { type: integer }
+        workspaceId: { type: ["integer", "null"] }
         name: { type: string }
         description: { type: ["string", "null"] }
         kind:
@@ -596,6 +718,7 @@ components:
       properties:
         name: { type: string, minLength: 1 }
         description: { type: string }
+        workspaceId: { type: integer }
         kind:
           type: string
           enum: [web, mobile-ios, mobile-android, fullstack, dashboard, api, design, automation, marketplace, chatbot, spreadsheet]

@@ -16,6 +16,7 @@ import {
   getListProjectsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useWorkspace } from "@/contexts/workspace-context";
 import {
   Monitor,
   LayoutDashboard,
@@ -52,6 +53,7 @@ export function CreateProjectModal({ open, onOpenChange, initialPrompt = "" }: P
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const createProject = useCreateProject();
+  const { currentWorkspace } = useWorkspace();
 
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ProjectKind>("web");
@@ -76,6 +78,7 @@ export function CreateProjectModal({ open, onOpenChange, initialPrompt = "" }: P
         data: {
           name: resolvedName,
           description: prompt.trim() || undefined,
+          workspaceId: currentWorkspace?.id,
           kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
           initialPrompt: prompt.trim() || undefined,
         },

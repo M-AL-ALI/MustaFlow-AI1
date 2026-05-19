@@ -25,6 +25,7 @@ import SecurityPage from "./pages/security";
 
 // Components
 import { AppLayout } from "./components/layout/app-layout";
+import { WorkspaceProvider } from "./contexts/workspace-context";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -218,6 +219,7 @@ function ClerkProviderWithRoutes() {
       <QueryClientProvider client={queryClient}>
         <ThemeApplier />
         <ClerkQueryClientCacheInvalidator />
+        <WorkspaceProvider>
         <TooltipProvider>
           <Switch>
             {/* ── Public routes ── */}
@@ -316,6 +318,7 @@ function ClerkProviderWithRoutes() {
           </Switch>
           <Toaster />
         </TooltipProvider>
+        </WorkspaceProvider>
       </QueryClientProvider>
     </ClerkProvider>
   );

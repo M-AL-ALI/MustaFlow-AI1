@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { useUser, useClerk } from "@clerk/react";
 import { useState, useEffect } from "react";
 import { CreateProjectModal } from "@/components/create-project-modal";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 const NAV_ITEMS = [
   { name: "Home", href: "/", icon: Home },
@@ -202,9 +203,12 @@ export function Sidebar() {
         <img src={logoUrl} alt="MustaFlow AI" className="h-28 w-auto object-contain" />
       </div>
 
+      {/* Workspace switcher — visible when signed in */}
+      {isSignedIn && <WorkspaceSwitcher />}
+
       {/* Create button — visible when signed in */}
       {isSignedIn && (
-        <div className="px-4 pb-2 shrink-0">
+        <div className="px-3 pb-2 shrink-0">
           <button
             onClick={() => setCreateOpen(true)}
             className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/60 transition-colors px-3 py-2 text-sm font-semibold"

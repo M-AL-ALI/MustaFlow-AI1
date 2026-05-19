@@ -20,6 +20,7 @@ import domainsRouter from "./domains";
 import sslRouter, { sslWebhookRouter } from "./ssl";
 import adminRouter from "./admin";
 import billingRouter, { billingWebhookRouter } from "./billing";
+import workspacesRouter from "./workspaces";
 import { attachUser } from "../lib/auth";
 import {
   aiBuilderLimiter,
@@ -42,6 +43,7 @@ router.use(billingWebhookRouter);   // POST /billing/webhook    (Stripe → us)
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
 const KNOWN_PREFIXES = [
+  "/workspaces",
   "/projects",
   "/messages",
   "/tasks",
@@ -79,6 +81,7 @@ router.post("/projects/:id/duplicate", exportLimiter);
 router.get("/projects/:id/export", exportLimiter);
 router.post("/billing/checkout", exportLimiter);
 
+router.use(workspacesRouter);
 router.use(projectsRouter);
 router.use(messagesRouter);
 router.use(tasksRouter);

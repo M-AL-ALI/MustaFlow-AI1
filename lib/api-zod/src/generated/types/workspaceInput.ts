@@ -5,13 +5,11 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
-import type { ProjectInputKind } from './projectInputKind';
+import type { WorkspaceInputType } from './workspaceInputType';
 
-export interface ProjectInput {
+export interface WorkspaceInput {
   /** @minLength 1 */
   name: string;
   description?: string;
-  workspaceId?: number;
-  kind: ProjectInputKind;
-  initialPrompt?: string;
+  type?: WorkspaceInputType;
 }

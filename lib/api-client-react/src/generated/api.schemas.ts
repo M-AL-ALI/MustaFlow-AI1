@@ -13,6 +13,62 @@ export interface ApiError {
   error: string;
 }
 
+export type WorkspaceType = typeof WorkspaceType[keyof typeof WorkspaceType];
+
+
+export const WorkspaceType = {
+  personal: 'personal',
+  business: 'business',
+  client: 'client',
+  team: 'team',
+} as const;
+
+export interface Workspace {
+  id: number;
+  ownerUserId: string;
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  type: WorkspaceType;
+  /** @nullable */
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type WorkspaceInputType = typeof WorkspaceInputType[keyof typeof WorkspaceInputType];
+
+
+export const WorkspaceInputType = {
+  personal: 'personal',
+  business: 'business',
+  client: 'client',
+  team: 'team',
+} as const;
+
+export interface WorkspaceInput {
+  /** @minLength 1 */
+  name: string;
+  description?: string;
+  type?: WorkspaceInputType;
+}
+
+export type WorkspaceUpdateType = typeof WorkspaceUpdateType[keyof typeof WorkspaceUpdateType];
+
+
+export const WorkspaceUpdateType = {
+  personal: 'personal',
+  business: 'business',
+  client: 'client',
+  team: 'team',
+} as const;
+
+export interface WorkspaceUpdate {
+  name?: string;
+  description?: string;
+  type?: WorkspaceUpdateType;
+}
+
 export type ProjectKind = typeof ProjectKind[keyof typeof ProjectKind];
 
 
@@ -53,6 +109,8 @@ export const ProjectAgentMode = {
 
 export interface Project {
   id: number;
+  /** @nullable */
+  workspaceId?: number | null;
   name: string;
   /** @nullable */
   description?: string | null;
@@ -96,6 +154,7 @@ export interface ProjectInput {
   /** @minLength 1 */
   name: string;
   description?: string;
+  workspaceId?: number;
   kind: ProjectInputKind;
   initialPrompt?: string;
 }
@@ -555,6 +614,14 @@ export interface CreditTransaction {
   balanceAfter: number;
   createdAt: string;
 }
+
+export type DeleteWorkspace200 = {
+  deleted: boolean;
+};
+
+export type ListProjectsParams = {
+workspaceId?: number;
+};
 
 export type UnpublishProject200 = {
   projectId: number;

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -26,10 +26,14 @@ const router: IRouter = Router();
 const activeProjects = isNull(projectsTable.deletedAt);
 
 router.get("/projects", async (req, res): Promise<void> => {
+  const userId = req.userId ?? "demo-user";
+  const wsId = req.query.workspaceId ? parseInt(req.query.workspaceId as string, 10) : null;
+  const conditions: SQL[] = [eq(projectsTable.ownerId, userId), activeProjects];
+  if (wsId && !isNaN(wsId)) conditions.push(eq(projectsTable.workspaceId, wsId));
   const rows = await db
     .select()
     .from(projectsTable)
-    .where(and(eq(projectsTable.ownerId, req.userId ?? "demo-user"), activeProjects))
+    .where(and(...conditions))
     .orderBy(desc(projectsTable.updatedAt));
   res.json(ListProjectsResponse.parse(rows));
 });
@@ -85,6 +89,7 @@ router.post("/projects", async (req, res): Promise<void> => {
     .insert(projectsTable)
     .values({
       ownerId: req.userId ?? "demo-user",
+      workspaceId: projectInput.workspaceId ?? null,
       name: projectInput.name,
       description: projectInput.description ?? null,
       kind: projectInput.kind,
