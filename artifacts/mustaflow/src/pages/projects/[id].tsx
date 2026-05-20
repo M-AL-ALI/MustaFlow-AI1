@@ -1439,14 +1439,6 @@ export default function ProjectWorkspacePage() {
                     />
                   )}
 
-                  {activeTaskId !== null && (
-                    <ActivityStream
-                      projectId={projectId}
-                      taskId={activeTaskId}
-                      onDismiss={() => setActiveTaskId(null)}
-                    />
-                  )}
-
                   {/* Activity ticker / Status bar */}
                   <div className="shrink-0 border-t border-border/40">
                     {sendMessage.isPending ? (
