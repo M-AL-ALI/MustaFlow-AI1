@@ -49,7 +49,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
     ],
     versionPattern: /tailwindcss@([\d.]+)/,
     blockedVersions: [],
-    minimumRecommendedVersion: "3.0.0",
+    minimumRecommendedVersion: "4.3.0",
   },
   {
     name: "lucide",
@@ -57,7 +57,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
     urlPatterns: [/unpkg\.com\/lucide/, /cdn\.jsdelivr\.net\/npm\/lucide/],
     versionPattern: /lucide@([\d.]+)/,
     blockedVersions: [],
-    minimumRecommendedVersion: "0.263.0",
+    minimumRecommendedVersion: "1.16.0",
   },
   {
     name: "chartjs",
@@ -77,7 +77,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "4.x",
       },
     ],
-    minimumRecommendedVersion: "3.0.0",
+    minimumRecommendedVersion: "4.5.1",
   },
   {
     name: "leaflet",
@@ -96,7 +96,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "1.9.4",
       },
     ],
-    minimumRecommendedVersion: "1.7.0",
+    minimumRecommendedVersion: "1.9.4",
   },
   {
     name: "alpinejs",
@@ -115,7 +115,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "3.x",
       },
     ],
-    minimumRecommendedVersion: "3.0.0",
+    minimumRecommendedVersion: "3.15.12",
   },
   {
     name: "htmx",
@@ -133,7 +133,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "2.x",
       },
     ],
-    minimumRecommendedVersion: "1.9.0",
+    minimumRecommendedVersion: "2.0.10",
   },
   {
     name: "axios",
@@ -160,7 +160,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "1.6.0",
       },
     ],
-    minimumRecommendedVersion: "1.6.0",
+    minimumRecommendedVersion: "1.16.1",
   },
   {
     name: "lodash",
@@ -180,7 +180,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "4.17.21",
       },
     ],
-    minimumRecommendedVersion: "4.17.21",
+    minimumRecommendedVersion: "4.18.1",
   },
   {
     name: "animejs",
@@ -200,7 +200,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         severity: "warning",
       },
     ],
-    minimumRecommendedVersion: "3.2.0",
+    minimumRecommendedVersion: "4.4.1",
   },
   {
     name: "threejs",
@@ -245,7 +245,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         severity: "warning",
       },
     ],
-    minimumRecommendedVersion: "4.0.0",
+    minimumRecommendedVersion: "5.55.8",
   },
   {
     name: "gsap",
@@ -257,7 +257,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
     ],
     versionPattern: /gsap@([\d.]+)|gsap\/([\d.]+)/,
     blockedVersions: [],
-    minimumRecommendedVersion: "3.0.0",
+    minimumRecommendedVersion: "3.15.0",
   },
   {
     name: "jquery",
@@ -278,7 +278,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "3.7.x",
       },
     ],
-    minimumRecommendedVersion: "3.5.0",
+    minimumRecommendedVersion: "4.0.0",
   },
   {
     name: "bootstrap",
@@ -301,7 +301,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "5.3.x",
       },
     ],
-    minimumRecommendedVersion: "4.3.1",
+    minimumRecommendedVersion: "5.3.8",
   },
   {
     name: "react",
@@ -321,7 +321,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         severity: "warning",
       },
     ],
-    minimumRecommendedVersion: "16.14.0",
+    minimumRecommendedVersion: "19.2.6",
   },
   {
     name: "d3",
@@ -342,7 +342,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         severity: "warning",
       },
     ],
-    minimumRecommendedVersion: "7.0.0",
+    minimumRecommendedVersion: "7.9.0",
   },
   {
     name: "moment",
@@ -381,7 +381,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         severity: "warning",
       },
     ],
-    minimumRecommendedVersion: "3.0.0",
+    minimumRecommendedVersion: "3.5.34",
   },
 ];
 
