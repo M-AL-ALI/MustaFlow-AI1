@@ -22,6 +22,8 @@ import {
   QrCode,
   Info,
   ShieldAlert,
+  Plug,
+  FileJson,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -67,6 +69,7 @@ type PreviewTabProps = {
   nativeFeatures?: string[];
   onFixPrompt?: (text: string) => void;
   onAutoSendPrompt?: (text: string) => void;
+  onOpenFileInEditor?: (fileId: number) => void;
 };
 
 // ─── Security note ────────────────────────────────────────────────────────────
@@ -90,6 +93,7 @@ export function PreviewTab({
   nativeFeatures = [],
   onFixPrompt,
   onAutoSendPrompt,
+  onOpenFileInEditor,
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
   const [platform, setPlatform] = useState<Platform>("web");
@@ -104,6 +108,7 @@ export function PreviewTab({
   const prevNativeFeaturesRef = useRef<string[]>([]);
   const [crashBanner, setCrashBanner] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
+  const [mocksOpen, setMocksOpen] = useState(false);
 
   // EAS build status — fetch latest completed build for native QR
   type EasBuildEntry = {
@@ -180,6 +185,19 @@ export function PreviewTab({
   const hasFiles = (files?.length ?? 0) > 0;
   const isLoading = filesLoading && files === undefined;
   const previewSrc = `/api/projects/${project.id}/preview/?t=${iframeKey}`;
+
+  // Mock API detection — derived from the file list
+  const mockFiles = (files ?? []).filter(
+    (f) => f.path.startsWith("_mocks/") && f.path.endsWith(".json"),
+  );
+  const hasMockSw = (files ?? []).some((f) => f.path === "_mocks/sw.js");
+  const mockEndpointCount = mockFiles.length;
+
+  /** Convert a _mocks/ filename back to the API path it stubs */
+  function mockFileToApiPath(filePath: string): string {
+    // _mocks/api/users/profile.json → /api/users/profile
+    return "/" + filePath.replace(/^_mocks\//, "").replace(/\.json$/, "");
+  }
 
   // postMessage listener — only accept messages from our preview iframe.
   // Requires both a mounted iframe ref AND a matching source window.
@@ -453,6 +471,98 @@ export function PreviewTab({
         </div>
 
         <div className="flex-1" />
+
+        {/* Mock API badge */}
+        {hasMockSw && mockEndpointCount > 0 && (
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setMocksOpen((o) => !o)}
+              aria-label={mocksOpen ? "Close mock API panel" : "Open mock API panel"}
+              aria-pressed={mocksOpen}
+              className={cn(
+                "flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors border",
+                mocksOpen
+                  ? "bg-violet-500/15 text-violet-400 border-violet-500/30"
+                  : "bg-violet-500/10 text-violet-400 border-violet-500/20 hover:bg-violet-500/15",
+              )}
+              title="Mock API endpoints active"
+            >
+              <Plug className="h-3 w-3" />
+              <span className="hidden sm:inline">Mocked</span>
+              <span className="px-1 py-0.5 rounded-full bg-violet-500/25 text-violet-300 text-[9px] font-bold leading-none">
+                {mockEndpointCount}
+              </span>
+            </button>
+            {mocksOpen && (
+              <div className="absolute top-full right-0 mt-2 z-50 w-80 bg-popover border border-border rounded-xl shadow-2xl overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-muted/40">
+                  <div className="font-semibold text-foreground text-sm flex items-center gap-1.5">
+                    <Plug className="h-3.5 w-3.5 text-violet-400" />
+                    Mock API
+                  </div>
+                  <button
+                    onClick={() => setMocksOpen(false)}
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="px-3 py-2 bg-violet-500/8 border-b border-violet-500/15">
+                  <p className="text-[11px] text-violet-300/80 leading-relaxed">
+                    A service worker is intercepting API calls in this preview and returning the stub
+                    data below. Edits are live — save a file to update the response.
+                  </p>
+                </div>
+                <div className="max-h-64 overflow-y-auto">
+                  {mockFiles.map((file) => {
+                    const apiPath = mockFileToApiPath(file.path);
+                    return (
+                      <button
+                        key={file.id}
+                        onClick={() => {
+                          if (onOpenFileInEditor) {
+                            onOpenFileInEditor(file.id);
+                            setMocksOpen(false);
+                          }
+                        }}
+                        className={cn(
+                          "group w-full flex items-center gap-2 px-3 py-2 text-left border-b border-border/30 last:border-0 transition-colors",
+                          onOpenFileInEditor
+                            ? "hover:bg-muted/50 cursor-pointer"
+                            : "cursor-default",
+                        )}
+                        title={onOpenFileInEditor ? `Edit ${file.path}` : file.path}
+                        disabled={!onOpenFileInEditor}
+                      >
+                        <FileJson className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-mono text-foreground truncate">
+                            {apiPath}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground truncate">
+                            {file.path}
+                          </div>
+                        </div>
+                        {onOpenFileInEditor && (
+                          <span className="text-[10px] text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100">
+                            Edit
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!onOpenFileInEditor && (
+                  <div className="px-3 py-2 border-t border-border bg-muted/20">
+                    <p className="text-[10px] text-muted-foreground">
+                      Switch to the Tools &amp; Files tab to edit mock responses.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Console toggle */}
         {hasFiles && (

@@ -129,7 +129,7 @@ export function QueueComposer({
         if (onPromptValueChange) onPromptValueChange("");
         onBatchStarted(data.batchId, data.totalTasks);
       } catch (err) {
-        console.error("Variant queue submission failed:", err);
+        void err;
       } finally {
         setIsSubmitting(false);
       }

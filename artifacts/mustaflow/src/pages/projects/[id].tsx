@@ -49,7 +49,6 @@ import {
   Puzzle,
   ListOrdered,
   ShieldCheck,
-  ServerCog,
   Bookmark,
   Layers2,
   RotateCcw,
@@ -1372,14 +1371,15 @@ export default function ProjectWorkspacePage() {
                       </div>
                     </div>
                   )}
+
+                  {activeTaskId !== null && (
+                    <ActivityStream
+                      projectId={projectId}
+                      taskId={activeTaskId}
+                      onDismiss={() => setActiveTaskId(null)}
+                    />
+                  )}
                 </div>
-                {activeTaskId !== null && (
-                  <ActivityStream
-                    projectId={projectId}
-                    taskId={activeTaskId}
-                    onDismiss={() => setActiveTaskId(null)}
-                  />
-                )}
 
                   {/* Activity ticker / Status bar */}
                   <div className="shrink-0 border-t border-border/40">
@@ -1811,6 +1811,10 @@ export default function ProjectWorkspacePage() {
                   switchLeftPanel("chat");
                   if (isMobileLayout) setChatDrawerOpen(true);
                   send(text);
+                }}
+                onOpenFileInEditor={(fileId) => {
+                  setSelectedCodeFileId(fileId);
+                  setActiveTab("code");
                 }}
               />
             )}
