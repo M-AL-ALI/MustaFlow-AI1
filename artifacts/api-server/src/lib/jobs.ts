@@ -1469,36 +1469,30 @@ export async function runJob(input: JobInput): Promise<void> {
             const MOMENT_REPLACE_PROMPT =
               "Replace Moment.js with Luxon — remove the Moment.js CDN script tag and rewrite all moment(...) calls using Luxon's DateTime API.";
 
-            // Idempotency guard: skip if a queued/running auto-fix for this project already exists.
-            const [existingAutoFix] = await db
-              .select({ id: agentTasksTable.id })
-              .from(agentTasksTable)
-              .where(
-                and(
-                  eq(agentTasksTable.projectId, projectId),
-                  eq(agentTasksTable.title, "Auto-fix: Replace Moment.js with Luxon"),
-                  inArray(agentTasksTable.status, ["queued", "building", "planning"]),
-                ),
-              )
-              .limit(1);
-            if (existingAutoFix) {
+            // Idempotency guard backed by a DB-enforced partial unique index:
+            //   agent_tasks_active_background_title_idx ON agent_tasks(project_id, title)
+            //   WHERE kind = 'background' AND status IN ('queued','building','planning')
+            // ON CONFLICT DO NOTHING is race-safe — if two concurrent builds both attempt
+            // to insert, the second will silently skip rather than creating a duplicate.
+            // Once a previous auto-fix resolves (status → done/failed/canceled), the row
+            // falls outside the partial index and a new auto-fix can be enqueued.
+            const autoFixResult = await pool.query<{ id: number }>(
+              `INSERT INTO agent_tasks (project_id, title, kind, status, prompt)
+               VALUES ($1, $2, 'background', 'queued', $3)
+               ON CONFLICT (project_id, title)
+               WHERE kind = 'background' AND status IN ('queued', 'building', 'planning')
+               DO NOTHING
+               RETURNING id`,
+              [projectId, "Auto-fix: Replace Moment.js with Luxon", MOMENT_REPLACE_PROMPT],
+            );
+            if (autoFixResult.rows.length === 0) {
               logger.info(
-                { projectId, taskId, existingAutoFixId: existingAutoFix.id },
+                { projectId, taskId },
                 "Moment.js auto-fix already queued — skipping duplicate enqueue",
               );
               return;
             }
-
-            const [followUpTask] = await db
-              .insert(agentTasksTable)
-              .values({
-                projectId,
-                title: "Auto-fix: Replace Moment.js with Luxon",
-                kind: "background",
-                status: "queued",
-                prompt: MOMENT_REPLACE_PROMPT,
-              })
-              .returning();
+            const followUpTask = autoFixResult.rows[0];
             if (!followUpTask) {
               logger.warn(
                 { projectId, taskId },

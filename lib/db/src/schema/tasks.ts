@@ -1,4 +1,14 @@
-import { pgTable, serial, integer, text, jsonb, timestamp, index } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  serial,
+  integer,
+  text,
+  jsonb,
+  timestamp,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
 
 export type TaskReport = {
@@ -74,6 +84,13 @@ export const agentTasksTable = pgTable(
   (table) => [
     index("agent_tasks_project_id_created_at_idx").on(table.projectId, table.createdAt),
     index("agent_tasks_queue_batch_id_idx").on(table.queueBatchId),
+    // Partial unique index: prevents more than one active background auto-fix task
+    // with the same title from being queued for the same project simultaneously.
+    // Rows that have transitioned to done/failed/canceled fall outside the index,
+    // so a new auto-fix can be enqueued once the previous one has resolved.
+    uniqueIndex("agent_tasks_active_background_title_idx")
+      .on(table.projectId, table.title)
+      .where(sql`kind = 'background' AND status IN ('queued', 'building', 'planning')`),
   ],
 );
 
