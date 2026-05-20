@@ -25,7 +25,6 @@ import {
   Loader2,
   XCircle,
   Plug,
-  PlugZap,
   ShieldCheck,
   HelpCircle,
 } from "lucide-react";
@@ -593,11 +592,11 @@ function ConnectModal({
   const createSecret = useCreateSecret();
   const deleteSecret = useDeleteSecret();
   const queryClient = useQueryClient();
-  // Build a map of existing secret names → id so we can upsert (delete + create)
-  const existingByName = new Map(existingSecrets.map((s) => [s.name, s.id]));
 
   const handleSubmit = useCallback(async () => {
     setError(null);
+    // Build a map of existing secret names → id so we can upsert (delete + create)
+    const existingByName = new Map(existingSecrets.map((s) => [s.name, s.id]));
     const keysToAdd = integration.requiredKeys.filter((k) => values[k]?.trim());
     if (keysToAdd.length === 0) {
       setError("Enter at least one value to connect this integration.");
@@ -625,7 +624,7 @@ function ConnectModal({
     values,
     createSecret,
     deleteSecret,
-    existingByName,
+    existingSecrets,
     projectId,
     queryClient,
     onSuccess,
@@ -671,23 +670,19 @@ function ConnectModal({
           ) : (
             <div className="space-y-2.5">
               <p className="text-xs text-muted-foreground">
-                Enter the secret values below. They are encrypted and never returned in plain text.
-                Add all keys to reach <strong className="text-foreground">Connected</strong> status
-                — partial entries show as <strong className="text-yellow-400">Partial</strong> until
-                all keys are saved and verified.
+                Enter your keys below. They will be encrypted and stored in your project secrets.
               </p>
               {integration.requiredKeys.map((key) => (
-                <div key={key}>
-                  <label className="block text-xs font-mono text-muted-foreground mb-1">
-                    {key}
+                <div key={key} className="space-y-1">
+                  <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                    {key.replace(/_/g, " ")}
                   </label>
                   <Input
                     type="password"
-                    placeholder={`Enter ${key}`}
-                    value={values[key] ?? ""}
-                    onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))}
-                    className="font-mono text-xs"
-                    autoComplete="off"
+                    value={values[key] || ""}
+                    onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
+                    placeholder={`Paste ${key.toLowerCase()}…`}
+                    className="h-8 text-sm"
                   />
                 </div>
               ))}
@@ -695,33 +690,25 @@ function ConnectModal({
           )}
 
           {error && (
-            <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md p-2.5">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <div className="p-2.5 bg-destructive/10 border border-destructive/20 rounded text-xs text-destructive flex items-start gap-2">
+              <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
               {error}
             </div>
           )}
         </div>
 
-        <div className="flex gap-2 px-5 pb-5">
-          <Button variant="outline" size="sm" className="flex-1" onClick={onClose}>
+        <div className="px-5 py-4 bg-muted/40 border-t border-border flex items-center justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={createSecret.isPending}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            className="flex-1"
-            onClick={() => void handleSubmit()}
-            disabled={createSecret.isPending || integration.requiredKeys.length === 0}
-          >
+          <Button size="sm" onClick={() => void handleSubmit()} disabled={createSecret.isPending}>
             {createSecret.isPending ? (
               <>
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
                 Saving…
               </>
             ) : (
-              <>
-                <PlugZap className="h-3.5 w-3.5 mr-1.5" />
-                Connect
-              </>
+              "Connect Integration"
             )}
           </Button>
         </div>
@@ -746,20 +733,20 @@ function DisconnectModal({
   const deleteSecret = useDeleteSecret();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const secretIds = getIntegrationSecrets(integration, secrets).map((s) => s.id);
 
-  const handleDisconnect = useCallback(async () => {
+  const handleDisconnect = async () => {
     setError(null);
+    const toDelete = secrets.filter((s) => integration.requiredKeys.includes(s.name));
     try {
-      for (const id of secretIds) {
-        await deleteSecret.mutateAsync({ id: projectId, secretId: id });
+      for (const secret of toDelete) {
+        await deleteSecret.mutateAsync({ id: projectId, secretId: secret.id });
       }
       await queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove secrets.");
+      setError(err instanceof Error ? err.message : "Failed to disconnect. Please try again.");
     }
-  }, [deleteSecret, secretIds, projectId, queryClient, onSuccess]);
+  };
 
   return (
     <div
@@ -770,59 +757,33 @@ function DisconnectModal({
         className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <h3 className="font-semibold text-sm">Disconnect {integration.name}</h3>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="px-5 py-4 space-y-3">
-          <p className="text-sm text-muted-foreground">
-            This will permanently delete the following secrets from this project:
-          </p>
-          <div className="space-y-1">
-            {integration.requiredKeys.map((k) => (
-              <div
-                key={k}
-                className="flex items-center gap-2 text-xs font-mono bg-muted border border-border rounded px-2.5 py-1.5"
-              >
-                <Key className="h-3 w-3 text-muted-foreground shrink-0" />
-                {k}
-              </div>
-            ))}
+        <div className="p-5 text-center">
+          <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4 text-destructive">
+            <Trash2 className="h-6 w-6" />
           </div>
-          {error && (
-            <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md p-2.5">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              {error}
-            </div>
-          )}
+          <h3 className="font-semibold text-lg">Disconnect {integration.name}?</h3>
+          <p className="text-sm text-muted-foreground mt-2">
+            This will permanently remove {integration.requiredKeys.length} API keys from this
+            project. Your app may stop working if it depends on these keys.
+          </p>
+          {error && <p className="text-xs text-destructive mt-3 font-medium">{error}</p>}
         </div>
-        <div className="flex gap-2 px-5 pb-5">
-          <Button variant="outline" size="sm" className="flex-1" onClick={onClose}>
-            Cancel
-          </Button>
+        <div className="px-5 py-4 bg-muted/40 border-t border-border flex flex-col gap-2">
           <Button
             variant="destructive"
-            size="sm"
-            className="flex-1"
             onClick={() => void handleDisconnect()}
             disabled={deleteSecret.isPending}
+            className="w-full"
           >
-            {deleteSecret.isPending ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                Removing…
-              </>
-            ) : (
-              <>
-                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                Disconnect
-              </>
-            )}
+            {deleteSecret.isPending ? "Disconnecting…" : "Yes, disconnect"}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={onClose}
+            disabled={deleteSecret.isPending}
+            className="w-full"
+          >
+            Cancel
           </Button>
         </div>
       </div>
@@ -841,150 +802,111 @@ function IntegrationCard({
 }) {
   const [showConnect, setShowConnect] = useState(false);
   const [showDisconnect, setShowDisconnect] = useState(false);
-  const queryClient = useQueryClient();
-
   const status = computeStatus(integration, secrets);
-  const cfg = STATUS_CONFIG[status];
+  const { label, color, dot } = STATUS_CONFIG[status];
+  const intSecrets = getIntegrationSecrets(integration, secrets);
+
+  const queryClient = useQueryClient();
+  const onVerified = () => {
+    void queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
+  };
+
+  const CatIcon = CATEGORIES.find((c) => c.id === integration.category)?.Icon ?? Blocks;
   const catColor =
     CATEGORY_COLORS[integration.category] ?? "from-muted/20 to-muted/10 border-border";
   const iconColor = ICON_COLORS[integration.category] ?? "text-muted-foreground";
-  const CatIcon = CATEGORIES.find((c) => c.id === integration.category)?.Icon ?? Blocks;
-  const secretMap = new Map(secrets.map((s) => [s.name, s]));
-
-  const isDisabled = integration.comingSoon || integration.mobileOnly;
-  const hasNoKeys = integration.requiredKeys.length === 0;
-  const hasAnySecrets = integration.requiredKeys.some((k) => secretMap.has(k));
-
-  const handleVerified = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
-  }, [queryClient, projectId]);
 
   return (
     <>
-      <div
-        className={cn(
-          "border rounded-xl overflow-hidden transition-all",
-          `bg-gradient-to-br ${catColor}`,
-        )}
-      >
-        <div className="p-3.5 flex items-start gap-3">
-          <div className="w-9 h-9 rounded-lg bg-background/60 border border-border flex items-center justify-center shrink-0 mt-0.5">
-            <CatIcon className={cn("h-4 w-4", iconColor)} />
-          </div>
+      <div className="group bg-card hover:bg-muted/30 border border-border rounded-xl p-4 transition-all hover:shadow-md relative overflow-hidden">
+        {/* Category gradient background */}
+        <div
+          className={cn(
+            "absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-br -z-10",
+            catColor,
+          )}
+        />
+
+        <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-semibold text-sm">{integration.name}</span>
-              {integration.mobileOnly ? (
-                <span className="text-[10px] bg-slate-500/20 text-slate-400 border border-slate-500/20 px-1.5 py-px rounded-full font-medium">
-                  Mobile — coming soon
+            <div className="flex items-center gap-2 mb-1">
+              <div className={cn("p-1.5 rounded-lg bg-muted/80", iconColor)}>
+                <CatIcon className="h-4 w-4" />
+              </div>
+              <h4 className="font-semibold text-sm truncate">{integration.name}</h4>
+              {integration.comingSoon && (
+                <span className="text-[10px] font-bold text-primary/80 bg-primary/10 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                  Soon
                 </span>
-              ) : integration.comingSoon ? (
-                <span className="text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-px rounded-full font-medium">
-                  Coming soon
-                </span>
-              ) : hasNoKeys ? (
-                <span className="text-[10px] bg-green-500/15 text-green-400 border border-green-500/20 px-1.5 py-px rounded-full font-medium">
-                  No key needed
-                </span>
-              ) : (
-                <div className="flex items-center gap-1">
-                  <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
-                  <span className={cn("text-[10px] font-medium", cfg.color)}>{cfg.label}</span>
+              )}
+              {integration.mobileOnly && (
+                <div className="flex items-center gap-1 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                  <Smartphone className="h-2.5 w-2.5" /> Mobile
                 </div>
               )}
             </div>
-            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
+            <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
               {integration.description}
             </p>
+          </div>
 
-            {/* Per-key status pills */}
-            {integration.requiredKeys.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-2">
-                {integration.requiredKeys.map((k) => {
-                  const secret = secretMap.get(k);
-                  return (
-                    <span
-                      key={k}
-                      className={cn(
-                        "flex items-center gap-1 text-[10px] font-mono bg-background/60 border px-1.5 py-0.5 rounded",
-                        secret?.verificationStatus === "verified"
-                          ? "border-green-500/40 text-green-400/80"
-                          : secret
-                            ? "border-yellow-500/30 text-yellow-400/70"
-                            : "border-border text-muted-foreground",
-                      )}
-                    >
-                      <VerifyStatusIcon status={secret?.verificationStatus} />
-                      {k}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Verify button row — shown when secrets exist but not all verified */}
-            {!isDisabled && hasAnySecrets && status !== "not-connected" && (
-              <div className="mt-2">
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            <div className="flex items-center gap-1.5">
+              <div className={cn("h-1.5 w-1.5 rounded-full animate-pulse", dot)} />
+              <span className={cn("text-[10px] font-medium uppercase tracking-wider", color)}>
+                {label}
+              </span>
+            </div>
+            {status === "not-connected" ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs px-3"
+                disabled={integration.comingSoon}
+                onClick={() => setShowConnect(true)}
+              >
+                Connect
+              </Button>
+            ) : (
+              <div className="flex items-center gap-1.5">
                 <VerifyIntegrationButton
                   integration={integration}
                   projectId={projectId}
                   secrets={secrets}
-                  onVerified={handleVerified}
+                  onVerified={onVerified}
                 />
+                <button
+                  onClick={() => setShowDisconnect(true)}
+                  className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                  title="Disconnect"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
             )}
           </div>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-1.5 shrink-0 self-start mt-1">
-            {integration.url && (
-              <a
-                href={integration.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            )}
-            {!isDisabled &&
-              !hasNoKeys &&
-              (status === "not-connected" ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs px-2.5"
-                  onClick={() => setShowConnect(true)}
-                >
-                  <Plus className="h-3 w-3 mr-1" />
-                  Connect
-                </Button>
-              ) : (
-                <div className="flex items-center gap-1">
-                  {status === "partial" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs px-2.5 border-yellow-500/30 text-yellow-400 hover:text-yellow-300"
-                      onClick={() => setShowConnect(true)}
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      Add keys
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-xs px-2 text-muted-foreground hover:text-destructive"
-                    onClick={() => setShowDisconnect(true)}
-                    title="Disconnect"
-                  >
-                    <XCircle className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ))}
-          </div>
         </div>
+
+        {intSecrets.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap gap-2">
+            {intSecrets.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center gap-1.5 bg-muted/50 border border-border rounded px-1.5 py-0.5"
+              >
+                <Key className="h-2.5 w-2.5 text-muted-foreground" />
+                <span className="text-[10px] font-mono text-muted-foreground">{s.name}</span>
+                <VerifyStatusIcon status={s.verificationStatus} />
+              </div>
+            ))}
+            <button
+              onClick={() => setShowConnect(true)}
+              className="text-[10px] font-medium text-primary hover:underline flex items-center gap-0.5"
+            >
+              <Plus className="h-2.5 w-2.5" /> Update Keys
+            </button>
+          </div>
+        )}
       </div>
 
       {showConnect && (

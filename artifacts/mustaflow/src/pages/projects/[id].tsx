@@ -753,7 +753,7 @@ export default function ProjectWorkspacePage() {
       setActiveTab("preview");
       setChatPrefill(null);
     }
-  }, [chatPrefill]);
+  }, [chatPrefill, switchLeftPanel]);
 
   /** Called from PlanCard "Build now" / "Background" buttons */
   const runPlanned = useCallback(

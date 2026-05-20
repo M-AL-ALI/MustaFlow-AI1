@@ -576,11 +576,11 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
   const queryClient = useQueryClient();
   const updateKnowledge = useUpdateKnowledge();
 
-  const params = {
+  const params = useMemo(() => ({
     projectId,
     archived: showArchived,
     limit: 200,
-  };
+  }), [projectId, showArchived]);
 
   const { data: entries = [], isLoading } = useListKnowledge(params, {
     query: {

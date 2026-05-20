@@ -409,7 +409,6 @@ export function PageMapTab({
       }, 800);
       // mapResponseRef is a stable ref — intentionally excluded from deps so the timer
       // identity doesn't change on every background refetch.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
     [platform, projectId, putPageMap],
   );
@@ -653,8 +652,7 @@ export function PageMapTab({
       return updated;
     });
     setSelectedNodeId(id);
-    // mapResponseRef and edgesRef are stable refs — intentionally omitted from deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // mapResponseRef and edgesRef are stable refs — intentionally omitted from deps
   }, [projectId, platform, handleNodeClick, handlePreviewClick, setNodes, putPageMap]);
 
   const handleModifyPage = useCallback(

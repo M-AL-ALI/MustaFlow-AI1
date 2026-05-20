@@ -23,6 +23,8 @@ const PHASE_DURATIONS: Record<Phase, number> = {
   done: 0,
 };
 
+const LOOP_PHASES: Phase[] = ["typing", "building", "preview"];
+
 function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(() =>
     typeof window !== "undefined"
@@ -55,7 +57,7 @@ function useLoop(phases: Phase[], phaseDurations: Record<Phase, number>, paused:
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [phaseIndex, paused]);
+  }, [phaseIndex, paused, phases, phaseDurations]);
 
   return phase;
 }
@@ -264,11 +266,7 @@ function PreviewPhase() {
 
 export function DemoAnimation() {
   const reducedMotion = usePrefersReducedMotion();
-  const phase = useLoop(
-    ["typing", "building", "preview"] as Phase[],
-    PHASE_DURATIONS,
-    reducedMotion,
-  );
+  const phase = useLoop(LOOP_PHASES, PHASE_DURATIONS, reducedMotion);
 
   return (
     <div className="relative w-full max-w-lg mx-auto">
@@ -286,7 +284,7 @@ export function DemoAnimation() {
           </div>
           <div className="flex-1 flex items-center justify-center">
             <div className="flex gap-1">
-              {(["typing", "building", "preview"] as Phase[]).map((p) => (
+              {LOOP_PHASES.map((p) => (
                 <div
                   key={p}
                   className={`h-1 rounded-full transition-all duration-500 ${

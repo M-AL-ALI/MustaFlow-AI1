@@ -59,8 +59,11 @@ export function QueueComposer({
   const isMultiRow = rows.length > 1;
 
   useEffect(() => {
-    if (promptValue !== undefined && rows.length === 1) {
-      setRows([{ id: rows[0]!.id, text: promptValue }]);
+    if (promptValue !== undefined) {
+      setRows((prev) => {
+        if (prev.length !== 1) return prev;
+        return [{ id: prev[0]!.id, text: promptValue }];
+      });
     }
   }, [promptValue]);
 
@@ -92,22 +95,6 @@ export function QueueComposer({
     setRows([{ id: newId, text: "" }]);
     if (onPromptValueChange) onPromptValueChange("");
   }, [onPromptValueChange]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>, _rowId: string) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        void handleSend();
-        return;
-      }
-      if (e.key === "Enter" && e.shiftKey) {
-        e.preventDefault();
-        addRow();
-        return;
-      }
-    },
-    [addRow],
-  );
 
   const handleSend = useCallback(async () => {
     const messages = rows.map((r) => r.text.trim()).filter(Boolean);
@@ -144,6 +131,22 @@ export function QueueComposer({
       setIsSubmitting(false);
     }
   }, [rows, agentMode, planMode, projectId, onSingleSend, onBatchStarted, onPromptValueChange]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>, _rowId: string) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        void handleSend();
+        return;
+      }
+      if (e.key === "Enter" && e.shiftKey) {
+        e.preventDefault();
+        addRow();
+        return;
+      }
+    },
+    [addRow, handleSend],
+  );
 
   const handleDragStart = useCallback((id: string) => {
     dragItemId.current = id;

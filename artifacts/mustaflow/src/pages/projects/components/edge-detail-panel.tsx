@@ -73,7 +73,7 @@ export function EdgeDetailPanel({ edge, onClose, onSave, onDelete }: EdgeDetailP
     if (edge) {
       setConnectionType(edge.connectionType);
     }
-  }, [edge?.id, edge?.connectionType]);
+  }, [edge]);
 
   if (!edge) return null;
 

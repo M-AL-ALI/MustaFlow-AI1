@@ -61,7 +61,7 @@ export function PageDetailPanel({
       setDirty(false);
       setConfirmDelete(false);
     }
-  }, [node?.id]);
+  }, [node]);
 
   if (!node) return null;
 
