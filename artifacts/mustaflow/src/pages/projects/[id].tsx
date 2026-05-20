@@ -452,6 +452,31 @@ export default function ProjectWorkspacePage() {
   );
   const pendingSuggestionsCount = allSuggestions.filter((s) => s.status === "pending").length;
 
+  const prevPendingSuggestionsCountRef = useRef(pendingSuggestionsCount);
+  const suggestionsAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suggestionsNewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [suggestionsAnimating, setSuggestionsAnimating] = useState(false);
+  const [suggestionsShowNew, setSuggestionsShowNew] = useState(false);
+
+  useEffect(() => {
+    if (pendingSuggestionsCount > prevPendingSuggestionsCountRef.current) {
+      if (suggestionsAnimTimerRef.current) clearTimeout(suggestionsAnimTimerRef.current);
+      if (suggestionsNewTimerRef.current) clearTimeout(suggestionsNewTimerRef.current);
+      setSuggestionsAnimating(true);
+      setSuggestionsShowNew(true);
+      suggestionsAnimTimerRef.current = setTimeout(() => setSuggestionsAnimating(false), 1500);
+      suggestionsNewTimerRef.current = setTimeout(() => setSuggestionsShowNew(false), 3000);
+    }
+    prevPendingSuggestionsCountRef.current = pendingSuggestionsCount;
+  }, [pendingSuggestionsCount]);
+
+  useEffect(() => {
+    return () => {
+      if (suggestionsAnimTimerRef.current) clearTimeout(suggestionsAnimTimerRef.current);
+      if (suggestionsNewTimerRef.current) clearTimeout(suggestionsNewTimerRef.current);
+    };
+  }, []);
+
   const [prompt, setPrompt] = useState("");
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [_batchTotalCount, setBatchTotalCount] = useState(0);
@@ -1142,9 +1167,18 @@ export default function ProjectWorkspacePage() {
                         ? "History"
                         : "Saved"}
                   {badge !== null && (
-                    <span className="ml-0.5 px-1 py-0.5 rounded-full bg-muted text-[9px] font-semibold leading-none">
+                    <span className={cn(
+                      "ml-0.5 px-1 py-0.5 rounded-full bg-muted text-[9px] font-semibold leading-none relative inline-flex items-center justify-center transition-transform",
+                      t === "saved" && suggestionsAnimating && "scale-125",
+                    )}>
+                      {t === "saved" && suggestionsAnimating && (
+                        <span className="absolute inset-0 rounded-full bg-primary/40 animate-ping" />
+                      )}
                       {badge}
                     </span>
+                  )}
+                  {t === "saved" && suggestionsShowNew && (
+                    <span className="text-[9px] text-primary font-bold animate-pulse">New</span>
                   )}
                 </button>
               );

@@ -135,7 +135,6 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
     // 3. Form inputs without associated labels
     const inputTags = html.match(/<input(?:\s[^>]*)?\/?>/gi) ?? [];
     const labelFors = extractAttr(html, "for");
-
     const unlabeledInputs = inputTags.filter((tag) => {
       const type = (tag.match(/type\s*=\s*["']([^"']*)["']/i)?.[1] ?? "").toLowerCase();
       if (["hidden", "submit", "button", "reset", "image"].includes(type)) return false;
