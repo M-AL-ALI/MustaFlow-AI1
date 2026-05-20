@@ -95,6 +95,7 @@ type TaskReport = {
   knowledgeApplied?: Array<{ title: string; category: string }>;
   nativeFeatures?: string[];
   modulesWired?: Array<{ id: string; name: string; secretsConsumed: string[] }>;
+  versionId?: number | null;
   auditReport?: {
     findings: Array<{
       category: "accessibility" | "seo" | "performance" | "security";
@@ -133,9 +134,11 @@ type ChatPlanPayload =
 function ReportCard({
   report,
   onViewFile,
+  onViewHistory,
 }: {
   report: TaskReport;
   onViewFile?: (path: string) => void;
+  onViewHistory?: () => void;
 }) {
   return (
     <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
@@ -313,6 +316,20 @@ function ReportCard({
               — see Quality tab for details
             </div>
           )}
+        </div>
+      )}
+      {report.versionId && (
+        <div className="pt-1.5 border-t border-border">
+          <button
+            onClick={onViewHistory}
+            className="w-full flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors group"
+          >
+            <RotateCcw className="h-3 w-3 shrink-0 text-muted-foreground/50 group-hover:text-foreground/70 transition-colors" />
+            <span>Checkpoint saved — roll back any time</span>
+            <span className="ml-auto font-mono text-[9px] text-muted-foreground/40">
+              #{report.versionId}
+            </span>
+          </button>
         </div>
       )}
     </div>
@@ -1376,6 +1393,7 @@ export default function ProjectWorkspacePage() {
                                             setActiveTab("code");
                                           }
                                         }}
+                                        onViewHistory={() => switchLeftPanel("history")}
                                       />
                                       {isLastReport && rp.taskId && !sendMessage.isPending && (
                                         <SuggestionChips

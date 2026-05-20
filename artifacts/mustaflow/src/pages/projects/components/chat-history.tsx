@@ -15,6 +15,7 @@ import {
   ShieldAlert,
   Check,
   Ban,
+  RotateCcw,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ type TaskReport = {
     environment: "test" | "production";
   }>;
   nextRecommendation?: string;
+  versionId?: number | null;
   codeSmells?: string[];
   securityNotices?: Array<{
     packageName: string;
@@ -292,6 +294,17 @@ function InlineReportCard({
       {report.nextRecommendation && (
         <div className="pt-1.5 border-t border-border text-muted-foreground italic text-[10px]">
           {report.nextRecommendation}
+        </div>
+      )}
+      {report.versionId && (
+        <div className="pt-1.5 border-t border-border">
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
+            <RotateCcw className="h-3 w-3 shrink-0" />
+            <span>Checkpoint saved — roll back any time</span>
+            <span className="ml-auto font-mono text-[9px] text-muted-foreground/40">
+              #{report.versionId}
+            </span>
+          </div>
         </div>
       )}
     </div>
