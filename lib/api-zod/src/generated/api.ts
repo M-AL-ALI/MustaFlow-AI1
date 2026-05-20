@@ -938,6 +938,39 @@ export const UnpublishProjectResponse = zod.object({
 
 
 /**
+ * @summary Build analytics rows and summary for a project
+ */
+export const GetProjectAnalyticsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetProjectAnalyticsResponse = zod.object({
+  "rows": zod.array(zod.object({
+  "id": zod.number(),
+  "taskId": zod.number(),
+  "projectId": zod.number(),
+  "userId": zod.string().nullish(),
+  "model": zod.string(),
+  "agentMode": zod.string(),
+  "kind": zod.string(),
+  "durationMs": zod.number(),
+  "correctionPasses": zod.number(),
+  "escalated": zod.boolean(),
+  "outcome": zod.string(),
+  "primaryErrorCategory": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})),
+  "summary": zod.object({
+  "total": zod.number(),
+  "successRate": zod.number().nullish(),
+  "avgDurationMs": zod.number().nullish(),
+  "avgCorrectionPasses": zod.number().nullish(),
+  "topErrorCategory": zod.string().nullish()
+})
+})
+
+
+/**
  * @summary Automated pre-publish readiness checks
  */
 export const GetPublishReadinessParams = zod.object({

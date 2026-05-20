@@ -26,6 +26,7 @@ import workspacesRouter from "./workspaces";
 import buildsRouter from "./builds";
 import queueRouter from "./queue";
 import easRouter from "./eas";
+import analyticsRouter from "./analytics";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -59,6 +60,7 @@ const KNOWN_PREFIXES = [
   "/queue",
   "/eas",
   "/builds",
+  "/analytics",
 ];
 
 router.use((req, res, next) => {
@@ -109,6 +111,7 @@ router.use(billingRouter);
 router.use(buildsRouter);
 router.use(queueRouter);
 router.use(easRouter);
+router.use(analyticsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

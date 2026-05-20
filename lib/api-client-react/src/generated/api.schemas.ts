@@ -1007,6 +1007,41 @@ export interface AdminAuditLogEntry {
   createdAt: string;
 }
 
+export interface BuildAnalyticRow {
+  id: number;
+  taskId: number;
+  projectId: number;
+  /** @nullable */
+  userId?: string | null;
+  model: string;
+  agentMode: string;
+  kind: string;
+  durationMs: number;
+  correctionPasses: number;
+  escalated: boolean;
+  outcome: string;
+  /** @nullable */
+  primaryErrorCategory?: string | null;
+  createdAt: string;
+}
+
+export interface BuildAnalyticsSummary {
+  total: number;
+  /** @nullable */
+  successRate?: number | null;
+  /** @nullable */
+  avgDurationMs?: number | null;
+  /** @nullable */
+  avgCorrectionPasses?: number | null;
+  /** @nullable */
+  topErrorCategory?: string | null;
+}
+
+export interface ProjectAnalyticsResponse {
+  rows: BuildAnalyticRow[];
+  summary: BuildAnalyticsSummary;
+}
+
 export interface AdminAuditLogPage {
   entries: AdminAuditLogEntry[];
   total: number;

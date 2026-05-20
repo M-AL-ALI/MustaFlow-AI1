@@ -638,6 +638,21 @@ paths:
                   projectId: { type: integer }
                   status: { type: string }
 
+  /projects/{id}/analytics:
+    get:
+      operationId: getProjectAnalytics
+      tags: [projects]
+      summary: Build analytics rows and summary for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Analytics data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAnalyticsResponse"
+
   /projects/{id}/publish-readiness:
     get:
       operationId: getPublishReadiness
@@ -2158,6 +2173,45 @@ components:
         actorId: { type: string }
         metadata: {}
         createdAt: { type: string, format: date-time }
+
+    BuildAnalyticRow:
+      type: object
+      required: [id, taskId, projectId, model, agentMode, kind, durationMs, correctionPasses, escalated, outcome, createdAt]
+      properties:
+        id: { type: integer }
+        taskId: { type: integer }
+        projectId: { type: integer }
+        userId: { type: ["string", "null"] }
+        model: { type: string }
+        agentMode: { type: string }
+        kind: { type: string }
+        durationMs: { type: integer }
+        correctionPasses: { type: integer }
+        escalated: { type: boolean }
+        outcome: { type: string }
+        primaryErrorCategory: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+
+    BuildAnalyticsSummary:
+      type: object
+      required: [total]
+      properties:
+        total: { type: integer }
+        successRate: { type: ["number", "null"] }
+        avgDurationMs: { type: ["integer", "null"] }
+        avgCorrectionPasses: { type: ["number", "null"] }
+        topErrorCategory: { type: ["string", "null"] }
+
+    ProjectAnalyticsResponse:
+      type: object
+      required: [rows, summary]
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/BuildAnalyticRow"
+        summary:
+          $ref: "#/components/schemas/BuildAnalyticsSummary"
 
     AdminAuditLogPage:
       type: object

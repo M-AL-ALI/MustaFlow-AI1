@@ -64,6 +64,7 @@ import type {
   PageMapData,
   PageMapResponse,
   Project,
+  ProjectAnalyticsResponse,
   ProjectFileContent,
   ProjectFileCreate,
   ProjectFileSummary,
@@ -2557,6 +2558,83 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getUnpublishProjectMutationOptions(options));
     }
+
+export const getGetProjectAnalyticsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/analytics`
+}
+
+/**
+ * @summary Build analytics rows and summary for a project
+ */
+export const getProjectAnalytics = async (id: number, options?: RequestInit): Promise<ProjectAnalyticsResponse> => {
+
+  return customFetch<ProjectAnalyticsResponse>(getGetProjectAnalyticsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectAnalyticsQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/analytics`
+    ] as const;
+    }
+
+
+export const getGetProjectAnalyticsQueryOptions = <TData = Awaited<ReturnType<typeof getProjectAnalytics>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectAnalytics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectAnalyticsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectAnalytics>>> = ({ signal }) => getProjectAnalytics(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectAnalytics>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectAnalyticsQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectAnalytics>>>
+export type GetProjectAnalyticsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Build analytics rows and summary for a project
+ */
+
+export function useGetProjectAnalytics<TData = Awaited<ReturnType<typeof getProjectAnalytics>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectAnalytics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectAnalyticsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetPublishReadinessUrl = (id: number,
     params?: GetPublishReadinessParams,) => {

@@ -76,6 +76,9 @@ export type BuilderResult = {
   files: BuilderFile[];
   report: TaskReport;
   assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
 };
 
 export type ConversationTurn = {
@@ -199,13 +202,14 @@ OUTPUT STRICT JSON matching this exact shape:
   "files": [{ "path": string, "content": string, "mimeType": string }],
   "patches": [{ "path": string, "find": string, "replace": string }],
   "filesRemoved": string[],
+  "unchangedFiles": string[],
   "summary": string,
   "warnings": string[],
   "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
   "nextRecommendation": string
 }
 
-The "files" array should contain ONLY the files that were created or changed (full new content). The "patches" array is optional — use it for large files where only a section changes. The "filesRemoved" array lists files to delete. Do NOT echo files that are unchanged.`;
+The "files" array should contain ONLY the files that were created or changed (full new content). The "patches" array is optional — use it for large files where only a section changes. The "filesRemoved" array lists files to delete. The "unchangedFiles" array MUST list every filename you are deliberately not touching — this allows the system to skip regenerating those files. Do NOT echo files that are unchanged in the "files" array.`;
 
 const PLAN_SYSTEM_PROMPT = `You are the MustaFlow AI Planner. You do NOT generate code in this mode. You output a comprehensive, structured plan as STRICT JSON only.
 
@@ -921,6 +925,190 @@ function injectRequiredMetaTags(file: BuilderFile, projectName: string): Builder
 }
 
 /**
+ * Sanitise a raw user prompt before injecting it into system context.
+ * Strips known prompt-injection patterns (role overrides, ignore-previous phrases, etc.)
+ * and returns the cleaned prompt plus a flag indicating whether anything was modified.
+ * Never throws — safe to call unconditionally.
+ */
+export function sanitisePrompt(prompt: string): { cleaned: string; wasModified: boolean } {
+  const INJECTION_PATTERNS: RegExp[] = [
+    /ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+instructions?/gi,
+    /disregard\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+instructions?/gi,
+    /forget\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+instructions?/gi,
+    /override\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+instructions?/gi,
+    /you\s+are\s+now\s+(?:a|an)\s+\w/gi,
+    /act\s+as\s+(?:a|an)\s+(?:different|new|unfiltered|unrestricted|uncensored)/gi,
+    /(?:system|developer|admin|root)\s+(?:override|prompt|mode|command|instruction)/gi,
+    /\[SYSTEM\]\s*:/gi,
+    /\[INST\]/gi,
+    /<\|(?:im_start|im_end|system|endoftext)\|>/gi,
+    /###\s*(?:System|Instruction|Override|Prompt)\s*:/gi,
+    /your\s+(?:new\s+)?(?:system\s+)?prompt\s+is/gi,
+    /pretend\s+(?:you\s+are|to\s+be)\s+(?:a|an)\s+(?:different|unrestricted|unfiltered|evil)/gi,
+  ];
+
+  let cleaned = prompt;
+  let wasModified = false;
+
+  for (const pattern of INJECTION_PATTERNS) {
+    const next = cleaned.replace(pattern, "[removed]");
+    if (next !== cleaned) {
+      wasModified = true;
+      cleaned = next;
+    }
+  }
+
+  return { cleaned, wasModified };
+}
+
+const SECRET_PATTERNS: Array<{ re: RegExp; category: string; redact: string }> = [
+  { re: /sk-[A-Za-z0-9_-]{20,}/g, category: "OpenAI API key", redact: "[REDACTED:openai-key]" },
+  { re: /sk_live_[A-Za-z0-9]{24,}/g, category: "Stripe live secret key", redact: "[REDACTED:stripe-secret]" },
+  { re: /pk_live_[A-Za-z0-9]{24,}/g, category: "Stripe live publishable key", redact: "[REDACTED:stripe-pk]" },
+  { re: /rk_live_[A-Za-z0-9]{24,}/g, category: "Stripe live restricted key", redact: "[REDACTED:stripe-rk]" },
+  { re: /AKIA[0-9A-Z]{16}/g, category: "AWS access key", redact: "[REDACTED:aws-key]" },
+  { re: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, category: "JWT token", redact: "[REDACTED:jwt]" },
+];
+
+/**
+ * Scan generated file content for hardcoded secret patterns before persistence.
+ * Redacts any matches with a placeholder and returns the sanitised file set
+ * plus a list of findings (file + category) for the task report.
+ * Never throws — fully best-effort.
+ */
+export function scanForSecrets(files: BuilderFile[]): {
+  files: BuilderFile[];
+  findings: Array<{ file: string; category: string }>;
+} {
+  const findings: Array<{ file: string; category: string }> = [];
+
+  const scannedFiles = files.map((f) => {
+    let content = f.content;
+    const fileCategories = new Set<string>();
+
+    for (const { re, category, redact } of SECRET_PATTERNS) {
+      re.lastIndex = 0;
+      if (re.test(content)) {
+        re.lastIndex = 0;
+        content = content.replace(new RegExp(re.source, re.flags), redact);
+        fileCategories.add(category);
+      }
+    }
+
+    for (const cat of fileCategories) {
+      findings.push({ file: f.path, category: cat });
+    }
+
+    return fileCategories.size > 0 ? { ...f, content } : f;
+  });
+
+  return { files: scannedFiles, findings };
+}
+
+/**
+ * Cross-file consistency checker — runs after files are received from the model.
+ * - CSS: extracts custom class names defined in CSS files, then checks HTML files
+ *   for references to those custom classes that do not appear in any CSS file.
+ * - JS: when multiple standalone JS files exist, checks for function calls in
+ *   HTML event attributes (onclick=, onsubmit=, etc.) that are not declared in any JS file.
+ *
+ * Only checks for definite mismatches to minimise false positives from Tailwind CDN classes.
+ * Returns a list of warning strings to append to the task report.
+ * Never throws — fully best-effort.
+ */
+export function validateCrossFileConsistency(files: BuilderFile[]): string[] {
+  const warnings: string[] = [];
+  try {
+    const cssFiles = files.filter(
+      (f) => f.mimeType === "text/css" || f.path.endsWith(".css"),
+    );
+    const htmlFiles = files.filter(
+      (f) => f.mimeType === "text/html" || f.path.endsWith(".html") || f.path.endsWith(".htm"),
+    );
+    const jsFiles = files.filter(
+      (f) =>
+        (f.mimeType === "application/javascript" ||
+          f.mimeType === "text/javascript" ||
+          f.path.endsWith(".js")) &&
+        !f.path.endsWith(".min.js"),
+    );
+
+    // CSS class consistency: only meaningful when custom CSS files exist
+    if (cssFiles.length > 0 && htmlFiles.length > 0) {
+      const definedClasses = new Set<string>();
+      for (const f of cssFiles) {
+        for (const m of f.content.matchAll(/\.(-?[_a-zA-Z][_a-zA-Z0-9-]*)\s*[{,:\[]/g)) {
+          definedClasses.add(m[1]!);
+        }
+      }
+
+      if (definedClasses.size > 0) {
+        // Tailwind CDN utility prefix heuristic — skip classes that look like Tailwind utilities
+        const TAILWIND_PREFIXES = /^(?:flex|grid|block|inline|hidden|relative|absolute|fixed|static|sticky|overflow|z-|p-|m-|w-|h-|text-|bg-|border|rounded|shadow|font-|items-|justify-|gap-|space-|cursor-|select-|opacity-|transition|duration-|ease-|hover:|focus:|active:|group|sr-only|container|max-w|min-w|min-h|max-h|col-|row-|aspect-|place-|self-|grow|shrink|basis-|order-|decoration-|tracking-|leading-|line-|align-|whitespace-|break-|truncate|visible|invisible|isolate|float-|clear-|object-|ring-|divide-|outline-|scale-|rotate-|translate-|skew-|origin-|animate-)/;
+
+        for (const htmlFile of htmlFiles) {
+          for (const attrMatch of htmlFile.content.matchAll(/class="([^"]+)"/g)) {
+            const classes = attrMatch[1]!.split(/\s+/).filter((c) => c.length > 0);
+            for (const cls of classes) {
+              if (cls.includes(":")) continue;
+              if (TAILWIND_PREFIXES.test(cls)) continue;
+              if (cls.length <= 3) continue;
+              if (!definedClasses.has(cls)) {
+                warnings.push(
+                  `Consistency: HTML class "${cls}" in ${htmlFile.path} not defined in any CSS file — may be missing or misspelled`,
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // JS function consistency: check HTML event attributes against JS declarations
+    if (jsFiles.length > 0 && htmlFiles.length > 0) {
+      const declaredFunctions = new Set<string>();
+      for (const f of jsFiles) {
+        for (const m of f.content.matchAll(
+          /(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function|\())/g,
+        )) {
+          const name = m[1] ?? m[2];
+          if (name) declaredFunctions.add(name);
+        }
+      }
+
+      if (declaredFunctions.size > 0) {
+        const EVENT_ATTR_RE = /on\w+="([^"]+)"/g;
+        const CALL_RE = /(\w+)\s*\(/g;
+        const BUILTINS = new Set([
+          "if", "for", "while", "function", "return", "alert", "confirm",
+          "console", "document", "window", "Object", "Array", "JSON",
+          "Math", "parseInt", "parseFloat", "Boolean", "String", "Number",
+        ]);
+
+        for (const htmlFile of htmlFiles) {
+          for (const evtMatch of htmlFile.content.matchAll(EVENT_ATTR_RE)) {
+            const handler = evtMatch[1]!;
+            for (const callMatch of handler.matchAll(CALL_RE)) {
+              const name = callMatch[1]!;
+              if (name.length < 3) continue;
+              if (BUILTINS.has(name)) continue;
+              if (!declaredFunctions.has(name)) {
+                warnings.push(
+                  `Consistency: JS function "${name}" called in ${htmlFile.path} event handler but not declared in any JS file`,
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // best-effort — never let this crash a build
+  }
+  return warnings;
+}
+
+/**
  * Non-blocking post-build code-smell scanner.
  * Returns a list of smell descriptions to append to the task report.
  * Never throws — fully best-effort.
@@ -1311,7 +1499,20 @@ export async function runBuildPipeline(args: {
     nextRecommendation,
   };
 
-  return { blueprint, files, report, assistantSummary: summary };
+  const correctionPasses = !validation.passed ? 1 : 0;
+  const errorCategory = !validation.passed
+    ? classifyCriticalErrors(validation.criticalErrors)
+    : null;
+
+  return {
+    blueprint,
+    files,
+    report,
+    assistantSummary: summary,
+    correctionPasses,
+    correctionFailed,
+    primaryErrorCategory: errorCategory,
+  };
 }
 
 export async function runRefinePipeline(args: {
@@ -1327,8 +1528,12 @@ export async function runRefinePipeline(args: {
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
+  unchangedFiles: string[];
   report: TaskReport;
   assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
 }> {
   const {
     projectName,
@@ -1455,6 +1660,9 @@ export async function runRefinePipeline(args: {
       f.path.endsWith(".mjs"),
   );
 
+  let correctionFailed = false;
+  let correctionWasAttempted = false;
+  let refineErrorCategory: string | null = null;
   let validationWarnings: string[] = [];
 
   if (filesToValidate.length > 0) {
@@ -1462,6 +1670,8 @@ export async function runRefinePipeline(args: {
     const validation = await validateFiles(filesToValidate);
 
     if (!validation.passed) {
+      correctionWasAttempted = true;
+      refineErrorCategory = classifyCriticalErrors(validation.criticalErrors);
       logger.warn(
         { criticalErrors: validation.criticalErrors },
         "Refine validation found critical errors — running correction pass",
@@ -1507,6 +1717,10 @@ export async function runRefinePipeline(args: {
     ? parsed.filesRemoved.filter((p): p is string => typeof p === "string").map(normalizePath)
     : [];
 
+  const unchangedFiles = Array.isArray(parsed.unchangedFiles)
+    ? parsed.unchangedFiles.filter((p): p is string => typeof p === "string")
+    : [];
+
   const summary =
     typeof parsed.summary === "string" ? parsed.summary : `Updated ${changedFiles.length} file(s).`;
 
@@ -1539,7 +1753,16 @@ export async function runRefinePipeline(args: {
     nextRecommendation,
   };
 
-  return { changedFiles, removedPaths, report, assistantSummary: summary };
+  return {
+    changedFiles,
+    removedPaths,
+    unchangedFiles,
+    report,
+    assistantSummary: summary,
+    correctionPasses: correctionWasAttempted ? 1 : 0,
+    correctionFailed,
+    primaryErrorCategory: refineErrorCategory,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2228,6 +2451,9 @@ export type MobileBuilderResult = {
   files: BuilderFile[];
   report: TaskReport;
   assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
 };
 
 export async function runMobileBuildPipeline(args: {
@@ -2422,7 +2648,15 @@ export async function runMobileBuildPipeline(args: {
     modulesWired: modulesWired.length > 0 ? modulesWired : undefined,
   };
 
-  return { blueprint, files, report, assistantSummary: summary };
+  return {
+    blueprint,
+    files,
+    report,
+    assistantSummary: summary,
+    correctionPasses: 0,
+    correctionFailed: false,
+    primaryErrorCategory: null,
+  };
 }
 
 export async function runMobileRefinePipeline(args: {
@@ -2439,9 +2673,13 @@ export async function runMobileRefinePipeline(args: {
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
+  unchangedFiles: string[];
   report: TaskReport;
   assistantSummary: string;
   detectedModuleIds: string[];
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
 }> {
   const {
     projectName,
@@ -2574,7 +2812,17 @@ export async function runMobileRefinePipeline(args: {
     modulesWired: modulesWired.length > 0 ? modulesWired : undefined,
   };
 
-  return { changedFiles, removedPaths, report, assistantSummary: summary, detectedModuleIds };
+  return {
+    changedFiles,
+    removedPaths,
+    unchangedFiles: [],
+    report,
+    assistantSummary: summary,
+    detectedModuleIds,
+    correctionPasses: 0,
+    correctionFailed: false,
+    primaryErrorCategory: null,
+  };
 }
 
 /**

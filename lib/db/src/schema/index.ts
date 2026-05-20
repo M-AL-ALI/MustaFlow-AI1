@@ -11,3 +11,4 @@ export * from "./knowledge";
 export * from "./deployments";
 export * from "./credits";
 export * from "./userRoles";
+export * from "./analytics";

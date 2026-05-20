@@ -10,6 +10,7 @@ import {
   knowledgeEntriesTable,
   secretsTable,
   deploymentLogsTable,
+  buildAnalyticsTable,
   type TaskReport,
   type FileSnapshotEntry,
 } from "@workspace/db";
@@ -19,6 +20,9 @@ import {
   runMobileBuildPipeline,
   runMobileRefinePipeline,
   scanCodeSmells,
+  sanitisePrompt,
+  scanForSecrets,
+  validateCrossFileConsistency,
   type BuilderFile,
   type ConversationTurn,
 } from "./builder";
@@ -44,6 +48,24 @@ const CREDIT_COST: Record<string, number> = {
   eco: 2,
   power: 5,
   pro: 10,
+};
+
+/** OpenAI model per agent mode — kept in sync with builder.ts for analytics recording. */
+const MODEL_FOR_MODE: Record<AgentMode, string> = {
+  lite: "gpt-5-nano",
+  eco: "gpt-5-mini",
+  power: "gpt-5.4",
+  pro: "gpt-5.4",
+};
+
+/**
+ * Auto-escalation: if correction pass fails, retry at the next model tier.
+ * Capped at one level to avoid runaway credit consumption.
+ * power/pro both use the same model so escalation stops there.
+ */
+const ESCALATION_MAP: Partial<Record<AgentMode, AgentMode>> = {
+  lite: "eco",
+  eco: "power",
 };
 
 export type JobKind = "build" | "refine";
@@ -594,17 +616,21 @@ async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
 }
 
 export async function runJob(input: JobInput): Promise<void> {
-  const {
-    taskId,
-    projectId,
-    kind,
-    userPrompt,
-    agentMode,
-    conversationHistory,
-    queueBatchId,
-    queueIndex,
-    queueTotalCount,
-  } = input;
+  const { taskId, projectId, kind, conversationHistory, queueBatchId, queueIndex, queueTotalCount } = input;
+  let { userPrompt, agentMode } = input;
+
+  const jobStartTime = Date.now();
+  let wasEscalated = false;
+  let analyticsErrorCategory: string | null = null;
+  let analyticsCorrectionPasses = 0;
+  let analyticsOutcome: "success" | "failed" = "failed";
+
+  // Sanitise prompt before injecting into AI context — strip injection patterns
+  const { cleaned: sanitisedPrompt, wasModified: promptWasModified } = sanitisePrompt(userPrompt);
+  if (promptWasModified) {
+    logger.warn({ taskId, projectId }, "Prompt injection patterns detected and stripped from user prompt");
+    userPrompt = sanitisedPrompt;
+  }
 
   await emitEvent(taskId, "queued", "Task received, starting pipeline…");
 
@@ -690,7 +716,7 @@ export async function runJob(input: JobInput): Promise<void> {
           : "Generating app blueprint and code with AI…",
       );
 
-      const result = isMobileProject
+      let result = isMobileProject
         ? await runMobileBuildPipeline({
             projectName: project.name,
             projectKind: project.kind,
@@ -710,6 +736,50 @@ export async function runJob(input: JobInput): Promise<void> {
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
           });
+
+      analyticsCorrectionPasses = result.correctionPasses;
+      analyticsErrorCategory = result.primaryErrorCategory;
+
+      // Auto-escalation: if correction pass failed, retry at next model tier
+      const buildEscalationMode = ESCALATION_MAP[agentMode];
+      if (result.correctionFailed && buildEscalationMode && !isMobileProject) {
+        logger.info({ taskId, projectId, from: agentMode, to: buildEscalationMode }, "Auto-escalating build to higher model tier");
+        await emitEvent(taskId, "generating_code", `Validation failed — escalating to ${buildEscalationMode} mode and retrying…`);
+        const escalatedResult = await runBuildPipeline({
+          projectName: project.name,
+          projectKind: project.kind,
+          userPrompt,
+          agentMode: buildEscalationMode,
+          conversationHistory,
+          knowledgeContext: knowledgeContext || undefined,
+        });
+        wasEscalated = true;
+        agentMode = buildEscalationMode;
+        result = escalatedResult;
+        analyticsCorrectionPasses += escalatedResult.correctionPasses;
+        analyticsErrorCategory = escalatedResult.primaryErrorCategory ?? analyticsErrorCategory;
+        result.report.warnings = [
+          `Auto-escalated from ${input.agentMode} to ${buildEscalationMode} mode after validation failure`,
+          ...(result.report.warnings ?? []),
+        ];
+      }
+
+      // Secrets scan — redact before persisting
+      const { files: sanitisedFiles, findings: secretFindings } = scanForSecrets(result.files);
+      if (secretFindings.length > 0) {
+        logger.warn({ taskId, projectId, secretFindings }, "Secrets detected and redacted in generated build files");
+        result.report.warnings = [
+          ...(result.report.warnings ?? []),
+          ...secretFindings.map((f) => `Secrets Scan: ${f.category} detected in ${f.file} and redacted before saving`),
+        ];
+      }
+      result = { ...result, files: sanitisedFiles };
+
+      // Cross-file consistency check
+      const buildConsistencyWarnings = validateCrossFileConsistency(sanitisedFiles);
+      if (buildConsistencyWarnings.length > 0) {
+        result.report.warnings = [...(result.report.warnings ?? []), ...buildConsistencyWarnings];
+      }
 
       await emitEvent(
         taskId,
@@ -741,7 +811,7 @@ export async function runJob(input: JobInput): Promise<void> {
           : "Applying change request with AI…",
       );
 
-      const result = isMobileProject
+      let refineResult = isMobileProject
         ? await runMobileRefinePipeline({
             projectName: project.name,
             projectKind: project.kind,
@@ -763,6 +833,58 @@ export async function runJob(input: JobInput): Promise<void> {
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
           });
+
+      analyticsCorrectionPasses = refineResult.correctionPasses;
+      analyticsErrorCategory = refineResult.primaryErrorCategory;
+
+      // Auto-escalation: if correction pass failed, retry at next model tier
+      const refineEscalationMode = ESCALATION_MAP[agentMode];
+      if (refineResult.correctionFailed && refineEscalationMode && !isMobileProject) {
+        logger.info({ taskId, projectId, from: agentMode, to: refineEscalationMode }, "Auto-escalating refine to higher model tier");
+        await emitEvent(taskId, "generating_code", `Validation failed — escalating to ${refineEscalationMode} mode and retrying…`);
+        const escalatedResult = await runRefinePipeline({
+          projectName: project.name,
+          projectKind: project.kind,
+          userPrompt,
+          agentMode: refineEscalationMode,
+          existingFiles,
+          conversationHistory,
+          knowledgeContext: knowledgeContext || undefined,
+        });
+        wasEscalated = true;
+        agentMode = refineEscalationMode;
+        refineResult = escalatedResult;
+        analyticsCorrectionPasses += escalatedResult.correctionPasses;
+        analyticsErrorCategory = escalatedResult.primaryErrorCategory ?? analyticsErrorCategory;
+        refineResult.report.warnings = [
+          `Auto-escalated from ${input.agentMode} to ${refineEscalationMode} mode after validation failure`,
+          ...(refineResult.report.warnings ?? []),
+        ];
+      }
+
+      // Secrets scan — redact before persisting
+      const { files: sanitisedChangedFiles, findings: refineSecretFindings } = scanForSecrets(refineResult.changedFiles);
+      if (refineSecretFindings.length > 0) {
+        logger.warn({ taskId, projectId, refineSecretFindings }, "Secrets detected and redacted in refined files");
+        refineResult.report.warnings = [
+          ...(refineResult.report.warnings ?? []),
+          ...refineSecretFindings.map((f) => `Secrets Scan: ${f.category} detected in ${f.file} and redacted before saving`),
+        ];
+      }
+      refineResult = { ...refineResult, changedFiles: sanitisedChangedFiles };
+
+      // Cross-file consistency check on the merged project file set
+      const mergedFilesForConsistency = [...existingFiles];
+      for (const cf of refineResult.changedFiles) {
+        const idx = mergedFilesForConsistency.findIndex((f) => f.path === cf.path);
+        if (idx >= 0) mergedFilesForConsistency[idx] = cf; else mergedFilesForConsistency.push(cf);
+      }
+      const refineConsistencyWarnings = validateCrossFileConsistency(mergedFilesForConsistency);
+      if (refineConsistencyWarnings.length > 0) {
+        refineResult.report.warnings = [...(refineResult.report.warnings ?? []), ...refineConsistencyWarnings];
+      }
+
+      const result = refineResult;
 
       await emitEvent(
         taskId,
@@ -939,6 +1061,23 @@ export async function runJob(input: JobInput): Promise<void> {
       planMode: false,
       plan: { kind: "report", report, ...batchMeta } as unknown as Record<string, unknown>,
     });
+    analyticsOutcome = "success";
+    void db
+      .insert(buildAnalyticsTable)
+      .values({
+        taskId,
+        projectId,
+        userId: project.ownerId ?? null,
+        model: MODEL_FOR_MODE[agentMode],
+        agentMode,
+        kind,
+        durationMs: Date.now() - jobStartTime,
+        correctionPasses: analyticsCorrectionPasses,
+        escalated: wasEscalated,
+        outcome: analyticsOutcome,
+        primaryErrorCategory: analyticsErrorCategory,
+      })
+      .catch((err) => logger.warn({ err, taskId }, "Failed to record build analytics (non-fatal)"));
   } catch (err) {
     logger.error({ err, taskId, projectId }, "Builder job failed");
     const message = err instanceof Error ? err.message : "Unknown builder error";
@@ -973,6 +1112,24 @@ export async function runJob(input: JobInput): Promise<void> {
         },
       })
       .where(eq(agentTasksTable.id, taskId));
+
+    // Record build analytics for the failed job (best-effort, non-fatal)
+    void db
+      .insert(buildAnalyticsTable)
+      .values({
+        taskId,
+        projectId,
+        userId: project?.ownerId ?? null,
+        model: MODEL_FOR_MODE[agentMode],
+        agentMode,
+        kind,
+        durationMs: Date.now() - jobStartTime,
+        correctionPasses: analyticsCorrectionPasses,
+        escalated: wasEscalated,
+        outcome: "failed",
+        primaryErrorCategory: analyticsErrorCategory,
+      })
+      .catch((analyticsErr) => logger.warn({ analyticsErr, taskId }, "Failed to record failed build analytics"));
 
     // Auto-write a diagnostic lesson to the Knowledge Vault
     void autoWriteFailureLesson(userPrompt, message, projectId, project.ownerId);
