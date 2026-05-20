@@ -515,9 +515,10 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
 interface HistoryTabProps {
   projectId: number;
   onRetry?: (prompt: string) => void;
+  focusVersionId?: number | null;
 }
 
-export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
+export function HistoryTab({ projectId, onRetry, focusVersionId }: HistoryTabProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -582,6 +583,15 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
 
   // Guard: true once the saved scroll has been successfully applied after content renders.
   const scrollRestoredRef = useRef(false);
+
+  // When a specific version is focused (e.g. from chat bubble "View in history"), scroll to top
+  // so the most-recent build entry (which corresponds to that version) is visible immediately.
+  useEffect(() => {
+    if (!focusVersionId) return;
+    scrollRestoredRef.current = false;
+    const el = historyScrollRef.current;
+    if (el) el.scrollTop = 0;
+  }, [focusVersionId]);
 
   // Save on pagehide (hard refresh / tab close) and on unmount (SPA navigation / tab switch).
   useEffect(() => {

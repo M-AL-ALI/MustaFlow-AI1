@@ -40,5 +40,9 @@ export interface AgentTask {
   suggestions?: string[];
   createdAt: Date;
   /** @nullable */
+  startedAt?: Date | null;
+  /** @nullable */
   completedAt?: Date | null;
+  /** @nullable */
+  elapsedSeconds?: number | null;
 }

@@ -28,7 +28,18 @@ router.get("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pro
     .from(agentTasksTable)
     .where(eq(agentTasksTable.projectId, params.data.id))
     .orderBy(desc(agentTasksTable.createdAt));
-  res.json(ListTasksResponse.parse(rows));
+
+  const rowsWithElapsed = rows.map((row) => ({
+    ...row,
+    elapsedSeconds:
+      row.completedAt && (row.startedAt ?? row.createdAt)
+        ? Math.round(
+            (row.completedAt.getTime() - (row.startedAt ?? row.createdAt).getTime()) / 1000,
+          )
+        : null,
+  }));
+
+  res.json(ListTasksResponse.parse(rowsWithElapsed));
 });
 
 router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Promise<void> => {

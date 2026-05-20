@@ -88,6 +88,7 @@ export const agentTasksTable = pgTable(
     queueBatchId: text("queue_batch_id"),
     queueIndex: integer("queue_index"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (table) => [

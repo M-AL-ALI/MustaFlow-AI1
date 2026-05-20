@@ -896,7 +896,7 @@ export async function runJob(input: JobInput): Promise<void> {
     // waiting for the advisory lock, status = 'canceled' so 0 rows are updated → abort cleanly.
     const transitioned = await db
       .update(agentTasksTable)
-      .set({ status: kind === "build" ? "building" : "planning" })
+      .set({ status: kind === "build" ? "building" : "planning", startedAt: sql`now()` })
       .where(
         and(
           eq(agentTasksTable.id, taskId),

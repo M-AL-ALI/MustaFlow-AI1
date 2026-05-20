@@ -366,12 +366,15 @@ export const ListTasksResponseItem = zod.object({
   "knowledgeApplied": zod.array(zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
-})).optional()
+})).optional(),
+  "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
   "suggestions": zod.array(zod.string()).optional(),
   "createdAt": zod.coerce.date(),
-  "completedAt": zod.coerce.date().nullish()
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish(),
+  "elapsedSeconds": zod.number().nullish()
 })
 export const ListTasksResponse = zod.array(ListTasksResponseItem)
 
@@ -426,12 +429,15 @@ export const CancelTaskResponse = zod.object({
   "knowledgeApplied": zod.array(zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
-})).optional()
+})).optional(),
+  "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
   "suggestions": zod.array(zod.string()).optional(),
   "createdAt": zod.coerce.date(),
-  "completedAt": zod.coerce.date().nullish()
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish(),
+  "elapsedSeconds": zod.number().nullish()
 })
 
 
@@ -573,12 +579,15 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "knowledgeApplied": zod.array(zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
-})).optional()
+})).optional(),
+  "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
   "suggestions": zod.array(zod.string()).optional(),
   "createdAt": zod.coerce.date(),
-  "completedAt": zod.coerce.date().nullish()
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish(),
+  "elapsedSeconds": zod.number().nullish()
 })
 
 
@@ -609,6 +618,33 @@ export const CreateVersionParams = zod.object({
 export const CreateVersionBody = zod.object({
   "label": zod.string().min(1),
   "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Rename a version checkpoint label
+ */
+export const PatchVersionParams = zod.object({
+  "id": zod.coerce.number(),
+  "versionId": zod.coerce.number()
+})
+
+
+
+
+export const PatchVersionBody = zod.object({
+  "label": zod.string().min(1).optional()
+})
+
+export const PatchVersionResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "label": zod.string(),
+  "note": zod.string().nullish(),
+  "changelogEntry": zod.string().nullish(),
+  "filesCount": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "planSnapshot": zod.record(zod.string(), zod.unknown()).nullish()
 })
 
 

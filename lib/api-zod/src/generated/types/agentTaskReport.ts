@@ -24,5 +24,7 @@ export type AgentTaskReport = {
   title?: string;
   category?: string;
 }[];
+  /** @nullable */
+  versionId?: number | null;
   [key: string]: unknown;
  } | null;

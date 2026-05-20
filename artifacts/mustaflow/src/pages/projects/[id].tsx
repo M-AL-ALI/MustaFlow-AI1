@@ -532,6 +532,7 @@ export default function ProjectWorkspacePage() {
     return (stored as "planning" | "task" | "main" | null) ?? "main";
   });
   const [showChatHistory, setShowChatHistory] = useState(false);
+  const [historyFocusVersionId, setHistoryFocusVersionId] = useState<number | null>(null);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
   const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
   const [creditsSuccess, setCreditsSuccess] = useState(() => {
@@ -1474,7 +1475,12 @@ export default function ProjectWorkspacePage() {
                         <AgentThinkingBubble
                           projectId={projectId}
                           taskId={pendingFeedTaskId}
+                          startedAt={pendingBuildStartedAt}
                           onDismiss={() => {}}
+                          onViewHistory={(versionId) => {
+                            setHistoryFocusVersionId(versionId);
+                            switchLeftPanel("history");
+                          }}
                         />
                       ) : (
                         <div className="flex justify-start">
@@ -1497,7 +1503,12 @@ export default function ProjectWorkspacePage() {
                       <AgentThinkingBubble
                         projectId={projectId}
                         taskId={activeTaskId}
+                        startedAt={pendingBuildStartedAt}
                         onDismiss={() => setActiveTaskId(null)}
+                        onViewHistory={(versionId) => {
+                          setHistoryFocusVersionId(versionId);
+                          switchLeftPanel("history");
+                        }}
                       />
                     ) : null}
                   </div>
@@ -1525,57 +1536,57 @@ export default function ProjectWorkspacePage() {
                             </span>
                           </>
                         )}
-                          {files.length > 0 && (
-                            <button
-                              onClick={() => switchLeftPanel("files")}
-                              className="text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
-                            >
-                              {files.length} file{files.length !== 1 ? "s" : ""}
-                            </button>
-                          )}
-                          {versions && versions.length > 0 && (
-                            <button
-                              onClick={() => switchLeftPanel("history")}
-                              className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-                              title="View checkpoint history"
-                            >
-                              {versions.length} checkpoint{versions.length !== 1 ? "s" : ""}
-                            </button>
-                          )}
+                        {files.length > 0 && (
                           <button
-                            onClick={() => setBackgroundPanelOpen((v) => !v)}
-                            className={cn(
-                              "flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors",
-                              bgActiveCount > 0
-                                ? "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
-                                : "border-transparent text-muted-foreground/50 hover:text-muted-foreground hover:border-border",
-                            )}
-                            title="Background tasks"
+                            onClick={() => switchLeftPanel("files")}
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
                           >
-                            <Layers2 className="h-2.5 w-2.5" />
-                            {bgActiveCount > 0
-                              ? `${bgActiveCount} running`
-                              : backgroundTasks.length > 0
-                                ? `${backgroundTasks.length} tasks`
-                                : "Tasks"}
+                            {files.length} file{files.length !== 1 ? "s" : ""}
                           </button>
-                          <div className="ml-auto flex items-center gap-1">
-                            <span
-                              className={cn(
-                                "text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide border",
-                                agentMode === "pro"
-                                  ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                                  : agentMode === "power"
-                                    ? "bg-primary/10 text-primary border-primary/20"
-                                    : agentMode === "eco"
-                                      ? "bg-green-500/10 text-green-400 border-green-500/20"
-                                      : "bg-muted text-muted-foreground border-border",
-                              )}
-                            >
-                              {agentMode}
-                            </span>
-                          </div>
+                        )}
+                        {versions && versions.length > 0 && (
+                          <button
+                            onClick={() => switchLeftPanel("history")}
+                            className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                            title="View checkpoint history"
+                          >
+                            {versions.length} checkpoint{versions.length !== 1 ? "s" : ""}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setBackgroundPanelOpen((v) => !v)}
+                          className={cn(
+                            "flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors",
+                            bgActiveCount > 0
+                              ? "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
+                              : "border-transparent text-muted-foreground/50 hover:text-muted-foreground hover:border-border",
+                          )}
+                          title="Background tasks"
+                        >
+                          <Layers2 className="h-2.5 w-2.5" />
+                          {bgActiveCount > 0
+                            ? `${bgActiveCount} running`
+                            : backgroundTasks.length > 0
+                              ? `${backgroundTasks.length} tasks`
+                              : "Tasks"}
+                        </button>
+                        <div className="ml-auto flex items-center gap-1">
+                          <span
+                            className={cn(
+                              "text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide border",
+                              agentMode === "pro"
+                                ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                                : agentMode === "power"
+                                  ? "bg-primary/10 text-primary border-primary/20"
+                                  : agentMode === "eco"
+                                    ? "bg-green-500/10 text-green-400 border-green-500/20"
+                                    : "bg-muted text-muted-foreground border-border",
+                            )}
+                          >
+                            {agentMode}
+                          </span>
                         </div>
+                      </div>
                     </>
                   </div>
 
@@ -1668,6 +1679,7 @@ export default function ProjectWorkspacePage() {
             <HistoryTab
               key={projectId}
               projectId={projectId}
+              focusVersionId={historyFocusVersionId}
               onRetry={(text) => {
                 setPrompt(text);
                 switchLeftPanel("chat");

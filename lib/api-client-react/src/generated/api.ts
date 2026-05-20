@@ -72,6 +72,7 @@ import type {
   MobileBuildQueued,
   PageMapData,
   PageMapResponse,
+  PatchVersionBody,
   Project,
   ProjectAnalyticsResponse,
   ProjectAuditResult,
@@ -1862,6 +1863,80 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getCreateVersionMutationOptions(options));
+    }
+
+export const getPatchVersionUrl = (id: number,
+    versionId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/versions/${versionId}`
+}
+
+/**
+ * @summary Rename a version checkpoint label
+ */
+export const patchVersion = async (id: number,
+    versionId: number,
+    patchVersionBody: PatchVersionBody, options?: RequestInit): Promise<ProjectVersion> => {
+
+  return customFetch<ProjectVersion>(getPatchVersionUrl(id,versionId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      patchVersionBody,)
+  }
+);}
+
+
+
+
+export const getPatchVersionMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchVersion>>, TError,{id: number;versionId: number;data: BodyType<PatchVersionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof patchVersion>>, TError,{id: number;versionId: number;data: BodyType<PatchVersionBody>}, TContext> => {
+
+const mutationKey = ['patchVersion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof patchVersion>>, {id: number;versionId: number;data: BodyType<PatchVersionBody>}> = (props) => {
+          const {id,versionId,data} = props ?? {};
+
+          return  patchVersion(id,versionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PatchVersionMutationResult = NonNullable<Awaited<ReturnType<typeof patchVersion>>>
+    export type PatchVersionMutationBody = BodyType<PatchVersionBody>
+    export type PatchVersionMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Rename a version checkpoint label
+ */
+export const usePatchVersion = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchVersion>>, TError,{id: number;versionId: number;data: BodyType<PatchVersionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof patchVersion>>,
+        TError,
+        {id: number;versionId: number;data: BodyType<PatchVersionBody>},
+        TContext
+      > => {
+      return useMutation(getPatchVersionMutationOptions(options));
     }
 
 export const getGetVersionUrl = (id: number,

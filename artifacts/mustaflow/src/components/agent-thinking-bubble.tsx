@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { useListTaskEvents, getListTaskEventsQueryKey } from "@workspace/api-client-react";
+import {
+  useListTaskEvents,
+  getListTaskEventsQueryKey,
+  useListTasks,
+  getListTasksQueryKey,
+  useListVersions,
+  getListVersionsQueryKey,
+  usePatchVersion,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
   BookOpen,
@@ -19,6 +28,12 @@ import {
   GitBranch,
   FilePen,
   Database,
+  Timer,
+  Bookmark,
+  Pencil,
+  Check,
+  X,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -123,6 +138,14 @@ function groupEventsByNarration(events: StepEvent[]): StepGroup[] {
   }
 
   return groups;
+}
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds} second${seconds !== 1 ? "s" : ""}`;
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (secs === 0) return `${mins} min`;
+  return `${mins} min ${secs} sec`;
 }
 
 function useWordReveal(text: string, active: boolean): string {
@@ -231,11 +254,7 @@ function FinishedGroupRow({ group }: { group: StepGroup }) {
         className="w-full flex items-start gap-2 group text-left"
       >
         <div className="shrink-0 mt-0.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors">
-          {expanded ? (
-            <ChevronDown className="h-3 w-3" />
-          ) : (
-            <ChevronRight className="h-3 w-3" />
-          )}
+          {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </div>
         <div className="flex-1 min-w-0">
           {group.narration && (
@@ -307,14 +326,190 @@ function ActiveGroupRow({ group, isTerminal }: { group: StepGroup; isTerminal: b
   );
 }
 
+function BuildTimingRow({
+  elapsedSeconds,
+  isFailed,
+  groupsExpanded,
+  onToggle,
+}: {
+  elapsedSeconds: number;
+  isFailed: boolean;
+  groupsExpanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className={cn(
+        "w-full flex items-center gap-2 group text-left py-1 rounded transition-colors",
+        isFailed ? "hover:bg-destructive/5" : "hover:bg-background/30",
+      )}
+    >
+      <div className="shrink-0 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors">
+        {groupsExpanded ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+      </div>
+      <Timer
+        className={cn(
+          "h-3 w-3 shrink-0",
+          isFailed ? "text-destructive/70" : "text-muted-foreground/60",
+        )}
+      />
+      <span
+        className={cn(
+          "text-[11px] font-medium",
+          isFailed ? "text-destructive/80" : "text-muted-foreground/70",
+        )}
+      >
+        {isFailed ? "Failed after" : "Worked for"} {formatElapsed(elapsedSeconds)}
+      </span>
+    </button>
+  );
+}
+
+function CheckpointRow({
+  projectId,
+  versionId,
+  versionLabel,
+  onViewHistory,
+}: {
+  projectId: number;
+  versionId: number;
+  versionLabel: string;
+  onViewHistory?: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(versionLabel);
+  const [savedLabel, setSavedLabel] = useState(versionLabel);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const patchVersion = usePatchVersion();
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const save = () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === savedLabel) {
+      setDraft(savedLabel);
+      setEditing(false);
+      return;
+    }
+    patchVersion.mutate(
+      { id: projectId, versionId, data: { label: trimmed } },
+      {
+        onSuccess: () => {
+          setSavedLabel(trimmed);
+          setDraft(trimmed);
+          void queryClient.invalidateQueries({
+            queryKey: getListVersionsQueryKey(projectId),
+          });
+        },
+        onError: () => {
+          setDraft(savedLabel);
+        },
+        onSettled: () => {
+          setEditing(false);
+        },
+      },
+    );
+  };
+
+  const cancel = () => {
+    setDraft(savedLabel);
+    setEditing(false);
+  };
+
+  return (
+    <div className="flex items-center gap-2 py-1 px-0.5 animate-in fade-in slide-in-from-bottom-1 duration-300">
+      <Bookmark className="h-3 w-3 shrink-0 text-secondary/70" />
+      <span className="text-[10px] text-muted-foreground/60 shrink-0">Checkpoint</span>
+      {editing ? (
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              if (e.key === "Escape") cancel();
+            }}
+            onBlur={save}
+            className="flex-1 min-w-0 bg-background border border-border rounded px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary"
+          />
+          <button
+            onMouseDown={(e) => {
+              e.preventDefault();
+              save();
+            }}
+            className="shrink-0 text-green-400 hover:text-green-300 transition-colors"
+          >
+            <Check className="h-3 w-3" />
+          </button>
+          <button
+            onMouseDown={(e) => {
+              e.preventDefault();
+              cancel();
+            }}
+            className="shrink-0 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <span className="text-[11px] text-foreground/80 truncate" title={savedLabel}>
+            {patchVersion.isPending ? draft : savedLabel}
+          </span>
+          <button
+            onClick={() => setEditing(true)}
+            className="shrink-0 text-muted-foreground/30 hover:text-muted-foreground/70 transition-colors"
+            title="Rename checkpoint"
+          >
+            <Pencil className="h-2.5 w-2.5" />
+          </button>
+          {onViewHistory && (
+            <button
+              onClick={onViewHistory}
+              className="shrink-0 flex items-center gap-0.5 text-[10px] text-primary/60 hover:text-primary transition-colors ml-auto"
+              title="View in history"
+            >
+              <ExternalLink className="h-2.5 w-2.5" />
+              <span>History</span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   projectId: number;
   taskId: number;
+  startedAt?: Date | null;
   onDismiss: () => void;
+  onViewHistory?: (versionId: number) => void;
 }
 
-export function AgentThinkingBubble({ projectId, taskId, onDismiss }: Props) {
+export function AgentThinkingBubble({
+  projectId,
+  taskId,
+  startedAt,
+  onDismiss,
+  onViewHistory,
+}: Props) {
   const bubbleRef = useRef<HTMLDivElement>(null);
+  const mountTimeRef = useRef(Date.now());
+  const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
+  const [groupsExpanded, setGroupsExpanded] = useState(true);
 
   const { data: events = [] } = useListTaskEvents(projectId, taskId, {
     query: {
@@ -333,6 +528,42 @@ export function AgentThinkingBubble({ projectId, taskId, onDismiss }: Props) {
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
+
+  const { data: tasks } = useListTasks(projectId, {
+    query: {
+      queryKey: getListTasksQueryKey(projectId),
+      enabled: isTerminal && isDone,
+      staleTime: 0,
+    },
+  });
+
+  const completedTask = tasks?.find((t) => t.id === taskId);
+  const versionId =
+    (completedTask?.report as { versionId?: number | null } | null | undefined)?.versionId ?? null;
+
+  const { data: versions } = useListVersions(projectId, {
+    query: {
+      queryKey: getListVersionsQueryKey(projectId),
+      enabled: isTerminal && isDone && !!versionId,
+      staleTime: 0,
+    },
+  });
+
+  const versionLabel =
+    versionId != null ? (versions?.find((v) => v.id === versionId)?.label ?? null) : null;
+
+  useEffect(() => {
+    if (!isTerminal) return;
+    // Prefer the authoritative server-calculated value (from startedAt → completedAt).
+    // Fall back to client-side wall-clock if the task isn't in the list yet.
+    const serverElapsed = completedTask?.elapsedSeconds ?? null;
+    if (serverElapsed != null) {
+      setElapsedSeconds(Math.max(1, serverElapsed));
+    } else {
+      const origin = startedAt ?? new Date(mountTimeRef.current);
+      setElapsedSeconds(Math.max(1, Math.round((Date.now() - origin.getTime()) / 1000)));
+    }
+  }, [isTerminal, startedAt, completedTask?.elapsedSeconds]);
 
   const groups = groupEventsByNarration(events as StepEvent[]);
   const finishedGroups = groups.slice(0, -1);
@@ -366,9 +597,7 @@ export function AgentThinkingBubble({ projectId, taskId, onDismiss }: Props) {
       <div
         className={cn(
           "max-w-[92%] rounded-xl rounded-bl-sm border text-xs overflow-hidden transition-colors duration-300",
-          isFailed
-            ? "bg-destructive/10 border-destructive/30"
-            : "bg-muted border-border",
+          isFailed ? "bg-destructive/10 border-destructive/30" : "bg-muted border-border",
         )}
       >
         {/* Header pulse */}
@@ -388,38 +617,56 @@ export function AgentThinkingBubble({ projectId, taskId, onDismiss }: Props) {
           <span
             className={cn(
               "text-[11px] font-semibold",
-              isDone
-                ? "text-green-400"
-                : isFailed
-                  ? "text-destructive"
-                  : "text-primary",
+              isDone ? "text-green-400" : isFailed ? "text-destructive" : "text-primary",
             )}
           >
             {isDone ? "Build complete" : isFailed ? "Build failed" : "Building"}
           </span>
         </div>
 
-        {/* Groups */}
-        <div className="px-3 pb-2.5 space-y-2.5">
-          {finishedGroups.map((group) => (
-            <FinishedGroupRow key={group.key} group={group} />
-          ))}
-
-          {activeGroup && (
-            <ActiveGroupRow
-              key={activeGroup.key}
-              group={activeGroup}
-              isTerminal={isTerminal}
+        {/* Build timing row (shown when terminal) */}
+        {isTerminal && elapsedSeconds !== null && (
+          <div className="px-3 pb-1">
+            <BuildTimingRow
+              elapsedSeconds={elapsedSeconds}
+              isFailed={isFailed}
+              groupsExpanded={groupsExpanded}
+              onToggle={() => setGroupsExpanded((v) => !v)}
             />
-          )}
+          </div>
+        )}
 
-          {groups.length === 0 && !isTerminal && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <div className="animate-spin h-2.5 w-2.5 border border-primary border-t-transparent rounded-full shrink-0" />
-              <span className="text-[11px]">Waiting for first event…</span>
-            </div>
-          )}
-        </div>
+        {/* Groups (collapsible via timing row toggle) */}
+        {groupsExpanded && (
+          <div className="px-3 pb-2.5 space-y-2.5">
+            {finishedGroups.map((group) => (
+              <FinishedGroupRow key={group.key} group={group} />
+            ))}
+
+            {activeGroup && (
+              <ActiveGroupRow key={activeGroup.key} group={activeGroup} isTerminal={isTerminal} />
+            )}
+
+            {groups.length === 0 && !isTerminal && (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <div className="animate-spin h-2.5 w-2.5 border border-primary border-t-transparent rounded-full shrink-0" />
+                <span className="text-[11px]">Waiting for first event…</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Checkpoint row (shown on success when versionId is known) */}
+        {isTerminal && isDone && versionId != null && versionLabel != null && (
+          <div className="px-3 pb-2.5 border-t border-border/40 pt-1.5">
+            <CheckpointRow
+              projectId={projectId}
+              versionId={versionId}
+              versionLabel={versionLabel}
+              onViewHistory={versionId != null ? () => onViewHistory?.(versionId) : undefined}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

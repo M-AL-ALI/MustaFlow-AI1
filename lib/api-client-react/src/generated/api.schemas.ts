@@ -440,6 +440,8 @@ export type AgentTaskReport = {
   title?: string;
   category?: string;
 }[];
+  /** @nullable */
+  versionId?: number | null;
   [key: string]: unknown;
  } | null;
 
@@ -482,7 +484,11 @@ export interface AgentTask {
   suggestions?: string[];
   createdAt: string;
   /** @nullable */
+  startedAt?: string | null;
+  /** @nullable */
   completedAt?: string | null;
+  /** @nullable */
+  elapsedSeconds?: number | null;
 }
 
 export type AgentTaskInputKind = typeof AgentTaskInputKind[keyof typeof AgentTaskInputKind];
@@ -519,6 +525,11 @@ export interface ProjectVersionInput {
   /** @minLength 1 */
   label: string;
   note?: string;
+}
+
+export interface PatchVersionBody {
+  /** @minLength 1 */
+  label?: string;
 }
 
 export type ProjectVersionDetailFilesSnapshotItem = {

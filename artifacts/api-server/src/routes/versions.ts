@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -15,6 +15,8 @@ import {
   ListVersionsResponse,
   CreateVersionParams,
   CreateVersionBody,
+  PatchVersionParams,
+  PatchVersionBody,
 } from "@workspace/api-zod";
 import { requireProjectOwnership } from "../lib/auth";
 import { guessMime } from "../lib/builder";
@@ -58,6 +60,58 @@ router.get("/projects/:id/versions", requireProjectOwnership, async (req, res): 
     .orderBy(desc(projectVersionsTable.createdAt));
   res.json(ListVersionsResponse.parse(rows));
 });
+
+router.patch(
+  "/projects/:id/versions/:versionId",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = PatchVersionParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    const parsed = PatchVersionBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const updates: Partial<typeof projectVersionsTable.$inferInsert> = {};
+    if (parsed.data.label !== undefined) updates.label = parsed.data.label;
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "No fields to update" });
+      return;
+    }
+
+    const [updated] = await db
+      .update(projectVersionsTable)
+      .set(updates)
+      .where(
+        and(
+          eq(projectVersionsTable.id, params.data.versionId),
+          eq(projectVersionsTable.projectId, params.data.id),
+        ),
+      )
+      .returning({
+        id: projectVersionsTable.id,
+        projectId: projectVersionsTable.projectId,
+        label: projectVersionsTable.label,
+        note: projectVersionsTable.note,
+        changelogEntry: projectVersionsTable.changelogEntry,
+        filesCount: sql<number>`COALESCE(jsonb_array_length(${projectVersionsTable.filesSnapshot}), 0)`,
+        createdAt: projectVersionsTable.createdAt,
+        planSnapshot: projectVersionsTable.planSnapshot,
+      });
+
+    if (!updated) {
+      res.status(404).json({ error: "Version not found" });
+      return;
+    }
+
+    res.json(updated);
+  },
+);
 
 router.post("/projects/:id/versions", requireProjectOwnership, async (req, res): Promise<void> => {
   const params = CreateVersionParams.safeParse(req.params);

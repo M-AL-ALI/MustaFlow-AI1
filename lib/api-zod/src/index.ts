@@ -9,3 +9,5 @@ export { ListSuggestionsParams } from "./generated/api";
 export { SearchProjectFilesParams } from "./generated/api";
 export { AcceptSuggestionBody } from "./generated/api";
 export { GetAgentRoutingParams } from "./generated/api";
+export { PatchVersionBody } from "./generated/api";
+export { PatchVersionParams } from "./generated/api";

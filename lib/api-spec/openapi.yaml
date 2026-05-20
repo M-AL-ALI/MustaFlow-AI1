@@ -488,6 +488,32 @@ paths:
                 $ref: "#/components/schemas/ProjectVersion"
 
   /projects/{id}/versions/{versionId}:
+    patch:
+      operationId: patchVersion
+      tags: [versions]
+      summary: Rename a version checkpoint label
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: versionId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchVersionBody"
+      responses:
+        "200":
+          description: Updated version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectVersion"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
     get:
       operationId: getVersion
       tags: [versions]
@@ -2013,6 +2039,7 @@ components:
                 properties:
                   title: { type: string }
                   category: { type: string }
+            versionId: { type: ["integer", "null"] }
         userFeedback:
           type: ["string", "null"]
           enum: [positive, negative, null]
@@ -2020,7 +2047,9 @@ components:
           type: array
           items: { type: string }
         createdAt: { type: string, format: date-time }
+        startedAt: { type: ["string", "null"], format: date-time }
         completedAt: { type: ["string", "null"], format: date-time }
+        elapsedSeconds: { type: ["integer", "null"] }
 
     AgentTaskInput:
       type: object
@@ -2054,6 +2083,11 @@ components:
       properties:
         label: { type: string, minLength: 1 }
         note: { type: string }
+
+    PatchVersionBody:
+      type: object
+      properties:
+        label: { type: string, minLength: 1 }
 
     ProjectVersionDetail:
       type: object
