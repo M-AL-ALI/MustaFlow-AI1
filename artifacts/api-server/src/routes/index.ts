@@ -31,6 +31,7 @@ import auditRouter from "./audit";
 import suggestionsRouter from "./suggestions";
 import githubRouter from "./github";
 import subdomainRouter from "./subdomain";
+import containersRouter from "./containers";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -69,6 +70,7 @@ const KNOWN_PREFIXES = [
   "/analytics",
   "/suggestions",
   "/github",
+  "/container",
 ];
 
 router.use((req, res, next) => {
@@ -124,6 +126,7 @@ router.use(auditRouter);
 router.use(suggestionsRouter);
 router.use(githubRouter);
 router.use(subdomainRouter);
+router.use(containersRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

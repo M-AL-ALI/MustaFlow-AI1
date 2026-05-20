@@ -7,6 +7,7 @@ import { isBinaryMime } from "../lib/binary-mime";
 import { injectBridge, MOCK_FLAG_SCRIPT } from "../lib/consoleBridge";
 import { extractPageMap } from "../lib/page-map";
 import { logger } from "../lib/logger";
+import { writeFileToContainer } from "../lib/container";
 
 const router: IRouter = Router();
 
@@ -239,6 +240,29 @@ router.patch(
         logger.warn({ err, projectId }, "page map re-extraction failed after manual file save");
       });
     }
+
+    // Sync the saved file to the live container (best-effort, non-fatal).
+    setImmediate(() => {
+      db.select({
+        containerId: projectsTable.containerId,
+        containerStatus: projectsTable.containerStatus,
+      })
+        .from(projectsTable)
+        .where(eq(projectsTable.id, projectId))
+        .then(([project]) => {
+          if (project?.containerId && project.containerStatus === "running") {
+            void writeFileToContainer(
+              project.containerId,
+              updated.path,
+              content,
+              projectId,
+            );
+          }
+        })
+        .catch((err: unknown) => {
+          logger.warn({ err, projectId, path: updated.path }, "Failed to sync file to container");
+        });
+    });
   },
 );
 

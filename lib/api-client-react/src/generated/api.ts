@@ -39,14 +39,20 @@ import type {
   ChatExchange,
   ChatMessage,
   ChatMessageInput,
+  ContainerExecInput,
+  ContainerExecResult,
+  ContainerLog,
+  ContainerStatus,
   DeleteKnowledge200,
   DeleteSecret200,
   DeleteWorkspace200,
+  DestroyContainer200,
   DuplicateProjectResult,
   FileSearchResult,
   GetAdminAuditLogParams,
   GetAgentRouting200,
   GetAgentRoutingParams,
+  GetContainerLogsParams,
   GetPublishReadinessParams,
   GetSecretAuditLogParams,
   GithubPushInput,
@@ -97,6 +103,7 @@ import type {
   SecretInput,
   SecretVerifyResult,
   SetProjectSubdomain400,
+  StopContainer200,
   StripeWebhook200,
   SubdomainInput,
   SubdomainResult,
@@ -5485,6 +5492,454 @@ export function useStreamTaskEvents<TData = Awaited<ReturnType<typeof streamTask
 
 
 
+
+export const getGetContainerStatusUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/container/status`
+}
+
+/**
+ * @summary Get the current container lifecycle status for a project
+ */
+export const getContainerStatus = async (id: number, options?: RequestInit): Promise<ContainerStatus> => {
+
+  return customFetch<ContainerStatus>(getGetContainerStatusUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetContainerStatusQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/container/status`
+    ] as const;
+    }
+
+
+export const getGetContainerStatusQueryOptions = <TData = Awaited<ReturnType<typeof getContainerStatus>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContainerStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetContainerStatusQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getContainerStatus>>> = ({ signal }) => getContainerStatus(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getContainerStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetContainerStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getContainerStatus>>>
+export type GetContainerStatusQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get the current container lifecycle status for a project
+ */
+
+export function useGetContainerStatus<TData = Awaited<ReturnType<typeof getContainerStatus>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContainerStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetContainerStatusQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getStartContainerUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/container/start`
+}
+
+/**
+ * @summary Provision or wake the project container
+ */
+export const startContainer = async (id: number, options?: RequestInit): Promise<ContainerStatus> => {
+
+  return customFetch<ContainerStatus>(getStartContainerUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getStartContainerMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startContainer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startContainer>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['startContainer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startContainer>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  startContainer(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartContainerMutationResult = NonNullable<Awaited<ReturnType<typeof startContainer>>>
+
+    export type StartContainerMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Provision or wake the project container
+ */
+export const useStartContainer = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startContainer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startContainer>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getStartContainerMutationOptions(options));
+    }
+
+export const getStopContainerUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/container/stop`
+}
+
+/**
+ * @summary Hibernate the project container
+ */
+export const stopContainer = async (id: number, options?: RequestInit): Promise<StopContainer200> => {
+
+  return customFetch<StopContainer200>(getStopContainerUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getStopContainerMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopContainer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof stopContainer>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['stopContainer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof stopContainer>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  stopContainer(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StopContainerMutationResult = NonNullable<Awaited<ReturnType<typeof stopContainer>>>
+
+    export type StopContainerMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Hibernate the project container
+ */
+export const useStopContainer = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopContainer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof stopContainer>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getStopContainerMutationOptions(options));
+    }
+
+export const getGetContainerLogsUrl = (id: number,
+    params?: GetContainerLogsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/container/logs?${stringifiedParams}` : `/api/projects/${id}/container/logs`
+}
+
+/**
+ * @summary Get recent container log lines for a project
+ */
+export const getContainerLogs = async (id: number,
+    params?: GetContainerLogsParams, options?: RequestInit): Promise<ContainerLog[]> => {
+
+  return customFetch<ContainerLog[]>(getGetContainerLogsUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetContainerLogsQueryKey = (id: number,
+    params?: GetContainerLogsParams,) => {
+    return [
+    `/api/projects/${id}/container/logs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetContainerLogsQueryOptions = <TData = Awaited<ReturnType<typeof getContainerLogs>>, TError = ErrorType<unknown>>(id: number,
+    params?: GetContainerLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContainerLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetContainerLogsQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getContainerLogs>>> = ({ signal }) => getContainerLogs(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getContainerLogs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetContainerLogsQueryResult = NonNullable<Awaited<ReturnType<typeof getContainerLogs>>>
+export type GetContainerLogsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get recent container log lines for a project
+ */
+
+export function useGetContainerLogs<TData = Awaited<ReturnType<typeof getContainerLogs>>, TError = ErrorType<unknown>>(
+ id: number,
+    params?: GetContainerLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContainerLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetContainerLogsQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getExecInContainerUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/container/exec`
+}
+
+/**
+ * @summary Execute a shell command inside the running container
+ */
+export const execInContainer = async (id: number,
+    containerExecInput: ContainerExecInput, options?: RequestInit): Promise<ContainerExecResult> => {
+
+  return customFetch<ContainerExecResult>(getExecInContainerUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      containerExecInput,)
+  }
+);}
+
+
+
+
+export const getExecInContainerMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof execInContainer>>, TError,{id: number;data: BodyType<ContainerExecInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof execInContainer>>, TError,{id: number;data: BodyType<ContainerExecInput>}, TContext> => {
+
+const mutationKey = ['execInContainer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof execInContainer>>, {id: number;data: BodyType<ContainerExecInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  execInContainer(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ExecInContainerMutationResult = NonNullable<Awaited<ReturnType<typeof execInContainer>>>
+    export type ExecInContainerMutationBody = BodyType<ContainerExecInput>
+    export type ExecInContainerMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Execute a shell command inside the running container
+ */
+export const useExecInContainer = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof execInContainer>>, TError,{id: number;data: BodyType<ContainerExecInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof execInContainer>>,
+        TError,
+        {id: number;data: BodyType<ContainerExecInput>},
+        TContext
+      > => {
+      return useMutation(getExecInContainerMutationOptions(options));
+    }
+
+export const getDestroyContainerUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/container`
+}
+
+/**
+ * @summary Permanently destroy the project container
+ */
+export const destroyContainer = async (id: number, options?: RequestInit): Promise<DestroyContainer200> => {
+
+  return customFetch<DestroyContainer200>(getDestroyContainerUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDestroyContainerMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof destroyContainer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof destroyContainer>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['destroyContainer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof destroyContainer>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  destroyContainer(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DestroyContainerMutationResult = NonNullable<Awaited<ReturnType<typeof destroyContainer>>>
+
+    export type DestroyContainerMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Permanently destroy the project container
+ */
+export const useDestroyContainer = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof destroyContainer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof destroyContainer>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDestroyContainerMutationOptions(options));
+    }
 
 export const getStripeWebhookUrl = () => {
 

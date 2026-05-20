@@ -144,6 +144,19 @@ The intended user journey is: Login → create project → build app → preview
 - **Credits billing**: Credits are enforced in the builder but top-up/purchase flow is a future milestone (Stripe). Users who run out must be manually granted credits via the `grantCredits` helper or a direct SQL update.
 - **Admin dashboard**: The `/admin` page is a placeholder. Real admin RBAC (role column, server-side guard) is a future milestone.
 
+## Phase C — Server-Side Containers Per Project
+
+- **Container provider**: Fly.io Machines API. Each project can have a dedicated Node.js 20 Alpine machine (`node:20-alpine`). Graceful degradation: when `FLY_API_TOKEN` is not set, all container operations are no-ops and the rest of the app works normally.
+- **Container lifecycle**: `POST /api/projects/:id/container/start` → provision + start machine, sync project files to container disk. `POST /api/projects/:id/container/stop` → stop machine. `GET /api/projects/:id/container/status` → poll current status. `DELETE /api/projects/:id/container/destroy` → permanently delete machine.
+- **File sync**: On container start, all `project_files` rows are written to container disk via Fly exec API. On file save (`PATCH /api/projects/:id/files/:fileId`), the change is forwarded to the live container (best-effort, non-fatal). After every AI build, `npm install` runs inside the container.
+- **Preview routing**: Preview tab shows the container's proxy URL in the address bar when `containerStatus === "running"` and `containerUrl` is set. Shows a "Waking up…" banner when `containerStatus` is "starting" or "hibernated".
+- **Terminal**: `/api/projects/:id/terminal` WebSocket endpoint (WS upgrade on HTTP server). Browser-side: custom input-buffered terminal in `terminal-tab.tsx`. Server-side PTY bridge: `terminal.ts` using Fly exec API to run `/bin/sh`.
+- **Hibernation**: Fly machines auto-stop after 10 minutes of inactivity (`auto_destroy: false, auto_start: true` + `min_machines_running: 0`). Container wakes on next start call.
+- **DB columns added (Phase C migration)**: `projects.container_id`, `projects.container_status`, `projects.container_url`; `container_logs` table.
+- **Container migration script**: `pnpm --filter @workspace/scripts run migrate-containers` — applies the container columns to the DB (already run; safe to re-run — uses `IF NOT EXISTS`).
+- **Required env (container features)**: `FLY_API_TOKEN`, `FLY_APP_NAME` (default: `mustaflow-containers`), `FLY_ORG_SLUG` (default: `personal`), `FLY_REGION` (default: `iad`). Without these, containers are disabled; everything else works normally.
+- **Key files**: `artifacts/api-server/src/lib/container.ts` (Fly.io provider), `artifacts/api-server/src/lib/terminal.ts` (WS PTY bridge), `artifacts/api-server/src/routes/containers.ts` (lifecycle routes), `artifacts/mustaflow/src/pages/projects/components/terminal-tab.tsx` (Terminal tab UI).
+
 ## Gotchas
 
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. It also runs `typecheck:libs`, which will fail if generated types break consumers — fix consumers, don't suppress. The `codegen-drift` validation check (`pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated`) catches any drift between the spec and committed generated files — run it (or let CI run it) after every spec edit.

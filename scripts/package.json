@@ -7,6 +7,7 @@
     "hello": "tsx ./src/hello.ts",
     "seed": "tsx ./src/seed.ts",
     "check-cdn-versions": "tsx ./src/check-cdn-versions.ts",
+    "migrate-containers": "tsx ./src/migrate-containers.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

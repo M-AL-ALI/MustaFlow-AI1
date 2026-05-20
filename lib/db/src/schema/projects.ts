@@ -56,6 +56,13 @@ export const projectsTable = pgTable("projects", {
   // "planning" = Planning Agent, "task" = Task Agent (staging gate),
   // "main" = Main Agent (direct fast edit). Default "main".
   defaultAgent: text("default_agent").notNull().default("main"),
+  // Container infrastructure (Phase C).
+  // containerId: Fly.io Machine ID for this project's container. Null = not provisioned.
+  // containerStatus: stopped | starting | running | hibernated | error
+  // containerUrl: proxy URL to reach the container's dev server (e.g. https://app.fly.dev/container/<machineId>).
+  containerId: text("container_id"),
+  containerStatus: text("container_status").notNull().default("stopped"),
+  containerUrl: text("container_url"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

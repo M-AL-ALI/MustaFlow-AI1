@@ -72,6 +72,7 @@ import { ResourcesTab } from "./components/resources-tab";
 import { ManageTab } from "./components/manage-tab";
 import { KnowledgeTab } from "./components/knowledge-tab";
 import { HistoryTab } from "./components/history-tab";
+import { TerminalTab } from "./components/terminal-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { cn } from "@/lib/utils";
@@ -398,12 +399,13 @@ function ErrorCard({
 const WORKSPACE_TABS = [
   { label: "Preview", value: "preview", icon: Monitor },
   { label: "Code", value: "code", icon: FileCode2 },
+  { label: "Terminal", value: "terminal", icon: TerminalSquare },
   { label: "Canvas", value: "canvas", icon: Paintbrush2 },
   { label: "Page Map", value: "page-map", icon: Globe },
   { label: "Tools & Files", value: "tools-files", icon: Blocks },
   { label: "Publishing", value: "publishing", icon: Rocket },
   { label: "Knowledge", value: "knowledge", icon: BrainCircuit },
-  { label: "Logs", value: "logs", icon: TerminalSquare },
+  { label: "Logs", value: "logs", icon: Wrench },
   { label: "Resources", value: "resources", icon: BookOpen },
   { label: "Analytics", value: "analytics", icon: Activity },
   { label: "Manage", value: "manage", icon: Settings },
@@ -556,6 +558,81 @@ export default function ProjectWorkspacePage() {
     url.searchParams.delete("credits_success");
     window.history.replaceState({}, "", url.toString());
   }, [creditsSuccess]);
+  // ── Container state ────────────────────────────────────────────────────────
+  type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
+  const [containerStatus, setContainerStatus] = useState<ContainerStatus>("stopped");
+  const [containerUrl, setContainerUrl] = useState<string | null>(null);
+  const [containerStarting, setContainerStarting] = useState(false);
+  const containerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Seed container state from project data once loaded
+  useEffect(() => {
+    if (!project) return;
+    const st = (project as { containerStatus?: string }).containerStatus;
+    if (st) setContainerStatus(st as ContainerStatus);
+    const url = (project as { containerUrl?: string | null }).containerUrl;
+    if (url) setContainerUrl(url);
+  }, [project]);
+
+  // Poll container status when starting
+  useEffect(() => {
+    if (containerStatus === "starting" || containerStarting) {
+      if (containerPollRef.current) return;
+      containerPollRef.current = setInterval(() => {
+        fetch(`/api/projects/${projectId}/container/status`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data: { containerStatus?: string; containerUrl?: string | null } | null) => {
+            if (!data) return;
+            const newStatus = (data.containerStatus ?? "stopped") as ContainerStatus;
+            setContainerStatus(newStatus);
+            if (data.containerUrl) setContainerUrl(data.containerUrl);
+            if (newStatus === "running") {
+              setContainerStarting(false);
+              if (containerPollRef.current) {
+                clearInterval(containerPollRef.current);
+                containerPollRef.current = null;
+              }
+            }
+          })
+          .catch(() => {});
+      }, 3000);
+    } else {
+      if (containerPollRef.current) {
+        clearInterval(containerPollRef.current);
+        containerPollRef.current = null;
+      }
+    }
+    return () => {
+      if (containerPollRef.current) {
+        clearInterval(containerPollRef.current);
+        containerPollRef.current = null;
+      }
+    };
+  }, [containerStatus, containerStarting, projectId]);
+
+  const handleStartContainer = useCallback(() => {
+    setContainerStarting(true);
+    setContainerStatus("starting");
+    fetch(`/api/projects/${projectId}/container/start`, { method: "POST" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { containerStatus?: string; containerUrl?: string | null } | null) => {
+        if (!data) return;
+        setContainerStatus((data.containerStatus ?? "starting") as ContainerStatus);
+        if (data.containerUrl) setContainerUrl(data.containerUrl);
+      })
+      .catch(() => setContainerStatus("error"));
+  }, [projectId]);
+
+  const handleStopContainer = useCallback(() => {
+    fetch(`/api/projects/${projectId}/container/stop`, { method: "POST" })
+      .then(() => {
+        setContainerStatus("hibernated");
+        setContainerStarting(false);
+      })
+      .catch(() => {});
+  }, [projectId]);
+  // ── End container state ────────────────────────────────────────────────────
+
   const [focusMode, setFocusMode] = useState(false);
   const [pageMapSyncing, setPageMapSyncing] = useState(false);
   const pageMapSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1986,6 +2063,9 @@ export default function ProjectWorkspacePage() {
                   setSelectedCodeFileId(fileId);
                   setActiveTab("code");
                 }}
+                containerStatus={containerStatus}
+                containerUrl={containerUrl}
+                onStartContainer={handleStartContainer}
               />
             )}
             {activeTab === "code" && (
@@ -1998,6 +2078,16 @@ export default function ProjectWorkspacePage() {
                   if (isMobileLayout) setChatDrawerOpen(true);
                   send(prompt);
                 }}
+              />
+            )}
+            {activeTab === "terminal" && (
+              <TerminalTab
+                projectId={projectId}
+                containerStatus={containerStatus}
+                containerUrl={containerUrl}
+                onStartContainer={handleStartContainer}
+                onStopContainer={handleStopContainer}
+                isStarting={containerStarting}
               />
             )}
             {activeTab === "canvas" && <CanvasTab projectId={projectId} />}

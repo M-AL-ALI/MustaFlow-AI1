@@ -1633,6 +1633,55 @@ export async function runJob(input: JobInput): Promise<void> {
         })
         .where(eq(projectsTable.id, projectId));
 
+      // Sync files to live container and run npm install (best-effort, non-fatal).
+      // Only runs when a container is active for this project.
+      setImmediate(() => {
+        void (async () => {
+          try {
+            const [containerRow] = await db
+              .select({
+                containerId: projectsTable.containerId,
+                containerStatus: projectsTable.containerStatus,
+              })
+              .from(projectsTable)
+              .where(eq(projectsTable.id, projectId));
+
+            if (!containerRow?.containerId || containerRow.containerStatus !== "running") return;
+
+            const { containerId } = containerRow;
+
+            // Import dynamically to keep this module tree-shakeable.
+            const { syncFilesToContainer, execInContainer } = await import("./container");
+
+            const allFiles = await db
+              .select({ path: projectFilesTable.path, content: projectFilesTable.content })
+              .from(projectFilesTable)
+              .where(eq(projectFilesTable.projectId, projectId));
+
+            await emitEvent(taskId, "narration", "Syncing files to container…");
+            await syncFilesToContainer(containerId, projectId, allFiles);
+
+            // Run npm install if a package.json was written
+            const hasPackageJson = allFiles.some((f) => f.path === "package.json");
+            if (hasPackageJson) {
+              await emitEvent(taskId, "narration", "Running npm install in container…");
+              const installResult = await execInContainer(
+                containerId,
+                ["npm", "install", "--prefer-offline", "--no-audit"],
+                projectId,
+              );
+              if (!installResult.ok) {
+                logger.warn({ projectId, taskId }, "npm install in container exited non-zero");
+              }
+            }
+
+            await emitEvent(taskId, "narration", "Container ready.");
+          } catch (err) {
+            logger.warn({ err, projectId, taskId }, "Container sync/install failed (non-fatal)");
+          }
+        })();
+      });
+
       // Extract the page map BEFORE emitting "completed" so the
       // "page_map_updated" event is guaranteed to precede the terminal event.
       // This eliminates the race where event consumers stop listening on

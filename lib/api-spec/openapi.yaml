@@ -1510,6 +1510,135 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/container/status:
+    get:
+      operationId: getContainerStatus
+      tags: [projects]
+      summary: Get the current container lifecycle status for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Container status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContainerStatus"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/container/start:
+    post:
+      operationId: startContainer
+      tags: [projects]
+      summary: Provision or wake the project container
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Container starting or already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContainerStatus"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/container/stop:
+    post:
+      operationId: stopContainer
+      tags: [projects]
+      summary: Hibernate the project container
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Container hibernated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [containerStatus]
+                properties:
+                  containerStatus: { type: string }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/container/logs:
+    get:
+      operationId: getContainerLogs
+      tags: [projects]
+      summary: Get recent container log lines for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, default: 200 } }
+      responses:
+        "200":
+          description: Container log lines
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContainerLog"
+
+  /projects/{id}/container/exec:
+    post:
+      operationId: execInContainer
+      tags: [projects]
+      summary: Execute a shell command inside the running container
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContainerExecInput"
+      responses:
+        "200":
+          description: Command output
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContainerExecResult"
+        "409":
+          description: Container not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/container:
+    delete:
+      operationId: destroyContainer
+      tags: [projects]
+      summary: Permanently destroy the project container
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Container destroyed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [destroyed]
+                properties:
+                  destroyed: { type: boolean }
+
   /billing/webhook:
     post:
       operationId: stripeWebhook
@@ -1806,6 +1935,12 @@ components:
         metaDescription: { type: ["string", "null"] }
         themeColor: { type: ["string", "null"] }
         mobilePreviewUrl: { type: ["string", "null"] }
+        containerId: { type: ["string", "null"], description: "Fly.io Machine ID for this project's container. Null = not provisioned." }
+        containerStatus:
+          type: string
+          enum: [stopped, starting, running, hibernated, error]
+          description: "Current container lifecycle state."
+        containerUrl: { type: ["string", "null"], description: "Proxy URL to reach the container's dev server." }
         healthScore:
           type: ["integer", "null"]
           minimum: 0
@@ -2776,6 +2911,44 @@ components:
         warnings: { type: integer }
         failures: { type: integer }
         score: { type: integer }
+
+    ContainerStatus:
+      type: object
+      required: [containerStatus]
+      properties:
+        containerId: { type: ["string", "null"] }
+        containerStatus:
+          type: string
+          enum: [stopped, starting, running, hibernated, error]
+        containerUrl: { type: ["string", "null"] }
+
+    ContainerLog:
+      type: object
+      required: [id, level, message, createdAt]
+      properties:
+        id: { type: integer }
+        level:
+          type: string
+          enum: [stdout, stderr, system]
+        message: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    ContainerExecInput:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: array
+          items: { type: string }
+          description: "Command and arguments (e.g. ['npm', 'install'])"
+        workdir: { type: string, description: "Working directory inside container (default /app)" }
+
+    ContainerExecResult:
+      type: object
+      required: [ok, output]
+      properties:
+        ok: { type: boolean }
+        output: { type: string }
 
     ProjectAuditResult:
       type: object

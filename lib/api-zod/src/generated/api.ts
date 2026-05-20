@@ -120,6 +120,9 @@ export const ListProjectsResponseItem = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
+  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s container. Null = not provisioned.'),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current container lifecycle state.'),
+  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
   "healthScore": zod.number().min(listProjectsResponseHealthScoreMin).max(listProjectsResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
@@ -169,6 +172,9 @@ export const GetProjectResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
+  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s container. Null = not provisioned.'),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current container lifecycle state.'),
+  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
   "healthScore": zod.number().min(getProjectResponseHealthScoreMin).max(getProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
@@ -213,6 +219,9 @@ export const UpdateProjectResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
+  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s container. Null = not provisioned.'),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current container lifecycle state.'),
+  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
   "healthScore": zod.number().min(updateProjectResponseHealthScoreMin).max(updateProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
@@ -254,6 +263,9 @@ export const GetProjectsSummaryResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
+  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s container. Null = not provisioned.'),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current container lifecycle state.'),
+  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
   "healthScore": zod.number().min(getProjectsSummaryResponseRecentItemHealthScoreMin).max(getProjectsSummaryResponseRecentItemHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
@@ -1859,6 +1871,98 @@ export const GetProjectFileRawParams = zod.object({
 export const StreamTaskEventsParams = zod.object({
   "id": zod.coerce.number(),
   "taskId": zod.coerce.number()
+})
+
+
+/**
+ * @summary Get the current container lifecycle status for a project
+ */
+export const GetContainerStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetContainerStatusResponse = zod.object({
+  "containerId": zod.string().nullish(),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']),
+  "containerUrl": zod.string().nullish()
+})
+
+
+/**
+ * @summary Provision or wake the project container
+ */
+export const StartContainerParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const StartContainerResponse = zod.object({
+  "containerId": zod.string().nullish(),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']),
+  "containerUrl": zod.string().nullish()
+})
+
+
+/**
+ * @summary Hibernate the project container
+ */
+export const StopContainerParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const StopContainerResponse = zod.object({
+  "containerStatus": zod.string()
+})
+
+
+/**
+ * @summary Get recent container log lines for a project
+ */
+export const GetContainerLogsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const getContainerLogsQueryLimitDefault = 200;
+
+export const GetContainerLogsQueryParams = zod.object({
+  "limit": zod.coerce.number().default(getContainerLogsQueryLimitDefault)
+})
+
+export const GetContainerLogsResponseItem = zod.object({
+  "id": zod.number(),
+  "level": zod.enum(['stdout', 'stderr', 'system']),
+  "message": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+export const GetContainerLogsResponse = zod.array(GetContainerLogsResponseItem)
+
+
+/**
+ * @summary Execute a shell command inside the running container
+ */
+export const ExecInContainerParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ExecInContainerBody = zod.object({
+  "command": zod.array(zod.string()).describe('Command and arguments (e.g. [\'npm\', \'install\'])'),
+  "workdir": zod.string().optional().describe('Working directory inside container (default \/app)')
+})
+
+export const ExecInContainerResponse = zod.object({
+  "ok": zod.boolean(),
+  "output": zod.string()
+})
+
+
+/**
+ * @summary Permanently destroy the project container
+ */
+export const DestroyContainerParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DestroyContainerResponse = zod.object({
+  "destroyed": zod.boolean()
 })
 
 

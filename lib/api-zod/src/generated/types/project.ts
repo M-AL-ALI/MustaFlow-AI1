@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProjectAgentMode } from './projectAgentMode';
+import type { ProjectContainerStatus } from './projectContainerStatus';
 import type { ProjectDefaultAgent } from './projectDefaultAgent';
 import type { ProjectKind } from './projectKind';
 import type { ProjectPlatform } from './projectPlatform';
@@ -37,6 +38,18 @@ export interface Project {
   themeColor?: string | null;
   /** @nullable */
   mobilePreviewUrl?: string | null;
+  /**
+     * Fly.io Machine ID for this project's container. Null = not provisioned.
+     * @nullable
+     */
+  containerId?: string | null;
+  /** Current container lifecycle state. */
+  containerStatus?: ProjectContainerStatus;
+  /**
+     * Proxy URL to reach the container's dev server.
+     * @nullable
+     */
+  containerUrl?: string | null;
   /**
      * 0–100 score derived from generated file quality: accessibility (alt/ARIA/semantic), SEO (title/description/h1), performance (script count/lazy), security (no eval/document.write). Null if no files built yet.
      * @minimum 0

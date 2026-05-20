@@ -119,6 +119,20 @@ export const ProjectAgentMode = {
 } as const;
 
 /**
+ * Current container lifecycle state.
+ */
+export type ProjectContainerStatus = typeof ProjectContainerStatus[keyof typeof ProjectContainerStatus];
+
+
+export const ProjectContainerStatus = {
+  stopped: 'stopped',
+  starting: 'starting',
+  running: 'running',
+  hibernated: 'hibernated',
+  error: 'error',
+} as const;
+
+/**
  * User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).
  */
 export type ProjectDefaultAgent = typeof ProjectDefaultAgent[keyof typeof ProjectDefaultAgent];
@@ -166,6 +180,18 @@ export interface Project {
   themeColor?: string | null;
   /** @nullable */
   mobilePreviewUrl?: string | null;
+  /**
+     * Fly.io Machine ID for this project's container. Null = not provisioned.
+     * @nullable
+     */
+  containerId?: string | null;
+  /** Current container lifecycle state. */
+  containerStatus?: ProjectContainerStatus;
+  /**
+     * Proxy URL to reach the container's dev server.
+     * @nullable
+     */
+  containerUrl?: string | null;
   /**
      * 0–100 score derived from generated file quality: accessibility (alt/ARIA/semantic), SEO (title/description/h1), performance (script count/lazy), security (no eval/document.write). Null if no files built yet.
      * @minimum 0
@@ -1267,6 +1293,53 @@ export interface AuditScore {
   score: number;
 }
 
+export type ContainerStatusContainerStatus = typeof ContainerStatusContainerStatus[keyof typeof ContainerStatusContainerStatus];
+
+
+export const ContainerStatusContainerStatus = {
+  stopped: 'stopped',
+  starting: 'starting',
+  running: 'running',
+  hibernated: 'hibernated',
+  error: 'error',
+} as const;
+
+export interface ContainerStatus {
+  /** @nullable */
+  containerId?: string | null;
+  containerStatus: ContainerStatusContainerStatus;
+  /** @nullable */
+  containerUrl?: string | null;
+}
+
+export type ContainerLogLevel = typeof ContainerLogLevel[keyof typeof ContainerLogLevel];
+
+
+export const ContainerLogLevel = {
+  stdout: 'stdout',
+  stderr: 'stderr',
+  system: 'system',
+} as const;
+
+export interface ContainerLog {
+  id: number;
+  level: ContainerLogLevel;
+  message: string;
+  createdAt: string;
+}
+
+export interface ContainerExecInput {
+  /** Command and arguments (e.g. ['npm', 'install']) */
+  command: string[];
+  /** Working directory inside container (default /app) */
+  workdir?: string;
+}
+
+export interface ContainerExecResult {
+  ok: boolean;
+  output: string;
+}
+
 export interface ProjectAuditResult {
   findings: AuditFinding[];
   scores: AuditScore[];
@@ -1440,6 +1513,18 @@ export type SearchProjectFilesParams = {
  * @minLength 1
  */
 q: string;
+};
+
+export type StopContainer200 = {
+  containerStatus: string;
+};
+
+export type GetContainerLogsParams = {
+limit?: number;
+};
+
+export type DestroyContainer200 = {
+  destroyed: boolean;
 };
 
 export type StripeWebhook200 = {
