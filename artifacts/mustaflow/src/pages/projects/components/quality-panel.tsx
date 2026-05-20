@@ -236,7 +236,11 @@ export function QualityPanel({
 }) {
   const queryClient = useQueryClient();
 
-  const { data: audit, isLoading, isError } = useGetProjectAudit(projectId, {
+  const {
+    data: audit,
+    isLoading,
+    isError,
+  } = useGetProjectAudit(projectId, {
     query: {
       enabled: !!projectId,
       queryKey: getGetProjectAuditQueryKey(projectId),

@@ -19,6 +19,8 @@ export interface CdnPackageEntry {
     cve?: string;
     description: string;
     upgradeTo: string;
+    /** Override the default "error" severity for this blocked entry (e.g. EOL warnings) */
+    severity?: "error" | "warning";
   }>;
   /** Minimum recommended version — older versions trigger a warning even without a specific CVE */
   minimumRecommendedVersion?: string;
@@ -204,6 +206,70 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
     blockedVersions: [],
     minimumRecommendedVersion: "3.0.0",
   },
+  {
+    name: "jquery",
+    displayName: "jQuery",
+    urlPatterns: [
+      /code\.jquery\.com\/jquery/,
+      /unpkg\.com\/jquery/,
+      /cdn\.jsdelivr\.net\/npm\/jquery/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/jquery/,
+    ],
+    versionPattern: /jquery@([\d.]+)|jquery\/([\d.]+)|jquery-([\d.]+)(?:\.min)?\.js/,
+    blockedVersions: [
+      {
+        match: (v) => semverLt(v, "3.5.0"),
+        cve: "CVE-2020-11022",
+        description:
+          "jQuery versions before 3.5.0 are vulnerable to XSS via the HTML-parsing functions. Passing HTML containing <option> elements from untrusted sources can lead to script execution.",
+        upgradeTo: "3.7.x",
+      },
+    ],
+    minimumRecommendedVersion: "3.5.0",
+  },
+  {
+    name: "bootstrap",
+    displayName: "Bootstrap",
+    urlPatterns: [
+      /cdn\.jsdelivr\.net\/npm\/bootstrap/,
+      /unpkg\.com\/bootstrap/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/bootstrap/,
+      /stackpath\.bootstrapcdn\.com/,
+      /maxcdn\.bootstrapcdn\.com/,
+    ],
+    versionPattern:
+      /bootstrap@([\d.]+)|bootstrap\/([\d.]+)|bootstrap-([\d.]+)(?:\.min)?\.(?:js|css)/,
+    blockedVersions: [
+      {
+        match: (v) => semverLt(v, "4.3.1"),
+        cve: "CVE-2019-8331",
+        description:
+          "Bootstrap versions before 4.3.1 are vulnerable to XSS via the tooltip and popover data-template attribute.",
+        upgradeTo: "5.3.x",
+      },
+    ],
+    minimumRecommendedVersion: "4.3.1",
+  },
+  {
+    name: "vue",
+    displayName: "Vue.js",
+    urlPatterns: [
+      /cdn\.jsdelivr\.net\/npm\/vue/,
+      /unpkg\.com\/vue/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/vue/,
+    ],
+    versionPattern: /vue@([\d.]+)|vue\/([\d.]+)|vue-([\d.]+)(?:\.min)?\.js/,
+    blockedVersions: [
+      {
+        match: (v) => v.startsWith("2."),
+        description:
+          "Vue 2.x reached End of Life on December 31, 2023 and no longer receives security patches. Migrate to Vue 3.",
+        upgradeTo: "3.x",
+        severity: "warning",
+      },
+    ],
+    minimumRecommendedVersion: "3.0.0",
+  },
 ];
 
 /**
@@ -242,7 +308,7 @@ export function scanCdnUrls(urls: string[]): CdnFinding[] {
               cve: blocked.cve,
               description: blocked.description,
               upgradeTo: blocked.upgradeTo,
-              severity: "error",
+              severity: blocked.severity ?? "error",
             });
           }
         }

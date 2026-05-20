@@ -78,20 +78,19 @@ function countExternalResources(html: string): number {
 
 /** Extract all CDN resource URLs (script src, link href) from HTML. */
 function extractCdnUrls(html: string): string[] {
-  const src = extractAttr(html, "src").filter(
-    (s) =>
-      s.includes("unpkg.com") ||
-      s.includes("cdn.jsdelivr.net") ||
-      s.includes("cdnjs.cloudflare.com") ||
-      s.includes("cdn.tailwindcss.com") ||
-      s.includes("cdn.skypack.dev"),
-  );
-  const href = extractAttr(html, "href").filter(
-    (s) =>
-      s.includes("unpkg.com") ||
-      s.includes("cdn.jsdelivr.net") ||
-      s.includes("cdnjs.cloudflare.com"),
-  );
+  const CDN_HOSTS = [
+    "unpkg.com",
+    "cdn.jsdelivr.net",
+    "cdnjs.cloudflare.com",
+    "cdn.tailwindcss.com",
+    "cdn.skypack.dev",
+    "code.jquery.com",
+    "stackpath.bootstrapcdn.com",
+    "maxcdn.bootstrapcdn.com",
+  ];
+  const isCdn = (s: string) => CDN_HOSTS.some((h) => s.includes(h));
+  const src = extractAttr(html, "src").filter(isCdn);
+  const href = extractAttr(html, "href").filter(isCdn);
   return [...src, ...href];
 }
 
@@ -136,6 +135,10 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
     // 3. Form inputs without associated labels
     const inputTags = html.match(/<input(?:\s[^>]*)?\/?>/gi) ?? [];
     const labelFors = extractAttr(html, "for");
+<<<<<<< HEAD
+=======
+
+>>>>>>> 095e733 (Add jQuery, Bootstrap, and Vue 2.x to CDN vulnerability allowlist (Task #214))
     const unlabeledInputs = inputTags.filter((tag) => {
       const type = (tag.match(/type\s*=\s*["']([^"']*)["']/i)?.[1] ?? "").toLowerCase();
       if (["hidden", "submit", "button", "reset", "image"].includes(type)) return false;

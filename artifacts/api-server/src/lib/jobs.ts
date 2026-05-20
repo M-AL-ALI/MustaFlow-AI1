@@ -1419,7 +1419,7 @@ export async function runJob(input: JobInput): Promise<void> {
         durationMs: Date.now() - jobStartTime,
         correctionPasses: analyticsCorrectionPasses,
         escalated: wasEscalated,
-        outcome: "success",
+        outcome: "success" as const,
         primaryErrorCategory: analyticsErrorCategory,
       })
       .catch((err) => logger.warn({ err, taskId }, "Failed to record build analytics (non-fatal)"));
