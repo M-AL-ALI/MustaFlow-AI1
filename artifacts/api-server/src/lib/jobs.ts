@@ -1444,6 +1444,93 @@ export async function runJob(input: JobInput): Promise<void> {
           unknown
         >,
       });
+
+      // If Moment.js was detected in an initial build, automatically enqueue a follow-up refine
+      // that swaps it for Luxon. Only fires on builds (not on refines) to avoid infinite loops.
+      // This runs as a fire-and-forget background job — failures never affect the build result.
+      if (kind === "build" && hasMomentNotice) {
+        void (async () => {
+          try {
+            const MOMENT_REPLACE_PROMPT =
+              "Replace Moment.js with Luxon — remove the Moment.js CDN script tag and rewrite all moment(...) calls using Luxon's DateTime API.";
+
+            // Idempotency guard: skip if a queued/running auto-fix for this project already exists.
+            const [existingAutoFix] = await db
+              .select({ id: agentTasksTable.id })
+              .from(agentTasksTable)
+              .where(
+                and(
+                  eq(agentTasksTable.projectId, projectId),
+                  eq(agentTasksTable.title, "Auto-fix: Replace Moment.js with Luxon"),
+                  inArray(agentTasksTable.status, ["queued", "building", "planning"]),
+                ),
+              )
+              .limit(1);
+            if (existingAutoFix) {
+              logger.info(
+                { projectId, taskId, existingAutoFixId: existingAutoFix.id },
+                "Moment.js auto-fix already queued — skipping duplicate enqueue",
+              );
+              return;
+            }
+
+            const [followUpTask] = await db
+              .insert(agentTasksTable)
+              .values({
+                projectId,
+                title: "Auto-fix: Replace Moment.js with Luxon",
+                kind: "background",
+                status: "queued",
+                prompt: MOMENT_REPLACE_PROMPT,
+              })
+              .returning();
+            if (!followUpTask) {
+              logger.warn(
+                { projectId, taskId },
+                "Moment.js auto-fix: failed to insert follow-up task row",
+              );
+              return;
+            }
+            await db.insert(chatMessagesTable).values([
+              {
+                projectId,
+                role: "user",
+                content: MOMENT_REPLACE_PROMPT,
+                agentMode,
+                planMode: false,
+              },
+              {
+                projectId,
+                role: "assistant",
+                content: `Moment.js was detected in this build. I've queued an automatic follow-up to replace it with Luxon (Task #${followUpTask.id}). The refine will run in the background and post a report here when complete.`,
+                agentMode,
+                planMode: false,
+                plan: {
+                  kind: "task-queued",
+                  taskId: followUpTask.id,
+                } as unknown as Record<string, unknown>,
+              },
+            ]);
+            enqueueJob({
+              taskId: followUpTask.id,
+              projectId,
+              kind: "refine",
+              userPrompt: MOMENT_REPLACE_PROMPT,
+              agentMode,
+            });
+            logger.info(
+              { projectId, taskId, followUpTaskId: followUpTask.id },
+              "Moment.js auto-fix refine enqueued",
+            );
+          } catch (err) {
+            logger.warn(
+              { err, projectId, taskId },
+              "Moment.js auto-fix enqueue failed (non-fatal)",
+            );
+          }
+        })();
+      }
+
       void db
         .insert(buildAnalyticsTable)
         .values({
