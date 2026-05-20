@@ -9,6 +9,7 @@
     "check-cdn-versions": "tsx ./src/check-cdn-versions.ts",
     "migrate-containers": "tsx ./src/migrate-containers.ts",
     "migrate-production-container": "tsx ./src/migrate-production-container.ts",
+    "migrate-prod-containers": "tsx ./src/migrate-prod-containers.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

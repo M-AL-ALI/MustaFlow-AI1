@@ -11,7 +11,8 @@
 
 import { Router, type IRouter } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { db, projectsTable, projectFilesTable, containerLogsTable } from "@workspace/db";
+import { db, projectsTable, projectFilesTable, containerLogsTable, secretsTable } from "@workspace/db";
+import { encryptionService } from "../lib/encryption";
 import { requireProjectOwnership } from "../lib/auth";
 import {
   provisionContainer,
@@ -20,7 +21,6 @@ import {
   execInContainer,
   destroyContainer,
   deployProductionContainer,
-  stopProductionContainer,
 } from "../lib/container";
 import { logger } from "../lib/logger";
 
@@ -221,7 +221,32 @@ router.post(
     req.log.info({ projectId }, "Deploying production container");
 
     const files = await loadProjectFiles(projectId);
-    const result = await deployProductionContainer(projectId, files);
+
+    // Load secrets for env injection
+    const secretRows = await db
+      .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
+      .from(secretsTable)
+      .where(eq(secretsTable.projectId, projectId));
+
+    const envVars: Record<string, string> = {
+      PROJECT_ID: String(projectId),
+      NODE_ENV: "production",
+      PORT: "3000",
+    };
+    for (const s of secretRows) {
+      try {
+        envVars[s.name] = encryptionService.decrypt(s.valueEncrypted);
+      } catch {
+        // skip malformed secrets
+      }
+    }
+
+    const result = await deployProductionContainer(
+      projectId,
+      project.prodContainerId ?? null,
+      files,
+      envVars,
+    );
 
     if (!result) {
       res.status(500).json({
@@ -230,9 +255,19 @@ router.post(
       return;
     }
 
+    // Persist new prod container info
+    await db
+      .update(projectsTable)
+      .set({
+        prodContainerId: result.prodContainerId,
+        prodContainerUrl: result.containerUrl,
+        prodContainerStatus: result.status,
+      })
+      .where(eq(projectsTable.id, projectId));
+
     res.json({
       ok: true,
-      containerId: result.containerId,
+      containerId: result.prodContainerId,
       containerUrl: result.containerUrl,
       note: "Production container deployed. Public URL now proxies to this container.",
     });
@@ -252,7 +287,13 @@ router.post(
       return;
     }
 
-    await stopProductionContainer(projectId);
+    if (project.prodContainerId) {
+      await destroyContainer(project.prodContainerId, projectId);
+      await db
+        .update(projectsTable)
+        .set({ prodContainerId: null, prodContainerUrl: null, prodContainerStatus: "stopped" })
+        .where(eq(projectsTable.id, projectId));
+    }
     res.json({ ok: true, note: "Production container stopped and destroyed." });
   },
 );

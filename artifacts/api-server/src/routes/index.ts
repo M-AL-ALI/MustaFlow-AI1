@@ -32,6 +32,7 @@ import suggestionsRouter from "./suggestions";
 import githubRouter from "./github";
 import subdomainRouter from "./subdomain";
 import containersRouter from "./containers";
+import deployRouter from "./deploy";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -92,6 +93,7 @@ router.post("/projects/:id/queue", aiBuilderLimiter);
 router.post("/projects/:id/page-map/analyze", aiBuilderLimiter);
 router.post("/projects/:id/publish", publishLimiter);
 router.post("/projects/:id/unpublish", publishLimiter);
+router.post("/projects/:id/deploy", publishLimiter);
 router.post("/projects/:id/duplicate", exportLimiter);
 router.get("/projects/:id/export", exportLimiter);
 router.post("/billing/checkout", exportLimiter);
@@ -127,6 +129,7 @@ router.use(suggestionsRouter);
 router.use(githubRouter);
 router.use(subdomainRouter);
 router.use(containersRouter);
+router.use(deployRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

@@ -70,7 +70,8 @@ export async function serveSnapshot(
       publicSlug: projectsTable.publicSlug,
       siteTitle: projectsTable.siteTitle,
       metaDescription: projectsTable.metaDescription,
-      productionContainerUrl: projectsTable.productionContainerUrl,
+      prodContainerUrl: projectsTable.prodContainerUrl,
+      prodContainerStatus: projectsTable.prodContainerStatus,
       deletedAt: projectsTable.deletedAt,
     })
     .from(projectsTable)
@@ -81,9 +82,9 @@ export async function serveSnapshot(
     return;
   }
 
-  // If a production container is deployed, proxy the request to it.
-  if (project.productionContainerUrl) {
-    const targetBase = project.productionContainerUrl.replace(/\/$/, "");
+  // If a production container is deployed and running, proxy the request to it.
+  if (project.prodContainerUrl && project.prodContainerStatus === "running") {
+    const targetBase = project.prodContainerUrl.replace(/\/$/, "");
     const requestPath = filePath ? `/${filePath}` : "/";
     const targetUrl = `${targetBase}${requestPath}`;
     try {

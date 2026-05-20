@@ -461,155 +461,6 @@ async function waitForMachineReady(machineId: string, timeoutSeconds: number): P
   }
 }
 
-/**
- * Deploy a production-grade Fly.io machine for a project.
- *
- * The production machine differs from the dev container:
- *   - Named `project-<id>-prod` so it doesn't collide with the dev machine.
- *   - `min_machines_running: 1` — never hibernates; always-on for the public URL.
- *   - Files are synced from the provided snapshot and `npm install` is run.
- *
- * If a previous production machine already exists for this project it is destroyed
- * first so we always deploy a clean replica from the latest snapshot.
- *
- * Returns { containerId, containerUrl } on success, null on error or when not configured.
- */
-export async function deployProductionContainer(
-  projectId: number,
-  files: Array<{ path: string; content: string }>,
-): Promise<{ containerId: string; containerUrl: string } | null> {
-  if (!isConfigured()) {
-    logger.warn({ projectId }, "FLY_API_TOKEN not set — production container deploy skipped");
-    return null;
-  }
-
-  // Load any existing production machine so we can replace it
-  const [project] = await db
-    .select({
-      productionContainerId: projectsTable.productionContainerId,
-    })
-    .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
-
-  if (project?.productionContainerId) {
-    await destroyContainer(project.productionContainerId, projectId);
-    await db
-      .update(projectsTable)
-      .set({ productionContainerId: null, productionContainerUrl: null })
-      .where(eq(projectsTable.id, projectId));
-  }
-
-  const machineName = `project-${projectId}-prod`;
-
-  const body = {
-    name: machineName,
-    region: FLY_REGION,
-    config: {
-      image: CONTAINER_IMAGE,
-      env: {
-        PROJECT_ID: String(projectId),
-        PORT: String(INTERNAL_PORT),
-        NODE_ENV: "production",
-      },
-      init: {
-        cmd: ["/bin/sh", "-c", "mkdir -p /app && tail -f /dev/null"],
-      },
-      guest: {
-        cpu_kind: "shared",
-        cpus: 1,
-        memory_mb: 512,
-      },
-      services: [
-        {
-          ports: [
-            { port: 443, handlers: ["tls", "http"] },
-            { port: 80, handlers: ["http"] },
-          ],
-          protocol: "tcp",
-          internal_port: INTERNAL_PORT,
-          autostop: "off",
-          autostart: true,
-          min_machines_running: 1,
-          checks: [],
-        },
-      ],
-      auto_destroy: false,
-      restart: { policy: "no" },
-    },
-  };
-
-  try {
-    const res = await flyFetch(`/apps/${FLY_APP}/machines`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      logger.error(
-        { projectId, status: res.status, body: text },
-        "Failed to create production Fly machine",
-      );
-      await writeLog(projectId, "system", `Production container creation failed: ${text}`);
-      return null;
-    }
-
-    const data = (await res.json()) as { id: string; state?: string };
-    const machineId = data.id;
-    const containerUrl = machineProxyUrl(machineId);
-
-    logger.info({ projectId, machineId, containerUrl }, "Production Fly machine created");
-    await writeLog(projectId, "system", `Production container created: ${machineId}`);
-
-    // Persist immediately so we can clean up even if the next steps fail
-    await db
-      .update(projectsTable)
-      .set({ productionContainerId: machineId, productionContainerUrl: containerUrl })
-      .where(eq(projectsTable.id, projectId));
-
-    // Wait for machine to be ready (up to 30s)
-    await waitForMachineReady(machineId, 30);
-
-    // Sync files and run npm install
-    await syncFilesToContainer(machineId, projectId, files);
-    await execInContainer(
-      machineId,
-      ["sh", "-c", "cd /app && npm install --if-present 2>&1 || true"],
-      projectId,
-    );
-
-    await writeLog(projectId, "system", `Production container ready at ${containerUrl}`);
-    return { containerId: machineId, containerUrl };
-  } catch (err) {
-    logger.error({ err, projectId }, "Error deploying production container");
-    return null;
-  }
-}
-
-/**
- * Stop and destroy the production container for a project.
- * Called on unpublish to free resources.
- */
-export async function stopProductionContainer(projectId: number): Promise<void> {
-  const [project] = await db
-    .select({ productionContainerId: projectsTable.productionContainerId })
-    .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
-
-  if (!project?.productionContainerId) return;
-
-  await destroyContainer(project.productionContainerId, projectId);
-  await db
-    .update(projectsTable)
-    .set({ productionContainerId: null, productionContainerUrl: null })
-    .where(eq(projectsTable.id, projectId));
-
-  await writeLog(
-    projectId,
-    "system",
-    `Production container stopped: ${project.productionContainerId}`,
-  );
-}
 
 /**
  * Hibernate a container (stop it to save resources).
@@ -629,4 +480,223 @@ export async function hibernateContainer(projectId: number): Promise<void> {
     .update(projectsTable)
     .set({ containerStatus: "hibernated" })
     .where(eq(projectsTable.id, projectId));
+}
+
+// ─── Production container support (Phase E) ──────────────────────────────────
+
+export interface ProdContainerInfo {
+  prodContainerId: string;
+  containerUrl: string | null;
+  status: ContainerStatus;
+}
+
+/**
+ * Create a production Fly.io machine with injected environment variables.
+ * Uses naming convention: prod-{projectId} for the machine name.
+ */
+export async function createProductionContainer(
+  projectId: number,
+  envVars: Record<string, string>,
+): Promise<ProdContainerInfo | null> {
+  if (!isConfigured()) {
+    logger.warn({ projectId }, "FLY_API_TOKEN not set — prod container creation skipped");
+    return null;
+  }
+
+  const machineName = `prod-${projectId}-${Date.now()}`;
+
+  const body = {
+    name: machineName,
+    region: FLY_REGION,
+    config: {
+      image: CONTAINER_IMAGE,
+      env: {
+        ...envVars,
+        PROJECT_ID: String(projectId),
+        PORT: "3000",
+        NODE_ENV: "production",
+      },
+      init: {
+        cmd: [
+          "/bin/sh",
+          "-c",
+          "cd /app && ([ -f package.json ] && npm start 2>/dev/null || tail -f /dev/null)",
+        ],
+      },
+      guest: {
+        cpu_kind: "shared",
+        cpus: 1,
+        memory_mb: 512,
+      },
+      services: [
+        {
+          ports: [
+            { port: 443, handlers: ["tls", "http"] },
+            { port: 80, handlers: ["http"] },
+          ],
+          protocol: "tcp",
+          internal_port: 3000,
+          autostop: "stop",
+          autostart: true,
+          min_machines_running: 1,
+          checks: [],
+        },
+      ],
+      auto_destroy: false,
+      restart: { policy: "always" },
+    },
+  };
+
+  try {
+    const res = await flyFetch(`/apps/${FLY_APP}/machines`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      logger.error(
+        { projectId, status: res.status, body: text },
+        "Failed to create prod Fly machine",
+      );
+      await writeLog(projectId, "system", `Prod container creation failed: ${text}`);
+      return null;
+    }
+
+    const data = (await res.json()) as { id: string; state?: string };
+    const machineId = data.id;
+    const containerUrl = machineProxyUrl(machineId);
+
+    logger.info({ projectId, machineId, containerUrl }, "Prod Fly machine created");
+    await writeLog(projectId, "system", `Prod container created: ${machineId}`);
+
+    return {
+      prodContainerId: machineId,
+      containerUrl,
+      status: "starting",
+    };
+  } catch (err) {
+    logger.error({ err, projectId }, "Error creating prod Fly machine");
+    return null;
+  }
+}
+
+/**
+ * Perform a health check on a container by polling GET / on its proxy URL.
+ * Returns true if the container responds 200 within timeoutSeconds.
+ */
+async function waitForContainerHealthy(
+  containerUrl: string,
+  timeoutSeconds: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(containerUrl, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) return true;
+    } catch {
+      // not ready yet
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  return false;
+}
+
+/**
+ * Blue/green deploy a production container.
+ *
+ * Algorithm:
+ *   1. Create a new "green" machine with the current files + env vars
+ *   2. Wait for the machine to start (Fly state = started)
+ *   3. Sync project files to the new machine
+ *   4. Run npm install in the new machine
+ *   5. Poll health check (GET / 200) — up to 90s
+ *   6. If healthy: stop the old "blue" machine, return new machine info
+ *   7. If unhealthy: destroy new machine, return null (keep old running)
+ *
+ * Gracefully degrades: when FLY_API_TOKEN is not set returns null without error.
+ */
+export async function deployProductionContainer(
+  projectId: number,
+  oldProdMachineId: string | null,
+  files: Array<{ path: string; content: string }>,
+  envVars: Record<string, string>,
+): Promise<ProdContainerInfo | null> {
+  if (!isConfigured()) return null;
+
+  await writeLog(projectId, "system", "Starting blue/green production deploy…");
+
+  // Create new green container
+  const greenInfo = await createProductionContainer(projectId, envVars);
+  if (!greenInfo) {
+    await writeLog(projectId, "system", "Failed to create new prod container — aborting deploy");
+    return null;
+  }
+
+  // Wait for machine to enter started state
+  await waitForMachineReady(greenInfo.prodContainerId, 60);
+  await writeLog(
+    projectId,
+    "system",
+    `New prod container ${greenInfo.prodContainerId} started. Syncing files…`,
+  );
+
+  // Sync files to new container
+  await syncFilesToContainer(greenInfo.prodContainerId, projectId, files);
+
+  // Run npm install if package.json present
+  const hasPackageJson = files.some((f) => f.path === "package.json");
+  if (hasPackageJson) {
+    await writeLog(projectId, "system", "Running npm install in prod container…");
+    await execInContainer(
+      greenInfo.prodContainerId,
+      ["npm", "install", "--production", "--prefer-offline"],
+      projectId,
+    );
+    await execInContainer(greenInfo.prodContainerId, ["npm", "run", "build"], projectId);
+  }
+
+  // Start the app in the container
+  await execInContainer(
+    greenInfo.prodContainerId,
+    ["/bin/sh", "-c", "cd /app && nohup npm start &>/tmp/app.log &"],
+    projectId,
+  );
+
+  // Health check — poll for up to 90 seconds
+  await writeLog(projectId, "system", `Health-checking ${greenInfo.containerUrl}…`);
+  const healthy = greenInfo.containerUrl
+    ? await waitForContainerHealthy(greenInfo.containerUrl, 90)
+    : false;
+
+  if (!healthy) {
+    await writeLog(
+      projectId,
+      "system",
+      "Health check failed — destroying new container, keeping old one",
+    );
+    // Destroy the failed green container
+    await destroyContainer(greenInfo.prodContainerId, projectId);
+    return null;
+  }
+
+  await writeLog(projectId, "system", "Health check passed. Completing blue/green swap…");
+
+  // Stop old blue container if one exists
+  if (oldProdMachineId && oldProdMachineId !== greenInfo.prodContainerId) {
+    await writeLog(projectId, "system", `Stopping old prod container ${oldProdMachineId}…`);
+    await destroyContainer(oldProdMachineId, projectId);
+  }
+
+  await writeLog(
+    projectId,
+    "system",
+    `Production deploy complete. Container: ${greenInfo.prodContainerId}`,
+  );
+
+  return {
+    prodContainerId: greenInfo.prodContainerId,
+    containerUrl: greenInfo.containerUrl,
+    status: "running",
+  };
 }

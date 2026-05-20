@@ -120,9 +120,12 @@ export const ListProjectsResponseItem = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
-  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s container. Null = not provisioned.'),
-  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current container lifecycle state.'),
+  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
   "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
+  "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
+  "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
   "healthScore": zod.number().min(listProjectsResponseHealthScoreMin).max(listProjectsResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
@@ -172,9 +175,12 @@ export const GetProjectResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
-  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s container. Null = not provisioned.'),
-  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current container lifecycle state.'),
+  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
   "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
+  "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
+  "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
   "healthScore": zod.number().min(getProjectResponseHealthScoreMin).max(getProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
@@ -219,9 +225,12 @@ export const UpdateProjectResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
-  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s container. Null = not provisioned.'),
-  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current container lifecycle state.'),
+  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
   "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
+  "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
+  "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
   "healthScore": zod.number().min(updateProjectResponseHealthScoreMin).max(updateProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
@@ -263,9 +272,12 @@ export const GetProjectsSummaryResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
-  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s container. Null = not provisioned.'),
-  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current container lifecycle state.'),
+  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
   "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
+  "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
+  "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
   "healthScore": zod.number().min(getProjectsSummaryResponseRecentItemHealthScoreMin).max(getProjectsSummaryResponseRecentItemHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
@@ -1237,6 +1249,29 @@ export const UnpublishProjectParams = zod.object({
 export const UnpublishProjectResponse = zod.object({
   "projectId": zod.number(),
   "status": zod.string()
+})
+
+
+/**
+ * @summary Deploy project to production (blue/green container swap + DB snapshot)
+ */
+export const DeployProjectParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeployProjectResponse = zod.object({
+  "ok": zod.boolean(),
+  "projectId": zod.number(),
+  "status": zod.string(),
+  "publicSlug": zod.string().optional(),
+  "publicUrl": zod.string(),
+  "internalPathUrl": zod.string().optional(),
+  "deployedAt": zod.coerce.date(),
+  "snapshotVersionId": zod.number().nullish(),
+  "filesDeployed": zod.number(),
+  "containerDeployed": zod.boolean(),
+  "prodContainerUrl": zod.string().nullish(),
+  "note": zod.string()
 })
 
 

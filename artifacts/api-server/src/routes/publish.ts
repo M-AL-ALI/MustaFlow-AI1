@@ -16,11 +16,13 @@ import {
   projectFilesTable,
   projectVersionsTable,
   deploymentLogsTable,
+  secretsTable,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
 import { generateOgSvg } from "../lib/ogImage";
-import { deployProductionContainer, stopProductionContainer } from "../lib/container";
+import { deployProductionContainer, destroyContainer } from "../lib/container";
+import { encryptionService } from "../lib/encryption";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
@@ -106,16 +108,44 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   // This runs synchronously so we can include the result in the response.
   // When FLY_API_TOKEN is not set, deployProductionContainer is a no-op returning null.
   let containerDeployed = false;
-  let prodContainerUrl: string | null = null;
-  if (project.containerId) {
+  let prodContainerUrl: string | null = project.prodContainerUrl ?? null;
+  let prodContainerStatus = project.prodContainerStatus ?? "stopped";
+  let prodContainerId = project.prodContainerId ?? null;
+  if (project.containerId && process.env.FLY_API_TOKEN) {
     req.log.info({ projectId }, "Project has dev container — deploying production container");
-    const prodResult = await deployProductionContainer(
-      projectId,
-      files.map((f) => ({ path: f.path, content: f.content })),
-    );
-    if (prodResult) {
-      containerDeployed = true;
-      prodContainerUrl = prodResult.containerUrl;
+    try {
+      const secretRows = await db
+        .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
+        .from(secretsTable)
+        .where(eq(secretsTable.projectId, projectId));
+
+      const envVars: Record<string, string> = {
+        PROJECT_ID: String(projectId),
+        NODE_ENV: "production",
+        PORT: "3000",
+      };
+      for (const s of secretRows) {
+        try {
+          envVars[s.name] = encryptionService.decrypt(s.valueEncrypted);
+        } catch {
+          // skip malformed secrets
+        }
+      }
+
+      const prodResult = await deployProductionContainer(
+        projectId,
+        project.prodContainerId ?? null,
+        files.map((f) => ({ path: f.path, content: f.content })),
+        envVars,
+      );
+      if (prodResult) {
+        containerDeployed = true;
+        prodContainerId = prodResult.prodContainerId;
+        prodContainerUrl = prodResult.containerUrl;
+        prodContainerStatus = prodResult.status;
+      }
+    } catch (err) {
+      req.log.error({ err, projectId }, "Prod container deployment failed — falling back to snapshot");
     }
   }
 
@@ -128,6 +158,9 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         status: "published",
         publishedSnapshotId: deploymentVersion?.id ?? null,
         publicSlug: slug,
+        prodContainerId,
+        prodContainerUrl,
+        prodContainerStatus,
         updatedAt: new Date(),
       })
       .catch(() => {
@@ -192,7 +225,19 @@ router.post("/projects/:id/unpublish", requireProjectOwnership, async (req, res)
     .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
   // Stop the production container if one was deployed — best-effort, non-fatal.
-  void stopProductionContainer(projectId).catch((err: unknown) => {
+  void (async () => {
+    const [proj] = await db
+      .select({ prodContainerId: projectsTable.prodContainerId })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+    if (proj?.prodContainerId) {
+      await destroyContainer(proj.prodContainerId, projectId);
+      await db
+        .update(projectsTable)
+        .set({ prodContainerId: null, prodContainerUrl: null, prodContainerStatus: "stopped" })
+        .where(eq(projectsTable.id, projectId));
+    }
+  })().catch((err: unknown) => {
     req.log.warn({ err, projectId }, "Failed to stop production container on unpublish");
   });
 

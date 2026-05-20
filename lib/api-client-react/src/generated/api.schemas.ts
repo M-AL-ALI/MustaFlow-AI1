@@ -119,7 +119,7 @@ export const ProjectAgentMode = {
 } as const;
 
 /**
- * Current container lifecycle state.
+ * Current dev container lifecycle state.
  */
 export type ProjectContainerStatus = typeof ProjectContainerStatus[keyof typeof ProjectContainerStatus];
 
@@ -130,6 +130,21 @@ export const ProjectContainerStatus = {
   running: 'running',
   hibernated: 'hibernated',
   error: 'error',
+} as const;
+
+/**
+ * Current production container lifecycle state.
+ */
+export type ProjectProdContainerStatus = typeof ProjectProdContainerStatus[keyof typeof ProjectProdContainerStatus];
+
+
+export const ProjectProdContainerStatus = {
+  stopped: 'stopped',
+  starting: 'starting',
+  running: 'running',
+  hibernated: 'hibernated',
+  error: 'error',
+  deploying: 'deploying',
 } as const;
 
 /**
@@ -181,17 +196,29 @@ export interface Project {
   /** @nullable */
   mobilePreviewUrl?: string | null;
   /**
-     * Fly.io Machine ID for this project's container. Null = not provisioned.
+     * Fly.io Machine ID for this project's dev container. Null = not provisioned.
      * @nullable
      */
   containerId?: string | null;
-  /** Current container lifecycle state. */
+  /** Current dev container lifecycle state. */
   containerStatus?: ProjectContainerStatus;
   /**
      * Proxy URL to reach the container's dev server.
      * @nullable
      */
   containerUrl?: string | null;
+  /**
+     * Fly.io Machine ID for the live production container. Null = not deployed.
+     * @nullable
+     */
+  prodContainerId?: string | null;
+  /** Current production container lifecycle state. */
+  prodContainerStatus?: ProjectProdContainerStatus;
+  /**
+     * Proxy URL to reach the production container. Null = not deployed.
+     * @nullable
+     */
+  prodContainerUrl?: string | null;
   /**
      * 0–100 score derived from generated file quality: accessibility (alt/ARIA/semantic), SEO (title/description/h1), performance (script count/lazy), security (no eval/document.write). Null if no files built yet.
      * @minimum 0
@@ -789,6 +816,23 @@ export interface PublishResult {
      * @nullable
      */
   containerUrl?: string | null;
+  note: string;
+}
+
+export interface DeployResult {
+  ok: boolean;
+  projectId: number;
+  status: string;
+  publicSlug?: string;
+  publicUrl: string;
+  internalPathUrl?: string;
+  deployedAt: string;
+  /** @nullable */
+  snapshotVersionId?: number | null;
+  filesDeployed: number;
+  containerDeployed: boolean;
+  /** @nullable */
+  prodContainerUrl?: string | null;
   note: string;
 }
 

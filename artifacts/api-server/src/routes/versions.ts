@@ -9,6 +9,7 @@ import {
   knowledgeEntriesTable,
   agentTasksTable,
   taskEventsTable,
+  secretsTable,
 } from "@workspace/db";
 import {
   ListVersionsParams,
@@ -23,6 +24,8 @@ import { guessMime } from "../lib/builder";
 import { isBinaryMime } from "../lib/binary-mime";
 import { injectBridge } from "../lib/consoleBridge";
 import { logger } from "../lib/logger";
+import { deployProductionContainer } from "../lib/container";
+import { encryptionService } from "../lib/encryption";
 
 const router: IRouter = Router();
 
@@ -339,6 +342,73 @@ router.post(
       });
     } catch {
       // best-effort — don't fail the rollback if knowledge write fails
+    }
+
+    // Phase E: best-effort prod container redeploy from the rolled-back snapshot.
+    // Non-fatal — if this fails the rollback still succeeds (DB files are already restored).
+    const [currentProject] = await db
+      .select({
+        prodContainerId: projectsTable.prodContainerId,
+        projectFormat: projectsTable.projectFormat,
+        status: projectsTable.status,
+      })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+
+    if (
+      currentProject?.prodContainerId &&
+      currentProject.projectFormat === "react-vite" &&
+      currentProject.status === "published" &&
+      process.env.FLY_API_TOKEN
+    ) {
+      setImmediate(() => {
+        void (async () => {
+          try {
+            const secretRows = await db
+              .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
+              .from(secretsTable)
+              .where(eq(secretsTable.projectId, projectId));
+
+            const envVars: Record<string, string> = {
+              PROJECT_ID: String(projectId),
+              NODE_ENV: "production",
+              PORT: "3000",
+            };
+            for (const s of secretRows) {
+              try {
+                envVars[s.name] = encryptionService.decrypt(s.valueEncrypted);
+              } catch {
+                // skip
+              }
+            }
+
+            const filePayload = snapshot.map((f) => ({ path: f.path, content: f.content }));
+            const result = await deployProductionContainer(
+              projectId,
+              currentProject.prodContainerId,
+              filePayload,
+              envVars,
+            );
+
+            if (result) {
+              await db
+                .update(projectsTable)
+                .set({
+                  prodContainerId: result.prodContainerId,
+                  prodContainerUrl: result.containerUrl,
+                  prodContainerStatus: result.status,
+                })
+                .where(eq(projectsTable.id, projectId));
+              logger.info(
+                { projectId, prodContainerId: result.prodContainerId },
+                "Prod container redeployed after rollback",
+              );
+            }
+          } catch (err) {
+            logger.error({ err, projectId }, "Prod container rollback redeploy failed — non-fatal");
+          }
+        })();
+      });
     }
 
     res.json({

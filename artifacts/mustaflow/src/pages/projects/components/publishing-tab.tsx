@@ -35,6 +35,8 @@ import {
   Package,
   Link2,
   Github,
+  Rocket,
+  Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -2001,8 +2003,8 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
 export function PublishingTab({
   projectId,
   kind,
-  containerStatus,
-  containerUrl,
+  containerStatus: _containerStatus,
+  containerUrl: _containerUrl,
   onNavigateToSecret,
 }: {
   projectId: number;
@@ -2016,7 +2018,6 @@ export function PublishingTab({
   const [webEnv, setWebEnv] = useState<"testing" | "production">("testing");
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [logsOpen, setLogsOpen] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<{
     ok: boolean;
@@ -2030,6 +2031,24 @@ export function PublishingTab({
     containerUrl?: string | null;
   } | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
+
+  // Deploy to Production state (Phase E)
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [deployResult, setDeployResult] = useState<{
+    ok: boolean;
+    publicUrl: string;
+    internalPathUrl?: string;
+    publicSlug: string;
+    deployedAt: string;
+    filesDeployed?: number;
+    containerDeployed: boolean;
+    prodContainerUrl?: string | null;
+    note?: string;
+  } | null>(null);
+  const [deployError, setDeployError] = useState<string | null>(null);
+  const [showDeployConfirm, setShowDeployConfirm] = useState(false);
+  const [prodContainerStatus, setProdContainerStatus] = useState<string | null>(null);
+  const [prodContainerUrl, setProdContainerUrl] = useState<string | null>(null);
 
   // Readiness gate state
   const [readiness, setReadiness] = useState<ReadinessResult | null>(null);
@@ -2172,6 +2191,41 @@ export function PublishingTab({
     }
   };
 
+  async function handleDeploy() {
+    setIsDeploying(true);
+    setDeployError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/deploy`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string };
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        ok: boolean;
+        publicUrl: string;
+        internalPathUrl?: string;
+        publicSlug: string;
+        deployedAt: string;
+        filesDeployed?: number;
+        containerDeployed: boolean;
+        prodContainerUrl?: string | null;
+        note?: string;
+      };
+      setDeployResult(data);
+      setShowDeployConfirm(false);
+      if (data.prodContainerUrl) setProdContainerUrl(data.prodContainerUrl);
+      void fetchDomain();
+      void fetchDeployments();
+      void fetchSiteSettings();
+    } catch (err) {
+      setDeployError(err instanceof Error ? err.message : "Deploy failed — please try again.");
+    } finally {
+      setIsDeploying(false);
+    }
+  }
+
   async function handlePublish() {
     setIsPublishing(true);
     setPublishError(null);
@@ -2195,7 +2249,6 @@ export function PublishingTab({
         containerUrl?: string | null;
       };
       setPublishResult(data);
-      setShowConfirm(false);
       // Refresh domain info (subdomain url is now available) and deployment logs
       void fetchDomain();
       void fetchDeployments();
@@ -2256,10 +2309,14 @@ export function PublishingTab({
           siteTitle?: string | null;
           metaDescription?: string | null;
           themeColor?: string | null;
+          prodContainerStatus?: string | null;
+          prodContainerUrl?: string | null;
         };
         setSiteTitle(data.siteTitle ?? "");
         setMetaDescription(data.metaDescription ?? "");
         setThemeColor(data.themeColor ?? "");
+        setProdContainerStatus(data.prodContainerStatus ?? null);
+        setProdContainerUrl(data.prodContainerUrl ?? null);
       }
     } catch {
       /* ignore */
@@ -2461,7 +2518,7 @@ export function PublishingTab({
                 <button
                   onClick={() => {
                     setWebEnv((e) => (e === "testing" ? "production" : "testing"));
-                    setShowConfirm(false);
+                    setShowDeployConfirm(false);
                   }}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-muted hover:bg-muted/80 text-sm font-medium transition-colors"
                 >
@@ -2524,41 +2581,116 @@ export function PublishingTab({
             <div className="border border-border rounded-xl p-4 bg-card space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-sm">Deployment Status</h3>
-                <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                <button
+                  onClick={() => void fetchSiteSettings()}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
                   <RefreshCw className="h-3 w-3" />
                   Refresh
                 </button>
               </div>
               <div className="space-y-2">
-                {[
-                  { label: "Health check", badge: "pending", note: "No active deployment" },
-                  { label: "Custom domain", badge: "unconfigured", note: "Configure below" },
-                  {
-                    label: "SSL / HTTPS",
-                    badge: "partial",
-                    note: "Requires manual cert setup — not automated",
-                  },
-                  { label: "Rollback point", badge: "ready", note: "Latest snapshot available" },
-                ].map((row) => (
-                  <div key={row.label} className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground text-xs">{row.label}</span>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "text-[10px] px-2 py-0.5 rounded-full font-medium",
-                          row.badge === "ready"
-                            ? "bg-green-500/15 text-green-600"
-                            : row.badge === "unconfigured"
-                              ? "bg-muted text-muted-foreground"
-                              : "bg-yellow-500/15 text-yellow-600",
+                {/* Production container health */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground text-xs flex items-center gap-1.5">
+                    <Activity className="h-3 w-3" />
+                    Production container
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {prodContainerStatus === "running" ? (
+                      <>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-green-500/15 text-green-600">
+                          running
+                        </span>
+                        {prodContainerUrl && (
+                          <a
+                            href={prodContainerUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] text-primary hover:underline truncate max-w-[160px]"
+                          >
+                            {prodContainerUrl}
+                          </a>
                         )}
-                      >
-                        {row.badge}
+                      </>
+                    ) : prodContainerStatus === "deploying" || isDeploying ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-blue-500/15 text-blue-600 flex items-center gap-1">
+                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                        deploying
                       </span>
-                      <span className="text-[11px] text-muted-foreground">{row.note}</span>
-                    </div>
+                    ) : prodContainerStatus === "error" ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-destructive/15 text-destructive">
+                        error
+                      </span>
+                    ) : prodContainerStatus === "stopped" ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-muted text-muted-foreground">
+                        stopped
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-muted text-muted-foreground">
+                        not deployed
+                      </span>
+                    )}
                   </div>
-                ))}
+                </div>
+                {/* Custom domain */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground text-xs">Custom domain</span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                        domainInfo?.domainStatus === "active"
+                          ? "bg-green-500/15 text-green-600"
+                          : domainInfo?.customDomain
+                            ? "bg-yellow-500/15 text-yellow-600"
+                            : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {domainInfo?.domainStatus === "active"
+                        ? "active"
+                        : domainInfo?.customDomain
+                          ? "pending DNS"
+                          : "unconfigured"}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {domainInfo?.customDomain ?? "Configure below"}
+                    </span>
+                  </div>
+                </div>
+                {/* SSL */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground text-xs">SSL / HTTPS</span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                        domainInfo?.sslStatus === "active"
+                          ? "bg-green-500/15 text-green-600"
+                          : "bg-yellow-500/15 text-yellow-600",
+                      )}
+                    >
+                      {domainInfo?.sslStatus === "active" ? "active" : "partial"}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {domainInfo?.sslStatus === "active"
+                        ? "Certificate active"
+                        : "Requires manual cert setup"}
+                    </span>
+                  </div>
+                </div>
+                {/* Rollback */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground text-xs">Rollback point</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-green-500/15 text-green-600">
+                      ready
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Latest snapshot available
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -2952,7 +3084,14 @@ export function PublishingTab({
                 onClick={() => setLogsOpen((o) => !o)}
                 className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-muted/30 transition-colors"
               >
-                <span>Deployment Logs</span>
+                <div className="flex items-center gap-2">
+                  <span>Deployment History</span>
+                  {deployments.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-normal">
+                      {deployments.length}
+                    </span>
+                  )}
+                </div>
                 {logsOpen ? (
                   <ChevronUp className="h-4 w-4 text-muted-foreground" />
                 ) : (
@@ -2962,12 +3101,15 @@ export function PublishingTab({
               {logsOpen &&
                 (deployments.length === 0 ? (
                   <div className="bg-zinc-950 font-mono text-xs text-zinc-500 p-4 border-t border-border min-h-[80px] flex items-center justify-center">
-                    No deployments yet. Logs will appear here after your first publish or EAS build.
+                    No deployments yet. History will appear here after your first deploy or EAS
+                    build.
                   </div>
                 ) : (
                   <div className="divide-y divide-border border-t border-border">
                     {deployments.map((d) => {
                       const isEas = d.env.startsWith("eas-");
+                      const isProduction = d.env === "production";
+                      const isTesting = d.env === "testing";
                       const envLabel = isEas
                         ? d.env.replace("eas-ios", "EAS iOS").replace("eas-android", "EAS Android")
                         : d.env;
@@ -2991,11 +3133,21 @@ export function PublishingTab({
                           >
                             {d.status === "started" ? "building" : d.status}
                           </span>
-                          {/* Environment label — EAS entries get a distinct badge */}
+                          {/* Environment label */}
                           {isEas ? (
                             <span className="shrink-0 flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded text-[10px] bg-orange-500/15 text-orange-400 border border-orange-500/20">
                               <Package className="h-2.5 w-2.5" />
                               {envLabel}
+                            </span>
+                          ) : isProduction ? (
+                            <span className="shrink-0 flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded text-[10px] bg-green-500/15 text-green-600 border border-green-500/20">
+                              <Rocket className="h-2.5 w-2.5" />
+                              production
+                            </span>
+                          ) : isTesting ? (
+                            <span className="shrink-0 flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded text-[10px] bg-yellow-500/15 text-yellow-600 border border-yellow-500/20">
+                              <Server className="h-2.5 w-2.5" />
+                              testing
                             </span>
                           ) : (
                             <span className="text-muted-foreground font-mono shrink-0 uppercase tracking-wide">
@@ -3012,6 +3164,11 @@ export function PublishingTab({
                             >
                               {d.publicUrl}
                             </a>
+                          )}
+                          {d.filesCount != null && (
+                            <span className="text-muted-foreground shrink-0">
+                              {d.filesCount} file{d.filesCount !== 1 ? "s" : ""}
+                            </span>
                           )}
                           <span className="ml-auto text-muted-foreground shrink-0">
                             {new Date(d.createdAt).toLocaleDateString()}
@@ -3043,52 +3200,65 @@ export function PublishingTab({
               <ChecklistGroup sections={webChecklist} checked={checked} onToggle={toggle} />
             </div>
 
-            {/* Publish action */}
+            {/* Deploy action (Phase E) */}
             {webEnv === "production" && (
               <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Rocket className="h-4 w-4 text-primary" />
+                  <h3 className="font-semibold text-sm">Deploy to Production</h3>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Snapshots your app, provisions a production container with blue/green swap, and
+                  makes it publicly available. Secrets are injected as environment variables.
+                </p>
+
                 {!webReadyToPublish && (
                   <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                     <span>
-                      Complete all required checklist items before publishing to production.
+                      Complete all required checklist items before deploying to production.
                     </span>
                   </div>
                 )}
-                {!showConfirm ? (
+
+                {!showDeployConfirm ? (
                   <Button
                     className="w-full"
-                    disabled={!webReadyToPublish || readiness?.canPublish === false}
-                    onClick={() => setShowConfirm(true)}
+                    disabled={!webReadyToPublish || readiness?.canPublish === false || isDeploying}
+                    onClick={() => setShowDeployConfirm(true)}
                   >
-                    <Globe className="h-4 w-4 mr-2" />
-                    Publish to Production
+                    <Rocket className="h-4 w-4 mr-2" />
+                    Deploy to Production
                   </Button>
                 ) : (
                   <div className="space-y-3">
-                    <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 text-sm space-y-1">
-                      <p className="font-semibold text-destructive text-xs">
-                        Confirm production publish
-                      </p>
+                    <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 text-sm space-y-1">
+                      <p className="font-semibold text-xs">Confirm production deploy</p>
                       <p className="text-muted-foreground text-xs">
-                        This will make your app publicly accessible. A rollback point has been saved
-                        automatically.
+                        This will snapshot the current build, boot a fresh production container, run
+                        a health check, then route traffic. The old container stays live until the
+                        new one is healthy. A rollback point is saved automatically.
                       </p>
                     </div>
-                    {publishError && <p className="text-xs text-destructive">{publishError}</p>}
+                    {deployError && (
+                      <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                        <span>{deployError}</span>
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <Button
-                        variant="destructive"
                         className="flex-1"
-                        onClick={handlePublish}
-                        disabled={isPublishing}
+                        onClick={() => void handleDeploy()}
+                        disabled={isDeploying}
                       >
-                        {isPublishing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                        {isPublishing ? "Publishing…" : "Confirm Publish"}
+                        {isDeploying && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                        {isDeploying ? "Deploying…" : "Confirm Deploy"}
                       </Button>
                       <Button
                         variant="outline"
-                        onClick={() => setShowConfirm(false)}
-                        disabled={isPublishing}
+                        onClick={() => setShowDeployConfirm(false)}
+                        disabled={isDeploying}
                       >
                         Cancel
                       </Button>
@@ -3098,11 +3268,75 @@ export function PublishingTab({
               </div>
             )}
 
+            {deployResult && (
+              <div className="border border-green-500/20 rounded-xl p-4 bg-green-500/5 space-y-3">
+                <div className="flex items-center gap-2 text-green-500 text-sm font-semibold">
+                  <CheckCircle2 className="h-4 w-4" />
+                  {deployResult.containerDeployed ? "App deployed and live" : "Snapshot published"}
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={deployResult.publicUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 text-primary hover:text-primary/80 text-sm break-all min-w-0"
+                  >
+                    <span className="truncate">{deployResult.publicUrl}</span>
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+                  </a>
+                  <CopyUrlButton url={deployResult.publicUrl} />
+                </div>
+                {deployResult.prodContainerUrl && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-muted-foreground">Container:</span>
+                    <a
+                      href={deployResult.prodContainerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-primary hover:underline truncate"
+                    >
+                      {deployResult.prodContainerUrl}
+                    </a>
+                    <CopyUrlButton url={deployResult.prodContainerUrl} />
+                  </div>
+                )}
+                <p className="text-[11px] text-muted-foreground">
+                  Slug: <span className="font-mono">{deployResult.publicSlug}</span>
+                  {deployResult.filesDeployed != null && (
+                    <span>
+                      {" · "}
+                      {deployResult.filesDeployed} file
+                      {deployResult.filesDeployed !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                  {" · "}
+                  {deployResult.containerDeployed ? "Container deployed" : "Snapshot only"}
+                  {" · "}Deployed {new Date(deployResult.deployedAt).toLocaleString()}
+                </p>
+                {deployResult.note && (
+                  <p className="text-[11px] text-muted-foreground italic">{deployResult.note}</p>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    await fetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
+                    setDeployResult(null);
+                    void fetchDomain();
+                    void fetchDeployments();
+                    void fetchSiteSettings();
+                  }}
+                >
+                  Unpublish
+                </Button>
+              </div>
+            )}
+
             {publishResult && (
               <div className="border border-green-500/20 rounded-xl p-4 bg-green-500/5 space-y-3">
                 <div className="flex items-center gap-2 text-green-500 text-sm font-semibold">
                   <CheckCircle2 className="h-4 w-4" />
-                  App is live
+                  App is live (snapshot)
                 </div>
                 {publishResult.containerDeployed && (
                   <div className="flex items-center gap-2 text-xs bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">

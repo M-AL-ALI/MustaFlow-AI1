@@ -47,6 +47,7 @@ import type {
   DeleteProjectFile200,
   DeleteSecret200,
   DeleteWorkspace200,
+  DeployResult,
   DestroyContainer200,
   DuplicateProjectResult,
   FileSearchResult,
@@ -3187,6 +3188,76 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getUnpublishProjectMutationOptions(options));
+    }
+
+export const getDeployProjectUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/deploy`
+}
+
+/**
+ * @summary Deploy project to production (blue/green container swap + DB snapshot)
+ */
+export const deployProject = async (id: number, options?: RequestInit): Promise<DeployResult> => {
+
+  return customFetch<DeployResult>(getDeployProjectUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getDeployProjectMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deployProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deployProject>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deployProject'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deployProject>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deployProject(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeployProjectMutationResult = NonNullable<Awaited<ReturnType<typeof deployProject>>>
+
+    export type DeployProjectMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Deploy project to production (blue/green container swap + DB snapshot)
+ */
+export const useDeployProject = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deployProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deployProject>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeployProjectMutationOptions(options));
     }
 
 export const getGetProjectAnalyticsUrl = (id: number,) => {

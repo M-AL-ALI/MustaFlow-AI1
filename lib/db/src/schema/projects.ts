@@ -56,18 +56,20 @@ export const projectsTable = pgTable("projects", {
   // "planning" = Planning Agent, "task" = Task Agent (staging gate),
   // "main" = Main Agent (direct fast edit). Default "main".
   defaultAgent: text("default_agent").notNull().default("main"),
-  // Container infrastructure (Phase C).
-  // containerId: Fly.io Machine ID for this project's container. Null = not provisioned.
+  // Container infrastructure (Phase C — dev containers).
+  // containerId: Fly.io Machine ID for this project's dev container. Null = not provisioned.
   // containerStatus: stopped | starting | running | hibernated | error
   // containerUrl: proxy URL to reach the container's dev server (e.g. https://app.fly.dev/container/<machineId>).
   containerId: text("container_id"),
   containerStatus: text("container_status").notNull().default("stopped"),
   containerUrl: text("container_url"),
-  // Production container (Phase C publish flow).
-  // productionContainerId: Fly.io Machine ID for the always-on production replica. Null = not deployed.
-  // productionContainerUrl: publicly reachable URL for the production container.
-  productionContainerId: text("production_container_id"),
-  productionContainerUrl: text("production_container_url"),
+  // Production container infrastructure (Phase E — prod containers).
+  // prodContainerId: Fly.io Machine ID for the live production container. Null = not deployed.
+  // prodContainerStatus: stopped | starting | running | hibernated | error | deploying
+  // prodContainerUrl: proxy URL to reach the production container (e.g. https://app.fly.dev/container/<machineId>).
+  prodContainerId: text("prod_container_id"),
+  prodContainerStatus: text("prod_container_status").notNull().default("stopped"),
+  prodContainerUrl: text("prod_container_url"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

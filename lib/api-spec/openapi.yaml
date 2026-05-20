@@ -851,6 +851,33 @@ paths:
                   projectId: { type: integer }
                   status: { type: string }
 
+  /projects/{id}/deploy:
+    post:
+      operationId: deployProject
+      tags: [projects]
+      summary: Deploy project to production (blue/green container swap + DB snapshot)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Deploy result with public URL and container info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeployResult"
+        "400":
+          description: No files to deploy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Readiness checks failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/analytics:
     get:
       operationId: getProjectAnalytics
@@ -2035,16 +2062,30 @@ components:
         containerId:
           {
             type: ["string", "null"],
-            description: "Fly.io Machine ID for this project's container. Null = not provisioned.",
+            description: "Fly.io Machine ID for this project's dev container. Null = not provisioned.",
           }
         containerStatus:
           type: string
           enum: [stopped, starting, running, hibernated, error]
-          description: "Current container lifecycle state."
+          description: "Current dev container lifecycle state."
         containerUrl:
           {
             type: ["string", "null"],
             description: "Proxy URL to reach the container's dev server.",
+          }
+        prodContainerId:
+          {
+            type: ["string", "null"],
+            description: "Fly.io Machine ID for the live production container. Null = not deployed.",
+          }
+        prodContainerStatus:
+          type: string
+          enum: [stopped, starting, running, hibernated, error, deploying]
+          description: "Current production container lifecycle state."
+        prodContainerUrl:
+          {
+            type: ["string", "null"],
+            description: "Proxy URL to reach the production container. Null = not deployed.",
           }
         healthScore:
           type: ["integer", "null"]
@@ -2522,6 +2563,24 @@ components:
         filesPublished: { type: integer }
         containerDeployed: { type: boolean, description: "True when a production container was provisioned instead of (or alongside) the static snapshot." }
         containerUrl: { type: ["string", "null"], description: "Fly.io proxy URL of the always-on production container. Null when containerDeployed is false." }
+        note: { type: string }
+
+    DeployResult:
+      type: object
+      required:
+        [ok, projectId, status, publicUrl, deployedAt, filesDeployed, containerDeployed, note]
+      properties:
+        ok: { type: boolean }
+        projectId: { type: integer }
+        status: { type: string }
+        publicSlug: { type: string }
+        publicUrl: { type: string }
+        internalPathUrl: { type: string }
+        deployedAt: { type: string, format: date-time }
+        snapshotVersionId: { type: ["integer", "null"] }
+        filesDeployed: { type: integer }
+        containerDeployed: { type: boolean }
+        prodContainerUrl: { type: ["string", "null"] }
         note: { type: string }
 
     ActivityItem:

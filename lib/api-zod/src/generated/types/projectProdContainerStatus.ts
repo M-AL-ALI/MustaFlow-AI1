@@ -7,15 +7,16 @@
  */
 
 /**
- * Current dev container lifecycle state.
+ * Current production container lifecycle state.
  */
-export type ProjectContainerStatus = typeof ProjectContainerStatus[keyof typeof ProjectContainerStatus];
+export type ProjectProdContainerStatus = typeof ProjectProdContainerStatus[keyof typeof ProjectProdContainerStatus];
 
 
-export const ProjectContainerStatus = {
+export const ProjectProdContainerStatus = {
   stopped: 'stopped',
   starting: 'starting',
   running: 'running',
   hibernated: 'hibernated',
   error: 'error',
+  deploying: 'deploying',
 } as const;
