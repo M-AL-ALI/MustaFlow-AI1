@@ -276,9 +276,7 @@ function extractCdnUrls(content: string): string[] {
 /**
  * Scan all HTML/JS files in a file list for CDN vulnerabilities and return structured notices.
  */
-function scanFilesForCdnIssues(
-  files: BuilderFile[],
-): NonNullable<TaskReport["securityNotices"]> {
+function scanFilesForCdnIssues(files: BuilderFile[]): NonNullable<TaskReport["securityNotices"]> {
   const allUrls: string[] = [];
   for (const f of files) {
     if (
@@ -1662,10 +1660,9 @@ export function applyCdnAutoUpgrades(files: BuilderFile[]): {
         return results;
       };
 
-      const cdnUrls = [
-        ...extractAttr(f.content, "src"),
-        ...extractAttr(f.content, "href"),
-      ].filter(isCdn);
+      const cdnUrls = [...extractAttr(f.content, "src"), ...extractAttr(f.content, "href")].filter(
+        isCdn,
+      );
 
       if (cdnUrls.length === 0) return f;
 
@@ -2172,9 +2169,7 @@ export async function runRefinePipeline(args: {
   const filesCreated = cdnUpgradedFiles
     .filter((f) => !existingPaths.has(f.path))
     .map((f) => f.path);
-  const filesChanged = cdnUpgradedFiles
-    .filter((f) => existingPaths.has(f.path))
-    .map((f) => f.path);
+  const filesChanged = cdnUpgradedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
 
   // Scan the full merged project state (existing + changed, minus removed) for CDN issues
   const removedSet = new Set(removedPaths);

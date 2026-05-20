@@ -166,11 +166,18 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-1.5 flex-wrap">
                       <span className="text-[10px] font-semibold text-foreground">{s.title}</span>
-                      <span className={cn("text-[9px] font-medium uppercase tracking-wide shrink-0", meta.color)}>
+                      <span
+                        className={cn(
+                          "text-[9px] font-medium uppercase tracking-wide shrink-0",
+                          meta.color,
+                        )}
+                      >
                         {meta.label}
                       </span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
+                    <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">
+                      {s.description}
+                    </p>
                     {!isEditing && (
                       <p
                         title={s.prompt}
@@ -278,11 +285,18 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-1.5 flex-wrap">
                       <span className="text-[10px] font-semibold text-foreground">{s.title}</span>
-                      <span className={cn("text-[9px] font-medium uppercase tracking-wide shrink-0", meta.color)}>
+                      <span
+                        className={cn(
+                          "text-[9px] font-medium uppercase tracking-wide shrink-0",
+                          meta.color,
+                        )}
+                      >
                         {meta.label}
                       </span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
+                    <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">
+                      {s.description}
+                    </p>
                     {!isEditing && (
                       <p
                         title={s.prompt}

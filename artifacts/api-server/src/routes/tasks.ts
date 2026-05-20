@@ -8,6 +8,7 @@ import {
   CreateTaskBody,
   SubmitTaskFeedbackParams,
   SubmitTaskFeedbackBody,
+  CancelTaskParams,
 } from "@workspace/api-zod";
 import { requireProjectOwnership } from "../lib/auth";
 import { enqueueJob } from "../lib/jobs";
@@ -112,6 +113,56 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
 
   res.status(201).json({ ...task, queued: false });
 });
+
+router.post(
+  "/projects/:id/tasks/:taskId/cancel",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = CancelTaskParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+
+    // Attempt a conditional update: only cancel if the task is still queued.
+    const [task] = await db
+      .update(agentTasksTable)
+      .set({ status: "canceled", completedAt: sql`now()` })
+      .where(
+        and(
+          eq(agentTasksTable.id, params.data.taskId),
+          eq(agentTasksTable.projectId, params.data.id),
+          eq(agentTasksTable.status, "queued"),
+        ),
+      )
+      .returning();
+
+    if (!task) {
+      // Either the task doesn't exist or it's already past "queued" state.
+      const [existing] = await db
+        .select({ id: agentTasksTable.id, status: agentTasksTable.status })
+        .from(agentTasksTable)
+        .where(
+          and(
+            eq(agentTasksTable.id, params.data.taskId),
+            eq(agentTasksTable.projectId, params.data.id),
+          ),
+        )
+        .limit(1);
+
+      if (!existing) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+      res
+        .status(409)
+        .json({ error: `Task is already in state "${existing.status}" and cannot be canceled` });
+      return;
+    }
+
+    res.json(task);
+  },
+);
 
 router.patch(
   "/projects/:id/tasks/:taskId/feedback",

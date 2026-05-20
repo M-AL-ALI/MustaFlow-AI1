@@ -13,9 +13,13 @@ import {
   ExternalLink,
   Lightbulb,
   ShieldAlert,
+  Check,
+  Ban,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useCancelTask, getListTasksQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 
 type TaskReport = {
   userRequest: string;
@@ -354,14 +358,20 @@ function InlinePlanCard({ plan }: { plan: StructuredPlan }) {
 function MessageRow({
   msg,
   searchQuery,
+  projectId,
   onViewFile,
 }: {
   msg: Message;
   searchQuery: string;
+  projectId: number;
   onViewFile?: (path: string) => void;
 }) {
   const [reportExpanded, setReportExpanded] = useState(false);
   const [planExpanded, setPlanExpanded] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const queryClient = useQueryClient();
+  const cancelTask = useCancelTask();
 
   const planPayload = msg.plan as ChatPlanPayload | null | undefined;
   const payloadKind =
@@ -370,6 +380,7 @@ function MessageRow({
       : undefined;
   const isReport = payloadKind === "report";
   const isError = payloadKind === "error";
+  const isTaskQueued = payloadKind === "task-queued";
   const isPlanCard =
     msg.planMode && msg.role === "assistant" && !isReport && planPayload && payloadKind !== "error";
   const structuredPlan = isPlanCard ? (planPayload as StructuredPlan) : null;
@@ -455,6 +466,69 @@ function MessageRow({
             {planExpanded && <InlinePlanCard plan={structuredPlan} />}
           </div>
         )}
+
+        {/* Auto-fix queued card with Accept / Dismiss */}
+        {isTaskQueued &&
+          (() => {
+            const queuedTaskId = (planPayload as { taskId: number }).taskId;
+            if (dismissed) {
+              return (
+                <div className="mt-2 bg-background border border-border/40 rounded-lg p-2 text-[11px] flex items-center gap-1.5 text-muted-foreground">
+                  <Ban className="h-3 w-3 shrink-0" />
+                  Auto-fix dismissed
+                </div>
+              );
+            }
+            if (accepted) {
+              return (
+                <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
+                  <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary shrink-0" />
+                  Background task #{queuedTaskId} running…
+                </div>
+              );
+            }
+            return (
+              <div className="mt-2 bg-background border border-orange-500/20 rounded-lg p-2.5 text-[11px] space-y-2">
+                <div className="flex items-center gap-2 text-orange-400">
+                  <div className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
+                  <span className="font-medium">Auto-fix queued</span>
+                </div>
+                <p className="text-muted-foreground leading-relaxed">
+                  Task #{queuedTaskId} will replace Moment.js with Luxon in the background. Accept
+                  to let it run or dismiss to skip it.
+                </p>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <button
+                    onClick={() => setAccepted(true)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20 transition-colors text-[10px] font-medium"
+                  >
+                    <Check className="h-3 w-3" />
+                    Accept
+                  </button>
+                  <button
+                    onClick={() => {
+                      cancelTask.mutate(
+                        { id: projectId, taskId: queuedTaskId },
+                        {
+                          onSuccess: () => {
+                            setDismissed(true);
+                            void queryClient.invalidateQueries({
+                              queryKey: getListTasksQueryKey(projectId),
+                            });
+                          },
+                        },
+                      );
+                    }}
+                    disabled={cancelTask.isPending}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors text-[10px] font-medium disabled:opacity-50"
+                  >
+                    <Ban className="h-3 w-3" />
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
       </div>
     </div>
   );
@@ -475,11 +549,13 @@ function DateDivider({ label }: { label: string }) {
 export function ChatHistory({
   messages,
   isLoading,
+  projectId,
   onViewFile,
   onClose,
 }: {
   messages: Message[] | undefined;
   isLoading: boolean;
+  projectId: number;
   onViewFile?: (path: string) => void;
   onClose: () => void;
 }) {
@@ -624,6 +700,7 @@ export function ChatHistory({
                     key={msg.id}
                     msg={msg}
                     searchQuery={searchQuery}
+                    projectId={projectId}
                     onViewFile={onViewFile}
                   />
                 ))}

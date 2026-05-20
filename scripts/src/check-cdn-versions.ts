@@ -211,9 +211,7 @@ async function main() {
         "for each DRIFT entry above, then re-run this script to confirm.\n" +
         "\nTip: re-run with --fix to apply the bumps automatically:",
     );
-    console.log(
-      "  pnpm --filter @workspace/scripts run check-cdn-versions -- --fix",
-    );
+    console.log("  pnpm --filter @workspace/scripts run check-cdn-versions -- --fix");
     process.exit(1);
   }
 
@@ -234,9 +232,7 @@ async function main() {
       continue;
     }
 
-    console.log(
-      `  PATCH ${drift.displayName}: ${drift.oldVersion} → ${drift.newVersion}`,
-    );
+    console.log(`  PATCH ${drift.displayName}: ${drift.oldVersion} → ${drift.newVersion}`);
     console.log(diffLines(before, patched));
     console.log();
   }

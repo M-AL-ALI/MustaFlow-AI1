@@ -509,8 +509,8 @@ export function PreviewTab({
                 </div>
                 <div className="px-3 py-2 bg-violet-500/8 border-b border-violet-500/15">
                   <p className="text-[11px] text-violet-300/80 leading-relaxed">
-                    A service worker is intercepting API calls in this preview and returning the stub
-                    data below. Edits are live — save a file to update the response.
+                    A service worker is intercepting API calls in this preview and returning the
+                    stub data below. Edits are live — save a file to update the response.
                   </p>
                 </div>
                 <div className="max-h-64 overflow-y-auto">

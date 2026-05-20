@@ -818,10 +818,25 @@ export async function runJob(input: JobInput): Promise<void> {
 
     await emitEvent(taskId, "queued", "Task received, starting pipeline…");
 
-    await db
+    // Atomically transition queued/planning → building/planning.
+    // Tasks are created with status "queued" (background) or "planning" (immediate foreground).
+    // Using WHERE status IN ('queued','planning') makes the check+update a single round-trip,
+    // eliminating the TOCTOU window. If the user dismissed (canceled) the task while we were
+    // waiting for the advisory lock, status = 'canceled' so 0 rows are updated → abort cleanly.
+    const transitioned = await db
       .update(agentTasksTable)
       .set({ status: kind === "build" ? "building" : "planning" })
-      .where(eq(agentTasksTable.id, taskId));
+      .where(
+        and(
+          eq(agentTasksTable.id, taskId),
+          inArray(agentTasksTable.status, ["queued", "planning"]),
+        ),
+      )
+      .returning({ id: agentTasksTable.id });
+    if (transitioned.length === 0) {
+      logger.info({ taskId, projectId }, "Task was canceled before pipeline started — skipping");
+      return;
+    }
 
     const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
     if (!project) {

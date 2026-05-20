@@ -1346,6 +1346,78 @@ export const useCreateTask = <TError = ErrorType<unknown>,
       return useMutation(getCreateTaskMutationOptions(options));
     }
 
+export const getCancelTaskUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}/cancel`
+}
+
+/**
+ * @summary Cancel a queued auto-fix task before it runs
+ */
+export const cancelTask = async (id: number,
+    taskId: number, options?: RequestInit): Promise<AgentTask> => {
+
+  return customFetch<AgentTask>(getCancelTaskUrl(id,taskId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getCancelTaskMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelTask>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelTask>>, TError,{id: number;taskId: number}, TContext> => {
+
+const mutationKey = ['cancelTask'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelTask>>, {id: number;taskId: number}> = (props) => {
+          const {id,taskId} = props ?? {};
+
+          return  cancelTask(id,taskId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelTaskMutationResult = NonNullable<Awaited<ReturnType<typeof cancelTask>>>
+
+    export type CancelTaskMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Cancel a queued auto-fix task before it runs
+ */
+export const useCancelTask = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelTask>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelTask>>,
+        TError,
+        {id: number;taskId: number},
+        TContext
+      > => {
+      return useMutation(getCancelTaskMutationOptions(options));
+    }
+
 export const getSubmitTaskFeedbackUrl = (id: number,
     taskId: number,) => {
 
