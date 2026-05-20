@@ -1525,6 +1525,30 @@ function MobileBuildStatusBadge({ status }: { status: string }) {
   );
 }
 
+type GithubSavedState = { repo: string; branch: string; repoUrl: string };
+
+function githubStorageKey(projectId: number) {
+  return `mustaflow:github:${projectId}`;
+}
+
+function loadGithubState(projectId: number): GithubSavedState | null {
+  try {
+    const raw = localStorage.getItem(githubStorageKey(projectId));
+    if (!raw) return null;
+    return JSON.parse(raw) as GithubSavedState;
+  } catch {
+    return null;
+  }
+}
+
+function saveGithubState(projectId: number, state: GithubSavedState) {
+  try {
+    localStorage.setItem(githubStorageKey(projectId), JSON.stringify(state));
+  } catch {
+    // Non-fatal
+  }
+}
+
 function GithubPushPanel({ projectId }: { projectId: number }) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState("");
@@ -1535,8 +1559,16 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
   const [pushing, setPushing] = useState(false);
   const [saveToken, setSaveToken] = useState(false);
   const [savingToken, setSavingToken] = useState(false);
-  const [result, setResult] = useState<{ repoUrl: string; commitSha: string; filesCount: number; created: boolean } | null>(null);
+  const [result, setResult] = useState<{
+    repoUrl: string;
+    commitSha: string;
+    filesCount: number;
+    created: boolean;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Saved connection state (repo/branch from last successful push — stored in localStorage)
+  const [savedState, setSavedState] = useState<GithubSavedState | null>(null);
 
   const queryClient = useQueryClient();
   const createSecret = useCreateSecret();
@@ -1546,6 +1578,17 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
     query: { queryKey: getListSecretsQueryKey(projectId), enabled: open },
   });
   const hasStoredToken = secrets.some((s) => s.name === "GITHUB_TOKEN");
+
+  // Load saved state from localStorage when the panel first opens
+  useEffect(() => {
+    if (!open) return;
+    const saved = loadGithubState(projectId);
+    setSavedState(saved);
+    if (saved) {
+      setRepo(saved.repo);
+      setBranch(saved.branch);
+    }
+  }, [open, projectId]);
 
   const handlePush = async () => {
     if (!repo.trim()) return;
@@ -1569,17 +1612,40 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = (await res.json()) as { repoUrl?: string; commitSha?: string; filesCount?: number; created?: boolean; error?: string };
+      const data = (await res.json()) as {
+        repoUrl?: string;
+        commitSha?: string;
+        filesCount?: number;
+        created?: boolean;
+        error?: string;
+      };
       if (!res.ok) {
         setError(data.error ?? "Push failed");
       } else {
-        setResult({ repoUrl: data.repoUrl!, commitSha: data.commitSha!, filesCount: data.filesCount!, created: data.created ?? false });
+        setResult({
+          repoUrl: data.repoUrl!,
+          commitSha: data.commitSha!,
+          filesCount: data.filesCount!,
+          created: data.created ?? false,
+        });
 
-        // Save token to project secrets if requested
+        // Persist repo/branch so the panel can pre-fill them next time
+        const newSaved: GithubSavedState = {
+          repo: repo.trim(),
+          branch: branch.trim() || "main",
+          repoUrl: data.repoUrl!,
+        };
+        saveGithubState(projectId, newSaved);
+        setSavedState(newSaved);
+
+        // Save (or replace) token in project secrets if requested
         if (saveToken && token.trim()) {
           setSavingToken(true);
           try {
-            await createSecret.mutateAsync({ id: projectId, data: { name: "GITHUB_TOKEN", value: token.trim(), environment: "production" } });
+            await createSecret.mutateAsync({
+              id: projectId,
+              data: { name: "GITHUB_TOKEN", value: token.trim(), environment: "production" },
+            });
             void queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
           } catch {
             // Non-fatal: token save failure doesn't block the success result
@@ -1596,6 +1662,7 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
   };
 
   const canPush = repo.trim() && (token.trim() || hasStoredToken) && !pushing;
+  const isConnected = hasStoredToken && !!savedState;
 
   return (
     <div className="border border-border rounded-xl bg-card overflow-hidden">
@@ -1607,9 +1674,24 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
         <Github className="h-4 w-4 text-muted-foreground shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold">Push to GitHub</div>
-          <div className="text-xs text-muted-foreground">Export all project files to a GitHub repository</div>
+          {isConnected ? (
+            <div className="flex items-center gap-1 mt-0.5">
+              <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
+              <span className="text-xs text-green-500 truncate">
+                {savedState.repo} · {savedState.branch}
+              </span>
+            </div>
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              Export all project files to a GitHub repository
+            </div>
+          )}
         </div>
-        {open ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+        {open ? (
+          <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+        )}
       </button>
 
       {open && (
@@ -1629,7 +1711,12 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
               <div className="bg-muted/40 rounded-lg px-3 py-2 space-y-1 text-xs font-mono">
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground shrink-0">Repo:</span>
-                  <a href={result.repoUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline truncate flex-1 flex items-center gap-1">
+                  <a
+                    href={result.repoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary hover:underline truncate flex-1 flex items-center gap-1"
+                  >
                     {result.repoUrl} <ArrowUpRight className="h-3 w-3 shrink-0" />
                   </a>
                 </div>
@@ -1642,7 +1729,14 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
                   <span className="text-foreground">{result.filesCount}</span>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={() => { setResult(null); setToken(""); }}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setResult(null);
+                  setToken("");
+                }}
+              >
                 Push again
               </Button>
             </div>
@@ -1660,10 +1754,10 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
                   type="password"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
-                  placeholder={hasStoredToken ? "Using saved token (enter to override)" : "ghp_…"}
+                  placeholder={hasStoredToken ? "Using saved token (enter to replace)" : "ghp_…"}
                   className="w-full text-xs bg-background border border-border rounded px-3 py-1.5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
                 />
-                {token.trim() && !hasStoredToken && (
+                {token.trim() && (
                   <label className="flex items-center gap-2 cursor-pointer mt-1">
                     <input
                       type="checkbox"
@@ -1671,11 +1765,17 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
                       onChange={(e) => setSaveToken(e.target.checked)}
                       className="accent-primary h-3 w-3"
                     />
-                    <span className="text-[10px] text-muted-foreground">Save as GITHUB_TOKEN project secret for future pushes</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {hasStoredToken
+                        ? "Replace saved GITHUB_TOKEN with this token"
+                        : "Save as GITHUB_TOKEN project secret for future pushes"}
+                    </span>
                   </label>
                 )}
                 {!hasStoredToken && !token.trim() && (
-                  <p className="text-[10px] text-muted-foreground">Needs <span className="font-mono">repo</span> scope.</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    Needs <span className="font-mono">repo</span> scope.
+                  </p>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -1701,7 +1801,9 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Commit message (optional)</label>
+                <label className="text-xs font-medium text-foreground">
+                  Commit message (optional)
+                </label>
                 <input
                   type="text"
                   value={commitMessage}
@@ -1716,7 +1818,11 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
                   onClick={() => setIsPrivate((p) => !p)}
                   className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {isPrivate ? <ToggleRight className="h-4 w-4 text-primary" /> : <ToggleLeft className="h-4 w-4" />}
+                  {isPrivate ? (
+                    <ToggleRight className="h-4 w-4 text-primary" />
+                  ) : (
+                    <ToggleLeft className="h-4 w-4" />
+                  )}
                   {isPrivate ? "Private repository" : "Public repository"}
                 </button>
               </div>
@@ -1726,15 +1832,15 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
                   {error}
                 </div>
               )}
-              <Button
-                className="w-full"
-                disabled={!canPush}
-                onClick={() => void handlePush()}
-              >
+              <Button className="w-full" disabled={!canPush} onClick={() => void handlePush()}>
                 {pushing ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Pushing…</>
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Pushing…
+                  </>
                 ) : (
-                  <><Github className="h-4 w-4 mr-2" /> Push to GitHub</>
+                  <>
+                    <Github className="h-4 w-4 mr-2" /> Push to GitHub
+                  </>
                 )}
               </Button>
             </div>
