@@ -119,7 +119,10 @@ export async function createContainer(projectId: number): Promise<ContainerInfo 
       },
       services: [
         {
-          ports: [{ port: 443, handlers: ["tls", "http"] }, { port: 80, handlers: ["http"] }],
+          ports: [
+            { port: 443, handlers: ["tls", "http"] },
+            { port: 80, handlers: ["http"] },
+          ],
           protocol: "tcp",
           internal_port: INTERNAL_PORT,
           autostop: "stop",
@@ -310,15 +313,13 @@ export async function writeFileToContainer(
   if (!isConfigured()) return false;
   try {
     const b64 = Buffer.from(content, "utf8").toString("base64");
-    const dir = filePath.includes("/") ? `/app/${filePath.split("/").slice(0, -1).join("/")}` : "/app";
+    const dir = filePath.includes("/")
+      ? `/app/${filePath.split("/").slice(0, -1).join("/")}`
+      : "/app";
     const fullPath = `/app/${filePath}`;
 
     // mkdir -p for parent dir, then decode base64 into file
-    const cmd = [
-      "/bin/sh",
-      "-c",
-      `mkdir -p "${dir}" && echo "${b64}" | base64 -d > "${fullPath}"`,
-    ];
+    const cmd = ["/bin/sh", "-c", `mkdir -p "${dir}" && echo "${b64}" | base64 -d > "${fullPath}"`];
 
     const res = await execInContainer(machineId, cmd, projectId);
     return res.ok;
@@ -458,6 +459,156 @@ async function waitForMachineReady(machineId: string, timeoutSeconds: number): P
     if (status === "running") return;
     await new Promise((r) => setTimeout(r, 2000));
   }
+}
+
+/**
+ * Deploy a production-grade Fly.io machine for a project.
+ *
+ * The production machine differs from the dev container:
+ *   - Named `project-<id>-prod` so it doesn't collide with the dev machine.
+ *   - `min_machines_running: 1` — never hibernates; always-on for the public URL.
+ *   - Files are synced from the provided snapshot and `npm install` is run.
+ *
+ * If a previous production machine already exists for this project it is destroyed
+ * first so we always deploy a clean replica from the latest snapshot.
+ *
+ * Returns { containerId, containerUrl } on success, null on error or when not configured.
+ */
+export async function deployProductionContainer(
+  projectId: number,
+  files: Array<{ path: string; content: string }>,
+): Promise<{ containerId: string; containerUrl: string } | null> {
+  if (!isConfigured()) {
+    logger.warn({ projectId }, "FLY_API_TOKEN not set — production container deploy skipped");
+    return null;
+  }
+
+  // Load any existing production machine so we can replace it
+  const [project] = await db
+    .select({
+      productionContainerId: projectsTable.productionContainerId,
+    })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId));
+
+  if (project?.productionContainerId) {
+    await destroyContainer(project.productionContainerId, projectId);
+    await db
+      .update(projectsTable)
+      .set({ productionContainerId: null, productionContainerUrl: null })
+      .where(eq(projectsTable.id, projectId));
+  }
+
+  const machineName = `project-${projectId}-prod`;
+
+  const body = {
+    name: machineName,
+    region: FLY_REGION,
+    config: {
+      image: CONTAINER_IMAGE,
+      env: {
+        PROJECT_ID: String(projectId),
+        PORT: String(INTERNAL_PORT),
+        NODE_ENV: "production",
+      },
+      init: {
+        cmd: ["/bin/sh", "-c", "mkdir -p /app && tail -f /dev/null"],
+      },
+      guest: {
+        cpu_kind: "shared",
+        cpus: 1,
+        memory_mb: 512,
+      },
+      services: [
+        {
+          ports: [
+            { port: 443, handlers: ["tls", "http"] },
+            { port: 80, handlers: ["http"] },
+          ],
+          protocol: "tcp",
+          internal_port: INTERNAL_PORT,
+          autostop: "off",
+          autostart: true,
+          min_machines_running: 1,
+          checks: [],
+        },
+      ],
+      auto_destroy: false,
+      restart: { policy: "no" },
+    },
+  };
+
+  try {
+    const res = await flyFetch(`/apps/${FLY_APP}/machines`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      logger.error(
+        { projectId, status: res.status, body: text },
+        "Failed to create production Fly machine",
+      );
+      await writeLog(projectId, "system", `Production container creation failed: ${text}`);
+      return null;
+    }
+
+    const data = (await res.json()) as { id: string; state?: string };
+    const machineId = data.id;
+    const containerUrl = machineProxyUrl(machineId);
+
+    logger.info({ projectId, machineId, containerUrl }, "Production Fly machine created");
+    await writeLog(projectId, "system", `Production container created: ${machineId}`);
+
+    // Persist immediately so we can clean up even if the next steps fail
+    await db
+      .update(projectsTable)
+      .set({ productionContainerId: machineId, productionContainerUrl: containerUrl })
+      .where(eq(projectsTable.id, projectId));
+
+    // Wait for machine to be ready (up to 30s)
+    await waitForMachineReady(machineId, 30);
+
+    // Sync files and run npm install
+    await syncFilesToContainer(machineId, projectId, files);
+    await execInContainer(
+      machineId,
+      ["sh", "-c", "cd /app && npm install --if-present 2>&1 || true"],
+      projectId,
+    );
+
+    await writeLog(projectId, "system", `Production container ready at ${containerUrl}`);
+    return { containerId: machineId, containerUrl };
+  } catch (err) {
+    logger.error({ err, projectId }, "Error deploying production container");
+    return null;
+  }
+}
+
+/**
+ * Stop and destroy the production container for a project.
+ * Called on unpublish to free resources.
+ */
+export async function stopProductionContainer(projectId: number): Promise<void> {
+  const [project] = await db
+    .select({ productionContainerId: projectsTable.productionContainerId })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId));
+
+  if (!project?.productionContainerId) return;
+
+  await destroyContainer(project.productionContainerId, projectId);
+  await db
+    .update(projectsTable)
+    .set({ productionContainerId: null, productionContainerUrl: null })
+    .where(eq(projectsTable.id, projectId));
+
+  await writeLog(
+    projectId,
+    "system",
+    `Production container stopped: ${project.productionContainerId}`,
+  );
 }
 
 /**

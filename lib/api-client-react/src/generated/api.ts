@@ -93,6 +93,7 @@ import type {
   ProjectVersionDetail,
   ProjectVersionInput,
   ProjectsSummary,
+  PublishContainer200,
   PublishResult,
   ReadinessResult,
   RevokeAdminRole200,
@@ -110,6 +111,7 @@ import type {
   SuggestionAcceptResult,
   TaskEvent,
   TaskFeedbackInput,
+  UnpublishContainer200,
   UnpublishProject200,
   UserCredit,
   Workspace,
@@ -5869,6 +5871,146 @@ export const useExecInContainer = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getExecInContainerMutationOptions(options));
+    }
+
+export const getPublishContainerUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/container/publish`
+}
+
+/**
+ * @summary Deploy a production container replica for this project
+ */
+export const publishContainer = async (id: number, options?: RequestInit): Promise<PublishContainer200> => {
+
+  return customFetch<PublishContainer200>(getPublishContainerUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getPublishContainerMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishContainer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof publishContainer>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['publishContainer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof publishContainer>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  publishContainer(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PublishContainerMutationResult = NonNullable<Awaited<ReturnType<typeof publishContainer>>>
+
+    export type PublishContainerMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Deploy a production container replica for this project
+ */
+export const usePublishContainer = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishContainer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof publishContainer>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getPublishContainerMutationOptions(options));
+    }
+
+export const getUnpublishContainerUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/container/unpublish`
+}
+
+/**
+ * @summary Stop and destroy the production container for this project
+ */
+export const unpublishContainer = async (id: number, options?: RequestInit): Promise<UnpublishContainer200> => {
+
+  return customFetch<UnpublishContainer200>(getUnpublishContainerUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getUnpublishContainerMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unpublishContainer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof unpublishContainer>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['unpublishContainer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof unpublishContainer>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  unpublishContainer(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UnpublishContainerMutationResult = NonNullable<Awaited<ReturnType<typeof unpublishContainer>>>
+
+    export type UnpublishContainerMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Stop and destroy the production container for this project
+ */
+export const useUnpublishContainer = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unpublishContainer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof unpublishContainer>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getUnpublishContainerMutationOptions(options));
     }
 
 export const getDestroyContainerUrl = (id: number,) => {

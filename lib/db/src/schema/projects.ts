@@ -63,6 +63,11 @@ export const projectsTable = pgTable("projects", {
   containerId: text("container_id"),
   containerStatus: text("container_status").notNull().default("stopped"),
   containerUrl: text("container_url"),
+  // Production container (Phase C publish flow).
+  // productionContainerId: Fly.io Machine ID for the always-on production replica. Null = not deployed.
+  // productionContainerUrl: publicly reachable URL for the production container.
+  productionContainerId: text("production_container_id"),
+  productionContainerUrl: text("production_container_url"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

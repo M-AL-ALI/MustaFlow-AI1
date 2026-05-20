@@ -1621,6 +1621,46 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/container/publish:
+    post:
+      operationId: publishContainer
+      tags: [projects]
+      summary: Deploy a production container replica for this project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Production container deployed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, containerId, containerUrl, note]
+                properties:
+                  ok: { type: boolean }
+                  containerId: { type: string }
+                  containerUrl: { type: string }
+                  note: { type: string }
+
+  /projects/{id}/container/unpublish:
+    post:
+      operationId: unpublishContainer
+      tags: [projects]
+      summary: Stop and destroy the production container for this project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Production container stopped
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, note]
+                properties:
+                  ok: { type: boolean }
+                  note: { type: string }
+
   /projects/{id}/container:
     delete:
       operationId: destroyContainer
@@ -2405,7 +2445,12 @@ components:
         status: { type: string }
         publicSlug: { type: string }
         publicUrl: { type: string }
+        internalPathUrl: { type: string }
         publishedAt: { type: string, format: date-time }
+        snapshotVersionId: { type: integer }
+        filesPublished: { type: integer }
+        containerDeployed: { type: boolean, description: "True when a production container was provisioned instead of (or alongside) the static snapshot." }
+        containerUrl: { type: ["string", "null"], description: "Fly.io proxy URL of the always-on production container. Null when containerDeployed is false." }
         note: { type: string }
 
     ActivityItem:

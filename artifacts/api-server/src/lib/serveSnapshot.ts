@@ -70,12 +70,45 @@ export async function serveSnapshot(
       publicSlug: projectsTable.publicSlug,
       siteTitle: projectsTable.siteTitle,
       metaDescription: projectsTable.metaDescription,
+      productionContainerUrl: projectsTable.productionContainerUrl,
       deletedAt: projectsTable.deletedAt,
     })
     .from(projectsTable)
     .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
-  if (!project || project.status !== "published" || !project.publishedSnapshotId) {
+  if (!project || project.status !== "published") {
+    res.status(404).type("text/html").send(NOT_PUBLISHED_HTML);
+    return;
+  }
+
+  // If a production container is deployed, proxy the request to it.
+  if (project.productionContainerUrl) {
+    const targetBase = project.productionContainerUrl.replace(/\/$/, "");
+    const requestPath = filePath ? `/${filePath}` : "/";
+    const targetUrl = `${targetBase}${requestPath}`;
+    try {
+      const upstreamRes = await fetch(targetUrl, {
+        headers: { "X-Forwarded-Host": "mustaflow.app" },
+        // Do not follow redirects automatically — forward them to the client.
+        redirect: "manual",
+      });
+      // Forward status and select headers.
+      res.status(upstreamRes.status);
+      const contentType = upstreamRes.headers.get("content-type");
+      if (contentType) res.setHeader("Content-Type", contentType);
+      const location = upstreamRes.headers.get("location");
+      if (location) res.setHeader("Location", location);
+      res.setHeader("Cache-Control", "no-store");
+      const body = await upstreamRes.arrayBuffer();
+      res.end(Buffer.from(body));
+    } catch {
+      // Upstream container unreachable — fall back to snapshot serving below.
+      // This can happen when the container is waking up or temporarily unavailable.
+    }
+    return;
+  }
+
+  if (!project.publishedSnapshotId) {
     res.status(404).type("text/html").send(NOT_PUBLISHED_HTML);
     return;
   }

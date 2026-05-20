@@ -2001,10 +2001,14 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
 export function PublishingTab({
   projectId,
   kind,
+  containerStatus,
+  containerUrl,
   onNavigateToSecret,
 }: {
   projectId: number;
   kind?: string;
+  containerStatus?: string;
+  containerUrl?: string | null;
   onNavigateToSecret?: (secretName: string) => void;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
@@ -2022,6 +2026,8 @@ export function PublishingTab({
     publishedAt: string;
     snapshotVersionId?: number;
     filesPublished?: number;
+    containerDeployed?: boolean;
+    containerUrl?: string | null;
   } | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
 
@@ -2185,6 +2191,8 @@ export function PublishingTab({
         publishedAt: string;
         snapshotVersionId?: number;
         filesPublished?: number;
+        containerDeployed?: boolean;
+        containerUrl?: string | null;
       };
       setPublishResult(data);
       setShowConfirm(false);
@@ -3096,6 +3104,13 @@ export function PublishingTab({
                   <CheckCircle2 className="h-4 w-4" />
                   App is live
                 </div>
+                {publishResult.containerDeployed && (
+                  <div className="flex items-center gap-2 text-xs bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
+                    <Server className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span className="text-primary font-medium">Container deployed</span>
+                    <span className="text-muted-foreground">— public URL proxies to a live production server</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <a
                     href={publishResult.publicUrl}
@@ -3108,9 +3123,15 @@ export function PublishingTab({
                   </a>
                   <CopyUrlButton url={publishResult.publicUrl} />
                 </div>
+                {publishResult.containerDeployed && publishResult.containerUrl && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Container URL:{" "}
+                    <span className="font-mono break-all">{publishResult.containerUrl}</span>
+                  </p>
+                )}
                 <p className="text-[11px] text-muted-foreground">
                   Slug: <span className="font-mono">{publishResult.publicSlug}</span>
-                  {publishResult.filesPublished != null && (
+                  {!publishResult.containerDeployed && publishResult.filesPublished != null && (
                     <span>
                       {" · "}
                       {publishResult.filesPublished} file

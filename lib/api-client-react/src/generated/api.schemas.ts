@@ -774,7 +774,17 @@ export interface PublishResult {
   status: string;
   publicSlug?: string;
   publicUrl: string;
+  internalPathUrl?: string;
   publishedAt: string;
+  snapshotVersionId?: number;
+  filesPublished?: number;
+  /** True when a production container was provisioned instead of (or alongside) the static snapshot. */
+  containerDeployed?: boolean;
+  /**
+     * Fly.io proxy URL of the always-on production container. Null when containerDeployed is false.
+     * @nullable
+     */
+  containerUrl?: string | null;
   note: string;
 }
 
@@ -1521,6 +1531,18 @@ export type StopContainer200 = {
 
 export type GetContainerLogsParams = {
 limit?: number;
+};
+
+export type PublishContainer200 = {
+  ok: boolean;
+  containerId: string;
+  containerUrl: string;
+  note: string;
+};
+
+export type UnpublishContainer200 = {
+  ok: boolean;
+  note: string;
 };
 
 export type DestroyContainer200 = {

@@ -11,6 +11,16 @@ export interface PublishResult {
   status: string;
   publicSlug?: string;
   publicUrl: string;
+  internalPathUrl?: string;
   publishedAt: Date;
+  snapshotVersionId?: number;
+  filesPublished?: number;
+  /** True when a production container was provisioned instead of (or alongside) the static snapshot. */
+  containerDeployed?: boolean;
+  /**
+     * Fly.io proxy URL of the always-on production container. Null when containerDeployed is false.
+     * @nullable
+     */
+  containerUrl?: string | null;
   note: string;
 }

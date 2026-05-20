@@ -2130,6 +2130,8 @@ export default function ProjectWorkspacePage() {
               <PublishingTab
                 projectId={projectId}
                 kind={project.kind}
+                containerStatus={containerStatus}
+                containerUrl={containerUrl}
                 onNavigateToSecret={handleAddKey}
               />
             )}

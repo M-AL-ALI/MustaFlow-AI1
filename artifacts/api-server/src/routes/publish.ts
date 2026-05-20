@@ -20,6 +20,7 @@ import {
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
 import { generateOgSvg } from "../lib/ogImage";
+import { deployProductionContainer, stopProductionContainer } from "../lib/container";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
@@ -101,6 +102,23 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   const publicUrl = `https://${slug}.${PLATFORM_DOMAIN}/`;
   const internalPathUrl = `/api/p/${slug}/`;
 
+  // If the project has a dev container, deploy a production replica.
+  // This runs synchronously so we can include the result in the response.
+  // When FLY_API_TOKEN is not set, deployProductionContainer is a no-op returning null.
+  let containerDeployed = false;
+  let prodContainerUrl: string | null = null;
+  if (project.containerId) {
+    req.log.info({ projectId }, "Project has dev container — deploying production container");
+    const prodResult = await deployProductionContainer(
+      projectId,
+      files.map((f) => ({ path: f.path, content: f.content })),
+    );
+    if (prodResult) {
+      containerDeployed = true;
+      prodContainerUrl = prodResult.containerUrl;
+    }
+  }
+
   // Mark the project published, store which snapshot is live, and save the slug.
   // Best-effort inside setImmediate so the response returns immediately.
   setImmediate(() => {
@@ -117,6 +135,34 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       });
   });
 
+  void writeKnowledge({
+    title: `Published: project ${projectId}`,
+    content: `Project id:${projectId} published by ${req.userId ?? "unknown"}. Slug: ${slug}. Container deployed: ${containerDeployed}.`,
+    type: "publish",
+    category: "event",
+    severity: "info",
+    projectId,
+    userId: req.userId,
+  });
+
+  setImmediate(() => {
+    void db
+      .insert(deploymentLogsTable)
+      .values({
+        projectId,
+        userId: req.userId ?? "unknown",
+        env: "production",
+        status: "published",
+        publicUrl,
+        note: containerDeployed
+          ? `Container deployed to production. Machine URL: ${prodContainerUrl ?? "unknown"}.`
+          : `Snapshot published. ${files.length} file(s).`,
+      })
+      .catch(() => {
+        /* best-effort */
+      });
+  });
+
   res.json({
     ok: true,
     projectId,
@@ -127,7 +173,11 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     publishedAt,
     snapshotVersionId: deploymentVersion?.id,
     filesPublished: files.length,
-    note: "Public URL serves the frozen snapshot. Draft edits do not affect it until you publish again.",
+    containerDeployed,
+    containerUrl: prodContainerUrl,
+    note: containerDeployed
+      ? "Production container deployed. Public URL proxies to the live container."
+      : "Public URL serves the frozen snapshot. Draft edits do not affect it until you publish again.",
   });
 });
 
@@ -140,6 +190,11 @@ router.post("/projects/:id/unpublish", requireProjectOwnership, async (req, res)
     .select({ publicSlug: projectsTable.publicSlug })
     .from(projectsTable)
     .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+  // Stop the production container if one was deployed — best-effort, non-fatal.
+  void stopProductionContainer(projectId).catch((err: unknown) => {
+    req.log.warn({ err, projectId }, "Failed to stop production container on unpublish");
+  });
 
   await db
     .update(projectsTable)

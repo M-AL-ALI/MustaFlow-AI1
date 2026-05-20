@@ -19,6 +19,8 @@ import {
   getContainerStatus,
   execInContainer,
   destroyContainer,
+  deployProductionContainer,
+  stopProductionContainer,
 } from "../lib/container";
 import { logger } from "../lib/logger";
 
@@ -192,6 +194,66 @@ router.post(
 
     const result = await execInContainer(project.containerId, cmd, projectId, cwd);
     res.json(result);
+  },
+);
+
+// ── POST /api/projects/:id/container/publish ─────────────────────────────────
+// Deploy a production container replica for this project.
+// This is called automatically by the publish route when a dev container exists.
+// It can also be called manually to (re-)deploy the production container without
+// going through the full publish flow (useful for ops / debugging).
+router.post(
+  "/projects/:id/container/publish",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const project = await loadProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    if (!project.containerId) {
+      res.status(409).json({ error: "Project does not have a dev container. Start one first." });
+      return;
+    }
+
+    req.log.info({ projectId }, "Deploying production container");
+
+    const files = await loadProjectFiles(projectId);
+    const result = await deployProductionContainer(projectId, files);
+
+    if (!result) {
+      res.status(500).json({
+        error: "Production container deploy failed. Check container logs for details.",
+      });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      containerId: result.containerId,
+      containerUrl: result.containerUrl,
+      note: "Production container deployed. Public URL now proxies to this container.",
+    });
+  },
+);
+
+// ── POST /api/projects/:id/container/unpublish ───────────────────────────────
+// Stop and destroy the production container for this project.
+router.post(
+  "/projects/:id/container/unpublish",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const project = await loadProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    await stopProductionContainer(projectId);
+    res.json({ ok: true, note: "Production container stopped and destroyed." });
   },
 );
 

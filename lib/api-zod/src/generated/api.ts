@@ -1186,7 +1186,12 @@ export const PublishProjectResponse = zod.object({
   "status": zod.string(),
   "publicSlug": zod.string().optional(),
   "publicUrl": zod.string(),
+  "internalPathUrl": zod.string().optional(),
   "publishedAt": zod.coerce.date(),
+  "snapshotVersionId": zod.number().optional(),
+  "filesPublished": zod.number().optional(),
+  "containerDeployed": zod.boolean().optional().describe('True when a production container was provisioned instead of (or alongside) the static snapshot.'),
+  "containerUrl": zod.string().nullish().describe('Fly.io proxy URL of the always-on production container. Null when containerDeployed is false.'),
   "note": zod.string()
 })
 
@@ -1951,6 +1956,34 @@ export const ExecInContainerBody = zod.object({
 export const ExecInContainerResponse = zod.object({
   "ok": zod.boolean(),
   "output": zod.string()
+})
+
+
+/**
+ * @summary Deploy a production container replica for this project
+ */
+export const PublishContainerParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const PublishContainerResponse = zod.object({
+  "ok": zod.boolean(),
+  "containerId": zod.string(),
+  "containerUrl": zod.string(),
+  "note": zod.string()
+})
+
+
+/**
+ * @summary Stop and destroy the production container for this project
+ */
+export const UnpublishContainerParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UnpublishContainerResponse = zod.object({
+  "ok": zod.boolean(),
+  "note": zod.string()
 })
 
 
