@@ -1279,6 +1279,11 @@ export type ListSuggestionsParams = {
 taskId?: number;
 };
 
+export type AcceptSuggestionBody = {
+  /** Optional edited prompt to use instead of the suggestion's stored prompt */
+  promptOverride?: string;
+};
+
 export type ListDeployments200 = {
   deployments: DeploymentLog[];
 };

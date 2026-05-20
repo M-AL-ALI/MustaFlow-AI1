@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   useListSuggestions,
   useAcceptSuggestion,
@@ -17,6 +18,8 @@ import {
   Zap,
   Play,
   X,
+  Pencil,
+  Check,
 } from "lucide-react";
 
 const CATEGORY_META: Record<
@@ -36,6 +39,8 @@ interface SavedSuggestionsTabProps {
 
 export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsTabProps) {
   const queryClient = useQueryClient();
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editedPrompt, setEditedPrompt] = useState("");
 
   const { data: suggestions, isLoading } = useListSuggestions(
     projectId,
@@ -93,6 +98,27 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
     },
   });
 
+  const handleStartEdit = (s: ProjectSuggestion) => {
+    setEditingId(s.id);
+    setEditedPrompt(s.prompt);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditedPrompt("");
+  };
+
+  const handleBuild = (s: ProjectSuggestion, promptOverride?: string) => {
+    const override = promptOverride?.trim();
+    accept.mutate({
+      id: projectId,
+      suggestionId: s.id,
+      ...(override && override !== s.prompt ? { data: { promptOverride: override } } : {}),
+    });
+    setEditingId(null);
+    setEditedPrompt("");
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
@@ -129,31 +155,84 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
               {pending.length}
             </span>
           </div>
+
           {pending.map((s: ProjectSuggestion) => {
             const meta = CATEGORY_META[s.category] ?? CATEGORY_META.feature!;
             const Icon = meta.icon;
+            const isEditing = editingId === s.id;
             return (
               <div
                 key={s.id}
-                className="group flex items-start gap-2 bg-muted/50 border border-border/60 rounded-lg px-2.5 py-2 hover:border-border transition-colors"
+                className="group flex flex-col gap-1.5 bg-muted/50 border border-border/60 rounded-lg px-2.5 py-2 hover:border-border transition-colors"
               >
-                <Icon className={cn("h-3 w-3 mt-0.5 shrink-0", meta.color)} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-1.5 flex-wrap">
-                    <span className="text-[10px] font-semibold text-foreground">{s.title}</span>
-                    <span className={cn("text-[9px] font-medium uppercase tracking-wide shrink-0", meta.color)}>
-                      {meta.label}
-                    </span>
+                <div className="flex items-start gap-2">
+                  <Icon className={cn("h-3 w-3 mt-0.5 shrink-0", meta.color)} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-semibold text-foreground">{s.title}</span>
+                      <span className={cn("text-[9px] font-medium uppercase tracking-wide shrink-0", meta.color)}>
+                        {meta.label}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
+                    {!isEditing && (
+                      <p
+                        title={s.prompt}
+                        className="text-[9px] text-muted-foreground/40 leading-snug mt-0.5 truncate cursor-default"
+                      >
+                        {s.prompt}
+                      </p>
+                    )}
                   </div>
-                  <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
-                  <div className="flex items-center gap-1.5 mt-1.5">
+                </div>
+
+                {/* Inline prompt editor */}
+                {isEditing && (
+                  <div className="flex flex-col gap-1.5 pl-5">
+                    <textarea
+                      autoFocus
+                      value={editedPrompt}
+                      onChange={(e) => setEditedPrompt(e.target.value)}
+                      rows={3}
+                      className="w-full text-[10px] bg-background border border-border rounded px-2 py-1.5 text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary/50 leading-snug"
+                      placeholder="Edit the prompt…"
+                    />
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleBuild(s, editedPrompt)}
+                        disabled={accept.isPending || !editedPrompt.trim()}
+                        className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/15 disabled:opacity-50 transition-colors"
+                      >
+                        <Check className="h-2.5 w-2.5" />
+                        Build with edits
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {!isEditing && (
+                  <div className="flex items-center gap-1.5 pl-5">
                     <button
-                      onClick={() => accept.mutate({ id: projectId, suggestionId: s.id })}
+                      onClick={() => handleBuild(s)}
                       disabled={accept.isPending}
                       className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/15 transition-colors"
                     >
                       <Play className="h-2.5 w-2.5" />
                       Build now
+                    </button>
+                    <button
+                      onClick={() => handleStartEdit(s)}
+                      title="Edit prompt before building"
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                    >
+                      <Pencil className="h-2.5 w-2.5" />
+                      Edit &amp; Build
                     </button>
                     <button
                       onClick={() => save.mutate({ id: projectId, suggestionId: s.id })}
@@ -171,7 +250,7 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
                       Dismiss
                     </button>
                   </div>
-                </div>
+                )}
               </div>
             );
           })}
@@ -192,28 +271,80 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
           {saved.map((s: ProjectSuggestion) => {
             const meta = CATEGORY_META[s.category] ?? CATEGORY_META.feature!;
             const Icon = meta.icon;
+            const isEditing = editingId === s.id;
             return (
               <div
                 key={s.id}
-                className="group flex items-start gap-2 bg-muted/50 border border-border/60 rounded-lg px-2.5 py-2 hover:border-border transition-colors"
+                className="group flex flex-col gap-1.5 bg-muted/50 border border-border/60 rounded-lg px-2.5 py-2 hover:border-border transition-colors"
               >
-                <Icon className={cn("h-3 w-3 mt-0.5 shrink-0", meta.color)} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-1.5 flex-wrap">
-                    <span className="text-[10px] font-semibold text-foreground">{s.title}</span>
-                    <span className={cn("text-[9px] font-medium uppercase tracking-wide shrink-0", meta.color)}>
-                      {meta.label}
-                    </span>
+                <div className="flex items-start gap-2">
+                  <Icon className={cn("h-3 w-3 mt-0.5 shrink-0", meta.color)} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-semibold text-foreground">{s.title}</span>
+                      <span className={cn("text-[9px] font-medium uppercase tracking-wide shrink-0", meta.color)}>
+                        {meta.label}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
+                    {!isEditing && (
+                      <p
+                        title={s.prompt}
+                        className="text-[9px] text-muted-foreground/40 leading-snug mt-0.5 truncate cursor-default"
+                      >
+                        {s.prompt}
+                      </p>
+                    )}
                   </div>
-                  <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
-                  <div className="flex items-center gap-1.5 mt-1.5">
+                </div>
+
+                {/* Inline prompt editor */}
+                {isEditing && (
+                  <div className="flex flex-col gap-1.5 pl-5">
+                    <textarea
+                      autoFocus
+                      value={editedPrompt}
+                      onChange={(e) => setEditedPrompt(e.target.value)}
+                      rows={3}
+                      className="w-full text-[10px] bg-background border border-border rounded px-2 py-1.5 text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary/50 leading-snug"
+                      placeholder="Edit the prompt…"
+                    />
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleBuild(s, editedPrompt)}
+                        disabled={accept.isPending || !editedPrompt.trim()}
+                        className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/15 disabled:opacity-50 transition-colors"
+                      >
+                        <Check className="h-2.5 w-2.5" />
+                        Build with edits
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {!isEditing && (
+                  <div className="flex items-center gap-1.5 pl-5">
                     <button
-                      onClick={() => accept.mutate({ id: projectId, suggestionId: s.id })}
+                      onClick={() => handleBuild(s)}
                       disabled={accept.isPending}
                       className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/15 transition-colors"
                     >
                       <Play className="h-2.5 w-2.5" />
                       Build now
+                    </button>
+                    <button
+                      onClick={() => handleStartEdit(s)}
+                      title="Edit prompt before building"
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                    >
+                      <Pencil className="h-2.5 w-2.5" />
+                      Edit &amp; Build
                     </button>
                     <button
                       onClick={() => dismiss.mutate({ id: projectId, suggestionId: s.id })}
@@ -223,7 +354,7 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
                       Remove
                     </button>
                   </div>
-                </div>
+                )}
               </div>
             );
           })}

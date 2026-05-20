@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './acceptSuggestionBody';
 export * from './activityItem';
 export * from './activityItemKind';
 export * from './adminAuditLogEntry';

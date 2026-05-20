@@ -1381,7 +1381,7 @@ export default function ProjectWorkspacePage() {
                   )}
                 </div>
 
-                  {/* Activity ticker / Status bar */}
+                {/* Activity ticker / Status bar */}
                   <div className="shrink-0 border-t border-border/40">
                     {sendMessage.isPending ? (
                       <BuildProgressFeed

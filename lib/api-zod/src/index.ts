@@ -7,3 +7,4 @@ export { AnalyzePageMapParams } from "./generated/api";
 export { GetSecretAuditLogParams } from "./generated/api";
 export { ListSuggestionsParams } from "./generated/api";
 export { SearchProjectFilesParams } from "./generated/api";
+export { AcceptSuggestionBody } from "./generated/api";

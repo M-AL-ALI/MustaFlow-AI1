@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AcceptSuggestionBody,
   ActivityItem,
   AdminAuditLogPage,
   AdminLaunchReadiness,
@@ -3304,14 +3305,16 @@ export const getAcceptSuggestionUrl = (id: number,
  * @summary Accept a suggestion — enqueues a background refine build
  */
 export const acceptSuggestion = async (id: number,
-    suggestionId: number, options?: RequestInit): Promise<SuggestionAcceptResult> => {
+    suggestionId: number,
+    acceptSuggestionBody?: AcceptSuggestionBody, options?: RequestInit): Promise<SuggestionAcceptResult> => {
 
   return customFetch<SuggestionAcceptResult>(getAcceptSuggestionUrl(id,suggestionId),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      acceptSuggestionBody,)
   }
 );}
 
@@ -3319,8 +3322,8 @@ export const acceptSuggestion = async (id: number,
 
 
 export const getAcceptSuggestionMutationOptions = <TError = ErrorType<ApiError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptSuggestion>>, TError,{id: number;suggestionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof acceptSuggestion>>, TError,{id: number;suggestionId: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptSuggestion>>, TError,{id: number;suggestionId: number;data?: BodyType<AcceptSuggestionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof acceptSuggestion>>, TError,{id: number;suggestionId: number;data?: BodyType<AcceptSuggestionBody>}, TContext> => {
 
 const mutationKey = ['acceptSuggestion'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -3332,10 +3335,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acceptSuggestion>>, {id: number;suggestionId: number}> = (props) => {
-          const {id,suggestionId} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acceptSuggestion>>, {id: number;suggestionId: number;data?: BodyType<AcceptSuggestionBody>}> = (props) => {
+          const {id,suggestionId,data} = props ?? {};
 
-          return  acceptSuggestion(id,suggestionId,requestOptions)
+          return  acceptSuggestion(id,suggestionId,data,requestOptions)
         }
 
 
@@ -3346,18 +3349,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type AcceptSuggestionMutationResult = NonNullable<Awaited<ReturnType<typeof acceptSuggestion>>>
-
+    export type AcceptSuggestionMutationBody = BodyType<AcceptSuggestionBody> | undefined
     export type AcceptSuggestionMutationError = ErrorType<ApiError>
 
     /**
  * @summary Accept a suggestion — enqueues a background refine build
  */
 export const useAcceptSuggestion = <TError = ErrorType<ApiError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptSuggestion>>, TError,{id: number;suggestionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptSuggestion>>, TError,{id: number;suggestionId: number;data?: BodyType<AcceptSuggestionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof acceptSuggestion>>,
         TError,
-        {id: number;suggestionId: number},
+        {id: number;suggestionId: number;data?: BodyType<AcceptSuggestionBody>},
         TContext
       > => {
       return useMutation(getAcceptSuggestionMutationOptions(options));

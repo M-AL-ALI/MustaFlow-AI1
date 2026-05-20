@@ -833,6 +833,16 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
         - { name: suggestionId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                promptOverride:
+                  type: string
+                  description: Optional edited prompt to use instead of the suggestion's stored prompt
       responses:
         "200":
           description: Accepted and task enqueued

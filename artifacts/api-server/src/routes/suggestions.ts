@@ -66,6 +66,11 @@ router.post(
       return;
     }
 
+    const bodyResult = z
+      .object({ promptOverride: z.string().trim().min(1).optional() })
+      .safeParse(req.body ?? {});
+    const promptOverride = bodyResult.success ? bodyResult.data.promptOverride : undefined;
+
     const [suggestion] = await db
       .select()
       .from(projectSuggestionsTable)
@@ -90,6 +95,8 @@ router.post(
       res.status(404).json({ error: "Project not found" });
       return;
     }
+
+    const effectivePrompt = promptOverride ?? suggestion.prompt;
 
     // Mark as accepted
     await db
@@ -117,7 +124,7 @@ router.post(
         title: `Build: ${suggestion.title.slice(0, 60)}`,
         kind: "main",
         status: "planning",
-        prompt: suggestion.prompt,
+        prompt: effectivePrompt,
       })
       .returning();
 
@@ -139,7 +146,7 @@ router.post(
       taskId: task.id,
       projectId: params.data.id,
       kind: "refine",
-      userPrompt: suggestion.prompt,
+      userPrompt: effectivePrompt,
       agentMode: project.agentMode as AgentMode,
     });
 

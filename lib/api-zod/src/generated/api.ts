@@ -1190,6 +1190,10 @@ export const AcceptSuggestionParams = zod.object({
   "suggestionId": zod.coerce.number()
 })
 
+export const AcceptSuggestionBody = zod.object({
+  "promptOverride": zod.string().optional().describe('Optional edited prompt to use instead of the suggestion\'s stored prompt')
+})
+
 export const AcceptSuggestionResponse = zod.object({
   "ok": zod.boolean(),
   "taskId": zod.number(),
