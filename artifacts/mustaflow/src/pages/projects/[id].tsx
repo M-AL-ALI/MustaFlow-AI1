@@ -1791,10 +1791,17 @@ export default function ProjectWorkspacePage() {
                 </div>
                 <div className="flex-1 min-h-0 flex">
                   {/* Variant A */}
-                  <div className="flex-1 min-w-0 flex flex-col border-r border-border">
-                    <div className="shrink-0 px-3 py-1.5 bg-muted/40 border-b border-border flex items-center gap-2">
+                  <div className="flex-1 min-w-0 flex flex-col border-r border-violet-500/20">
+                    <div className="shrink-0 px-3 py-2 bg-muted/60 border-b border-border flex items-center gap-2">
                       <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">A</span>
-                      <span className="text-[11px] text-muted-foreground truncate flex-1">Minimalist · Light palette</span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[11px] font-medium text-foreground">Minimalist · Light palette</span>
+                        {variantComparison.versionA.changelogEntry && (
+                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                            {variantComparison.versionA.changelogEntry.split("\n")[0]}
+                          </p>
+                        )}
+                      </div>
                       <button
                         onClick={() => {
                           rollbackVersion.mutate(
@@ -1803,26 +1810,30 @@ export default function ProjectWorkspacePage() {
                           );
                         }}
                         disabled={rollbackVersion.isPending}
-                        className="shrink-0 px-2 py-1 text-[10px] font-semibold bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+                        className="shrink-0 px-3 py-1 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
                       >
                         Keep A
                       </button>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-3 text-[11px] text-muted-foreground space-y-1">
-                      {variantComparison.versionA.changelogEntry ? (
-                        variantComparison.versionA.changelogEntry.split("\n").map((line, i) => (
-                          <p key={i} className={line.startsWith("•") ? "pl-2" : "font-medium text-foreground"}>{line}</p>
-                        ))
-                      ) : (
-                        <p className="text-muted-foreground/60 italic">No changelog available</p>
-                      )}
-                    </div>
+                    <iframe
+                      src={`/api/projects/${projectId}/versions/${variantComparison.versionA.id}/preview/`}
+                      sandbox="allow-scripts allow-forms allow-popups"
+                      className="flex-1 w-full border-0 bg-white"
+                      title="Variant A preview"
+                    />
                   </div>
                   {/* Variant B */}
                   <div className="flex-1 min-w-0 flex flex-col">
-                    <div className="shrink-0 px-3 py-1.5 bg-muted/40 border-b border-border flex items-center gap-2">
+                    <div className="shrink-0 px-3 py-2 bg-muted/60 border-b border-border flex items-center gap-2">
                       <span className="text-[10px] font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">B</span>
-                      <span className="text-[11px] text-muted-foreground truncate flex-1">Bold · Dark palette</span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[11px] font-medium text-foreground">Bold · Dark palette</span>
+                        {variantComparison.versionB.changelogEntry && (
+                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                            {variantComparison.versionB.changelogEntry.split("\n")[0]}
+                          </p>
+                        )}
+                      </div>
                       <button
                         onClick={() => {
                           rollbackVersion.mutate(
@@ -1831,25 +1842,22 @@ export default function ProjectWorkspacePage() {
                           );
                         }}
                         disabled={rollbackVersion.isPending}
-                        className="shrink-0 px-2 py-1 text-[10px] font-semibold bg-violet-600 text-white rounded hover:bg-violet-700 transition-colors disabled:opacity-50"
+                        className="shrink-0 px-3 py-1 text-[11px] font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50"
                       >
                         Keep B
                       </button>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-3 text-[11px] text-muted-foreground space-y-1">
-                      {variantComparison.versionB.changelogEntry ? (
-                        variantComparison.versionB.changelogEntry.split("\n").map((line, i) => (
-                          <p key={i} className={line.startsWith("•") ? "pl-2" : "font-medium text-foreground"}>{line}</p>
-                        ))
-                      ) : (
-                        <p className="text-muted-foreground/60 italic">No changelog available</p>
-                      )}
-                    </div>
+                    <iframe
+                      src={`/api/projects/${projectId}/versions/${variantComparison.versionB.id}/preview/`}
+                      sandbox="allow-scripts allow-forms allow-popups"
+                      className="flex-1 w-full border-0 bg-white"
+                      title="Variant B preview"
+                    />
                   </div>
                 </div>
                 <div className="shrink-0 px-4 py-2 bg-muted/30 border-t border-border text-[11px] text-muted-foreground flex items-center gap-2">
                   <RotateCcw className="h-3 w-3 shrink-0" />
-                  Clicking Keep A or Keep B will restore that version as your active preview. The other version remains in Build History.
+                  Keep A or Keep B to make that version active. The other snapshot stays in Build History.
                 </div>
               </div>
             )}

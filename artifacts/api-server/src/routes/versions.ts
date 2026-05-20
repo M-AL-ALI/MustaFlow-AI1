@@ -17,6 +17,9 @@ import {
   CreateVersionBody,
 } from "@workspace/api-zod";
 import { requireProjectOwnership } from "../lib/auth";
+import { guessMime } from "../lib/builder";
+import { isBinaryMime } from "../lib/binary-mime";
+import { injectBridge } from "../lib/consoleBridge";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -122,6 +125,59 @@ router.get(
       createdAt: version.createdAt,
       filesSnapshot: version.filesSnapshot ?? [],
     });
+  },
+);
+
+// Serve a file from a specific version snapshot — used by the variant comparison iframes.
+// Auth-checked: caller must own the project.
+router.get(
+  "/projects/:id/versions/:versionId/preview/{*splat}",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const versionId = Number(req.params.versionId);
+    if (!Number.isFinite(versionId)) {
+      res.status(400).json({ error: "Invalid version id" });
+      return;
+    }
+
+    const [version] = await db
+      .select({ filesSnapshot: projectVersionsTable.filesSnapshot, projectId: projectVersionsTable.projectId })
+      .from(projectVersionsTable)
+      .where(eq(projectVersionsTable.id, versionId));
+
+    if (!version || version.projectId !== projectId) {
+      res.status(404).type("text/html").send(
+        `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Version not found</h1></body></html>`,
+      );
+      return;
+    }
+
+    type SnapshotFile = { path: string; content: string; mimeType?: string };
+    const snapshot = (version.filesSnapshot ?? []) as SnapshotFile[];
+
+    const splat = req.params.splat;
+    const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
+    const filePath = raw === "" ? "index.html" : raw;
+
+    let file = snapshot.find((f) => f.path === filePath);
+    if (!file) file = snapshot.find((f) => f.path === "index.html");
+
+    if (!file) {
+      res.status(404).type("text/html").send(
+        `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">No preview yet</h1></body></html>`,
+      );
+      return;
+    }
+
+    const mime = file.mimeType || guessMime(file.path);
+    const isHtml = mime === "text/html" || file.path.endsWith(".html");
+    res.type(mime).setHeader("Cache-Control", "no-store, must-revalidate");
+    if (isBinaryMime(mime)) {
+      res.end(Buffer.from(file.content, "base64"));
+    } else {
+      res.send(isHtml ? injectBridge(file.content) : file.content);
+    }
   },
 );
 
