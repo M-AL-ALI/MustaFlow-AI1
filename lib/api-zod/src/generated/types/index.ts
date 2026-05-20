@@ -116,6 +116,7 @@ export * from './projectInput';
 export * from './projectInputKind';
 export * from './projectKind';
 export * from './projectPlatform';
+export * from './projectProjectFormat';
 export * from './projectsSummary';
 export * from './projectsSummaryByKind';
 export * from './projectsSummaryByStatus';
