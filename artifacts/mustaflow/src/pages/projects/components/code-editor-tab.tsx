@@ -374,6 +374,14 @@ export function CodeEditorTab({
       const lowerPath = selectedFile?.path.toLowerCase() ?? "";
       const isHtml = lowerPath.endsWith(".html") || lowerPath.endsWith(".htm");
       if (isHtml) onHtmlFileSaved?.();
+      // Notify the WebContainer (if running) about the saved file so Vite HMR picks it up.
+      if (selectedFile?.path && editorContent !== null) {
+        window.dispatchEvent(
+          new CustomEvent("mustaflow:file-saved", {
+            detail: { path: selectedFile.path, content: editorContent },
+          }),
+        );
+      }
       return true;
     } catch {
       toast({

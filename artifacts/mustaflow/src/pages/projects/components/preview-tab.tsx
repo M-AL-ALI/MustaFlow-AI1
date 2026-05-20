@@ -24,9 +24,13 @@ import {
   ShieldAlert,
   Plug,
   FileJson,
+  PackageOpen,
+  ServerCrash,
+  Wifi,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
+import { STATUS_LABELS, type UseWebContainerResult } from "@/hooks/use-web-container";
 import { cn } from "@/lib/utils";
 import { useListProjectFiles, getListProjectFilesQueryKey } from "@workspace/api-client-react";
 
@@ -59,10 +63,12 @@ type Project = {
   updatedAt: string;
   name?: string;
   kind?: string;
+  projectFormat?: string;
 };
 
 type PreviewTabProps = {
   project: Project;
+  wc: UseWebContainerResult;
   focusMode?: boolean;
   onToggleFocusMode?: () => void;
   validationWarnings?: string[];
@@ -87,6 +93,7 @@ type PreviewTabProps = {
 
 export function PreviewTab({
   project,
+  wc,
   focusMode,
   onToggleFocusMode,
   validationWarnings = [],
@@ -96,6 +103,7 @@ export function PreviewTab({
   onOpenFileInEditor,
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
+  const isReactVite = project.projectFormat === "react-vite" && !isMobile;
   const [platform, setPlatform] = useState<Platform>("web");
   const [device, setDevice] = useState<DeviceFrame>(isMobile ? "mobile" : "desktop");
   const [iframeKey, setIframeKey] = useState(0);
@@ -185,6 +193,46 @@ export function PreviewTab({
   const hasFiles = (files?.length ?? 0) > 0;
   const isLoading = filesLoading && files === undefined;
   const previewSrc = `/api/projects/${project.id}/preview/?t=${iframeKey}`;
+
+  // After a build completes for a react-vite project, resync the WC with fresh files.
+  // We detect build completion via project.status transitioning away from "building".
+  // Use a ref for the restart fn to keep the effect deps stable (avoids re-running on every render).
+  const wcRestartRef = useRef(wc.restart);
+  wcRestartRef.current = wc.restart;
+  const prevBuildStatusRef = useRef(project.status);
+  useEffect(() => {
+    const prev = prevBuildStatusRef.current;
+    prevBuildStatusRef.current = project.status;
+    if (isReactVite && prev === "building" && project.status !== "building" && hasFiles) {
+      wcRestartRef.current();
+    }
+  }, [project.status, isReactVite, hasFiles]);
+
+  // Step 6: Bridge WC process stdout/stderr into the PreviewTab console panel.
+  // We track the last-seen WC log ID so we only forward net-new entries each render.
+  const lastWcLogIdRef = useRef(-1);
+  useEffect(() => {
+    if (!isReactVite || wc.logs.length === 0) return;
+    const newLogs = wc.logs.filter((l) => l.id > lastWcLogIdRef.current);
+    if (newLogs.length === 0) return;
+    lastWcLogIdRef.current = wc.logs[wc.logs.length - 1]!.id;
+    setConsoleEntries((prev) => {
+      const newEntries = newLogs.map((l) => ({
+        id: entryIdRef.current++,
+        level: "log" as const,
+        args: [l.text],
+        ts: l.ts,
+      }));
+      return [...prev, ...newEntries].slice(-200);
+    });
+  }, [isReactVite, wc.logs]);
+
+  // Reset last-seen WC log pointer when the container reboots so we don't re-forward stale lines.
+  useEffect(() => {
+    if (wc.status === "booting") {
+      lastWcLogIdRef.current = -1;
+    }
+  }, [wc.status]);
 
   // Mock API detection — derived from the file list
   const mockFiles = (files ?? []).filter(
@@ -280,20 +328,88 @@ export function PreviewTab({
   const errorCount = consoleEntries.filter((e) => e.level === "error").length;
   const warnCount = consoleEntries.filter((e) => e.level === "warn").length;
 
-  // Shared iframe renderer — the console bridge is injected server-side in the
-  // preview route, so we always use a plain src iframe.
-  const renderIframe = (extraClass?: string, extraStyle?: React.CSSProperties) => (
-    <iframe
-      key={`src-${device}-${iframeKey}`}
-      ref={iframeRef}
-      src={previewSrc}
-      title="App preview"
-      aria-label="App preview"
-      className={cn("w-full border-0", extraClass)}
-      style={extraStyle}
-      sandbox="allow-scripts allow-forms allow-popups"
-      onLoad={handleIframeLoad}
-    />
+  // Shared iframe renderer.
+  // For react-vite projects with a live WebContainer dev server, the iframe points
+  // at the WC-provided URL (no sandbox needed — WC handles its own isolation).
+  // For static-html projects, the existing DB-served preview route is used.
+  const renderIframe = (extraClass?: string, extraStyle?: React.CSSProperties) => {
+    const wcLive = isReactVite && wc.status === "ready" && wc.previewUrl != null;
+    const src = wcLive ? wc.previewUrl! : previewSrc;
+    return (
+      <iframe
+        key={wcLive ? `wc-${device}-${wc.previewUrl}` : `src-${device}-${iframeKey}`}
+        ref={iframeRef}
+        src={src}
+        title="App preview"
+        aria-label="App preview"
+        className={cn("w-full border-0", extraClass)}
+        style={extraStyle}
+        sandbox={
+          wcLive
+            ? "allow-scripts allow-forms allow-popups allow-same-origin allow-modals"
+            : "allow-scripts allow-forms allow-popups"
+        }
+        onLoad={handleIframeLoad}
+      />
+    );
+  };
+
+  // Boot progress overlay — shown in the preview area while WC is initialising.
+  const renderWcBootOverlay = () => (
+    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0d0f17]/80 backdrop-blur-sm gap-4 z-10">
+      <div className="flex flex-col items-center gap-3">
+        <div className="relative">
+          <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+            <PackageOpen className="h-6 w-6 text-primary/70" />
+          </div>
+          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-muted border border-border flex items-center justify-center">
+            <Loader2 className="h-3 w-3 text-primary animate-spin" />
+          </div>
+        </div>
+        <div className="text-center">
+          <div className="text-sm font-medium text-foreground">{STATUS_LABELS[wc.status]}</div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            {wc.status === "booting"
+              ? "Starting in-browser sandbox…"
+              : wc.status === "installing"
+                ? "npm install is running…"
+                : "Vite dev server is starting…"}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {(["booting", "installing", "starting"] as const).map((stage) => (
+            <div key={stage} className="flex items-center gap-1">
+              <div
+                className={cn(
+                  "w-2 h-2 rounded-full transition-colors",
+                  wc.status === stage
+                    ? "bg-primary animate-pulse"
+                    : ["installing", "starting"].includes(wc.status) && stage === "booting"
+                      ? "bg-primary/70"
+                      : wc.status === "starting" && stage === "installing"
+                        ? "bg-primary/70"
+                        : "bg-muted",
+                )}
+              />
+              <span
+                className={cn(
+                  "text-[10px]",
+                  wc.status === stage
+                    ? "text-primary font-medium"
+                    : ["installing", "starting"].includes(wc.status) && stage === "booting"
+                      ? "text-primary/60"
+                      : wc.status === "starting" && stage === "installing"
+                        ? "text-primary/60"
+                        : "text-muted-foreground/40",
+                )}
+              >
+                {stage === "booting" ? "Boot" : stage === "installing" ? "Install" : "Start"}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 
   // Suppress unused variable warning — platform state reserved for future iOS/Android toggle
@@ -629,6 +745,66 @@ export function PreviewTab({
         </div>
       </div>
 
+      {/* WebContainer boot status banner — only for react-vite projects */}
+      {isReactVite && wc.status !== "ready" && wc.status !== "idle" && (
+        <div
+          className={cn(
+            "shrink-0 flex items-center gap-2 px-3 py-2 border-b text-xs",
+            wc.status === "error"
+              ? "bg-destructive/10 border-destructive/20 text-destructive"
+              : wc.status === "unsupported"
+                ? "bg-muted border-border text-muted-foreground"
+                : "bg-primary/8 border-primary/15 text-primary",
+          )}
+        >
+          {wc.status === "error" ? (
+            <ServerCrash className="h-3.5 w-3.5 shrink-0" />
+          ) : wc.status === "unsupported" ? (
+            <Wifi className="h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+          )}
+          <span className="flex-1">{wc.statusLabel}</span>
+          {wc.status === "error" && (
+            <button
+              onClick={() => wc.restart()}
+              className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-destructive/20 border border-destructive/30 text-destructive hover:bg-destructive/30 transition-colors"
+            >
+              Retry
+            </button>
+          )}
+          {wc.status === "unsupported" && (
+            <button
+              onClick={() => window.open(`/api/projects/${project.id}/export`, "_blank")}
+              className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-muted border border-border text-muted-foreground hover:bg-accent transition-colors"
+            >
+              Export ZIP
+            </button>
+          )}
+          {/* Stage progress dots */}
+          {!["error", "unsupported"].includes(wc.status) && (
+            <div className="flex items-center gap-1 shrink-0">
+              {(["booting", "installing", "starting"] as const).map((stage) => (
+                <span
+                  key={stage}
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full",
+                    wc.status === stage
+                      ? "bg-primary animate-pulse"
+                      : ["installing", "starting", "ready"].includes(wc.status) &&
+                          stage === "booting"
+                        ? "bg-primary/60"
+                        : wc.status === "starting" && stage === "installing"
+                          ? "bg-primary/60"
+                          : "bg-primary/20",
+                  )}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Health warning banner */}
       {healthWarning && (
         <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-xs">
@@ -837,7 +1013,9 @@ export function PreviewTab({
         </div>
       )}
 
-      {/* Preview area */}
+      {/* Preview area — for unsupported/error WC state the static DB snapshot is shown as
+          graceful fallback (renderIframe falls back to previewSrc when wcLive is false).
+          The boot-status banner above communicates the WC state to the user. */}
       <div className="flex-1 min-h-0 bg-[#1a1a1f] overflow-auto flex items-start justify-center p-4">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
@@ -866,7 +1044,7 @@ export function PreviewTab({
                   <div className="w-3.5 h-3.5 rounded-full bg-green-500/80" />
                 </div>
                 <button
-                  onClick={refresh}
+                  onClick={isReactVite ? () => wc.restart() : refresh}
                   className="text-zinc-400 hover:text-zinc-200 transition-colors p-1 rounded hover:bg-zinc-700"
                 >
                   <RefreshCw className="h-3 w-3" />
@@ -874,12 +1052,15 @@ export function PreviewTab({
                 <div className="flex-1 flex items-center bg-zinc-900 border border-zinc-700 rounded-md px-3 h-6 gap-2 max-w-md mx-auto">
                   <Globe className="h-3 w-3 text-zinc-500 shrink-0" />
                   <span className="text-[11px] text-zinc-300 font-mono truncate flex-1">
-                    preview/{project.id}/
+                    {isReactVite && wc.previewUrl ? wc.previewUrl : `preview/${project.id}/`}
                   </span>
                 </div>
               </div>
-              {/* iframe */}
-              <div className="flex-1 min-h-0 bg-white overflow-hidden">
+              {/* iframe — with WC boot overlay while installing/starting */}
+              <div className="flex-1 min-h-0 bg-white overflow-hidden relative">
+                {isReactVite &&
+                  ["booting", "installing", "starting"].includes(wc.status) &&
+                  renderWcBootOverlay()}
                 {renderIframe("h-full")}
               </div>
             </div>
@@ -898,7 +1079,10 @@ export function PreviewTab({
                   </div>
                 </div>
                 {/* Screen */}
-                <div className="flex-1 bg-white overflow-hidden">
+                <div className="flex-1 bg-white overflow-hidden relative">
+                  {isReactVite &&
+                    ["booting", "installing", "starting"].includes(wc.status) &&
+                    renderWcBootOverlay()}
                   {renderIframe(undefined, { height: 780 })}
                 </div>
                 {/* Home bar */}
@@ -919,7 +1103,10 @@ export function PreviewTab({
                   <div className="w-2 h-2 rounded-full bg-zinc-700" />
                 </div>
                 {/* Screen */}
-                <div className="flex-1 bg-white overflow-hidden">
+                <div className="flex-1 bg-white overflow-hidden relative">
+                  {isReactVite &&
+                    ["booting", "installing", "starting"].includes(wc.status) &&
+                    renderWcBootOverlay()}
                   {renderIframe(undefined, { height: 970 })}
                 </div>
                 {/* Home bar */}

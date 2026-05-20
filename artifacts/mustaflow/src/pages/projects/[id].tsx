@@ -1,4 +1,5 @@
 import { useParams } from "wouter";
+import { useWebContainer } from "@/hooks/use-web-container";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import {
   useGetProject,
@@ -442,6 +443,14 @@ export default function ProjectWorkspacePage() {
   });
   const { data: files = [] } = useListProjectFiles(projectId, {
     query: { enabled: !!projectId, queryKey: getListProjectFilesQueryKey(projectId) },
+  });
+
+  // Pre-warm WebContainer on project load — boots before the user opens the Preview tab.
+  const isReactViteProject =
+    project?.projectFormat === "react-vite" && project?.kind !== "mobile-cross";
+  const wc = useWebContainer({
+    projectId,
+    enabled: isReactViteProject && files.length > 0,
   });
   const queryClient = useQueryClient();
 
@@ -1940,7 +1949,8 @@ export default function ProjectWorkspacePage() {
             )}
             {activeTab === "preview" && !variantComparison && (
               <PreviewTab
-                project={{ ...project, kind: project.kind }}
+                project={{ ...project, kind: project.kind, projectFormat: project.projectFormat }}
+                wc={wc}
                 focusMode={focusMode}
                 onToggleFocusMode={() => setFocusMode((f) => !f)}
                 validationWarnings={(() => {

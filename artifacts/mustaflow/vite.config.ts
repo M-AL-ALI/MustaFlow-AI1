@@ -59,6 +59,13 @@ export default defineConfig({
     fs: {
       strict: true,
     },
+    headers: {
+      // Required for SharedArrayBuffer (WebContainers).
+      // "credentialless" allows cross-origin resources without opt-in CORP headers,
+      // which is necessary for Clerk and other third-party scripts to keep working.
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "credentialless",
+    },
   },
   preview: {
     port,

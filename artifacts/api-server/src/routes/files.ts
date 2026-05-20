@@ -35,6 +35,29 @@ router.get("/projects/:id/files", requireProjectOwnership, async (req, res): Pro
   );
 });
 
+// Returns all project files with their full content in a single request.
+// Used by the WebContainer boot sequence to populate the virtual FS efficiently.
+router.get(
+  "/projects/:id/files/all-content",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const rows = await db
+      .select({
+        id: projectFilesTable.id,
+        path: projectFilesTable.path,
+        mimeType: projectFilesTable.mimeType,
+        content: projectFilesTable.content,
+        updatedAt: projectFilesTable.updatedAt,
+      })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId))
+      .orderBy(asc(projectFilesTable.path));
+
+    res.json(rows);
+  },
+);
+
 router.get(
   "/projects/:id/files/search",
   requireProjectOwnership,
