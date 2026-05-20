@@ -804,6 +804,32 @@ export async function runJob(input: JobInput): Promise<void> {
       const existingFiles = await loadFiles(projectId);
       await emitEvent(taskId, "reading_files", `Loaded ${existingFiles.length} existing file(s).`);
 
+      // Load unchanged-files hint from the last completed task for this project.
+      // These paths were declared untouched by the model in the prior refine turn and are
+      // passed to makeCompactManifest so they get a path-only stub instead of a full content
+      // block, reducing the token count of the file manifest sent to the model.
+      let unchangedFilesHint: string[] = [];
+      try {
+        const [lastTask] = await db
+          .select({ report: agentTasksTable.report })
+          .from(agentTasksTable)
+          .where(
+            and(eq(agentTasksTable.projectId, projectId), eq(agentTasksTable.status, "completed")),
+          )
+          .orderBy(desc(agentTasksTable.completedAt))
+          .limit(1);
+        unchangedFilesHint = lastTask?.report?.filesUnchanged ?? [];
+      } catch (err) {
+        logger.warn({ err, taskId }, "Failed to load prior unchangedFiles hint (non-fatal)");
+      }
+
+      if (unchangedFilesHint.length > 0) {
+        logger.info(
+          { taskId, projectId, count: unchangedFilesHint.length },
+          "Applying unchangedFiles hint to file manifest — skipping full content for these paths",
+        );
+      }
+
       await emitEvent(
         taskId,
         "generating_code",
@@ -833,6 +859,7 @@ export async function runJob(input: JobInput): Promise<void> {
             existingFiles,
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
+            unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
           });
 
       analyticsCorrectionPasses = refineResult.correctionPasses;
@@ -851,6 +878,7 @@ export async function runJob(input: JobInput): Promise<void> {
           existingFiles,
           conversationHistory,
           knowledgeContext: knowledgeContext || undefined,
+          unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
         });
         wasEscalated = true;
         agentMode = refineEscalationMode;
@@ -908,6 +936,17 @@ export async function runJob(input: JobInput): Promise<void> {
       diffSummary = computeRefineDiff(existingFiles, result.changedFiles, result.removedPaths);
 
       report = result.report;
+
+      // Surface unchanged-files count in the task report so the report card can display it.
+      // Also persists the list for the next refine turn's manifest pruning hint.
+      if (result.unchangedFiles.length > 0) {
+        report.filesUnchanged = result.unchangedFiles;
+        logger.info(
+          { taskId, projectId, count: result.unchangedFiles.length },
+          "Refine: skipped writeFiles for unchanged paths (already correct in DB)",
+        );
+      }
+
       assistantSummary = result.assistantSummary;
       nextVersionLabel = userPrompt.slice(0, 40) || "Refinement";
       filesToSmellScan = result.changedFiles;

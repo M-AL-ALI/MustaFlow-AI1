@@ -349,13 +349,19 @@ function extractStructuralSummary(content: string, mimeType: string): string {
  *
  * Falls back to full content if the total is under 20k chars.
  */
-export function makeCompactManifest(files: BuilderFile[], userPrompt?: string): string {
+export function makeCompactManifest(
+  files: BuilderFile[],
+  userPrompt?: string,
+  unchangedFilesHint?: string[],
+): string {
   const full = files.map((f) => `--- ${f.path} (${f.mimeType}) ---\n${f.content}`).join("\n\n");
   if (full.length <= 20000) return full;
 
   const promptLower = (userPrompt ?? "").toLowerCase();
   const directlyReferenced = new Set<string>();
   const referencedDirs = new Set<string>();
+  // Files the model declared unchanged in the prior turn — deprioritise to a path-only stub
+  const priorUnchanged = new Set<string>(unchangedFilesHint ?? []);
 
   for (const f of files) {
     const fileName = f.path.split("/").pop()?.toLowerCase() ?? "";
@@ -386,6 +392,12 @@ export function makeCompactManifest(files: BuilderFile[], userPrompt?: string): 
             ? `\n…(${f.content.length - 800} more chars)${structural ? ` | Structure: ${structural}` : ""}`
             : "";
         return `--- ${f.path} (${f.mimeType}, ${f.content.length} chars — related dir) ---\n${preview}${tail}`;
+      }
+
+      // Files the model explicitly left untouched in the previous turn get a path-only stub.
+      // This saves tokens without losing structural context for files that haven't been touched.
+      if (priorUnchanged.has(f.path)) {
+        return `--- ${f.path} (${f.mimeType}, ${f.content.length} chars — unchanged last turn, skip unless this request affects it) ---`;
       }
 
       const structural = extractStructuralSummary(f.content, f.mimeType);
@@ -1524,6 +1536,7 @@ export async function runRefinePipeline(args: {
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
   integrationContext?: string;
+  unchangedFilesHint?: string[];
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<{
   changedFiles: BuilderFile[];
@@ -1544,10 +1557,11 @@ export async function runRefinePipeline(args: {
     conversationHistory,
     knowledgeContext,
     integrationContext,
+    unchangedFilesHint,
     onEvent,
   } = args;
 
-  const fileManifest = makeCompactManifest(existingFiles, userPrompt);
+  const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: REFINE_SYSTEM_PROMPT },

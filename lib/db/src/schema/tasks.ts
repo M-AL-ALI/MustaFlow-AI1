@@ -41,6 +41,7 @@ export type TaskReport = {
     auditedAt: string;
     fileCount: number;
   } | null;
+  filesUnchanged?: string[];
 };
 
 export const agentTasksTable = pgTable(
