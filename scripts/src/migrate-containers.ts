@@ -9,15 +9,11 @@ async function main(): Promise<void> {
   try {
     await client.query("BEGIN");
 
-    await client.query(
-      "ALTER TABLE projects ADD COLUMN IF NOT EXISTS container_id text",
-    );
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS container_id text");
     await client.query(
       `ALTER TABLE projects ADD COLUMN IF NOT EXISTS container_status text NOT NULL DEFAULT 'stopped'`,
     );
-    await client.query(
-      "ALTER TABLE projects ADD COLUMN IF NOT EXISTS container_url text",
-    );
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS container_url text");
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS container_logs (

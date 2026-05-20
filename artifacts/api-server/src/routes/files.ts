@@ -251,17 +251,91 @@ router.patch(
         .where(eq(projectsTable.id, projectId))
         .then(([project]) => {
           if (project?.containerId && project.containerStatus === "running") {
-            void writeFileToContainer(
-              project.containerId,
-              updated.path,
-              content,
-              projectId,
-            );
+            void writeFileToContainer(project.containerId, updated.path, content, projectId);
           }
         })
         .catch((err: unknown) => {
           logger.warn({ err, projectId, path: updated.path }, "Failed to sync file to container");
         });
+    });
+  },
+);
+
+router.delete(
+  "/projects/:id/files/:fileId",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const fileId = Number(req.params.fileId);
+    if (!Number.isFinite(fileId)) {
+      res.status(400).json({ error: "Invalid file id" });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(projectFilesTable)
+      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)));
+    if (!existing) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    await db
+      .delete(projectFilesTable)
+      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)));
+    res.json({ deleted: true });
+  },
+);
+
+router.patch(
+  "/projects/:id/files/:fileId/rename",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const fileId = Number(req.params.fileId);
+    if (!Number.isFinite(fileId)) {
+      res.status(400).json({ error: "Invalid file id" });
+      return;
+    }
+    const { path: newPath } = req.body as { path?: unknown };
+    if (typeof newPath !== "string" || newPath.trim() === "") {
+      res.status(400).json({ error: "path must be a non-empty string" });
+      return;
+    }
+    const normalizedPath = newPath.trim();
+
+    const [existing] = await db
+      .select()
+      .from(projectFilesTable)
+      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)));
+    if (!existing) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+
+    const conflict = await db
+      .select({ id: projectFilesTable.id })
+      .from(projectFilesTable)
+      .where(
+        and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, normalizedPath)),
+      );
+    if (conflict.length > 0) {
+      res.status(409).json({ error: "A file with that path already exists" });
+      return;
+    }
+
+    const newMimeType = guessMime(normalizedPath);
+    const [updated] = await db
+      .update(projectFilesTable)
+      .set({ path: normalizedPath, mimeType: newMimeType, updatedAt: new Date() })
+      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)))
+      .returning();
+
+    res.json({
+      id: updated.id,
+      path: updated.path,
+      mimeType: updated.mimeType,
+      content: updated.content,
+      updatedAt: updated.updatedAt,
     });
   },
 );

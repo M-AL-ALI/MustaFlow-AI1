@@ -803,6 +803,40 @@ export const UpdateProjectFileResponse = zod.object({
 })
 
 
+/**
+ * @summary Delete a project file by id
+ */
+export const DeleteProjectFileParams = zod.object({
+  "id": zod.coerce.number(),
+  "fileId": zod.coerce.number()
+})
+
+export const DeleteProjectFileResponse = zod.object({
+  "deleted": zod.boolean()
+})
+
+
+/**
+ * @summary Rename (move) a project file to a new path
+ */
+export const RenameProjectFileParams = zod.object({
+  "id": zod.coerce.number(),
+  "fileId": zod.coerce.number()
+})
+
+export const RenameProjectFileBody = zod.object({
+  "path": zod.string()
+})
+
+export const RenameProjectFileResponse = zod.object({
+  "id": zod.number(),
+  "path": zod.string(),
+  "mimeType": zod.string(),
+  "content": zod.string(),
+  "updatedAt": zod.coerce.date()
+})
+
+
 export const ListSecretsParams = zod.object({
   "id": zod.coerce.number()
 })

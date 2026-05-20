@@ -1,13 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import {
-  Terminal,
-  Power,
-  PowerOff,
-  Loader2,
-  AlertCircle,
-  RefreshCw,
-  Zap,
-} from "lucide-react";
+import { Terminal, Power, PowerOff, Loader2, AlertCircle, RefreshCw, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -47,10 +39,7 @@ export function TerminalTab({
   const outputRef = useRef<HTMLDivElement>(null);
 
   const addLine = useCallback((text: string, type: LogLine["type"]) => {
-    setLines((prev) => [
-      ...prev.slice(-499),
-      { id: lineIdCounter++, text, type },
-    ]);
+    setLines((prev) => [...prev.slice(-499), { id: lineIdCounter++, text, type }]);
   }, []);
 
   const scrollToBottom = useCallback(() => {
@@ -188,11 +177,7 @@ export function TerminalTab({
         {(containerStatus === "stopped" ||
           containerStatus === "hibernated" ||
           containerStatus === "error") && (
-          <Button
-            onClick={onStartContainer}
-            disabled={isStarting}
-            className="gap-2"
-          >
+          <Button onClick={onStartContainer} disabled={isStarting} className="gap-2">
             {isStarting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
@@ -269,16 +254,34 @@ export function TerminalTab({
             {connected ? "Connected" : "Disconnected"}
           </span>
 
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={clearTerminal} title="Clear terminal">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={clearTerminal}
+            title="Clear terminal"
+          >
             <RefreshCw className="h-3 w-3" />
           </Button>
 
           {connected ? (
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={disconnect} title="Disconnect">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={disconnect}
+              title="Disconnect"
+            >
               <PowerOff className="h-3 w-3 text-destructive" />
             </Button>
           ) : (
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={connect} title="Reconnect">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={connect}
+              title="Reconnect"
+            >
               <Power className="h-3 w-3 text-green-400" />
             </Button>
           )}
@@ -301,7 +304,10 @@ export function TerminalTab({
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
           {wsError}
           <button
-            onClick={() => { setWsError(null); connect(); }}
+            onClick={() => {
+              setWsError(null);
+              connect();
+            }}
             className="ml-auto text-[10px] font-semibold border border-destructive/30 px-2 py-0.5 rounded hover:bg-destructive/20 transition-colors"
           >
             Retry

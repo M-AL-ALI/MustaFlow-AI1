@@ -68,7 +68,11 @@ export function createTerminalServer(): TerminalServer {
 
     // Load project and verify ownership
     const [project] = await db
-      .select({ ownerId: projectsTable.ownerId, containerId: projectsTable.containerId, containerStatus: projectsTable.containerStatus })
+      .select({
+        ownerId: projectsTable.ownerId,
+        containerId: projectsTable.containerId,
+        containerStatus: projectsTable.containerStatus,
+      })
       .from(projectsTable)
       .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
@@ -85,7 +89,10 @@ export function createTerminalServer(): TerminalServer {
     }
 
     if (!project.containerId || project.containerStatus !== "running") {
-      sendControl(ws, { type: "error", message: "Container is not running. Start it from the Preview tab first." });
+      sendControl(ws, {
+        type: "error",
+        message: "Container is not running. Start it from the Preview tab first.",
+      });
       ws.close(4002, "Container not running");
       return;
     }
@@ -97,7 +104,7 @@ export function createTerminalServer(): TerminalServer {
     // Input buffer — accumulate keystrokes into a command line
     let lineBuffer = "";
 
-    ws.on("message", async (data) => {
+    ws.on("message", async (data: Buffer | ArrayBuffer | Buffer[]) => {
       const input = data.toString("utf8");
 
       // Handle special characters
@@ -118,7 +125,10 @@ export function createTerminalServer(): TerminalServer {
           if (result.output) {
             sendText(ws, result.output.replace(/\n/g, "\r\n"));
           }
-          sendText(ws, result.ok ? "\r\n\x1b[32m[exit 0]\x1b[0m\r\n$ " : "\r\n\x1b[31m[exit 1]\x1b[0m\r\n$ ");
+          sendText(
+            ws,
+            result.ok ? "\r\n\x1b[32m[exit 0]\x1b[0m\r\n$ " : "\r\n\x1b[31m[exit 1]\x1b[0m\r\n$ ",
+          );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           sendText(ws, `\r\n\x1b[31mError: ${msg}\x1b[0m\r\n$ `);
@@ -144,7 +154,7 @@ export function createTerminalServer(): TerminalServer {
       logger.info({ projectId, machineId }, "Terminal session closed");
     });
 
-    ws.on("error", (err) => {
+    ws.on("error", (err: Error) => {
       logger.warn({ err, projectId }, "Terminal WebSocket error");
     });
   });
@@ -152,7 +162,7 @@ export function createTerminalServer(): TerminalServer {
   const handleUpgrade = (req: IncomingMessage, socket: import("node:net").Socket, head: Buffer) => {
     const url = req.url ?? "";
     if (!url.match(/\/api\/projects\/\d+\/terminal/)) return;
-    wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
       wss.emit("connection", ws, req);
     });
   };

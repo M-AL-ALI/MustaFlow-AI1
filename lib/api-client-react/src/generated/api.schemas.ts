@@ -752,6 +752,10 @@ export interface ProjectFileUpdate {
   content: string;
 }
 
+export interface ProjectFileRename {
+  path: string;
+}
+
 export interface RollbackResult {
   restoredFiles: number;
   versionId: number;
@@ -1422,6 +1426,10 @@ export const GetAgentRouting200AgentIdentity = {
 export type GetAgentRouting200 = {
   agentIdentity: GetAgentRouting200AgentIdentity;
   reason: string;
+};
+
+export type DeleteProjectFile200 = {
+  deleted: boolean;
 };
 
 export type AnalyzePageMapParams = {

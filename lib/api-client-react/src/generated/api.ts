@@ -44,6 +44,7 @@ import type {
   ContainerLog,
   ContainerStatus,
   DeleteKnowledge200,
+  DeleteProjectFile200,
   DeleteSecret200,
   DeleteWorkspace200,
   DestroyContainer200,
@@ -84,6 +85,7 @@ import type {
   ProjectAuditResult,
   ProjectFileContent,
   ProjectFileCreate,
+  ProjectFileRename,
   ProjectFileSummary,
   ProjectFileUpdate,
   ProjectInput,
@@ -2482,6 +2484,152 @@ export const useUpdateProjectFile = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getUpdateProjectFileMutationOptions(options));
+    }
+
+export const getDeleteProjectFileUrl = (id: number,
+    fileId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files/${fileId}`
+}
+
+/**
+ * @summary Delete a project file by id
+ */
+export const deleteProjectFile = async (id: number,
+    fileId: number, options?: RequestInit): Promise<DeleteProjectFile200> => {
+
+  return customFetch<DeleteProjectFile200>(getDeleteProjectFileUrl(id,fileId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteProjectFileMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProjectFile>>, TError,{id: number;fileId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteProjectFile>>, TError,{id: number;fileId: number}, TContext> => {
+
+const mutationKey = ['deleteProjectFile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteProjectFile>>, {id: number;fileId: number}> = (props) => {
+          const {id,fileId} = props ?? {};
+
+          return  deleteProjectFile(id,fileId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteProjectFileMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProjectFile>>>
+
+    export type DeleteProjectFileMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Delete a project file by id
+ */
+export const useDeleteProjectFile = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProjectFile>>, TError,{id: number;fileId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteProjectFile>>,
+        TError,
+        {id: number;fileId: number},
+        TContext
+      > => {
+      return useMutation(getDeleteProjectFileMutationOptions(options));
+    }
+
+export const getRenameProjectFileUrl = (id: number,
+    fileId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files/${fileId}/rename`
+}
+
+/**
+ * @summary Rename (move) a project file to a new path
+ */
+export const renameProjectFile = async (id: number,
+    fileId: number,
+    projectFileRename: ProjectFileRename, options?: RequestInit): Promise<ProjectFileContent> => {
+
+  return customFetch<ProjectFileContent>(getRenameProjectFileUrl(id,fileId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      projectFileRename,)
+  }
+);}
+
+
+
+
+export const getRenameProjectFileMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameProjectFile>>, TError,{id: number;fileId: number;data: BodyType<ProjectFileRename>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof renameProjectFile>>, TError,{id: number;fileId: number;data: BodyType<ProjectFileRename>}, TContext> => {
+
+const mutationKey = ['renameProjectFile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameProjectFile>>, {id: number;fileId: number;data: BodyType<ProjectFileRename>}> = (props) => {
+          const {id,fileId,data} = props ?? {};
+
+          return  renameProjectFile(id,fileId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenameProjectFileMutationResult = NonNullable<Awaited<ReturnType<typeof renameProjectFile>>>
+    export type RenameProjectFileMutationBody = BodyType<ProjectFileRename>
+    export type RenameProjectFileMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Rename (move) a project file to a new path
+ */
+export const useRenameProjectFile = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameProjectFile>>, TError,{id: number;fileId: number;data: BodyType<ProjectFileRename>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof renameProjectFile>>,
+        TError,
+        {id: number;fileId: number;data: BodyType<ProjectFileRename>},
+        TContext
+      > => {
+      return useMutation(getRenameProjectFileMutationOptions(options));
     }
 
 export const getListSecretsUrl = (id: number,) => {

@@ -6,6 +6,8 @@ import {
   useGetProjectFile,
   useUpdateProjectFile,
   useCreateProjectFile,
+  useDeleteProjectFile,
+  useRenameProjectFile,
   getListProjectFilesQueryKey,
   getGetProjectFileQueryKey,
 } from "@workspace/api-client-react";
@@ -26,6 +28,14 @@ import {
   Layers,
   ChevronRight,
   Loader2,
+  Pencil,
+  Trash2,
+  Package,
+  GitBranch,
+  Github,
+  ExternalLink,
+  Lock,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -38,7 +48,11 @@ function getLanguage(path: string): string {
   if (path.endsWith(".ts") || path.endsWith(".tsx")) return "typescript";
   if (path.endsWith(".json")) return "json";
   if (path.endsWith(".md") || path.endsWith(".markdown")) return "markdown";
+  if (path.endsWith(".yaml") || path.endsWith(".yml")) return "yaml";
   if (path.endsWith(".svg") || path.endsWith(".xml")) return "xml";
+  if (path.endsWith(".sh") || path.endsWith(".bash")) return "shell";
+  if (path.endsWith(".py")) return "python";
+  if (path.endsWith(".toml")) return "ini";
   return "plaintext";
 }
 
@@ -56,7 +70,7 @@ function FileIcon({ path }: { path: string }) {
   return <FileCode2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
 }
 
-type SidebarMode = "files" | "search" | "snippets";
+type SidebarMode = "files" | "search" | "snippets" | "packages" | "git";
 
 type SearchResult = {
   fileId: number;
@@ -257,6 +271,373 @@ function SnippetLibraryPanel({ onInsert }: { onInsert: (prompt: string) => void 
   );
 }
 
+type PackageDep = { name: string; version: string; dev?: boolean };
+
+function PackageManagerPanel({
+  projectId,
+  files,
+}: {
+  projectId: number;
+  files: Array<{ id: number; path: string }>;
+}) {
+  const [deps, setDeps] = useState<PackageDep[]>([]);
+  const [devDeps, setDevDeps] = useState<PackageDep[]>([]);
+  const [parsed, setParsed] = useState(false);
+  const [expanded, setExpanded] = useState<"deps" | "devDeps" | null>("deps");
+  const { data: pkgFile } = useGetProjectFile(
+    projectId,
+    files.find((f) => f.path === "package.json")?.id ?? 0,
+    {
+      query: {
+        enabled: !!files.find((f) => f.path === "package.json"),
+        queryKey: getGetProjectFileQueryKey(
+          projectId,
+          files.find((f) => f.path === "package.json")?.id ?? 0,
+        ),
+      },
+    },
+  );
+
+  useEffect(() => {
+    if (!pkgFile?.content) return;
+    try {
+      const pkg = JSON.parse(pkgFile.content) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      setDeps(Object.entries(pkg.dependencies ?? {}).map(([name, version]) => ({ name, version })));
+      setDevDeps(
+        Object.entries(pkg.devDependencies ?? {}).map(([name, version]) => ({
+          name,
+          version,
+          dev: true,
+        })),
+      );
+      setParsed(true);
+    } catch {
+      setParsed(false);
+    }
+  }, [pkgFile?.content]);
+
+  const hasPkgJson = !!files.find((f) => f.path === "package.json");
+
+  if (!hasPkgJson) {
+    return (
+      <div className="px-3 py-6 text-center">
+        <Package className="h-5 w-5 text-muted-foreground/30 mx-auto mb-2" />
+        <div className="text-[11px] text-muted-foreground">No package.json found</div>
+        <div className="text-[10px] text-muted-foreground/60 mt-0.5">
+          Build something first to see packages
+        </div>
+      </div>
+    );
+  }
+
+  if (!parsed && pkgFile) {
+    return (
+      <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
+        Could not parse package.json
+      </div>
+    );
+  }
+
+  if (!pkgFile) {
+    return (
+      <div className="px-3 py-4 flex items-center justify-center">
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  const totalCount = deps.length + devDeps.length;
+
+  function renderSection(title: string, items: PackageDep[], sectionKey: "deps" | "devDeps") {
+    const isOpen = expanded === sectionKey;
+    return (
+      <div key={sectionKey} className="border-b border-border/30 last:border-0">
+        <button
+          onClick={() => setExpanded(isOpen ? null : sectionKey)}
+          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors text-left"
+        >
+          {isOpen ? (
+            <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+          ) : (
+            <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+          )}
+          <span className="text-[11px] font-medium text-foreground flex-1">{title}</span>
+          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+            {items.length}
+          </span>
+        </button>
+        {isOpen && (
+          <div className="pb-1">
+            {items.length === 0 ? (
+              <div className="px-3 py-2 text-[10px] text-muted-foreground">None</div>
+            ) : (
+              items.map((dep) => (
+                <div
+                  key={dep.name}
+                  className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30 transition-colors"
+                >
+                  <Package className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <span className="text-[11px] font-mono text-foreground flex-1 truncate">
+                    {dep.name}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                    {dep.version}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="px-3 py-2 border-b border-border/50 bg-muted/20">
+        <div className="text-[10px] text-muted-foreground">
+          {totalCount} package{totalCount !== 1 ? "s" : ""} in package.json
+        </div>
+        <div className="text-[10px] text-muted-foreground/60 mt-0.5">
+          Use the terminal to install new packages
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {renderSection("Dependencies", deps, "deps")}
+        {renderSection("Dev Dependencies", devDeps, "devDeps")}
+      </div>
+    </div>
+  );
+}
+
+function GitPushPanel({ projectId }: { projectId: number }) {
+  const [token, setToken] = useState("");
+  const [repo, setRepo] = useState("");
+  const [branch, setBranch] = useState("main");
+  const [commitMessage, setCommitMessage] = useState("");
+  const [isPrivate, setIsPrivate] = useState(true);
+  const [pushing, setPushing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    repoUrl: string;
+    commitSha: string;
+    filesCount: number;
+    created: boolean;
+  } | null>(null);
+  const { toast } = useToast();
+
+  const LS_KEY = `mf-github-${projectId}`;
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_KEY) ?? "{}") as {
+        repo?: string;
+        branch?: string;
+      };
+      if (saved.repo) setRepo(saved.repo);
+      if (saved.branch) setBranch(saved.branch);
+    } catch {
+      // intentionally ignored
+    }
+  }, [LS_KEY]);
+
+  async function handlePush() {
+    if (!repo.trim()) return;
+    setPushing(true);
+    setError(null);
+    setResult(null);
+    try {
+      const body: Record<string, unknown> = {
+        repo: repo.trim(),
+        branch: branch.trim() || "main",
+        private: isPrivate,
+        commitMessage: commitMessage.trim() || undefined,
+      };
+      if (token.trim()) body.token = token.trim();
+
+      const res = await fetch(`/api/projects/${projectId}/github/push`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json()) as {
+        repoUrl?: string;
+        commitSha?: string;
+        filesCount?: number;
+        created?: boolean;
+        error?: string;
+      };
+      if (!res.ok) {
+        setError(data.error ?? "Push failed");
+      } else {
+        setResult({
+          repoUrl: data.repoUrl!,
+          commitSha: data.commitSha!,
+          filesCount: data.filesCount!,
+          created: data.created ?? false,
+        });
+        localStorage.setItem(LS_KEY, JSON.stringify({ repo: repo.trim(), branch: branch.trim() }));
+        toast({ title: "Pushed to GitHub", description: `${data.filesCount} files pushed` });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Push failed";
+      setError(msg);
+    } finally {
+      setPushing(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-full min-h-0 overflow-y-auto">
+      <div className="px-3 py-2 border-b border-border/50 bg-muted/20">
+        <div className="flex items-center gap-2">
+          <Github className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-[11px] font-medium text-foreground">Push to GitHub</span>
+        </div>
+        <div className="text-[10px] text-muted-foreground mt-0.5">
+          Push all project files to a GitHub repository
+        </div>
+      </div>
+
+      <div className="p-3 space-y-3">
+        {result && (
+          <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-2.5 space-y-1.5">
+            <div className="text-[11px] text-green-400 font-medium flex items-center gap-1.5">
+              <Check className="h-3.5 w-3.5" />
+              {result.created ? "Repository created and pushed" : "Pushed successfully"}
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+              {result.filesCount} files · {result.commitSha.slice(0, 7)}
+            </div>
+            <a
+              href={result.repoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {result.repoUrl}
+            </a>
+            <button
+              onClick={() => setResult(null)}
+              className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Push again
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-2.5 text-[11px] text-destructive">
+            {error}
+          </div>
+        )}
+
+        {!result && (
+          <>
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                Repository name
+              </label>
+              <input
+                type="text"
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                placeholder="my-project"
+                className="w-full px-2 py-1.5 text-[11px] bg-background border border-border rounded text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                Branch
+              </label>
+              <input
+                type="text"
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                placeholder="main"
+                className="w-full px-2 py-1.5 text-[11px] bg-background border border-border rounded text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                Commit message
+              </label>
+              <input
+                type="text"
+                value={commitMessage}
+                onChange={(e) => setCommitMessage(e.target.value)}
+                placeholder="Push from MustaFlow AI"
+                className="w-full px-2 py-1.5 text-[11px] bg-background border border-border rounded text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+                <Lock className="h-3 w-3" />
+                GitHub token
+              </label>
+              <input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="ghp_… or use stored GITHUB_TOKEN secret"
+                className="w-full px-2 py-1.5 text-[11px] bg-background border border-border rounded text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+              />
+              <div className="text-[10px] text-muted-foreground">
+                Leave blank to use the GITHUB_TOKEN project secret
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsPrivate((v) => !v)}
+                className={cn(
+                  "w-8 h-4 rounded-full transition-colors relative shrink-0",
+                  isPrivate ? "bg-primary" : "bg-muted-foreground/30",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm",
+                    isPrivate ? "left-4.5" : "left-0.5",
+                  )}
+                  style={{ transform: isPrivate ? "translateX(14px)" : "translateX(0)" }}
+                />
+              </button>
+              <span className="text-[11px] text-muted-foreground">Private repository</span>
+            </div>
+
+            <button
+              onClick={() => void handlePush()}
+              disabled={pushing || !repo.trim()}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-primary text-primary-foreground text-[11px] font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              {pushing ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Pushing…
+                </>
+              ) : (
+                <>
+                  <GitBranch className="h-3.5 w-3.5" />
+                  Push to GitHub
+                </>
+              )}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const EDITOR_LS_KEY = (projectId: number) => `mf-editor-file-${projectId}`;
+
 export function CodeEditorTab({
   projectId,
   initialFileId,
@@ -272,7 +653,19 @@ export function CodeEditorTab({
   const queryClient = useQueryClient();
 
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("files");
-  const [selectedFileId, setSelectedFileId] = useState<number | null>(initialFileId ?? null);
+
+  const resolveInitialFile = (): number | null => {
+    if (initialFileId != null) return initialFileId;
+    try {
+      const stored = localStorage.getItem(EDITOR_LS_KEY(projectId));
+      if (stored) return Number(stored);
+    } catch {
+      // intentionally ignored
+    }
+    return null;
+  };
+
+  const [selectedFileId, setSelectedFileId] = useState<number | null>(resolveInitialFile);
   const [pendingFileId, setPendingFileId] = useState<number | null>(null);
   const [editorContent, setEditorContent] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -282,7 +675,12 @@ export function CodeEditorTab({
   const [newFilePath, setNewFilePath] = useState("");
   const newFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Monaco editor instance ref for programmatic line navigation
+  const [renamingFileId, setRenamingFileId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  const [confirmDeleteFileId, setConfirmDeleteFileId] = useState<number | null>(null);
+
   const editorRef = useRef<MonacoEditor | null>(null);
   const pendingRevealLineRef = useRef<number | null>(null);
 
@@ -299,8 +697,11 @@ export function CodeEditorTab({
 
   const updateFile = useUpdateProjectFile();
   const createFile = useCreateProjectFile();
+  const deleteFile = useDeleteProjectFile();
+  const renameFile = useRenameProjectFile();
 
   const selectedFile = files.find((f) => f.id === selectedFileId) ?? null;
+  const confirmDeleteFile = files.find((f) => f.id === confirmDeleteFileId) ?? null;
 
   const displayContent = editorContent !== null ? editorContent : (fileContent?.content ?? "");
 
@@ -323,15 +724,18 @@ export function CodeEditorTab({
       setEditorContent(null);
       setIsDirty(false);
       setShowUnsavedWarning(false);
+      try {
+        localStorage.setItem(EDITOR_LS_KEY(projectId), String(fileId));
+      } catch {
+      // intentionally ignored
+    }
     }
     setSidebarMode("files");
   }
 
-  // Reveal the pending line once file content loads and editor is mounted
   useEffect(() => {
     const line = pendingRevealLineRef.current;
     if (!line || !editorRef.current) return;
-    // Small delay to let Monaco finish rendering the new file content
     const timer = setTimeout(() => {
       const ed = editorRef.current;
       if (!ed) return;
@@ -350,6 +754,11 @@ export function CodeEditorTab({
       setIsDirty(false);
       setShowUnsavedWarning(false);
       setPendingFileId(null);
+      try {
+        localStorage.setItem(EDITOR_LS_KEY(projectId), String(pendingFileId));
+      } catch {
+      // intentionally ignored
+    }
     }
   }
 
@@ -374,7 +783,6 @@ export function CodeEditorTab({
       const lowerPath = selectedFile?.path.toLowerCase() ?? "";
       const isHtml = lowerPath.endsWith(".html") || lowerPath.endsWith(".htm");
       if (isHtml) onHtmlFileSaved?.();
-      // Notify the WebContainer (if running) about the saved file so Vite HMR picks it up.
       if (selectedFile?.path && editorContent !== null) {
         window.dispatchEvent(
           new CustomEvent("mustaflow:file-saved", {
@@ -418,10 +826,74 @@ export function CodeEditorTab({
       setSelectedFileId(created.id);
       setEditorContent("");
       setIsDirty(false);
+      try {
+        localStorage.setItem(EDITOR_LS_KEY(projectId), String(created.id));
+      } catch {
+      // intentionally ignored
+    }
       toast({ title: "File created", description: trimmed });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Could not create file.";
       toast({ title: "Create failed", description: msg, variant: "destructive" });
+    }
+  }
+
+  function startRename(fileId: number, currentPath: string) {
+    setRenamingFileId(fileId);
+    setRenameValue(currentPath);
+    setTimeout(() => renameInputRef.current?.focus(), 50);
+  }
+
+  function cancelRename() {
+    setRenamingFileId(null);
+    setRenameValue("");
+  }
+
+  async function handleRename(fileId: number) {
+    const trimmed = renameValue.trim();
+    if (!trimmed) return cancelRename();
+    const currentFile = files.find((f) => f.id === fileId);
+    if (currentFile?.path === trimmed) return cancelRename();
+    try {
+      await renameFile.mutateAsync({
+        id: projectId,
+        fileId,
+        data: { path: trimmed },
+      });
+      await queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
+      if (selectedFileId === fileId) {
+        void queryClient.invalidateQueries({
+          queryKey: getGetProjectFileQueryKey(projectId, fileId),
+        });
+      }
+      setRenamingFileId(null);
+      setRenameValue("");
+      toast({ title: "File renamed", description: trimmed });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not rename file.";
+      toast({ title: "Rename failed", description: msg, variant: "destructive" });
+    }
+  }
+
+  async function handleDeleteFile(fileId: number) {
+    try {
+      await deleteFile.mutateAsync({ id: projectId, fileId });
+      await queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
+      setConfirmDeleteFileId(null);
+      if (selectedFileId === fileId) {
+        setSelectedFileId(null);
+        setEditorContent(null);
+        setIsDirty(false);
+        try {
+          localStorage.removeItem(EDITOR_LS_KEY(projectId));
+        } catch {
+      // intentionally ignored
+    }
+      }
+      toast({ title: "File deleted" });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not delete file.";
+      toast({ title: "Delete failed", description: msg, variant: "destructive" });
     }
   }
 
@@ -464,6 +936,30 @@ export function CodeEditorTab({
           )}
         >
           <Layers className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() => setSidebarMode("packages")}
+          title="Package manager"
+          className={cn(
+            "p-1.5 rounded transition-colors",
+            sidebarMode === "packages"
+              ? "text-primary bg-primary/10"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted",
+          )}
+        >
+          <Package className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() => setSidebarMode("git")}
+          title="Push to GitHub"
+          className={cn(
+            "p-1.5 rounded transition-colors",
+            sidebarMode === "git"
+              ? "text-primary bg-primary/10"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted",
+          )}
+        >
+          <Github className="h-4 w-4" />
         </button>
       </div>
 
@@ -529,24 +1025,119 @@ export function CodeEditorTab({
                   </div>
                 </div>
               ) : (
-                files.map((file) => (
-                  <button
-                    key={file.id}
-                    onClick={() => switchToFile(file.id)}
-                    className={cn(
-                      "w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-left transition-colors",
-                      selectedFileId === file.id
-                        ? "bg-primary/10 text-primary border-r-2 border-primary"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    <FileIcon path={file.path} />
-                    <span className="truncate font-mono">{file.path}</span>
-                    {selectedFileId === file.id && isDirty && (
-                      <span className="ml-auto w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                    )}
-                  </button>
-                ))
+                files.map((file) => {
+                  const isRenaming = renamingFileId === file.id;
+                  const isConfirmDelete = confirmDeleteFileId === file.id;
+
+                  if (isRenaming) {
+                    return (
+                      <div
+                        key={file.id}
+                        className="flex items-center gap-1 px-2 py-1.5 bg-primary/5 border-r-2 border-primary"
+                      >
+                        <input
+                          ref={renameInputRef}
+                          type="text"
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void handleRename(file.id);
+                            if (e.key === "Escape") cancelRename();
+                          }}
+                          className="flex-1 min-w-0 text-[11px] font-mono bg-background border border-primary/50 rounded px-1.5 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <button
+                          onClick={() => void handleRename(file.id)}
+                          disabled={renameFile.isPending}
+                          className="p-0.5 rounded text-primary hover:bg-primary/10 transition-colors disabled:opacity-40 shrink-0"
+                          title="Confirm rename"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={cancelRename}
+                          className="p-0.5 rounded text-muted-foreground hover:bg-muted transition-colors shrink-0"
+                          title="Cancel"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  if (isConfirmDelete) {
+                    return (
+                      <div
+                        key={file.id}
+                        className="px-2 py-1.5 bg-destructive/10 border-r-2 border-destructive"
+                      >
+                        <div className="text-[10px] text-destructive/80 truncate mb-1">
+                          Delete {file.path}?
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => void handleDeleteFile(file.id)}
+                            disabled={deleteFile.isPending}
+                            className="flex-1 text-[10px] py-0.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors disabled:opacity-50"
+                          >
+                            {deleteFile.isPending ? "Deleting…" : "Delete"}
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteFileId(null)}
+                            className="flex-1 text-[10px] py-0.5 rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={file.id}
+                      className={cn(
+                        "w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-left transition-colors group",
+                        selectedFileId === file.id
+                          ? "bg-primary/10 text-primary border-r-2 border-primary"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      <button
+                        onClick={() => switchToFile(file.id)}
+                        className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                      >
+                        <FileIcon path={file.path} />
+                        <span className="truncate font-mono">{file.path}</span>
+                        {selectedFileId === file.id && isDirty && (
+                          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+                        )}
+                      </button>
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startRename(file.id, file.path);
+                          }}
+                          title="Rename"
+                          className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeleteFileId(file.id);
+                          }}
+                          title="Delete"
+                          className="p-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
           </>
@@ -581,6 +1172,34 @@ export function CodeEditorTab({
                   toast({ title: "Snippet sent", description: "Check the AI Builder chat below." });
                 }}
               />
+            </div>
+          </>
+        )}
+
+        {sidebarMode === "packages" && (
+          <>
+            <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2">
+              <Package className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Packages
+              </span>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <PackageManagerPanel projectId={projectId} files={files} />
+            </div>
+          </>
+        )}
+
+        {sidebarMode === "git" && (
+          <>
+            <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2">
+              <Github className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Git
+              </span>
+            </div>
+            <div className="flex-1 min-h-0">
+              <GitPushPanel projectId={projectId} />
             </div>
           </>
         )}
@@ -631,6 +1250,11 @@ export function CodeEditorTab({
                         setIsDirty(false);
                         setShowUnsavedWarning(false);
                         setPendingFileId(null);
+                        try {
+                          localStorage.setItem(EDITOR_LS_KEY(projectId), String(pendingFileId));
+                        } catch {
+      // intentionally ignored
+    }
                       }
                     })
                   }
@@ -693,6 +1317,36 @@ export function CodeEditorTab({
           </div>
         )}
       </div>
+
+      {/* Delete confirmation overlay */}
+      {confirmDeleteFile && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-xl p-5 max-w-sm w-full mx-4 shadow-2xl space-y-4">
+            <div className="space-y-1.5">
+              <div className="font-semibold text-foreground">Delete file?</div>
+              <div className="text-sm text-muted-foreground">
+                <span className="font-mono text-foreground">{confirmDeleteFile.path}</span> will be
+                permanently deleted. This cannot be undone.
+              </div>
+            </div>
+            <div className="flex items-center gap-2 justify-end">
+              <button
+                onClick={() => setConfirmDeleteFileId(null)}
+                className="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleDeleteFile(confirmDeleteFile.id)}
+                disabled={deleteFile.isPending}
+                className="px-3 py-1.5 text-sm rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
+              >
+                {deleteFile.isPending ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
