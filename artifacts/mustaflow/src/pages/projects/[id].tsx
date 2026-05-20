@@ -57,6 +57,7 @@ import { SuggestionChips } from "./components/suggestion-chips";
 import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
 import { QueueComposer } from "./components/queue-composer";
 import { QueueProgressStrip } from "./components/queue-progress-strip";
+import { BackgroundTasksDrawer, type BgTask } from "./components/background-tasks-drawer";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
@@ -501,6 +502,7 @@ export default function ProjectWorkspacePage() {
   const [agentMode, setAgentMode] = useState<AgentMode>("power");
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
+  const [backgroundPanelOpen, setBackgroundPanelOpen] = useState(false);
   const [variantMode, setVariantMode] = useState(false);
   const [variantBatchPending, setVariantBatchPending] = useState(false);
   const [variantComparison, setVariantComparison] = useState<{
@@ -781,6 +783,7 @@ export default function ProjectWorkspacePage() {
       setActiveTaskId(null);
       chatAtBottomRef.current = true;
       setPendingBuildStartedAt(new Date());
+      if (opts?.background ?? runInBackground) setBackgroundPanelOpen(true);
       const effectiveMode = opts?.agentMode ?? agentMode;
       const effectivePlanMode = opts?.planMode ?? planMode;
       pendingIsPlanRef.current = effectivePlanMode;
@@ -852,6 +855,7 @@ export default function ProjectWorkspacePage() {
     (batchId: string, totalCount: number) => {
       setActiveBatchId(batchId);
       setBatchTotalCount(totalCount);
+      setBackgroundPanelOpen(true);
       localStorage.setItem(`mustaflow_batch_${projectId}`, batchId);
       void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
       void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
@@ -1012,7 +1016,7 @@ export default function ProjectWorkspacePage() {
   const pendingFeedTaskId = sendMessage.isPending
     ? (tasksForFeed
         .filter((t) => {
-          const activeStatuses = new Set(["queued", "planning", "building", "testing"]);
+          const activeStatuses = new Set(["planning", "building", "testing"]);
           if (!activeStatuses.has(t.status)) return false;
           if (!pendingBuildStartedAt) return true;
           return new Date(t.createdAt).getTime() >= pendingBuildStartedAt.getTime() - 5000;
@@ -1020,6 +1024,18 @@ export default function ProjectWorkspacePage() {
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.id ??
       null)
     : null;
+
+  const backgroundTasks = useMemo(
+    () =>
+      (tasksForFeed as BgTask[])
+        .filter((t) => t.kind === "background")
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 20),
+    [tasksForFeed],
+  );
+  const bgActiveCount = backgroundTasks.filter(
+    (t) => !["completed", "failed", "canceled"].includes(t.status),
+  ).length;
 
   if (projectError || (!projectLoading && !project))
     return (
@@ -1337,6 +1353,7 @@ export default function ProjectWorkspacePage() {
                             : undefined;
                         const isReport = payloadKind === "report";
                         const isError = payloadKind === "error";
+                        const isTaskQueued = payloadKind === "task-queued";
                         const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
                         const structuredPlan =
                           isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
@@ -1348,87 +1365,101 @@ export default function ProjectWorkspacePage() {
                               msg.role === "user" ? "justify-end" : "justify-start",
                             )}
                           >
-                            <div
-                              className={cn(
-                                "max-w-[90%] px-3 py-2 rounded-xl text-xs",
-                                msg.role === "user"
-                                  ? "bg-primary text-primary-foreground rounded-br-sm"
-                                  : isError
-                                    ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
-                                    : "bg-muted text-foreground rounded-bl-sm border border-border",
-                              )}
-                            >
-                              <div className="whitespace-pre-wrap leading-relaxed">
-                                {msg.content}
-                              </div>
-                              {isReport &&
-                                (() => {
-                                  const rp = planPayload as {
-                                    kind: "report";
-                                    report: TaskReport;
-                                    taskId?: number;
-                                    queueBatchId?: string;
-                                    queueIndex?: number | null;
-                                    queueTotalCount?: number | null;
-                                  };
-                                  const hasBatch =
-                                    rp.queueBatchId && rp.queueTotalCount && rp.queueTotalCount > 1;
-                                  const isLastReport = msgIdx === lastReportIdx;
-                                  return (
-                                    <>
-                                      {hasBatch && (
-                                        <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
-                                          <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
-                                          <span className="text-[10px] text-muted-foreground/70 font-medium">
-                                            Task {(rp.queueIndex ?? 0) + 1} of {rp.queueTotalCount}
-                                          </span>
-                                        </div>
-                                      )}
-                                      <ReportCard
-                                        report={rp.report}
-                                        onViewFile={(path) => {
-                                          const f = files.find((x) => x.path === path);
-                                          if (f) {
-                                            setSelectedCodeFileId(f.id);
-                                            setActiveTab("code");
-                                          }
-                                        }}
-                                        onViewHistory={() => switchLeftPanel("history")}
-                                      />
-                                      {isLastReport && rp.taskId && !sendMessage.isPending && (
-                                        <SuggestionChips
-                                          projectId={projectId}
-                                          taskId={rp.taskId}
-                                          onAccepted={(tid) => setActiveTaskId(tid)}
+                            {isTaskQueued ? (
+                              <button
+                                onClick={() => setBackgroundPanelOpen(true)}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/40 bg-muted/30 text-[10px] text-muted-foreground hover:border-primary/30 hover:text-foreground transition-colors"
+                              >
+                                <Layers2 className="h-3 w-3 text-primary/60 shrink-0" />
+                                <span>Task queued in background</span>
+                                <ChevronRight className="h-3 w-3 shrink-0 opacity-50" />
+                              </button>
+                            ) : (
+                              <div
+                                className={cn(
+                                  "max-w-[90%] px-3 py-2 rounded-xl text-xs",
+                                  msg.role === "user"
+                                    ? "bg-primary text-primary-foreground rounded-br-sm"
+                                    : isError
+                                      ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
+                                      : "bg-muted text-foreground rounded-bl-sm border border-border",
+                                )}
+                              >
+                                <div className="whitespace-pre-wrap leading-relaxed">
+                                  {msg.content}
+                                </div>
+                                {isReport &&
+                                  (() => {
+                                    const rp = planPayload as {
+                                      kind: "report";
+                                      report: TaskReport;
+                                      taskId?: number;
+                                      queueBatchId?: string;
+                                      queueIndex?: number | null;
+                                      queueTotalCount?: number | null;
+                                    };
+                                    const hasBatch =
+                                      rp.queueBatchId &&
+                                      rp.queueTotalCount &&
+                                      rp.queueTotalCount > 1;
+                                    const isLastReport = msgIdx === lastReportIdx;
+                                    return (
+                                      <>
+                                        {hasBatch && (
+                                          <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
+                                            <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
+                                            <span className="text-[10px] text-muted-foreground/70 font-medium">
+                                              Task {(rp.queueIndex ?? 0) + 1} of{" "}
+                                              {rp.queueTotalCount}
+                                            </span>
+                                          </div>
+                                        )}
+                                        <ReportCard
+                                          report={rp.report}
+                                          onViewFile={(path) => {
+                                            const f = files.find((x) => x.path === path);
+                                            if (f) {
+                                              setSelectedCodeFileId(f.id);
+                                              setActiveTab("code");
+                                            }
+                                          }}
+                                          onViewHistory={() => switchLeftPanel("history")}
                                         />
-                                      )}
-                                    </>
-                                  );
-                                })()}
-                              {isError && (
-                                <ErrorCard
-                                  message={(planPayload as { message: string }).message}
-                                  suggestions={
-                                    (planPayload as { suggestions?: string[] }).suggestions
-                                  }
-                                  onTryFix={(text) => {
-                                    setPrompt(text);
-                                  }}
-                                  onBuyCredits={() => setBuyCreditsOpen(true)}
-                                />
-                              )}
-                              {isPlanCard && (
-                                <PlanCard
-                                  plan={structuredPlan}
-                                  projectId={projectId}
-                                  initialAgentMode={agentMode}
-                                  onBuild={runPlanned}
-                                  onAddKey={handleAddKey}
-                                  disabled={sendMessage.isPending}
-                                  messageId={msg.id}
-                                />
-                              )}
-                            </div>
+                                        {isLastReport && rp.taskId && !sendMessage.isPending && (
+                                          <SuggestionChips
+                                            projectId={projectId}
+                                            taskId={rp.taskId}
+                                            onAccepted={(tid) => setActiveTaskId(tid)}
+                                          />
+                                        )}
+                                      </>
+                                    );
+                                  })()}
+                                {isError && (
+                                  <ErrorCard
+                                    message={(planPayload as { message: string }).message}
+                                    suggestions={
+                                      (planPayload as { suggestions?: string[] }).suggestions
+                                    }
+                                    onTryFix={(text) => {
+                                      setPrompt(text);
+                                    }}
+                                    onBuyCredits={() => setBuyCreditsOpen(true)}
+                                  />
+                                )}
+                                {isPlanCard && (
+                                  <PlanCard
+                                    plan={structuredPlan}
+                                    projectId={projectId}
+                                    initialAgentMode={agentMode}
+                                    onBuild={runPlanned}
+                                    onAddKey={handleAddKey}
+                                    disabled={sendMessage.isPending}
+                                    messageId={msg.id}
+                                  />
+                                )}
+                              </div>
+                            )}
                           </div>
                         );
                       });
@@ -1477,26 +1508,6 @@ export default function ProjectWorkspacePage() {
                       />
                     ) : (
                       <>
-                        {/* Queue indicator — shown briefly after a queued response */}
-                        {(() => {
-                          const lastMsg = messages?.[messages.length - 1];
-                          const lastPlan = lastMsg?.plan as
-                            | Record<string, unknown>
-                            | null
-                            | undefined;
-                          const isRecentlyQueued =
-                            lastMsg?.role === "assistant" &&
-                            typeof lastPlan === "object" &&
-                            (lastPlan as Record<string, unknown>)?.kind === "task-queued";
-                          return isRecentlyQueued ? (
-                            <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-orange-500/5">
-                              <div className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse shrink-0" />
-                              <span className="text-[10px] text-orange-400 font-medium">
-                                Queued — running in background
-                              </span>
-                            </div>
-                          ) : null;
-                        })()}
                         {/* Bottom status bar — shown when idle */}
                         <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-muted/20">
                           <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
@@ -1520,6 +1531,23 @@ export default function ProjectWorkspacePage() {
                               {versions.length} checkpoint{versions.length !== 1 ? "s" : ""}
                             </button>
                           )}
+                          <button
+                            onClick={() => setBackgroundPanelOpen((v) => !v)}
+                            className={cn(
+                              "flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors",
+                              bgActiveCount > 0
+                                ? "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
+                                : "border-transparent text-muted-foreground/50 hover:text-muted-foreground hover:border-border",
+                            )}
+                            title="Background tasks"
+                          >
+                            <Layers2 className="h-2.5 w-2.5" />
+                            {bgActiveCount > 0
+                              ? `${bgActiveCount} running`
+                              : backgroundTasks.length > 0
+                                ? `${backgroundTasks.length} tasks`
+                                : "Tasks"}
+                          </button>
                           <div className="ml-auto flex items-center gap-1">
                             <span
                               className={cn(
@@ -1556,16 +1584,6 @@ export default function ProjectWorkspacePage() {
                     </div>
                   )}
 
-                  {/* Queue progress strip — shown when a batch is active */}
-                  {activeBatchId && (
-                    <QueueProgressStrip
-                      projectId={projectId}
-                      batchId={activeBatchId}
-                      onComplete={handleBatchComplete}
-                      onRetry={(msgs, mode) => void handleBatchRetry(msgs, mode)}
-                    />
-                  )}
-
                   {/* Chat / Queue input */}
                   <QueueComposer
                     projectId={projectId}
@@ -1577,7 +1595,7 @@ export default function ProjectWorkspacePage() {
                     onRunInBackgroundChange={setRunInBackground}
                     variantMode={variantMode}
                     onVariantModeChange={setVariantMode}
-                    disabled={sendMessage.isPending || !!activeBatchId}
+                    disabled={sendMessage.isPending}
                     onSingleSend={(content) => {
                       setPrompt("");
                       send(content);
@@ -2009,6 +2027,43 @@ export default function ProjectWorkspacePage() {
           </div>
         </div>
       </div>
+      <BackgroundTasksDrawer
+        projectId={projectId}
+        isOpen={backgroundPanelOpen}
+        onClose={() => setBackgroundPanelOpen(false)}
+        tasks={backgroundTasks}
+        onRollback={(versionId) => {
+          rollbackVersion.mutate(
+            { id: projectId, versionId },
+            {
+              onSuccess: () => {
+                void queryClient.invalidateQueries({
+                  queryKey: getListProjectFilesQueryKey(projectId),
+                });
+                void queryClient.invalidateQueries({
+                  queryKey: getListVersionsQueryKey(projectId),
+                });
+                void queryClient.invalidateQueries({
+                  queryKey: getListMessagesQueryKey(projectId),
+                });
+              },
+            },
+          );
+        }}
+        onViewCode={() => {
+          setActiveTab("tools-files");
+          setBackgroundPanelOpen(false);
+        }}
+      >
+        {activeBatchId && (
+          <QueueProgressStrip
+            projectId={projectId}
+            batchId={activeBatchId}
+            onComplete={handleBatchComplete}
+            onRetry={(msgs, mode) => void handleBatchRetry(msgs, mode)}
+          />
+        )}
+      </BackgroundTasksDrawer>
       <BuyCreditsSheet
         open={buyCreditsOpen}
         onClose={() => setBuyCreditsOpen(false)}
