@@ -95,7 +95,13 @@ type ChatPlanPayload =
   | { kind: "error"; message: string; suggestions?: string[] }
   | Record<string, unknown>;
 
-function ReportCard({ report, onViewFile }: { report: TaskReport; onViewFile?: (path: string) => void }) {
+function ReportCard({
+  report,
+  onViewFile,
+}: {
+  report: TaskReport;
+  onViewFile?: (path: string) => void;
+}) {
   return (
     <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
       <div className="flex items-center gap-2 font-semibold text-foreground">
@@ -116,7 +122,9 @@ function ReportCard({ report, onViewFile }: { report: TaskReport; onViewFile?: (
           <div className="font-semibold text-foreground">{report.filesRemoved.length}</div>
         </div>
       </div>
-      {(report.filesCreated.length > 0 || report.filesChanged.length > 0 || report.filesRemoved.length > 0) && (
+      {(report.filesCreated.length > 0 ||
+        report.filesChanged.length > 0 ||
+        report.filesRemoved.length > 0) && (
         <div className="space-y-0.5 pt-0.5 border-t border-border/50">
           {report.filesCreated.slice(0, 5).map((p) => (
             <button
@@ -129,7 +137,9 @@ function ReportCard({ report, onViewFile }: { report: TaskReport; onViewFile?: (
             >
               <span className="shrink-0">+</span>
               <span className="truncate">{p}</span>
-              {onViewFile && <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-60 ml-auto" />}
+              {onViewFile && (
+                <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-60 ml-auto" />
+              )}
             </button>
           ))}
           {report.filesChanged.slice(0, 5).map((p) => (
@@ -143,11 +153,16 @@ function ReportCard({ report, onViewFile }: { report: TaskReport; onViewFile?: (
             >
               <span className="shrink-0">~</span>
               <span className="truncate">{p}</span>
-              {onViewFile && <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-60 ml-auto" />}
+              {onViewFile && (
+                <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-60 ml-auto" />
+              )}
             </button>
           ))}
           {report.filesRemoved.slice(0, 3).map((p) => (
-            <div key={`r-${p}`} className="font-mono text-[10px] text-red-400/70 truncate flex items-center gap-1">
+            <div
+              key={`r-${p}`}
+              className="font-mono text-[10px] text-red-400/70 truncate flex items-center gap-1"
+            >
               <span className="shrink-0">-</span>
               <span className="truncate">{p}</span>
             </div>
@@ -219,8 +234,6 @@ function ReportCard({ report, onViewFile }: { report: TaskReport; onViewFile?: (
     </div>
   );
 }
-
-
 
 function ErrorCard({
   message,
@@ -307,7 +320,11 @@ export default function ProjectWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const projectId = parseInt(id, 10);
 
-  const { data: project, isLoading: projectLoading, isError: projectError } = useGetProject(projectId, {
+  const {
+    data: project,
+    isLoading: projectLoading,
+    isError: projectError,
+  } = useGetProject(projectId, {
     query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId), retry: false },
   });
   const sendMessage = useSendMessage();
@@ -315,7 +332,7 @@ export default function ProjectWorkspacePage() {
     query: {
       enabled: !!projectId,
       queryKey: getListMessagesQueryKey(projectId),
-      refetchInterval: (project?.status === "building" || sendMessage.isPending) ? 2000 : 15000,
+      refetchInterval: project?.status === "building" || sendMessage.isPending ? 2000 : 15000,
     },
   });
   const _rollbackVersion = useRollbackVersion();
@@ -383,8 +400,12 @@ export default function ProjectWorkspacePage() {
     const stored = localStorage.getItem("mustaflow_split_pct");
     return stored ? Math.min(65, Math.max(25, parseFloat(stored))) : 38;
   });
-  const [windowWidth, setWindowWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1200));
-  const [chatDrawerOpen, setChatDrawerOpen] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  const [windowWidth, setWindowWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1200,
+  );
+  const [chatDrawerOpen, setChatDrawerOpen] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 768,
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const filesScrollRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
@@ -437,22 +458,33 @@ export default function ProjectWorkspacePage() {
   // Persist Chat/Files scroll for the currently-active tab.
   // Called on tab switch, component unmount, and page hide so the position
   // survives both navigation and full-page refresh.
-  const saveCurrentScroll = useCallback((tab: "chat" | "files" | "history") => {
-    const ref = tab === "chat" ? scrollRef : tab === "files" ? filesScrollRef : null;
-    if (ref?.current) {
-      try {
-        localStorage.setItem(`mustaflow_scroll_${projectId}_${tab}`, String(ref.current.scrollTop));
-      } catch { /* ignore */ }
-    }
-  }, [projectId]);
+  const saveCurrentScroll = useCallback(
+    (tab: "chat" | "files" | "history") => {
+      const ref = tab === "chat" ? scrollRef : tab === "files" ? filesScrollRef : null;
+      if (ref?.current) {
+        try {
+          localStorage.setItem(
+            `mustaflow_scroll_${projectId}_${tab}`,
+            String(ref.current.scrollTop),
+          );
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    [projectId],
+  );
 
-  const switchLeftPanel = useCallback((newTab: "chat" | "files" | "history") => {
-    setLeftPanelTab((currentTab) => {
-      saveCurrentScroll(currentTab);
-      leftPanelTabRef.current = newTab;
-      return newTab;
-    });
-  }, [saveCurrentScroll]);
+  const switchLeftPanel = useCallback(
+    (newTab: "chat" | "files" | "history") => {
+      setLeftPanelTab((currentTab) => {
+        saveCurrentScroll(currentTab);
+        leftPanelTabRef.current = newTab;
+        return newTab;
+      });
+    },
+    [saveCurrentScroll],
+  );
 
   // Keep leftPanelTabRef in sync whenever state changes via direct setLeftPanelTab
   // (e.g. the project-switch reset effect).
@@ -473,7 +505,8 @@ export default function ProjectWorkspacePage() {
   }, [saveCurrentScroll]);
 
   useEffect(() => {
-    const restoreRef = leftPanelTab === "chat" ? scrollRef : leftPanelTab === "files" ? filesScrollRef : null;
+    const restoreRef =
+      leftPanelTab === "chat" ? scrollRef : leftPanelTab === "files" ? filesScrollRef : null;
     if (!restoreRef) return;
     requestAnimationFrame(() => {
       const el = restoreRef.current;
@@ -487,7 +520,9 @@ export default function ProjectWorkspacePage() {
             chatAtBottomRef.current = el.scrollHeight - top - el.clientHeight < 80;
           }
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     });
   }, [leftPanelTab, projectId]);
 
@@ -513,7 +548,9 @@ export default function ProjectWorkspacePage() {
             }
             return [];
           }
-        } catch { /* non-JSON message, skip */ }
+        } catch {
+          /* non-JSON message, skip */
+        }
       }
     }
     return undefined;
@@ -532,9 +569,7 @@ export default function ProjectWorkspacePage() {
     if (!activeTaskId) return;
     // Reset dedup set per task so it stays bounded across long sessions
     seenPageMapEventIdsRef.current = new Set();
-    const es = new EventSource(
-      `/api/projects/${projectId}/tasks/${activeTaskId}/events/stream`,
-    );
+    const es = new EventSource(`/api/projects/${projectId}/tasks/${activeTaskId}/events/stream`);
     es.onmessage = (e: MessageEvent<string>) => {
       try {
         const event = JSON.parse(e.data) as { id: number; eventType: string };
@@ -557,7 +592,10 @@ export default function ProjectWorkspacePage() {
   // Auto-generate a plan analysis when a project opens with no messages yet
   useEffect(() => {
     if (!project || messages === undefined || autoAnalyzedRef.current) return;
-    if (messages.length > 0) { autoAnalyzedRef.current = true; return; }
+    if (messages.length > 0) {
+      autoAnalyzedRef.current = true;
+      return;
+    }
     if (sendMessage.isPending) return;
     autoAnalyzedRef.current = true;
     pendingIsPlanRef.current = true;
@@ -586,52 +624,58 @@ export default function ProjectWorkspacePage() {
     );
   }, [project, messages, projectId, sendMessage, queryClient]);
 
-  const send = useCallback((
-    content: string,
-    opts?: { planMode?: boolean; background?: boolean; agentMode?: AgentMode },
-  ) => {
-    if (!content.trim()) return;
-    chatAtBottomRef.current = true;
-    setPendingBuildStartedAt(new Date());
-    const effectiveMode = opts?.agentMode ?? agentMode;
-    const effectivePlanMode = opts?.planMode ?? planMode;
-    pendingIsPlanRef.current = effectivePlanMode;
-    setPendingIsPlan(effectivePlanMode);
-    sendMessage.mutate(
-      {
-        id: projectId,
-        data: {
-          content,
-          agentMode: effectiveMode,
-          planMode: effectivePlanMode,
-          background: opts?.background ?? runInBackground,
+  const send = useCallback(
+    (
+      content: string,
+      opts?: { planMode?: boolean; background?: boolean; agentMode?: AgentMode },
+    ) => {
+      if (!content.trim()) return;
+      chatAtBottomRef.current = true;
+      setPendingBuildStartedAt(new Date());
+      const effectiveMode = opts?.agentMode ?? agentMode;
+      const effectivePlanMode = opts?.planMode ?? planMode;
+      pendingIsPlanRef.current = effectivePlanMode;
+      setPendingIsPlan(effectivePlanMode);
+      sendMessage.mutate(
+        {
+          id: projectId,
+          data: {
+            content,
+            agentMode: effectiveMode,
+            planMode: effectivePlanMode,
+            background: opts?.background ?? runInBackground,
+          },
         },
-      },
-      {
-        onSuccess: (data) => {
-          setPendingBuildStartedAt(null);
-          pendingIsPlanRef.current = false;
-          setPendingIsPlan(false);
-          void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
-          void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
-          setTimeout(() => {
-            void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
-            void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
-            void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
-            void queryClient.invalidateQueries({ queryKey: getGetPageMapQueryKey(projectId) });
-          }, 3000);
-          const plan = data?.assistantMessage?.plan as Record<string, unknown> | null | undefined;
-          const tid = plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
-          if (tid) setActiveTaskId(tid);
+        {
+          onSuccess: (data) => {
+            setPendingBuildStartedAt(null);
+            pendingIsPlanRef.current = false;
+            setPendingIsPlan(false);
+            void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+            void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+            setTimeout(() => {
+              void queryClient.invalidateQueries({
+                queryKey: getListProjectFilesQueryKey(projectId),
+              });
+              void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
+              void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+              void queryClient.invalidateQueries({ queryKey: getGetPageMapQueryKey(projectId) });
+            }, 3000);
+            const plan = data?.assistantMessage?.plan as Record<string, unknown> | null | undefined;
+            const tid =
+              plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
+            if (tid) setActiveTaskId(tid);
+          },
+          onError: () => {
+            setPendingBuildStartedAt(null);
+            pendingIsPlanRef.current = false;
+            setPendingIsPlan(false);
+          },
         },
-        onError: () => {
-          setPendingBuildStartedAt(null);
-          pendingIsPlanRef.current = false;
-          setPendingIsPlan(false);
-        },
-      },
-    );
-  }, [projectId, agentMode, planMode, runInBackground, sendMessage, queryClient]);
+      );
+    },
+    [projectId, agentMode, planMode, runInBackground, sendMessage, queryClient],
+  );
 
   const handleAddKey = useCallback((keyName: string) => {
     setPrefillSecretName(keyName);
@@ -652,13 +696,16 @@ export default function ProjectWorkspacePage() {
     }
   }, [projectId]);
 
-  const handleBatchStarted = useCallback((batchId: string, totalCount: number) => {
-    setActiveBatchId(batchId);
-    setBatchTotalCount(totalCount);
-    localStorage.setItem(`mustaflow_batch_${projectId}`, batchId);
-    void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
-    void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
-  }, [projectId, queryClient]);
+  const handleBatchStarted = useCallback(
+    (batchId: string, totalCount: number) => {
+      setActiveBatchId(batchId);
+      setBatchTotalCount(totalCount);
+      localStorage.setItem(`mustaflow_batch_${projectId}`, batchId);
+      void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+      void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+    },
+    [projectId, queryClient],
+  );
 
   const handleBatchComplete = useCallback(() => {
     setActiveBatchId(null);
@@ -670,30 +717,33 @@ export default function ProjectWorkspacePage() {
     void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
   }, [projectId, queryClient]);
 
-  const handleBatchRetry = useCallback(async (remainingMessages: string[], retryMode: string) => {
-    setActiveBatchId(null);
-    setBatchTotalCount(0);
-    localStorage.removeItem(`mustaflow_batch_${projectId}`);
-    if (remainingMessages.length === 0) return;
-    if (remainingMessages.length === 1) {
-      send(remainingMessages[0]!, { agentMode: retryMode as AgentMode });
-      return;
-    }
-    try {
-      const res = await fetch(`/api/projects/${projectId}/queue`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: remainingMessages, agentMode: retryMode, planMode }),
-        credentials: "include",
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { batchId: string; totalTasks: number };
-        handleBatchStarted(data.batchId, data.totalTasks);
+  const handleBatchRetry = useCallback(
+    async (remainingMessages: string[], retryMode: string) => {
+      setActiveBatchId(null);
+      setBatchTotalCount(0);
+      localStorage.removeItem(`mustaflow_batch_${projectId}`);
+      if (remainingMessages.length === 0) return;
+      if (remainingMessages.length === 1) {
+        send(remainingMessages[0]!, { agentMode: retryMode as AgentMode });
+        return;
       }
-    } catch {
-      send(remainingMessages[0]!, { agentMode: retryMode as AgentMode });
-    }
-  }, [projectId, send, planMode, handleBatchStarted]);
+      try {
+        const res = await fetch(`/api/projects/${projectId}/queue`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: remainingMessages, agentMode: retryMode, planMode }),
+          credentials: "include",
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { batchId: string; totalTasks: number };
+          handleBatchStarted(data.batchId, data.totalTasks);
+        }
+      } catch {
+        send(remainingMessages[0]!, { agentMode: retryMode as AgentMode });
+      }
+    },
+    [projectId, send, planMode, handleBatchStarted],
+  );
 
   // When page-map requests a chat prefill, switch to chat and set the prompt
   useEffect(() => {
@@ -706,10 +756,13 @@ export default function ProjectWorkspacePage() {
   }, [chatPrefill]);
 
   /** Called from PlanCard "Build now" / "Background" buttons */
-  const runPlanned = useCallback((editedPrompt: string, mode: AgentMode, background: boolean) => {
-    setAgentMode(mode);
-    send(editedPrompt, { planMode: false, background, agentMode: mode });
-  }, [send]);
+  const runPlanned = useCallback(
+    (editedPrompt: string, mode: AgentMode, background: boolean) => {
+      setAgentMode(mode);
+      send(editedPrompt, { planMode: false, background, agentMode: mode });
+    },
+    [send],
+  );
 
   const updateSplit = useCallback((pct: number) => {
     const clamped = Math.min(65, Math.max(25, pct));
@@ -723,11 +776,14 @@ export default function ProjectWorkspacePage() {
     setIsDragging(true);
   }, []);
 
-  const handleSplitDrag = useCallback((e: React.MouseEvent) => {
-    if (!isDraggingRef.current || !splitContainerRef.current) return;
-    const rect = splitContainerRef.current.getBoundingClientRect();
-    updateSplit(((e.clientX - rect.left) / rect.width) * 100);
-  }, [updateSplit]);
+  const handleSplitDrag = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isDraggingRef.current || !splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      updateSplit(((e.clientX - rect.left) / rect.width) * 100);
+    },
+    [updateSplit],
+  );
 
   const stopSplitDrag = useCallback(() => {
     isDraggingRef.current = false;
@@ -777,9 +833,8 @@ export default function ProjectWorkspacePage() {
           if (!pendingBuildStartedAt) return true;
           return new Date(t.createdAt).getTime() >= pendingBuildStartedAt.getTime() - 5000;
         })
-        .sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        )[0]?.id ?? null)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.id ??
+      null)
     : null;
 
   if (projectError || (!projectLoading && !project))
@@ -805,7 +860,6 @@ export default function ProjectWorkspacePage() {
 
   return (
     <div className="flex flex-col h-full bg-background w-full overflow-hidden text-foreground">
-
       <CreateProjectModal open={newProjectOpen} onOpenChange={setNewProjectOpen} />
 
       {/* ── Top bar ── */}
@@ -814,48 +868,56 @@ export default function ProjectWorkspacePage() {
           <div className="w-5 h-5 rounded bg-primary/20 border border-primary/30 flex items-center justify-center">
             <Globe className="h-3 w-3 text-primary" />
           </div>
-          <span className="text-sm font-semibold text-foreground truncate max-w-[130px]">{project.name}</span>
-          <span className={cn("text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
-            project.status === "building" ? "bg-primary/10 text-primary border-primary/20"
-            : project.status === "published" ? "bg-green-500/10 text-green-400 border-green-500/20"
-            : project.status === "failed" ? "bg-destructive/10 text-destructive border-destructive/20"
-            : "bg-muted text-muted-foreground border-border"
-          )}>
+          <span className="text-sm font-semibold text-foreground truncate max-w-[130px]">
+            {project.name}
+          </span>
+          <span
+            className={cn(
+              "text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
+              project.status === "building"
+                ? "bg-primary/10 text-primary border-primary/20"
+                : project.status === "published"
+                  ? "bg-green-500/10 text-green-400 border-green-500/20"
+                  : project.status === "failed"
+                    ? "bg-destructive/10 text-destructive border-destructive/20"
+                    : "bg-muted text-muted-foreground border-border",
+            )}
+          >
             {project.status}
           </span>
         </div>
         <div className="w-px h-5 bg-border shrink-0" />
-          <div className="flex-1 overflow-x-auto min-w-0">
-            <div className="flex items-stretch h-12">
-              {WORKSPACE_TABS.filter((tab) =>
-                tab.value !== "analytics" || project.status === "published",
-              ).map((tab) => {
-                const Icon = tab.icon;
-                return (
-                  <button
-                    key={tab.value}
-                    onClick={() => setActiveTab(tab.value)}
-                    data-tab={tab.value}
-                    className={cn(
-                      "relative flex items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
-                      activeTab === tab.value
-                        ? "border-primary text-foreground"
-                        : "border-transparent text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="h-3 w-3 shrink-0" />
-                    {tab.label}
-                    {tab.value === "page-map" && pageMapSyncing && (
-                      <span className="relative flex h-1.5 w-1.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+        <div className="flex-1 overflow-x-auto min-w-0">
+          <div className="flex items-stretch h-12">
+            {WORKSPACE_TABS.filter(
+              (tab) => tab.value !== "analytics" || project.status === "published",
+            ).map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.value}
+                  onClick={() => setActiveTab(tab.value)}
+                  data-tab={tab.value}
+                  className={cn(
+                    "relative flex items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
+                    activeTab === tab.value
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-3 w-3 shrink-0" />
+                  {tab.label}
+                  {tab.value === "page-map" && pageMapSyncing && (
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
+        </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => setNewProjectOpen(true)}
@@ -898,18 +960,15 @@ export default function ProjectWorkspacePage() {
             isMobileLayout
               ? { bottom: "56px" }
               : focusMode
-              ? { width: 0, minWidth: 0 }
-              : { width: `${splitPct}%`, minWidth: 260, maxWidth: "72%" }
+                ? { width: 0, minWidth: 0 }
+                : { width: `${splitPct}%`, minWidth: 260, maxWidth: "72%" }
           }
         >
           {/* Left panel tab bar: Chat | Files | History */}
           <div className="shrink-0 flex border-b border-border bg-card/60">
             {(["chat", "files", "history"] as const).map((t) => {
               const Icon = t === "chat" ? MessageSquare : t === "files" ? FileCode2 : History;
-              const badge =
-                t === "files" && files.length > 0
-                  ? files.length
-                  : null;
+              const badge = t === "files" && files.length > 0 ? files.length : null;
               return (
                 <button
                   key={t}
@@ -924,7 +983,9 @@ export default function ProjectWorkspacePage() {
                   <Icon className="h-3 w-3" />
                   {t === "chat" ? "Chat" : t === "files" ? "Files" : "History"}
                   {badge !== null && (
-                    <span className="ml-0.5 px-1 py-0.5 rounded-full bg-muted text-[9px] font-semibold leading-none">{badge}</span>
+                    <span className="ml-0.5 px-1 py-0.5 rounded-full bg-muted text-[9px] font-semibold leading-none">
+                      {badge}
+                    </span>
                   )}
                 </button>
               );
@@ -976,255 +1037,301 @@ export default function ProjectWorkspacePage() {
 
           {/* ── CHAT TAB ── */}
           {leftPanelTab === "chat" && (
-          <>
-          {/* Chat panel header */}
-          <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
-            <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
-              <Sparkles style={{ width: 10, height: 10 }} className="text-white" />
-            </div>
-            <span className="text-xs font-semibold text-foreground">AI Builder</span>
-            <span className={cn(
-              "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-              sendMessage.isPending
-                ? pendingIsPlan
-                  ? "bg-secondary/15 text-secondary"
-                  : "bg-primary/15 text-primary"
-                : "bg-green-500/15 text-green-400"
-            )}>
-              {sendMessage.isPending ? (pendingIsPlan ? "Planning…" : "Working…") : "Ready"}
-            </span>
-            <button
-              onClick={() => setShowChatHistory((v) => !v)}
-              title={showChatHistory ? "Back to live chat" : "View chat history"}
-              className={cn(
-                "ml-1.5 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
-                showChatHistory
-                  ? "bg-primary/10 text-primary border-primary/20"
-                  : "text-muted-foreground border-border hover:text-foreground hover:bg-muted",
-              )}
-            >
-              <History className="h-3 w-3" />
-              {showChatHistory ? "Live" : "History"}
-            </button>
-          </div>
-
-          {/* Chat History overlay */}
-          {showChatHistory && (
-            <div className="flex-1 min-h-0 relative">
-              <ChatHistory
-                messages={messages}
-                isLoading={messages === undefined}
-                onViewFile={(path) => {
-                  const f = files.find((x) => x.path === path);
-                  if (f) { setSelectedCodeFileId(f.id); setActiveTab("code"); }
-                }}
-                onClose={() => setShowChatHistory(false)}
-              />
-            </div>
-          )}
-
-          {/* Messages + controls (hidden in history mode) */}
-          {!showChatHistory && <><div
-            ref={scrollRef}
-            onScroll={() => {
-              const el = scrollRef.current;
-              if (!el) return;
-              chatAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-            }}
-            className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
-          >
-            {creditsSuccess && (
-              <div className="sticky top-0 z-10 pb-1">
-                <CreditsSuccessBanner onDismiss={() => setCreditsSuccess(false)} />
-              </div>
-            )}
-            {messages?.slice(-20).map((msg) => {
-              const planPayload = msg.plan as ChatPlanPayload | null | undefined;
-              const payloadKind = planPayload && typeof planPayload === "object" ? (planPayload as { kind?: string }).kind : undefined;
-              const isReport = payloadKind === "report";
-              const isQueued = payloadKind === "task-queued";
-              const isError = payloadKind === "error";
-              const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
-              const structuredPlan = isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
-              return (
-                <div
-                  key={msg.id}
-                  className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}
+            <>
+              {/* Chat panel header */}
+              <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
+                <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
+                  <Sparkles style={{ width: 10, height: 10 }} className="text-white" />
+                </div>
+                <span className="text-xs font-semibold text-foreground">AI Builder</span>
+                <span
+                  className={cn(
+                    "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                    sendMessage.isPending
+                      ? pendingIsPlan
+                        ? "bg-secondary/15 text-secondary"
+                        : "bg-primary/15 text-primary"
+                      : "bg-green-500/15 text-green-400",
+                  )}
                 >
-                  <div className={cn(
-                    "max-w-[90%] px-3 py-2 rounded-xl text-xs",
-                    msg.role === "user"
-                      ? "bg-primary text-primary-foreground rounded-br-sm"
-                      : isError
-                      ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
-                      : "bg-muted text-foreground rounded-bl-sm border border-border",
-                  )}>
-                    <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
-                    {isReport && (() => {
-                      const rp = planPayload as { kind: "report"; report: TaskReport; queueBatchId?: string; queueIndex?: number | null; queueTotalCount?: number | null };
-                      const hasBatch = rp.queueBatchId && rp.queueTotalCount && rp.queueTotalCount > 1;
-                      return (
-                        <>
-                          {hasBatch && (
-                            <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
-                              <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
-                              <span className="text-[10px] text-muted-foreground/70 font-medium">
-                                Task {(rp.queueIndex ?? 0) + 1} of {rp.queueTotalCount}
-                              </span>
-                            </div>
-                          )}
-                          <ReportCard
-                            report={rp.report}
-                            onViewFile={(path) => {
-                              const f = files.find((x) => x.path === path);
-                              if (f) { setSelectedCodeFileId(f.id); setActiveTab("code"); }
-                            }}
-                          />
-                        </>
-                      );
-                    })()}
-                    {isQueued && (
-                      <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
-                        <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary" />
-                        Background task #{(planPayload as { taskId: number }).taskId} running…
+                  {sendMessage.isPending ? (pendingIsPlan ? "Planning…" : "Working…") : "Ready"}
+                </span>
+                <button
+                  onClick={() => setShowChatHistory((v) => !v)}
+                  title={showChatHistory ? "Back to live chat" : "View chat history"}
+                  className={cn(
+                    "ml-1.5 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
+                    showChatHistory
+                      ? "bg-primary/10 text-primary border-primary/20"
+                      : "text-muted-foreground border-border hover:text-foreground hover:bg-muted",
+                  )}
+                >
+                  <History className="h-3 w-3" />
+                  {showChatHistory ? "Live" : "History"}
+                </button>
+              </div>
+
+              {/* Chat History overlay */}
+              {showChatHistory && (
+                <div className="flex-1 min-h-0 relative">
+                  <ChatHistory
+                    messages={messages}
+                    isLoading={messages === undefined}
+                    onViewFile={(path) => {
+                      const f = files.find((x) => x.path === path);
+                      if (f) {
+                        setSelectedCodeFileId(f.id);
+                        setActiveTab("code");
+                      }
+                    }}
+                    onClose={() => setShowChatHistory(false)}
+                  />
+                </div>
+              )}
+
+              {/* Messages + controls (hidden in history mode) */}
+              {!showChatHistory && (
+                <>
+                  <div
+                    ref={scrollRef}
+                    onScroll={() => {
+                      const el = scrollRef.current;
+                      if (!el) return;
+                      chatAtBottomRef.current =
+                        el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                    }}
+                    className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
+                  >
+                    {creditsSuccess && (
+                      <div className="sticky top-0 z-10 pb-1">
+                        <CreditsSuccessBanner onDismiss={() => setCreditsSuccess(false)} />
                       </div>
                     )}
-                    {isError && (
-                      <ErrorCard
-                        message={(planPayload as { message: string }).message}
-                        suggestions={(planPayload as { suggestions?: string[] }).suggestions}
-                        onTryFix={(text) => { setPrompt(text); }}
-                        onBuyCredits={() => setBuyCreditsOpen(true)}
-                      />
+                    {messages?.slice(-20).map((msg) => {
+                      const planPayload = msg.plan as ChatPlanPayload | null | undefined;
+                      const payloadKind =
+                        planPayload && typeof planPayload === "object"
+                          ? (planPayload as { kind?: string }).kind
+                          : undefined;
+                      const isReport = payloadKind === "report";
+                      const isQueued = payloadKind === "task-queued";
+                      const isError = payloadKind === "error";
+                      const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
+                      const structuredPlan =
+                        isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
+                      return (
+                        <div
+                          key={msg.id}
+                          className={cn(
+                            "flex",
+                            msg.role === "user" ? "justify-end" : "justify-start",
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "max-w-[90%] px-3 py-2 rounded-xl text-xs",
+                              msg.role === "user"
+                                ? "bg-primary text-primary-foreground rounded-br-sm"
+                                : isError
+                                  ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
+                                  : "bg-muted text-foreground rounded-bl-sm border border-border",
+                            )}
+                          >
+                            <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                            {isReport &&
+                              (() => {
+                                const rp = planPayload as {
+                                  kind: "report";
+                                  report: TaskReport;
+                                  queueBatchId?: string;
+                                  queueIndex?: number | null;
+                                  queueTotalCount?: number | null;
+                                };
+                                const hasBatch =
+                                  rp.queueBatchId && rp.queueTotalCount && rp.queueTotalCount > 1;
+                                return (
+                                  <>
+                                    {hasBatch && (
+                                      <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
+                                        <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
+                                        <span className="text-[10px] text-muted-foreground/70 font-medium">
+                                          Task {(rp.queueIndex ?? 0) + 1} of {rp.queueTotalCount}
+                                        </span>
+                                      </div>
+                                    )}
+                                    <ReportCard
+                                      report={rp.report}
+                                      onViewFile={(path) => {
+                                        const f = files.find((x) => x.path === path);
+                                        if (f) {
+                                          setSelectedCodeFileId(f.id);
+                                          setActiveTab("code");
+                                        }
+                                      }}
+                                    />
+                                  </>
+                                );
+                              })()}
+                            {isQueued && (
+                              <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
+                                <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary" />
+                                Background task #{(planPayload as { taskId: number }).taskId}{" "}
+                                running…
+                              </div>
+                            )}
+                            {isError && (
+                              <ErrorCard
+                                message={(planPayload as { message: string }).message}
+                                suggestions={
+                                  (planPayload as { suggestions?: string[] }).suggestions
+                                }
+                                onTryFix={(text) => {
+                                  setPrompt(text);
+                                }}
+                                onBuyCredits={() => setBuyCreditsOpen(true)}
+                              />
+                            )}
+                            {isPlanCard && (
+                              <PlanCard
+                                plan={structuredPlan}
+                                projectId={projectId}
+                                initialAgentMode={agentMode}
+                                onBuild={runPlanned}
+                                onAddKey={handleAddKey}
+                                disabled={sendMessage.isPending}
+                                messageId={msg.id}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {sendMessage.isPending && !activeTaskId && (
+                      <div className="flex justify-start">
+                        <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
+                          <div
+                            className={cn(
+                              "animate-pulse w-1.5 h-1.5 rounded-full",
+                              pendingIsPlan ? "bg-secondary" : "bg-primary",
+                            )}
+                          />
+                          <span className="text-muted-foreground">
+                            {pendingIsPlan ? "Thinking through the plan…" : "MustaFlow is working…"}
+                          </span>
+                        </div>
+                      </div>
                     )}
-                    {isPlanCard && (
-                      <PlanCard
-                        plan={structuredPlan}
+
+                    {activeTaskId !== null && (
+                      <ActivityStream
                         projectId={projectId}
-                        initialAgentMode={agentMode}
-                        onBuild={runPlanned}
-                        onAddKey={handleAddKey}
-                        disabled={sendMessage.isPending}
-                        messageId={msg.id}
+                        taskId={activeTaskId}
+                        onDismiss={() => setActiveTaskId(null)}
                       />
                     )}
                   </div>
-                </div>
-              );
-            })}
 
-            {sendMessage.isPending && !activeTaskId && (
-              <div className="flex justify-start">
-                <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
-                  <div className={cn(
-                    "animate-pulse w-1.5 h-1.5 rounded-full",
-                    pendingIsPlan ? "bg-secondary" : "bg-primary",
-                  )} />
-                  <span className="text-muted-foreground">
-                    {pendingIsPlan ? "Thinking through the plan…" : "MustaFlow is working…"}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {activeTaskId !== null && (
-              <ActivityStream
-                projectId={projectId}
-                taskId={activeTaskId}
-                onDismiss={() => setActiveTaskId(null)}
-              />
-            )}
-          </div>
-
-          {/* Activity ticker / Status bar */}
-          <div className="shrink-0 border-t border-border/40">
-            {sendMessage.isPending ? (
-              <BuildProgressFeed
-                projectId={projectId}
-                taskId={pendingFeedTaskId}
-                taskStartedAt={pendingBuildStartedAt}
-              />
-            ) : (
-              <>
-                {/* Bottom status bar — shown when idle */}
-                <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-muted/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                  <span className="text-[10px] text-muted-foreground font-medium">Ready</span>
-                  {files.length > 0 && (
-                    <button
-                      onClick={() => switchLeftPanel("files")}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
-                    >
-                      {files.length} file{files.length !== 1 ? "s" : ""}
-                    </button>
-                  )}
-                  {versions && versions.length > 0 && (
-                    <button
-                      onClick={() => switchLeftPanel("history")}
-                      className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-                      title="View checkpoint history"
-                    >
-                      {versions.length} checkpoint{versions.length !== 1 ? "s" : ""}
-                    </button>
-                  )}
-                  <div className="ml-auto flex items-center gap-1">
-                    <span className={cn(
-                      "text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide border",
-                      agentMode === "pro" ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                      : agentMode === "power" ? "bg-primary/10 text-primary border-primary/20"
-                      : agentMode === "eco" ? "bg-green-500/10 text-green-400 border-green-500/20"
-                      : "bg-muted text-muted-foreground border-border"
-                    )}>
-                      {agentMode}
-                    </span>
+                  {/* Activity ticker / Status bar */}
+                  <div className="shrink-0 border-t border-border/40">
+                    {sendMessage.isPending ? (
+                      <BuildProgressFeed
+                        projectId={projectId}
+                        taskId={pendingFeedTaskId}
+                        taskStartedAt={pendingBuildStartedAt}
+                      />
+                    ) : (
+                      <>
+                        {/* Bottom status bar — shown when idle */}
+                        <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-muted/20">
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                          <span className="text-[10px] text-muted-foreground font-medium">
+                            Ready
+                          </span>
+                          {files.length > 0 && (
+                            <button
+                              onClick={() => switchLeftPanel("files")}
+                              className="text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+                            >
+                              {files.length} file{files.length !== 1 ? "s" : ""}
+                            </button>
+                          )}
+                          {versions && versions.length > 0 && (
+                            <button
+                              onClick={() => switchLeftPanel("history")}
+                              className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                              title="View checkpoint history"
+                            >
+                              {versions.length} checkpoint{versions.length !== 1 ? "s" : ""}
+                            </button>
+                          )}
+                          <div className="ml-auto flex items-center gap-1">
+                            <span
+                              className={cn(
+                                "text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide border",
+                                agentMode === "pro"
+                                  ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                                  : agentMode === "power"
+                                    ? "bg-primary/10 text-primary border-primary/20"
+                                    : agentMode === "eco"
+                                      ? "bg-green-500/10 text-green-400 border-green-500/20"
+                                      : "bg-muted text-muted-foreground border-border",
+                              )}
+                            >
+                              {agentMode}
+                            </span>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
-                </div>
-              </>
-            )}
-          </div>
 
-          {/* Quick action chips */}
-          {!sendMessage.isPending && !activeBatchId && prompt === "" && (
-            <div className="shrink-0 px-3 pt-2 pb-1 flex flex-wrap gap-1.5">
-              {QUICK_ACTIONS.map((chip) => (
-                <button
-                  key={chip}
-                  onClick={() => setPrompt(chip)}
-                  className="px-2.5 py-1 rounded-full border border-border bg-muted/40 text-[10px] text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
-                >
-                  {chip}
-                </button>
-              ))}
-            </div>
-          )}
+                  {/* Quick action chips */}
+                  {!sendMessage.isPending && !activeBatchId && prompt === "" && (
+                    <div className="shrink-0 px-3 pt-2 pb-1 flex flex-wrap gap-1.5">
+                      {QUICK_ACTIONS.map((chip) => (
+                        <button
+                          key={chip}
+                          onClick={() => setPrompt(chip)}
+                          className="px-2.5 py-1 rounded-full border border-border bg-muted/40 text-[10px] text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                        >
+                          {chip}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-          {/* Queue progress strip — shown when a batch is active */}
-          {activeBatchId && (
-            <QueueProgressStrip
-              projectId={projectId}
-              batchId={activeBatchId}
-              onComplete={handleBatchComplete}
-              onRetry={(msgs, mode) => void handleBatchRetry(msgs, mode)}
-            />
-          )}
+                  {/* Queue progress strip — shown when a batch is active */}
+                  {activeBatchId && (
+                    <QueueProgressStrip
+                      projectId={projectId}
+                      batchId={activeBatchId}
+                      onComplete={handleBatchComplete}
+                      onRetry={(msgs, mode) => void handleBatchRetry(msgs, mode)}
+                    />
+                  )}
 
-          {/* Chat / Queue input */}
-          <QueueComposer
-            projectId={projectId}
-            agentMode={agentMode}
-            onAgentModeChange={setAgentMode}
-            planMode={planMode}
-            onPlanModeChange={setPlanMode}
-            runInBackground={runInBackground}
-            onRunInBackgroundChange={setRunInBackground}
-            disabled={sendMessage.isPending || !!activeBatchId}
-            onSingleSend={(content) => { setPrompt(""); send(content); }}
-            onBatchStarted={handleBatchStarted}
-            promptValue={prompt}
-            onPromptValueChange={setPrompt}
-          />
-          </>}
-          </>
+                  {/* Chat / Queue input */}
+                  <QueueComposer
+                    projectId={projectId}
+                    agentMode={agentMode}
+                    onAgentModeChange={setAgentMode}
+                    planMode={planMode}
+                    onPlanModeChange={setPlanMode}
+                    runInBackground={runInBackground}
+                    onRunInBackgroundChange={setRunInBackground}
+                    disabled={sendMessage.isPending || !!activeBatchId}
+                    onSingleSend={(content) => {
+                      setPrompt("");
+                      send(content);
+                    }}
+                    onBatchStarted={handleBatchStarted}
+                    promptValue={prompt}
+                    onPromptValueChange={setPrompt}
+                  />
+                </>
+              )}
+            </>
           )}
 
           {/* ── FILES TAB ── */}
@@ -1235,7 +1342,9 @@ export default function ProjectWorkspacePage() {
                 <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                   {files.length} file{files.length !== 1 ? "s" : ""}
                 </span>
-                <span className="ml-auto text-[10px] text-muted-foreground">Click to open in Code tab</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">
+                  Click to open in Code tab
+                </span>
               </div>
               <div ref={filesScrollRef} className="flex-1 overflow-y-auto py-1">
                 {files.length === 0 ? (
@@ -1243,14 +1352,19 @@ export default function ProjectWorkspacePage() {
                     <FileCode2 className="h-8 w-8 opacity-25" />
                     <div className="text-center">
                       <div className="text-xs font-medium text-foreground/60">No files yet</div>
-                      <div className="text-[10px] opacity-50 mt-0.5">Ask the AI to build something first</div>
+                      <div className="text-[10px] opacity-50 mt-0.5">
+                        Ask the AI to build something first
+                      </div>
                     </div>
                   </div>
                 ) : (
                   files.map((file) => (
                     <button
                       key={file.path}
-                      onClick={() => { setSelectedCodeFileId(file.id); setActiveTab("code"); }}
+                      onClick={() => {
+                        setSelectedCodeFileId(file.id);
+                        setActiveTab("code");
+                      }}
                       className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-left text-muted-foreground hover:bg-muted hover:text-foreground transition-colors group"
                     >
                       <FileCode2 className="h-3.5 w-3.5 shrink-0 group-hover:text-primary transition-colors" />
@@ -1287,7 +1401,9 @@ export default function ProjectWorkspacePage() {
                   </div>
                   <div>
                     <h2 className="text-lg font-bold">Historical Plan</h2>
-                    <p className="text-xs text-muted-foreground">Viewing a read-only snapshot from this version</p>
+                    <p className="text-xs text-muted-foreground">
+                      Viewing a read-only snapshot from this version
+                    </p>
                   </div>
                 </div>
                 <button
@@ -1308,9 +1424,7 @@ export default function ProjectWorkspacePage() {
                 />
               </div>
               <div className="shrink-0 p-4 border-t border-border bg-muted/30 flex justify-end">
-                <Button onClick={() => setViewingHistoryPlan(null)}>
-                  Close Viewer
-                </Button>
+                <Button onClick={() => setViewingHistoryPlan(null)}>Close Viewer</Button>
               </div>
             </div>
           </div>
@@ -1337,7 +1451,9 @@ export default function ProjectWorkspacePage() {
                   key={i}
                   className={cn(
                     "h-px rounded-full transition-colors duration-100",
-                    isDragging ? "w-3 bg-primary" : "w-3 bg-muted-foreground/30 group-hover:bg-primary/70",
+                    isDragging
+                      ? "w-3 bg-primary"
+                      : "w-3 bg-muted-foreground/30 group-hover:bg-primary/70",
                   )}
                 />
               ))}
@@ -1349,7 +1465,10 @@ export default function ProjectWorkspacePage() {
         <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background relative">
           {/* Mobile bottom tab bar */}
           {isMobileLayout && (
-            <div className="fixed bottom-0 left-0 right-0 z-30 flex items-stretch border-t border-border bg-card/95 backdrop-blur-sm" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+            <div
+              className="fixed bottom-0 left-0 right-0 z-30 flex items-stretch border-t border-border bg-card/95 backdrop-blur-sm"
+              style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+            >
               {[
                 { label: "Preview", value: "preview", icon: Monitor },
                 { label: "Code", value: "code", icon: FileCode2 },
@@ -1357,7 +1476,10 @@ export default function ProjectWorkspacePage() {
               ].map(({ label, value, icon: Icon }) => (
                 <button
                   key={value}
-                  onClick={() => { setActiveTab(value); setChatDrawerOpen(false); }}
+                  onClick={() => {
+                    setActiveTab(value);
+                    setChatDrawerOpen(false);
+                  }}
                   className={cn(
                     "flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors",
                     activeTab === value && !chatDrawerOpen
@@ -1389,23 +1511,19 @@ export default function ProjectWorkspacePage() {
                 focusMode={focusMode}
                 onToggleFocusMode={() => setFocusMode((f) => !f)}
                 validationWarnings={(() => {
-                  const recentReport = [...(messages ?? [])]
-                    .reverse()
-                    .find((m) => {
-                      const p = m.plan as ChatPlanPayload | null | undefined;
-                      return p && typeof p === "object" && (p as { kind?: string }).kind === "report";
-                    });
+                  const recentReport = [...(messages ?? [])].reverse().find((m) => {
+                    const p = m.plan as ChatPlanPayload | null | undefined;
+                    return p && typeof p === "object" && (p as { kind?: string }).kind === "report";
+                  });
                   if (!recentReport) return [];
                   const payload = recentReport.plan as { kind: "report"; report: TaskReport };
                   return payload.report?.warnings ?? [];
                 })()}
                 nativeFeatures={(() => {
-                  const latestReport = [...(messages ?? [])]
-                    .reverse()
-                    .find((m) => {
-                      const p = m.plan as ChatPlanPayload | null | undefined;
-                      return p && typeof p === "object" && (p as { kind?: string }).kind === "report";
-                    });
+                  const latestReport = [...(messages ?? [])].reverse().find((m) => {
+                    const p = m.plan as ChatPlanPayload | null | undefined;
+                    return p && typeof p === "object" && (p as { kind?: string }).kind === "report";
+                  });
                   if (!latestReport) return [];
                   const payload = latestReport.plan as { kind: "report"; report: TaskReport };
                   return payload.report?.nativeFeatures ?? [];
@@ -1423,7 +1541,13 @@ export default function ProjectWorkspacePage() {
                 }}
               />
             )}
-            {activeTab === "code" && <CodeEditorTab projectId={projectId} initialFileId={selectedCodeFileId} onHtmlFileSaved={handleHtmlFileSaved} />}
+            {activeTab === "code" && (
+              <CodeEditorTab
+                projectId={projectId}
+                initialFileId={selectedCodeFileId}
+                onHtmlFileSaved={handleHtmlFileSaved}
+              />
+            )}
             {activeTab === "canvas" && <CanvasTab projectId={projectId} />}
             {activeTab === "page-map" && (
               <PageMapTab
@@ -1460,7 +1584,13 @@ export default function ProjectWorkspacePage() {
                 }}
               />
             )}
-            {activeTab === "publishing" && <PublishingTab projectId={projectId} kind={project.kind} onNavigateToSecret={handleAddKey} />}
+            {activeTab === "publishing" && (
+              <PublishingTab
+                projectId={projectId}
+                kind={project.kind}
+                onNavigateToSecret={handleAddKey}
+              />
+            )}
             {activeTab === "logs" && (
               <LogsTab
                 projectId={projectId}

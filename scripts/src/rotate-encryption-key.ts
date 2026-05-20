@@ -75,7 +75,7 @@ async function main() {
   }
 
   const { rows } = await pool.query<{ id: number; value_encrypted: string }>(
-    "SELECT id, value_encrypted FROM project_secrets ORDER BY id"
+    "SELECT id, value_encrypted FROM project_secrets ORDER BY id",
   );
 
   console.log(`Found ${rows.length} secrets to rotate.`);
@@ -102,7 +102,9 @@ async function main() {
 
   console.log(`Rotation complete. Rotated: ${rotated}, Skipped/Errors: ${skipped}`);
   if (errors > 0) {
-    console.warn("Some secrets could not be rotated. They may still be encrypted with the old key.");
+    console.warn(
+      "Some secrets could not be rotated. They may still be encrypted with the old key.",
+    );
   }
   await pool.end();
 }

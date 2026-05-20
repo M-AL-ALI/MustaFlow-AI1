@@ -10,11 +10,14 @@ export type PageEdgeData = {
   aiGenerated: boolean;
 };
 
-const EDGE_STYLE: Record<ConnectionType, { stroke: string; strokeDasharray?: string; strokeWidth: number }> = {
-  nav:       { stroke: "hsl(var(--primary))",    strokeWidth: 2 },
+const EDGE_STYLE: Record<
+  ConnectionType,
+  { stroke: string; strokeDasharray?: string; strokeWidth: number }
+> = {
+  nav: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
   "auth-gate": { stroke: "hsl(var(--secondary))", strokeDasharray: "6 3", strokeWidth: 1.5 },
-  redirect:  { stroke: "hsl(var(--foreground))", strokeDasharray: "2 4", strokeWidth: 1.5 },
-  external:  { stroke: "hsl(var(--muted-foreground))", strokeWidth: 1 },
+  redirect: { stroke: "hsl(var(--foreground))", strokeDasharray: "2 4", strokeWidth: 1.5 },
+  external: { stroke: "hsl(var(--muted-foreground))", strokeWidth: 1 },
 };
 
 export const PageEdge = memo(function PageEdge({

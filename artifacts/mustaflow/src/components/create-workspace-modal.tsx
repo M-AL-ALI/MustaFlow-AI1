@@ -92,7 +92,9 @@ export function CreateWorkspaceModal({ open, onOpenChange }: CreateWorkspaceModa
                       : "border-border bg-muted/50 text-muted-foreground hover:border-border/80 hover:text-foreground",
                   )}
                 >
-                  <Icon className={cn("h-4 w-4 mt-0.5 shrink-0", type === value ? "text-primary" : "")} />
+                  <Icon
+                    className={cn("h-4 w-4 mt-0.5 shrink-0", type === value ? "text-primary" : "")}
+                  />
                   <div className="min-w-0">
                     <div className="text-xs font-semibold">{label}</div>
                     <div className="text-[10px] leading-snug mt-0.5 opacity-70">{desc}</div>
@@ -107,11 +109,7 @@ export function CreateWorkspaceModal({ open, onOpenChange }: CreateWorkspaceModa
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            onClick={handleCreate}
-            disabled={!name.trim() || isCreating}
-          >
+          <Button size="sm" onClick={handleCreate} disabled={!name.trim() || isCreating}>
             {isCreating ? "Creating…" : "Create Workspace"}
           </Button>
         </DialogFooter>

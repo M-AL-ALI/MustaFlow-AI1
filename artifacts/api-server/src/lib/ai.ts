@@ -127,9 +127,6 @@ export async function generatePlan(
   }
 }
 
-export function buildInitialAssistantMessage(
-  projectName: string,
-  initialPrompt: string,
-): string {
+export function buildInitialAssistantMessage(projectName: string, initialPrompt: string): string {
   return `Welcome to MustaFlow AI. I've spun up "${projectName}" for you. Here's what I heard:\n\n"${initialPrompt.trim()}"\n\nWhen you're ready, send me a message describing the first thing you want to see, or toggle Plan Mode and I'll lay out a full build plan for your approval.`;
 }

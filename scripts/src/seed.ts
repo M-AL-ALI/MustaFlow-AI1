@@ -17,8 +17,7 @@ async function main() {
   const seeds = [
     {
       name: "Aurora Notes",
-      description:
-        "A calm, focused notes app with daily reflections and AI summaries.",
+      description: "A calm, focused notes app with daily reflections and AI summaries.",
       kind: "web" as const,
       status: "building" as const,
       lastTaskSummary: "Drafted the inbox layout and quick-capture flow",
@@ -33,8 +32,7 @@ async function main() {
     },
     {
       name: "Cedar Bookings",
-      description:
-        "A small-business booking dashboard with calendar, customers, and payments.",
+      description: "A small-business booking dashboard with calendar, customers, and payments.",
       kind: "dashboard" as const,
       status: "testing" as const,
       lastTaskSummary: "Connected the calendar to a sample customer list",
@@ -83,7 +81,8 @@ async function main() {
     },
     {
       title: "Mask secrets in API responses",
-      content: "Server never returns raw secret values — only a masked preview with the last four characters.",
+      content:
+        "Server never returns raw secret values — only a masked preview with the last four characters.",
       category: "lesson",
     },
   ]);

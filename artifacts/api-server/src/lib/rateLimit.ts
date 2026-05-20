@@ -33,7 +33,10 @@ function createLimiter(opts: {
   message?: string;
 }) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? req.socket.remoteAddress ?? "unknown";
+    const ip =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
+      req.socket.remoteAddress ??
+      "unknown";
     const key = `${opts.keyPrefix}:${ip}`;
     const now = Date.now();
 

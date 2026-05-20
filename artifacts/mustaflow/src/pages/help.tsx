@@ -1,4 +1,14 @@
-import { HelpCircle, Zap, Lock, Globe, RefreshCw, MessageSquare, FileDown, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  HelpCircle,
+  Zap,
+  Lock,
+  Globe,
+  RefreshCw,
+  MessageSquare,
+  FileDown,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import { useState } from "react";
 
 const FAQS = [
@@ -52,7 +62,9 @@ export default function HelpPage() {
           <HelpCircle className="h-6 w-6 text-primary" />
           <h1 className="text-2xl font-bold">Help & Documentation</h1>
         </div>
-        <p className="text-muted-foreground text-sm">Everything you need to get started and build great apps with MustaFlow AI.</p>
+        <p className="text-muted-foreground text-sm">
+          Everything you need to get started and build great apps with MustaFlow AI.
+        </p>
       </div>
 
       <QuickLinks />
@@ -69,7 +81,9 @@ export default function HelpPage() {
           <MessageSquare className="h-5 w-5 text-primary" />
           <h2 className="font-semibold">Still need help?</h2>
         </div>
-        <p className="text-sm text-muted-foreground">Our support team is here to help. Describe your issue and we'll get back to you.</p>
+        <p className="text-sm text-muted-foreground">
+          Our support team is here to help. Describe your issue and we'll get back to you.
+        </p>
         <a
           href="mailto:support@mustaflow.ai"
           className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
@@ -86,8 +100,18 @@ function QuickLinks() {
     { icon: Zap, label: "Quick Start", desc: "Build your first app in minutes", href: "/" },
     { icon: Lock, label: "Secret Security", desc: "How secrets are encrypted", href: "/privacy" },
     { icon: Globe, label: "Publishing Guide", desc: "Go live with your app", href: "#publishing" },
-    { icon: RefreshCw, label: "Version History", desc: "Roll back to any snapshot", href: "#versions" },
-    { icon: FileDown, label: "Export & Duplicate", desc: "Download or copy projects", href: "#export" },
+    {
+      icon: RefreshCw,
+      label: "Version History",
+      desc: "Roll back to any snapshot",
+      href: "#versions",
+    },
+    {
+      icon: FileDown,
+      label: "Export & Duplicate",
+      desc: "Download or copy projects",
+      href: "#export",
+    },
   ];
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -118,7 +142,11 @@ function FaqItem({ q, a }: { q: string; a: string }) {
         onClick={() => setOpen((v) => !v)}
       >
         <span>{q}</span>
-        {open ? <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />}
+        {open ? (
+          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
       </button>
       {open && (
         <div className="px-4 pb-4 text-sm text-muted-foreground leading-relaxed border-t border-border bg-card/50">

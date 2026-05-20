@@ -15,7 +15,12 @@ import {
   Wand2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useSendMessage, useListProjectFiles, getListProjectFilesQueryKey, getListMessagesQueryKey } from "@workspace/api-client-react";
+import {
+  useSendMessage,
+  useListProjectFiles,
+  getListProjectFilesQueryKey,
+  getListMessagesQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 type TabMode = "design" | "brand-studio";
@@ -51,11 +56,25 @@ function BrandPreview({ projectId, iframeKey }: { projectId: number; iframeKey: 
       <div className="shrink-0 grid grid-cols-2 gap-2 pt-2">
         <div className="border border-border rounded-lg p-2 bg-background flex flex-col items-center gap-1">
           <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Logo</div>
-          <img src={logoUrl} alt="Logo" className="h-8 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <img
+            src={logoUrl}
+            alt="Logo"
+            className="h-8 object-contain"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
+          />
         </div>
         <div className="border border-border rounded-lg p-2 bg-zinc-900 flex flex-col items-center gap-1">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wide">Dark bg</div>
-          <img src={iconUrl} alt="Icon" className="h-8 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <img
+            src={iconUrl}
+            alt="Icon"
+            className="h-8 object-contain"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
+          />
         </div>
       </div>
     </div>
@@ -71,7 +90,8 @@ function BrandEmptyState() {
       <div>
         <h3 className="text-sm font-semibold text-foreground mb-1">No brand kit yet</h3>
         <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
-          Fill in your brand details and click Generate to create a professional logo, icon, color palette, and typography system.
+          Fill in your brand details and click Generate to create a professional logo, icon, color
+          palette, and typography system.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground w-full max-w-xs">
@@ -134,10 +154,15 @@ export function CanvasTab({ projectId }: { projectId: number }) {
       `- brand/preview.html (brand board showing all assets, colors, and typography using Tailwind CDN)`,
       `Use only SVG primitives (rect, circle, path, text) — no external images or fonts.`,
       `Make it professional, scalable, and distinctive for the ${industry || "tech"} industry.`,
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     sendMessage.mutate(
-      { id: projectId, data: { content: prompt, agentMode: "power", planMode: false, background: false } },
+      {
+        id: projectId,
+        data: { content: prompt, agentMode: "power", planMode: false, background: false },
+      },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
@@ -159,7 +184,10 @@ Ensure headings use --brand-font-heading, body text uses --brand-font-body, and 
 The app should feel visually consistent with the brand identity shown in brand/preview.html.`;
 
     sendMessage.mutate(
-      { id: projectId, data: { content: prompt, agentMode: "power", planMode: false, background: false } },
+      {
+        id: projectId,
+        data: { content: prompt, agentMode: "power", planMode: false, background: false },
+      },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
@@ -174,7 +202,15 @@ The app should feel visually consistent with the brand identity shown in brand/p
   const generateDesignVariant = () => {
     if (!designPrompt.trim()) return;
     sendMessage.mutate(
-      { id: projectId, data: { content: `Design change request: ${designPrompt}`, agentMode: "power", planMode: false, background: false } },
+      {
+        id: projectId,
+        data: {
+          content: `Design change request: ${designPrompt}`,
+          agentMode: "power",
+          planMode: false,
+          background: false,
+        },
+      },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
@@ -194,7 +230,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
             onClick={() => setMode("design")}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-              mode === "design" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              mode === "design"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             <Monitor className="h-3.5 w-3.5" /> Design
@@ -203,7 +241,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
             onClick={() => setMode("brand-studio")}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-              mode === "brand-studio" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              mode === "brand-studio"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             <Sparkles className="h-3.5 w-3.5" /> Brand Studio
@@ -220,10 +260,15 @@ The app should feel visually consistent with the brand identity shown in brand/p
       {mode === "design" && (
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <div className="w-44 border-r border-border bg-card p-3 space-y-3 shrink-0">
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Screens</div>
+            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+              Screens
+            </div>
             <div className="space-y-0.5">
               {(files?.filter((f) => f.path.endsWith(".html")).slice(0, 8) ?? []).map((f) => (
-                <div key={f.id} className="px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted rounded-md cursor-pointer truncate">
+                <div
+                  key={f.id}
+                  className="px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted rounded-md cursor-pointer truncate"
+                >
                   {f.path.replace(".html", "")}
                 </div>
               ))}
@@ -239,7 +284,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
                 className="flex-1 h-8 text-sm"
                 value={designPrompt}
                 onChange={(e) => setDesignPrompt(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") generateDesignVariant(); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") generateDesignVariant();
+                }}
               />
               <Button
                 size="sm"
@@ -250,14 +297,16 @@ The app should feel visually consistent with the brand identity shown in brand/p
                 {sendMessage.isPending ? (
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <><Paintbrush className="h-3.5 w-3.5 mr-1.5" /> Generate</>
+                  <>
+                    <Paintbrush className="h-3.5 w-3.5 mr-1.5" /> Generate
+                  </>
                 )}
               </Button>
             </div>
             <div className="flex-1 p-4 bg-muted/20 overflow-y-auto">
               <div className="text-xs text-muted-foreground text-center py-12">
-                Describe a design change above to generate variants of your app.
-                The AI will modify your files and show changes in the Preview tab.
+                Describe a design change above to generate variants of your app. The AI will modify
+                your files and show changes in the Preview tab.
               </div>
             </div>
             <div className="p-3 border-t border-border bg-card flex justify-end shrink-0">
@@ -279,7 +328,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
                 <div className="text-xs font-semibold text-foreground mb-3">Brand Details</div>
                 <div className="space-y-3">
                   <div>
-                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Brand Name *</label>
+                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                      Brand Name *
+                    </label>
                     <Input
                       placeholder="e.g. SwiftRide"
                       className="h-8 text-sm"
@@ -288,7 +339,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Tagline</label>
+                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                      Tagline
+                    </label>
                     <Input
                       placeholder="e.g. Get there faster"
                       className="h-8 text-sm"
@@ -297,7 +350,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Industry</label>
+                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                      Industry
+                    </label>
                     <Input
                       placeholder="e.g. Ride-hailing, Healthcare..."
                       className="h-8 text-sm"
@@ -306,7 +361,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Color Hint</label>
+                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                      Color Hint
+                    </label>
                     <Input
                       placeholder="e.g. Deep purple, Electric blue..."
                       className="h-8 text-sm"
@@ -318,7 +375,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
               </div>
 
               <div>
-                <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">Style Direction</div>
+                <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                  Style Direction
+                </div>
                 <div className="grid grid-cols-2 gap-1.5">
                   {STYLE_OPTIONS.map((opt) => (
                     <button
@@ -345,9 +404,13 @@ The app should feel visually consistent with the brand identity shown in brand/p
                   disabled={!brandName.trim() || generating || sendMessage.isPending}
                 >
                   {generating || sendMessage.isPending ? (
-                    <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Generating…</>
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Generating…
+                    </>
                   ) : (
-                    <><Wand2 className="h-3.5 w-3.5 mr-1.5" /> Generate Brand Kit</>
+                    <>
+                      <Wand2 className="h-3.5 w-3.5 mr-1.5" /> Generate Brand Kit
+                    </>
                   )}
                 </Button>
 
@@ -359,9 +422,13 @@ The app should feel visually consistent with the brand identity shown in brand/p
                     disabled={applying || sendMessage.isPending}
                   >
                     {applying ? (
-                      <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Applying…</>
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Applying…
+                      </>
                     ) : (
-                      <><Paintbrush className="h-3.5 w-3.5 mr-1.5" /> Apply Brand to App</>
+                      <>
+                        <Paintbrush className="h-3.5 w-3.5 mr-1.5" /> Apply Brand to App
+                      </>
                     )}
                   </Button>
                 )}
@@ -379,11 +446,23 @@ The app should feel visually consistent with the brand identity shown in brand/p
 
               {hasBrandFiles && (
                 <div className="space-y-1 pt-1">
-                  <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">Generated Assets</div>
-                  {["brand/logo.svg", "brand/icon.svg", "brand/logo-reversed.svg", "brand/favicon.svg", "brand/brand.css", "brand/preview.html"]
+                  <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                    Generated Assets
+                  </div>
+                  {[
+                    "brand/logo.svg",
+                    "brand/icon.svg",
+                    "brand/logo-reversed.svg",
+                    "brand/favicon.svg",
+                    "brand/brand.css",
+                    "brand/preview.html",
+                  ]
                     .filter((path) => files?.some((f) => f.path === path))
                     .map((path) => (
-                      <div key={path} className="flex items-center gap-1.5 text-[11px] text-green-400">
+                      <div
+                        key={path}
+                        className="flex items-center gap-1.5 text-[11px] text-green-400"
+                      >
                         <Check className="h-3 w-3 shrink-0" />
                         <span className="font-mono">{path}</span>
                       </div>

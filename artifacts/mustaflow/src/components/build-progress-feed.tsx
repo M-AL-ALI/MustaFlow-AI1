@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  useListTaskEvents,
-  getListTaskEventsQueryKey,
-} from "@workspace/api-client-react";
+import { useListTaskEvents, getListTaskEventsQueryKey } from "@workspace/api-client-react";
 import {
   CheckCircle2,
   XCircle,
@@ -34,10 +31,7 @@ type EventType =
   | "completed"
   | "failed";
 
-const EVENT_META: Record<
-  EventType,
-  { icon: React.ElementType; color: string }
-> = {
+const EVENT_META: Record<EventType, { icon: React.ElementType; color: string }> = {
   queued: { icon: Clock, color: "text-muted-foreground" },
   planning: { icon: BrainCircuit, color: "text-violet-400" },
   reading_files: { icon: FolderOpen, color: "text-blue-400" },
@@ -80,29 +74,22 @@ export function BuildProgressFeed({ projectId, taskId, taskStartedAt }: Props) {
   const [visible] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { data: events = [] } = useListTaskEvents(
-    projectId,
-    taskId ?? 0,
-    {
-      query: {
-        enabled: taskId !== null && taskId > 0,
-        queryKey: getListTaskEventsQueryKey(projectId, taskId ?? 0),
-        refetchInterval: (query) => {
-          const data = query.state.data;
-          if (!data || !Array.isArray(data)) return 1500;
-          const last = data[data.length - 1];
-          if (last && TERMINAL_STATUSES.has(last.eventType as string))
-            return false;
-          return 1500;
-        },
+  const { data: events = [] } = useListTaskEvents(projectId, taskId ?? 0, {
+    query: {
+      enabled: taskId !== null && taskId > 0,
+      queryKey: getListTaskEventsQueryKey(projectId, taskId ?? 0),
+      refetchInterval: (query) => {
+        const data = query.state.data;
+        if (!data || !Array.isArray(data)) return 1500;
+        const last = data[data.length - 1];
+        if (last && TERMINAL_STATUSES.has(last.eventType as string)) return false;
+        return 1500;
       },
     },
-  );
+  });
 
   const lastEvent = events[events.length - 1];
-  const isTerminal = lastEvent
-    ? TERMINAL_STATUSES.has(lastEvent.eventType as string)
-    : false;
+  const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
 
@@ -122,12 +109,8 @@ export function BuildProgressFeed({ projectId, taskId, taskStartedAt }: Props) {
   const elapsedSec = elapsedMs / 1000;
   const showReassurance = elapsedSec > 30 && !isTerminal;
 
-  const milestoneCount = events.filter((e) =>
-    MILESTONE_TYPES.has(e.eventType as string),
-  ).length;
-  const rawPct = isDone
-    ? 100
-    : Math.min(95, (milestoneCount / EXPECTED_STEP_COUNT) * 100);
+  const milestoneCount = events.filter((e) => MILESTONE_TYPES.has(e.eventType as string)).length;
+  const rawPct = isDone ? 100 : Math.min(95, (milestoneCount / EXPECTED_STEP_COUNT) * 100);
 
   const deduped = events.reduce<typeof events>((acc, ev) => {
     const prevSameType = acc.findLast((e) => e.eventType === ev.eventType);
@@ -152,10 +135,7 @@ export function BuildProgressFeed({ projectId, taskId, taskStartedAt }: Props) {
       )}
     >
       {/* Step list */}
-      <div
-        ref={scrollRef}
-        className="space-y-0.5 max-h-40 overflow-y-auto hide-scrollbar"
-      >
+      <div ref={scrollRef} className="space-y-0.5 max-h-40 overflow-y-auto hide-scrollbar">
         {taskId === null && (
           <div className="flex items-center gap-2 px-2 py-1.5 text-[11px] text-muted-foreground">
             <span className="relative flex h-2 w-2 shrink-0">
@@ -168,17 +148,14 @@ export function BuildProgressFeed({ projectId, taskId, taskStartedAt }: Props) {
         )}
 
         {deduped.map((event, idx) => {
-          const meta =
-            EVENT_META[event.eventType as EventType] ?? EVENT_META.queued;
+          const meta = EVENT_META[event.eventType as EventType] ?? EVENT_META.queued;
           const Icon = meta.icon;
           const isLast = idx === deduped.length - 1;
           const isActive = isLast && !isTerminal;
           const isPast = !isLast || isTerminal;
 
           const stepElapsedSec = taskStartedAt
-            ? (new Date(event.createdAt).getTime() -
-                taskStartedAt.getTime()) /
-              1000
+            ? (new Date(event.createdAt).getTime() - taskStartedAt.getTime()) / 1000
             : null;
 
           return (
@@ -196,25 +173,19 @@ export function BuildProgressFeed({ projectId, taskId, taskStartedAt }: Props) {
                     event.eventType === "failed"
                       ? "text-destructive"
                       : event.eventType === "completed"
-                      ? "text-green-400"
-                      : "text-green-500/60",
+                        ? "text-green-400"
+                        : "text-green-500/60",
                   )}
                 />
               ) : (
                 <Icon
-                  className={cn(
-                    "h-3 w-3 shrink-0 mt-px",
-                    meta.color,
-                    isActive && "animate-pulse",
-                  )}
+                  className={cn("h-3 w-3 shrink-0 mt-px", meta.color, isActive && "animate-pulse")}
                 />
               )}
               <span
                 className={cn(
                   "flex-1 truncate leading-tight",
-                  isActive
-                    ? "text-foreground font-medium"
-                    : "text-muted-foreground",
+                  isActive ? "text-foreground font-medium" : "text-muted-foreground",
                 )}
               >
                 {event.message}
@@ -263,18 +234,10 @@ export function BuildProgressFeed({ projectId, taskId, taskStartedAt }: Props) {
         <span
           className={cn(
             "text-[11px] font-semibold",
-            isDone
-              ? "text-green-400"
-              : isFailed
-              ? "text-destructive"
-              : "text-primary",
+            isDone ? "text-green-400" : isFailed ? "text-destructive" : "text-primary",
           )}
         >
-          {isDone
-            ? "Build complete"
-            : isFailed
-            ? "Build failed"
-            : "Building"}
+          {isDone ? "Build complete" : isFailed ? "Build failed" : "Building"}
         </span>
         <span className="text-[10px] text-muted-foreground/60 tabular-nums ml-auto">
           {elapsedSec.toFixed(0)}s

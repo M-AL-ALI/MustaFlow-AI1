@@ -70,56 +70,44 @@ function generateEnvExample(secretNames: string[]): string {
   return lines.join("\n");
 }
 
-router.get(
-  "/projects/:id/export",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
+router.get("/projects/:id/export", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
 
-    const [project] = await db
-      .select()
-      .from(projectsTable)
-      .where(eq(projectsTable.id, projectId));
-    if (!project) {
-      res.status(404).json({ error: "Project not found" });
-      return;
-    }
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
 
-    const files = await db
-      .select()
-      .from(projectFilesTable)
-      .where(eq(projectFilesTable.projectId, projectId));
+  const files = await db
+    .select()
+    .from(projectFilesTable)
+    .where(eq(projectFilesTable.projectId, projectId));
 
-    const secrets = await db
-      .select({ name: secretsTable.name })
-      .from(secretsTable)
-      .where(eq(secretsTable.projectId, projectId));
+  const secrets = await db
+    .select({ name: secretsTable.name })
+    .from(secretsTable)
+    .where(eq(secretsTable.projectId, projectId));
 
-    const safeName = project.name.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+  const safeName = project.name.replace(/[^a-z0-9]/gi, "-").toLowerCase();
 
-    // Build the zip in-memory using fflate (pure ESM, no CJS issues)
-    const zipFiles: Record<string, Uint8Array> = {};
+  // Build the zip in-memory using fflate (pure ESM, no CJS issues)
+  const zipFiles: Record<string, Uint8Array> = {};
 
-    for (const file of files) {
-      const mime = file.mimeType ?? "";
-      zipFiles[file.path] = isBinaryMime(mime)
-        ? new Uint8Array(Buffer.from(file.content, "base64"))
-        : strToU8(file.content);
-    }
-    zipFiles["README.md"] = strToU8(generateReadme(project, files));
-    zipFiles[".env.example"] = strToU8(
-      generateEnvExample(secrets.map((s) => s.name)),
-    );
+  for (const file of files) {
+    const mime = file.mimeType ?? "";
+    zipFiles[file.path] = isBinaryMime(mime)
+      ? new Uint8Array(Buffer.from(file.content, "base64"))
+      : strToU8(file.content);
+  }
+  zipFiles["README.md"] = strToU8(generateReadme(project, files));
+  zipFiles[".env.example"] = strToU8(generateEnvExample(secrets.map((s) => s.name)));
 
-    const zipped = zipSync(zipFiles, { level: 9 });
+  const zipped = zipSync(zipFiles, { level: 9 });
 
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${safeName}.zip"`,
-    );
-    res.end(Buffer.from(zipped));
-  },
-);
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="${safeName}.zip"`);
+  res.end(Buffer.from(zipped));
+});
 
 export default router;

@@ -27,12 +27,7 @@ import buildsRouter from "./builds";
 import queueRouter from "./queue";
 import easRouter from "./eas";
 import { attachUser } from "../lib/auth";
-import {
-  aiBuilderLimiter,
-  publishLimiter,
-  exportLimiter,
-  generalLimiter,
-} from "../lib/rateLimit";
+import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
 const router: IRouter = Router();
 
@@ -42,8 +37,8 @@ router.use(generalLimiter);
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 router.use(healthRouter);
 router.use(publicRouter);
-router.use(sslWebhookRouter);       // POST /domain/ssl-webhook (Cloudflare → us)
-router.use(billingWebhookRouter);   // POST /billing/webhook    (Stripe → us)
+router.use(sslWebhookRouter); // POST /domain/ssl-webhook (Cloudflare → us)
+router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
@@ -68,9 +63,7 @@ const KNOWN_PREFIXES = [
 
 router.use((req, res, next) => {
   const p = req.path;
-  const known = KNOWN_PREFIXES.some(
-    (prefix) => p === prefix || p.startsWith(prefix + "/"),
-  );
+  const known = KNOWN_PREFIXES.some((prefix) => p === prefix || p.startsWith(prefix + "/"));
   if (!known) {
     res.status(404).json({ error: "Not found" });
     return;

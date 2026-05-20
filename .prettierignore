@@ -1,0 +1,7 @@
+dist/
+node_modules/
+.replit-artifact/
+lib/api-client-react/src/generated/
+lib/api-zod/src/generated/
+artifacts/mustaflow/src/components/ui/
+pnpm-lock.yaml

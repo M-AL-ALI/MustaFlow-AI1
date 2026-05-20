@@ -75,7 +75,11 @@ router.get(
         .from(projectVersionsTable)
         .where(eq(projectVersionsTable.projectId, projectId)),
       db
-        .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted, environment: secretsTable.environment })
+        .select({
+          name: secretsTable.name,
+          valueEncrypted: secretsTable.valueEncrypted,
+          environment: secretsTable.environment,
+        })
         .from(secretsTable)
         .where(eq(secretsTable.projectId, projectId)),
     ]);
@@ -92,7 +96,10 @@ router.get(
       description: "At least one file must be generated before publishing.",
       severity: "blocking",
       status: fileCount > 0 ? "pass" : "fail",
-      message: fileCount > 0 ? `${fileCount} file(s) ready` : "No files generated yet. Use the AI Builder to create your app.",
+      message:
+        fileCount > 0
+          ? `${fileCount} file(s) ready`
+          : "No files generated yet. Use the AI Builder to create your app.",
     });
 
     // ── Check 2: has rollback point (BLOCKING for production) ─────────────────
@@ -101,29 +108,37 @@ router.get(
       label: "Rollback snapshot exists",
       description: "A saved version is required so you can roll back if something goes wrong.",
       severity: isProduction ? "blocking" : "warning",
-      status: versionCount > 0 ? "pass" : (isProduction ? "fail" : "warning"),
-      message: versionCount > 0 ? `${versionCount} snapshot(s) available` : "No version snapshots yet. Build the app to create one.",
+      status: versionCount > 0 ? "pass" : isProduction ? "fail" : "warning",
+      message:
+        versionCount > 0
+          ? `${versionCount} snapshot(s) available`
+          : "No version snapshots yet. Build the app to create one.",
     });
 
     // ── Check 3: no test-looking keys in production secrets ───────────────────
     if (isProduction) {
       const prodSecrets = secrets.filter((s) => s.environment === "production");
-      const testKeysInProd = prodSecrets.filter((s) => looksLikeTestKey(s.valueEncrypted) || looksLikeTestKey(s.name));
+      const testKeysInProd = prodSecrets.filter(
+        (s) => looksLikeTestKey(s.valueEncrypted) || looksLikeTestKey(s.name),
+      );
       checks.push({
         id: "no_test_keys_in_production",
         label: "No test keys in production secrets",
         description: "Production secrets must not contain test-mode API keys.",
         severity: "blocking",
         status: testKeysInProd.length === 0 ? "pass" : "fail",
-        message: testKeysInProd.length === 0
-          ? "All production secrets look like live keys"
-          : `${testKeysInProd.length} secret(s) appear to use test keys: ${testKeysInProd.map((s) => s.name).join(", ")}`,
+        message:
+          testKeysInProd.length === 0
+            ? "All production secrets look like live keys"
+            : `${testKeysInProd.length} secret(s) appear to use test keys: ${testKeysInProd.map((s) => s.name).join(", ")}`,
       });
     }
 
     // ── Check 4: no prod-looking keys in testing secrets (WARNING) ────────────
     const testingSecrets = secrets.filter((s) => s.environment === "testing");
-    const prodKeysInTest = testingSecrets.filter((s) => looksLikeProdKey(s.valueEncrypted) || looksLikeProdKey(s.name));
+    const prodKeysInTest = testingSecrets.filter(
+      (s) => looksLikeProdKey(s.valueEncrypted) || looksLikeProdKey(s.name),
+    );
     if (testingSecrets.length > 0) {
       checks.push({
         id: "no_prod_keys_in_testing",
@@ -131,22 +146,26 @@ router.get(
         description: "Testing environment should not reference live production API keys.",
         severity: "warning",
         status: prodKeysInTest.length === 0 ? "pass" : "warning",
-        message: prodKeysInTest.length === 0
-          ? "No production-mode keys found in testing environment"
-          : `${prodKeysInTest.length} secret(s) in testing may be production keys: ${prodKeysInTest.map((s) => s.name).join(", ")}`,
+        message:
+          prodKeysInTest.length === 0
+            ? "No production-mode keys found in testing environment"
+            : `${prodKeysInTest.length} secret(s) in testing may be production keys: ${prodKeysInTest.map((s) => s.name).join(", ")}`,
       });
     }
 
     // ── Check 5: project has a real name (WARNING) ────────────────────────────
     const defaultNames = ["new project", "untitled", "my project"];
-    const nameOk = project.name.trim().length > 0 && !defaultNames.includes(project.name.toLowerCase().trim());
+    const nameOk =
+      project.name.trim().length > 0 && !defaultNames.includes(project.name.toLowerCase().trim());
     checks.push({
       id: "has_name",
       label: "Project has a meaningful name",
       description: "Give your project a real name before publishing.",
       severity: "warning",
       status: nameOk ? "pass" : "warning",
-      message: nameOk ? `Name: "${project.name}"` : `Project is named "${project.name}" — consider renaming it in Manage.`,
+      message: nameOk
+        ? `Name: "${project.name}"`
+        : `Project is named "${project.name}" — consider renaming it in Manage.`,
     });
 
     // ── Check 6: project has a description (INFO) ─────────────────────────────

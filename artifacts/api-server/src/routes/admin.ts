@@ -31,10 +31,7 @@ router.use("/admin", requireAdmin);
 // ── GET /api/admin/me ─────────────────────────────────────────────────────────
 router.get("/admin/me", async (req, res): Promise<void> => {
   const userId = req.userId!;
-  const [row] = await db
-    .select()
-    .from(userRolesTable)
-    .where(eq(userRolesTable.userId, userId));
+  const [row] = await db.select().from(userRolesTable).where(eq(userRolesTable.userId, userId));
 
   const adminViaEnv = Boolean(
     (process.env.ADMIN_USER_IDS ?? "")
@@ -246,9 +243,7 @@ router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {
     "session_secret",
     "SESSION_SECRET configured",
     process.env.SESSION_SECRET ? "pass" : "fail",
-    process.env.SESSION_SECRET
-      ? "SESSION_SECRET present."
-      : "SESSION_SECRET not set.",
+    process.env.SESSION_SECRET ? "SESSION_SECRET present." : "SESSION_SECRET not set.",
   );
 
   // 15. AI integration
@@ -269,9 +264,7 @@ router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {
     check("database", "Database reachable", "fail", "Database connection failed.");
   }
 
-  const blockingFails = checks.filter(
-    (c) => c.blocking && c.status === "fail",
-  ).length;
+  const blockingFails = checks.filter((c) => c.blocking && c.status === "fail").length;
 
   res.json({
     ready: blockingFails === 0,
@@ -322,7 +315,11 @@ router.delete("/admin/roles/:userId", async (req, res): Promise<void> => {
 
   await db.delete(userRolesTable).where(eq(userRolesTable.userId, targetUserId));
 
-  res.json({ ok: true, userId: targetUserId, note: "Role revoked — user reverts to default 'user' role." });
+  res.json({
+    ok: true,
+    userId: targetUserId,
+    note: "Role revoked — user reverts to default 'user' role.",
+  });
 });
 
 // ── GET /api/admin/audit-log ──────────────────────────────────────────────────

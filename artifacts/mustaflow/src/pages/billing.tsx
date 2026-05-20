@@ -162,9 +162,8 @@ export default function BillingPage() {
         <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-yellow-600">
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
-            <span className="font-semibold">Credit purchases are not yet available.</span>
-            {" "}Stripe is not configured on this platform. Contact your administrator or
-            check back soon.
+            <span className="font-semibold">Credit purchases are not yet available.</span> Stripe is
+            not configured on this platform. Contact your administrator or check back soon.
           </div>
         </div>
       )}
@@ -198,7 +197,9 @@ export default function BillingPage() {
             { mode: "Pro", cost: 10, desc: "Maximum quality, extended context" },
           ].map((row) => (
             <div key={row.mode} className="flex items-center justify-between px-4 py-2.5 text-sm">
-              <span className="text-muted-foreground">{row.mode} mode — {row.desc}</span>
+              <span className="text-muted-foreground">
+                {row.mode} mode — {row.desc}
+              </span>
               <span className="font-semibold">
                 {row.cost} credit{row.cost !== 1 ? "s" : ""}
               </span>
@@ -242,22 +243,16 @@ export default function BillingPage() {
           </div>
         )}
         {loading && (
-          <div className="px-4 py-6 text-sm text-muted-foreground text-center">
-            Loading…
-          </div>
+          <div className="px-4 py-6 text-sm text-muted-foreground text-center">Loading…</div>
         )}
         {transactions.length > 0 && (
           <div className="divide-y divide-border">
             {transactions.map((tx) => (
-              <div
-                key={tx.id}
-                className="flex items-center justify-between px-4 py-2.5 text-sm"
-              >
+              <div key={tx.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
                 <div>
                   <p className="font-medium">{tx.description ?? tx.type}</p>
                   <p className="text-xs text-muted-foreground">
-                    {new Date(tx.createdAt).toLocaleString()} · balance after:{" "}
-                    {tx.balanceAfter}
+                    {new Date(tx.createdAt).toLocaleString()} · balance after: {tx.balanceAfter}
                   </p>
                 </div>
                 <span

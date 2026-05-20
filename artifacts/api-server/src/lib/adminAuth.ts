@@ -32,11 +32,7 @@ export async function isAdminUser(userId: string): Promise<boolean> {
 }
 
 /** Express middleware: 401 if not authenticated, 403 if not admin. */
-export async function requireAdmin(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
+export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   const userId = req.userId;
   if (!userId) {
     res.status(401).json({ error: "Unauthenticated" });

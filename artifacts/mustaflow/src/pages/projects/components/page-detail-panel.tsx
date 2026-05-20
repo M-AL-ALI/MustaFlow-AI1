@@ -18,16 +18,16 @@ export type PageMapNodeState = {
 };
 
 const WEB_PAGE_TYPES: { value: PageType; label: string }[] = [
-  { value: "landing",   label: "Landing Page" },
-  { value: "auth",      label: "Auth / Login" },
-  { value: "form",      label: "Form" },
+  { value: "landing", label: "Landing Page" },
+  { value: "auth", label: "Auth / Login" },
+  { value: "form", label: "Form" },
   { value: "dashboard", label: "Dashboard" },
-  { value: "modal",     label: "Modal / Overlay" },
-  { value: "settings",  label: "Settings" },
-  { value: "404",       label: "404 / Error" },
-  { value: "list",      label: "List View" },
-  { value: "detail",    label: "Detail View" },
-  { value: "other",     label: "Other" },
+  { value: "modal", label: "Modal / Overlay" },
+  { value: "settings", label: "Settings" },
+  { value: "404", label: "404 / Error" },
+  { value: "list", label: "List View" },
+  { value: "detail", label: "Detail View" },
+  { value: "other", label: "Other" },
 ];
 
 type PageDetailPanelProps = {
@@ -39,7 +39,14 @@ type PageDetailPanelProps = {
   onDelete: (nodeId: string) => void;
 };
 
-export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPage, onDelete }: PageDetailPanelProps) {
+export function PageDetailPanel({
+  node,
+  onClose,
+  onSave,
+  onFileOpen,
+  onModifyPage,
+  onDelete,
+}: PageDetailPanelProps) {
   const [label, setLabel] = useState("");
   const [pageType, setPageType] = useState<PageType>("other");
   const [notes, setNotes] = useState("");
@@ -91,7 +98,10 @@ export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPag
           </label>
           <input
             value={label}
-            onChange={(e) => { setLabel(e.target.value); setDirty(true); }}
+            onChange={(e) => {
+              setLabel(e.target.value);
+              setDirty(true);
+            }}
             className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-shadow"
             placeholder="Page name"
           />
@@ -104,11 +114,16 @@ export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPag
           </label>
           <select
             value={pageType}
-            onChange={(e) => { setPageType(e.target.value as PageType); setDirty(true); }}
+            onChange={(e) => {
+              setPageType(e.target.value as PageType);
+              setDirty(true);
+            }}
             className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-shadow"
           >
             {WEB_PAGE_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>{t.label}</option>
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
             ))}
           </select>
         </div>
@@ -120,7 +135,10 @@ export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPag
           </label>
           <textarea
             value={notes}
-            onChange={(e) => { setNotes(e.target.value); setDirty(true); }}
+            onChange={(e) => {
+              setNotes(e.target.value);
+              setDirty(true);
+            }}
             rows={3}
             className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-shadow resize-none"
             placeholder="Add notes about this page…"
@@ -138,7 +156,9 @@ export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPag
               className="w-full flex items-center gap-2 bg-muted border border-border rounded-lg px-3 py-2 text-left hover:border-primary/40 hover:bg-muted/80 transition-colors group"
             >
               <FileCode2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <span className="text-[11px] font-mono text-muted-foreground truncate flex-1">{node.filePath}</span>
+              <span className="text-[11px] font-mono text-muted-foreground truncate flex-1">
+                {node.filePath}
+              </span>
               <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-60 shrink-0 transition-opacity" />
             </button>
           </div>
@@ -147,16 +167,24 @@ export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPag
         {/* Metadata badges */}
         <div className="flex flex-wrap gap-1.5">
           {node.planned && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold">Planned — not built yet</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold">
+              Planned — not built yet
+            </span>
           )}
           {node.aiGenerated && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold">AI-generated</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold">
+              AI-generated
+            </span>
           )}
           {node.isNew && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/20 font-semibold">New in last build</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/20 font-semibold">
+              New in last build
+            </span>
           )}
           {node.hasError && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/20 font-semibold">Has errors</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/20 font-semibold">
+              Has errors
+            </span>
           )}
         </div>
       </div>
@@ -171,11 +199,7 @@ export function PageDetailPanel({ node, onClose, onSave, onFileOpen, onModifyPag
           {node.planned ? <FilePlus className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
           {node.planned ? "Build this page" : "Modify this page"}
         </Button>
-        <Button
-          onClick={handleSave}
-          disabled={!dirty}
-          className="w-full h-8 text-xs"
-        >
+        <Button onClick={handleSave} disabled={!dirty} className="w-full h-8 text-xs">
           Save changes
         </Button>
         {node.planned ? (

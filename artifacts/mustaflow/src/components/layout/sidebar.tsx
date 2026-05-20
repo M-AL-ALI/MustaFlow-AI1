@@ -64,8 +64,7 @@ function NavGroup({
       <div className="space-y-1">
         {items.map((item) => {
           const isActive =
-            location === item.href ||
-            (item.href !== "/" && location.startsWith(item.href));
+            location === item.href || (item.href !== "/" && location.startsWith(item.href));
           return (
             <Link key={item.href} href={item.href}>
               <div
@@ -100,7 +99,9 @@ function CreditsWidget() {
         const data = (await res.json()) as { balance: number };
         setBalance(data.balance);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   useEffect(() => {
@@ -140,9 +141,7 @@ function CreditsWidget() {
             <span className="font-semibold">{balance.toLocaleString()}</span>
             <span className="ml-1">credits</span>
             {isLow && (
-              <p className="text-[10px] leading-tight mt-0.5 font-normal">
-                Running low — buy more
-              </p>
+              <p className="text-[10px] leading-tight mt-0.5 font-normal">Running low — buy more</p>
             )}
           </div>
           <CreditCard className="h-3 w-3 shrink-0 opacity-60" />
@@ -197,8 +196,7 @@ function UserSection() {
 
   if (!isLoaded || !user) return null;
 
-  const displayName =
-    user.fullName ?? user.emailAddresses[0]?.emailAddress ?? "User";
+  const displayName = user.fullName ?? user.emailAddresses[0]?.emailAddress ?? "User";
   const email = user.emailAddresses[0]?.emailAddress ?? "";
   const initials = displayName
     .split(" ")
@@ -225,14 +223,8 @@ function UserSection() {
           </div>
         )}
         <div className="flex-1 text-left min-w-0">
-          <div className="text-xs font-semibold text-foreground truncate">
-            {displayName}
-          </div>
-          {email && (
-            <div className="text-[10px] text-muted-foreground truncate">
-              {email}
-            </div>
-          )}
+          <div className="text-xs font-semibold text-foreground truncate">{displayName}</div>
+          {email && <div className="text-[10px] text-muted-foreground truncate">{email}</div>}
         </div>
         <ChevronDown
           className={cn(
@@ -316,13 +308,21 @@ function SidebarInner({
       <div className="mt-auto">
         <NavGroup items={TERTIARY_NAV_ITEMS} title="Resources" />
         <div className="px-6 py-2 flex items-center gap-3 text-[10px] text-muted-foreground/60">
-          <a href="/terms" className="hover:text-muted-foreground transition-colors">Terms</a>
+          <a href="/terms" className="hover:text-muted-foreground transition-colors">
+            Terms
+          </a>
           <span>·</span>
-          <a href="/privacy" className="hover:text-muted-foreground transition-colors">Privacy</a>
+          <a href="/privacy" className="hover:text-muted-foreground transition-colors">
+            Privacy
+          </a>
           <span>·</span>
-          <a href="/pricing" className="hover:text-muted-foreground transition-colors">Pricing</a>
+          <a href="/pricing" className="hover:text-muted-foreground transition-colors">
+            Pricing
+          </a>
           <span>·</span>
-          <a href="/help" className="hover:text-muted-foreground transition-colors">Help</a>
+          <a href="/help" className="hover:text-muted-foreground transition-colors">
+            Help
+          </a>
         </div>
         <UserSection />
       </div>
@@ -332,8 +332,12 @@ function SidebarInner({
 
 export function Sidebar() {
   const [createOpen, setCreateOpen] = useState(false);
-  const [windowWidth, setWindowWidth] = useState(() => typeof window !== "undefined" ? window.innerWidth : 1200);
-  const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  const [windowWidth, setWindowWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1200,
+  );
+  const [collapsed, setCollapsed] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 768,
+  );
 
   useEffect(() => {
     const handler = () => {

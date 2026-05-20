@@ -1,11 +1,6 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import {
-  Zap,
-  ArrowRight,
-  CheckCircle2,
-  Sparkles,
-} from "lucide-react";
+import { Zap, ArrowRight, CheckCircle2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TIERS = [
@@ -98,7 +93,8 @@ export default function PricingPage() {
           Pay for what you build
         </h1>
         <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-          No subscriptions. Buy credits, spend them on builds. Choose the agent mode that fits your project.
+          No subscriptions. Buy credits, spend them on builds. Choose the agent mode that fits your
+          project.
         </p>
       </div>
 
@@ -118,10 +114,14 @@ export default function PricingPage() {
               )}
             >
               {tier.badge && (
-                <div className={cn(
-                  "absolute -top-2.5 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase tracking-wide px-3 py-0.5 rounded-full border whitespace-nowrap",
-                  tier.id === "power" ? "bg-primary text-primary-foreground border-primary/50" : "bg-purple-500 text-white border-purple-500/50",
-                )}>
+                <div
+                  className={cn(
+                    "absolute -top-2.5 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase tracking-wide px-3 py-0.5 rounded-full border whitespace-nowrap",
+                    tier.id === "power"
+                      ? "bg-primary text-primary-foreground border-primary/50"
+                      : "bg-purple-500 text-white border-purple-500/50",
+                  )}
+                >
                   {tier.badge}
                 </div>
               )}
@@ -134,7 +134,9 @@ export default function PricingPage() {
               </div>
               <div className="flex items-baseline gap-1">
                 <span className="text-3xl font-extrabold">{tier.cost}</span>
-                <span className="text-sm text-muted-foreground">credit{tier.cost !== 1 ? "s" : ""}</span>
+                <span className="text-sm text-muted-foreground">
+                  credit{tier.cost !== 1 ? "s" : ""}
+                </span>
               </div>
               <ul className="space-y-1.5 flex-1">
                 {tier.features.map((f) => (
@@ -164,9 +166,7 @@ export default function PricingPage() {
                 key={pkg.credits}
                 className={cn(
                   "relative rounded-2xl border p-6 flex flex-col gap-4 text-center",
-                  pkg.highlight
-                    ? "border-primary/40 bg-primary/5"
-                    : "border-border bg-card",
+                  pkg.highlight ? "border-primary/40 bg-primary/5" : "border-border bg-card",
                 )}
               >
                 {pkg.highlight && (
@@ -181,10 +181,7 @@ export default function PricingPage() {
                 <div className="text-2xl font-bold">${pkg.price}</div>
                 <p className="text-xs text-muted-foreground">{pkg.desc}</p>
                 <Link href="/billing">
-                  <Button
-                    className="w-full"
-                    variant={pkg.highlight ? "default" : "outline"}
-                  >
+                  <Button className="w-full" variant={pkg.highlight ? "default" : "outline"}>
                     Buy credits
                   </Button>
                 </Link>

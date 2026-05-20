@@ -30,11 +30,7 @@ import {
   getGetAdminAuditLogQueryKey,
 } from "@workspace/api-client-react";
 
-import type {
-  AdminLaunchCheck,
-  AdminRole,
-  AdminAuditLogEntry,
-} from "@workspace/api-client-react";
+import type { AdminLaunchCheck, AdminRole, AdminAuditLogEntry } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 function isHttpError(err: unknown): err is { status: number; data: unknown; message: string } {
@@ -170,8 +166,8 @@ export default function AdminPage() {
         <div className="border border-green-500/20 bg-green-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-green-600">
           <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
-            <span className="font-semibold">Admin RBAC is active.</span>
-            {" "}Signed in as <code className="font-mono text-xs">{me.role}</code>
+            <span className="font-semibold">Admin RBAC is active.</span> Signed in as{" "}
+            <code className="font-mono text-xs">{me.role}</code>
             {me.grantedViaEnv && " (granted via ADMIN_USER_IDS env var)"}
             {!me.grantedViaEnv && me.grantedBy && ` (granted by ${me.grantedBy})`}.
           </div>
@@ -238,9 +234,7 @@ export default function AdminPage() {
           </div>
         )}
         {!readiness && readinessLoading && (
-          <div className="px-4 py-6 text-sm text-muted-foreground text-center">
-            Running checks…
-          </div>
+          <div className="px-4 py-6 text-sm text-muted-foreground text-center">Running checks…</div>
         )}
         {readiness && (
           <div
@@ -300,17 +294,15 @@ export default function AdminPage() {
 
         {roles.length === 0 && !rolesLoading && (
           <div className="px-4 py-6 text-sm text-muted-foreground text-center">
-            No role grants found. Admins may be configured via the ADMIN_USER_IDS environment variable.
+            No role grants found. Admins may be configured via the ADMIN_USER_IDS environment
+            variable.
           </div>
         )}
 
         {roles.length > 0 && (
           <div className="divide-y divide-border">
             {roles.map((r: AdminRole) => (
-              <div
-                key={r.userId}
-                className="flex items-center justify-between px-4 py-3 text-sm"
-              >
+              <div key={r.userId} className="flex items-center justify-between px-4 py-3 text-sm">
                 <div className="min-w-0">
                   <code className="font-mono text-xs text-foreground">{r.userId}</code>
                   <div className="flex items-center gap-2 mt-0.5">
@@ -364,13 +356,19 @@ export default function AdminPage() {
                   ? "border-green-500/40 text-green-500 bg-green-500/10"
                   : "border-border text-muted-foreground bg-transparent"
               }`}
-              title={auditLive ? "Auto-refresh on (every 10s) — click to pause" : "Auto-refresh off — click to enable"}
+              title={
+                auditLive
+                  ? "Auto-refresh on (every 10s) — click to pause"
+                  : "Auto-refresh off — click to enable"
+              }
             >
               {auditLive ? "Live" : "Paused"}
             </button>
             {auditLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
             <button
-              onClick={() => void queryClient.invalidateQueries({ queryKey: getGetAdminAuditLogQueryKey() })}
+              onClick={() =>
+                void queryClient.invalidateQueries({ queryKey: getGetAdminAuditLogQueryKey() })
+              }
               className="text-muted-foreground hover:text-foreground"
               title="Refresh now"
             >
@@ -380,7 +378,9 @@ export default function AdminPage() {
         </div>
 
         {!auditPage && auditLoading && (
-          <div className="px-4 py-6 text-sm text-muted-foreground text-center">Loading audit log…</div>
+          <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+            Loading audit log…
+          </div>
         )}
 
         {auditQuery.isError && !auditPage && (
@@ -404,7 +404,8 @@ export default function AdminPage() {
             </div>
             <div className="px-4 py-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
               <span>
-                Showing {auditOffset + 1}–{Math.min(auditOffset + AUDIT_PAGE_SIZE, auditPage.total)} of {auditPage.total.toLocaleString()}
+                Showing {auditOffset + 1}–{Math.min(auditOffset + AUDIT_PAGE_SIZE, auditPage.total)}{" "}
+                of {auditPage.total.toLocaleString()}
               </span>
               <div className="flex items-center gap-1">
                 <button
@@ -416,7 +417,8 @@ export default function AdminPage() {
                   <ChevronLeft className="h-3.5 w-3.5" />
                 </button>
                 <span className="px-2">
-                  Page {Math.floor(auditOffset / AUDIT_PAGE_SIZE) + 1} of {Math.max(1, Math.ceil(auditPage.total / AUDIT_PAGE_SIZE))}
+                  Page {Math.floor(auditOffset / AUDIT_PAGE_SIZE) + 1} of{" "}
+                  {Math.max(1, Math.ceil(auditPage.total / AUDIT_PAGE_SIZE))}
                 </span>
                 <button
                   onClick={() => setAuditOffset(auditOffset + AUDIT_PAGE_SIZE)}
@@ -474,16 +476,8 @@ export default function AdminPage() {
         </AdminSection>
 
         <AdminSection title="Billing">
-          <AdminItem
-            label="Starter credits"
-            value="100 per user (auto-grant)"
-            status="ok"
-          />
-          <AdminItem
-            label="Credit enforcement"
-            value="Active — enforced in builder"
-            status="ok"
-          />
+          <AdminItem label="Starter credits" value="100 per user (auto-grant)" status="ok" />
+          <AdminItem label="Credit enforcement" value="Active — enforced in builder" status="ok" />
           <AdminItem
             label="Stripe payments"
             value={
@@ -518,8 +512,16 @@ const ACTION_COLORS: Record<string, string> = {
 function AuditLogRow({ entry }: { entry: AdminAuditLogEntry }) {
   const colorClass = ACTION_COLORS[entry.action] ?? "text-muted-foreground bg-muted";
   const date = new Date(entry.createdAt);
-  const dateStr = date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-  const timeStr = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const dateStr = date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const timeStr = date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors">
@@ -575,9 +577,7 @@ function ReadinessRow({ check }: { check: AdminLaunchCheck }) {
           }`}
         />
       </button>
-      {expanded && (
-        <p className="mt-1.5 ml-5 text-xs text-muted-foreground">{check.note}</p>
-      )}
+      {expanded && <p className="mt-1.5 ml-5 text-xs text-muted-foreground">{check.note}</p>}
     </div>
   );
 }
@@ -605,13 +605,7 @@ function StatCard({
   );
 }
 
-function AdminSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function AdminSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="border border-border rounded-xl bg-card overflow-hidden">
       <div className="px-4 py-2.5 bg-muted/40 border-b border-border">

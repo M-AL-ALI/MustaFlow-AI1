@@ -1,5 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, CreditCard, Zap, RefreshCw, ExternalLink, CheckCircle, AlertCircle } from "lucide-react";
+import {
+  X,
+  CreditCard,
+  Zap,
+  RefreshCw,
+  ExternalLink,
+  CheckCircle,
+  AlertCircle,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
@@ -104,12 +112,7 @@ export function BuyCreditsSheet({
 
   return (
     <>
-      {open && (
-        <div
-          className="fixed inset-0 z-40 bg-black/50"
-          onClick={onClose}
-        />
-      )}
+      {open && <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />}
 
       <div
         className={cn(
@@ -124,7 +127,9 @@ export function BuyCreditsSheet({
               <h2 className="font-semibold text-sm">Top up credits</h2>
               {balance !== null && (
                 <p className="text-[11px] text-muted-foreground">
-                  Current balance: <span className="font-semibold text-foreground">{balance.toLocaleString()}</span> credits
+                  Current balance:{" "}
+                  <span className="font-semibold text-foreground">{balance.toLocaleString()}</span>{" "}
+                  credits
                 </p>
               )}
             </div>
@@ -142,8 +147,8 @@ export function BuyCreditsSheet({
             <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs text-yellow-600">
               <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
               <div>
-                <span className="font-semibold">Purchases not yet available.</span>
-                {" "}Stripe is not configured on this platform. Contact your administrator.
+                <span className="font-semibold">Purchases not yet available.</span> Stripe is not
+                configured on this platform. Contact your administrator.
               </div>
             </div>
           )}
@@ -163,7 +168,9 @@ export function BuyCreditsSheet({
               ].map((row) => (
                 <div key={row.mode} className="flex items-center justify-between px-4 py-2 text-xs">
                   <span className="text-muted-foreground">{row.mode} mode</span>
-                  <span className="font-semibold">{row.cost} credit{row.cost !== 1 ? "s" : ""}</span>
+                  <span className="font-semibold">
+                    {row.cost} credit{row.cost !== 1 ? "s" : ""}
+                  </span>
                 </div>
               ))}
             </div>
@@ -177,7 +184,10 @@ export function BuyCreditsSheet({
               </div>
             )}
             {(packages?.packages ?? []).map((pkg) => (
-              <div key={pkg.id} className="border border-border rounded-xl bg-card p-4 flex items-center gap-4">
+              <div
+                key={pkg.id}
+                className="border border-border rounded-xl bg-card p-4 flex items-center gap-4"
+              >
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-sm">{pkg.label}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{pkg.description}</p>
@@ -185,12 +195,16 @@ export function BuyCreditsSheet({
                     <Zap className="h-3 w-3 text-primary shrink-0" />
                     <span className="text-sm font-bold">{pkg.credits.toLocaleString()}</span>
                     <span className="text-xs text-muted-foreground">credits</span>
-                    <span className="ml-2 text-xs font-medium text-muted-foreground">${pkg.priceUsd}</span>
+                    <span className="ml-2 text-xs font-medium text-muted-foreground">
+                      ${pkg.priceUsd}
+                    </span>
                   </div>
                 </div>
                 <button
                   onClick={() => void handleCheckout(pkg)}
-                  disabled={!packages?.stripeConfigured || !pkg.available || checkoutLoading === pkg.id}
+                  disabled={
+                    !packages?.stripeConfigured || !pkg.available || checkoutLoading === pkg.id
+                  }
                   className={cn(
                     "shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors",
                     !packages?.stripeConfigured || !pkg.available

@@ -9,7 +9,19 @@ import {
   getGetProjectFileQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileCode2, FileText, FileJson, Globe, FileCog, FileType, Save, AlertCircle, Plus, X, Check } from "lucide-react";
+import {
+  FileCode2,
+  FileText,
+  FileJson,
+  Globe,
+  FileCog,
+  FileType,
+  Save,
+  AlertCircle,
+  Plus,
+  X,
+  Check,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
@@ -27,14 +39,12 @@ function getLanguage(path: string): string {
 function FileIcon({ path }: { path: string }) {
   if (path.endsWith(".html") || path.endsWith(".htm"))
     return <Globe className="h-3.5 w-3.5 shrink-0 text-orange-400" />;
-  if (path.endsWith(".css"))
-    return <FileType className="h-3.5 w-3.5 shrink-0 text-blue-400" />;
+  if (path.endsWith(".css")) return <FileType className="h-3.5 w-3.5 shrink-0 text-blue-400" />;
   if (path.endsWith(".js") || path.endsWith(".mjs"))
     return <FileCog className="h-3.5 w-3.5 shrink-0 text-yellow-400" />;
   if (path.endsWith(".ts") || path.endsWith(".tsx"))
     return <FileCog className="h-3.5 w-3.5 shrink-0 text-blue-500" />;
-  if (path.endsWith(".json"))
-    return <FileJson className="h-3.5 w-3.5 shrink-0 text-green-400" />;
+  if (path.endsWith(".json")) return <FileJson className="h-3.5 w-3.5 shrink-0 text-green-400" />;
   if (path.endsWith(".md"))
     return <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
   return <FileCode2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
@@ -158,7 +168,10 @@ export function CodeEditorTab({
     const trimmed = newFilePath.trim();
     if (!trimmed) return;
     try {
-      const created = await createFile.mutateAsync({ id: projectId, data: { path: trimmed, content: "" } });
+      const created = await createFile.mutateAsync({
+        id: projectId,
+        data: { path: trimmed, content: "" },
+      });
       await queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
       setShowNewFileInput(false);
       setNewFilePath("");
@@ -229,7 +242,9 @@ export function CodeEditorTab({
             <div className="px-3 py-6 text-center">
               <FileCode2 className="h-6 w-6 text-muted-foreground/30 mx-auto mb-2" />
               <div className="text-[11px] text-muted-foreground">No files yet.</div>
-              <div className="text-[10px] text-muted-foreground/60 mt-0.5">Build something first.</div>
+              <div className="text-[10px] text-muted-foreground/60 mt-0.5">
+                Build something first.
+              </div>
             </div>
           ) : (
             files.map((file) => (
@@ -287,17 +302,21 @@ export function CodeEditorTab({
             {showUnsavedWarning && (
               <div className="shrink-0 px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/20 flex items-center gap-2 text-xs text-yellow-400">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                <span className="flex-1">You have unsaved changes. Save before switching, or discard them.</span>
+                <span className="flex-1">
+                  You have unsaved changes. Save before switching, or discard them.
+                </span>
                 <button
-                  onClick={() => void handleSave().then((ok) => {
-                    if (ok && pendingFileId !== null) {
-                      setSelectedFileId(pendingFileId);
-                      setEditorContent(null);
-                      setIsDirty(false);
-                      setShowUnsavedWarning(false);
-                      setPendingFileId(null);
-                    }
-                  })}
+                  onClick={() =>
+                    void handleSave().then((ok) => {
+                      if (ok && pendingFileId !== null) {
+                        setSelectedFileId(pendingFileId);
+                        setEditorContent(null);
+                        setIsDirty(false);
+                        setShowUnsavedWarning(false);
+                        setPendingFileId(null);
+                      }
+                    })
+                  }
                   className="px-2 py-0.5 rounded bg-yellow-500/20 hover:bg-yellow-500/30 transition-colors whitespace-nowrap"
                 >
                   Save & switch

@@ -44,12 +44,7 @@ router.get("/p/:slug/{*splat}", async (req, res): Promise<void> => {
   const [project] = await db
     .select({ id: projectsTable.id })
     .from(projectsTable)
-    .where(
-      and(
-        eq(projectsTable.publicSlug, slug),
-        isNull(projectsTable.deletedAt),
-      ),
-    );
+    .where(and(eq(projectsTable.publicSlug, slug), isNull(projectsTable.deletedAt)));
 
   if (!project) {
     res

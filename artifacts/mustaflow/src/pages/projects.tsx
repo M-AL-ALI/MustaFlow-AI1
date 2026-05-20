@@ -89,7 +89,8 @@ function WelcomeCard({ onCreateProject }: { onCreateProject: () => void }) {
       <div>
         <h2 className="text-xl font-bold mb-2">Welcome to MustaFlow AI</h2>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          Describe any app in plain language and the AI will build it for you in seconds. No coding needed.
+          Describe any app in plain language and the AI will build it for you in seconds. No coding
+          needed.
         </p>
       </div>
       <Button onClick={onCreateProject} size="lg" className="gap-2">
@@ -176,7 +177,9 @@ function GettingStartedChecklist({
           <CheckSquare className="h-4 w-4 text-primary shrink-0" />
           <div>
             <div className="text-sm font-semibold">Getting started</div>
-            <div className="text-xs text-muted-foreground">{doneCount} of {items.length} steps complete</div>
+            <div className="text-xs text-muted-foreground">
+              {doneCount} of {items.length} steps complete
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -212,13 +215,23 @@ function GettingStartedChecklist({
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <div className={cn("text-sm font-medium", item.done && "line-through text-muted-foreground")}>
+                <div
+                  className={cn(
+                    "text-sm font-medium",
+                    item.done && "line-through text-muted-foreground",
+                  )}
+                >
                   {item.label}
                 </div>
                 <div className="text-xs text-muted-foreground mt-0.5">{item.description}</div>
               </div>
               {item.action && !item.done && (
-                <Button size="sm" variant="outline" onClick={item.action} className="shrink-0 text-xs h-7">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={item.action}
+                  className="shrink-0 text-xs h-7"
+                >
                   {item.actionLabel}
                 </Button>
               )}
@@ -242,7 +255,11 @@ export default function ProjectsPage() {
 
   // Infer checklist state from available data
   const hasProject = totalProjects > 0;
-  const hasBuilt = (summary?.byStatus?.building ?? 0) > 0 || (summary?.byStatus?.published ?? 0) > 0 || (summary?.byStatus?.testing ?? 0) > 0 || totalProjects > 0;
+  const hasBuilt =
+    (summary?.byStatus?.building ?? 0) > 0 ||
+    (summary?.byStatus?.published ?? 0) > 0 ||
+    (summary?.byStatus?.testing ?? 0) > 0 ||
+    totalProjects > 0;
   const hasPreviewed = hasBuilt;
   const hasPublished = publishedCount > 0;
 
@@ -253,7 +270,9 @@ export default function ProjectsPage() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Projects</h1>
-          <p className="text-muted-foreground mt-1 text-sm md:text-base">Manage and monitor your MustaFlow AI builds.</p>
+          <p className="text-muted-foreground mt-1 text-sm md:text-base">
+            Manage and monitor your MustaFlow AI builds.
+          </p>
         </div>
         <Button onClick={() => setModalOpen(true)} size="default" className="shrink-0 gap-2">
           <Plus className="h-4 w-4" />
@@ -263,9 +282,7 @@ export default function ProjectsPage() {
       </div>
 
       {/* Welcome card for brand new users */}
-      {isNewUser && (
-        <WelcomeCard onCreateProject={() => setModalOpen(true)} />
-      )}
+      {isNewUser && <WelcomeCard onCreateProject={() => setModalOpen(true)} />}
 
       {/* Stats row — only show once user has projects */}
       {hasProjects && (
@@ -336,9 +353,7 @@ export default function ProjectsPage() {
                     <CardHeader className="pb-2">
                       <div className="flex justify-between items-start">
                         <CardTitle className="text-lg">{project.name}</CardTitle>
-                        <Badge
-                          variant={project.status === "published" ? "default" : "secondary"}
-                        >
+                        <Badge variant={project.status === "published" ? "default" : "secondary"}>
                           {project.status}
                         </Badge>
                       </div>

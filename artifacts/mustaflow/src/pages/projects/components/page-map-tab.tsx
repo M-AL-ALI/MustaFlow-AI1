@@ -26,7 +26,17 @@ import {
 } from "@workspace/api-client-react";
 import type { PageMapData } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Globe, Smartphone, Tablet, RefreshCw, Layout, Download, Layers, MapPin, FilePlus } from "lucide-react";
+import {
+  Globe,
+  Smartphone,
+  Tablet,
+  RefreshCw,
+  Layout,
+  Download,
+  Layers,
+  MapPin,
+  FilePlus,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PageNode, type PageNodeData, type PageType } from "./page-node";
@@ -45,11 +55,7 @@ const EDGE_DEFAULTS = {
   markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
 };
 
-function runDagreLayout(
-  nodes: Node[],
-  edges: Edge[],
-  direction = "LR",
-): Node[] {
+function runDagreLayout(nodes: Node[], edges: Edge[], direction = "LR"): Node[] {
   // Create a fresh graph each call — reusing a singleton accumulates stale nodes
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
@@ -71,7 +77,16 @@ function runDagreLayout(
 }
 
 function platformMapToFlow(
-  platformData: { nodes: PageMapNodeState[]; edges: { id: string; source: string; target: string; connectionType: string; aiGenerated: boolean }[] },
+  platformData: {
+    nodes: PageMapNodeState[];
+    edges: {
+      id: string;
+      source: string;
+      target: string;
+      connectionType: string;
+      aiGenerated: boolean;
+    }[];
+  },
   projectId: number,
   isBuilding: boolean,
   onNodeClick: (nodeId: string) => void,
@@ -145,7 +160,11 @@ export function PageMapTab({
   // Effect 1 filters these out so background refetches can't resurrect them.
   const pendingDeletedNodeIdsRef = useRef<Set<string>>(new Set());
 
-  const { data: mapResponse, isLoading, isFetching } = useGetPageMap(projectId, {
+  const {
+    data: mapResponse,
+    isLoading,
+    isFetching,
+  } = useGetPageMap(projectId, {
     query: {
       enabled: !!projectId,
       queryKey: getGetPageMapQueryKey(projectId),
@@ -167,13 +186,21 @@ export function PageMapTab({
   const initialisedRef = useRef(false);
 
   // Keep stable refs in sync with latest values so timer callbacks never capture stale closures
-  useEffect(() => { mapResponseRef.current = mapResponse; }, [mapResponse]);
-  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
-  useEffect(() => { edgesRef.current = edges; }, [edges]);
+  useEffect(() => {
+    mapResponseRef.current = mapResponse;
+  }, [mapResponse]);
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
 
   // Reset the one-time fitView guard whenever the platform changes so that
   // switching back to a platform re-frames all nodes correctly on the next onInit.
-  useEffect(() => { initialisedRef.current = false; }, [platform]);
+  useEffect(() => {
+    initialisedRef.current = false;
+  }, [platform]);
 
   // When the user switches platforms, pending-delete IDs from the previous platform
   // are irrelevant (node IDs are platform-scoped). Clear the set so Effect 1 doesn't
@@ -198,7 +225,9 @@ export function PageMapTab({
   // Keep a stable ref to onSwitchToPreview so the callback identity
   // never forces the data-loading effect to re-run
   const onSwitchToPreviewRef = useRef(onSwitchToPreview);
-  useEffect(() => { onSwitchToPreviewRef.current = onSwitchToPreview; }, [onSwitchToPreview]);
+  useEffect(() => {
+    onSwitchToPreviewRef.current = onSwitchToPreview;
+  }, [onSwitchToPreview]);
 
   const handlePreviewClick = useCallback((filePath: string) => {
     onSwitchToPreviewRef.current(filePath);
@@ -209,7 +238,16 @@ export function PageMapTab({
   useEffect(() => {
     if (!platformData) return;
     const { nodes: rfNodes, edges: rfEdges } = platformMapToFlow(
-      platformData as { nodes: PageMapNodeState[]; edges: { id: string; source: string; target: string; connectionType: string; aiGenerated: boolean }[] },
+      platformData as {
+        nodes: PageMapNodeState[];
+        edges: {
+          id: string;
+          source: string;
+          target: string;
+          connectionType: string;
+          aiGenerated: boolean;
+        }[];
+      },
       projectId,
       false, // isBuilding is patched separately below; pass false here to avoid reset
       handleNodeClick,
@@ -237,12 +275,12 @@ export function PageMapTab({
       }
     }
     // Filter remaining pending-delete IDs (not yet confirmed deleted by server).
-    const filteredNodes = pendingDeletes.size > 0
-      ? rfNodes.filter((n) => !pendingDeletes.has(n.id))
-      : rfNodes;
-    const filteredEdges = pendingDeletes.size > 0
-      ? rfEdges.filter((e) => !pendingDeletes.has(e.source) && !pendingDeletes.has(e.target))
-      : rfEdges;
+    const filteredNodes =
+      pendingDeletes.size > 0 ? rfNodes.filter((n) => !pendingDeletes.has(n.id)) : rfNodes;
+    const filteredEdges =
+      pendingDeletes.size > 0
+        ? rfEdges.filter((e) => !pendingDeletes.has(e.source) && !pendingDeletes.has(e.target))
+        : rfEdges;
 
     // Auto-layout when all positions are (0,0) — sentinel for "never been positioned"
     const needsAutoLayout =
@@ -276,7 +314,8 @@ export function PageMapTab({
           id: e.id,
           source: e.source,
           target: e.target,
-          connectionType: ((e.data as { connectionType?: string })?.connectionType ?? "nav") as ConnectionType,
+          connectionType: ((e.data as { connectionType?: string })?.connectionType ??
+            "nav") as ConnectionType,
           aiGenerated: (e.data as { aiGenerated?: boolean })?.aiGenerated ?? false,
         })),
       };
@@ -286,7 +325,7 @@ export function PageMapTab({
       setNodes(filteredNodes);
       setEdges(filteredEdges);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapResponse, platform, projectId]);
 
   // Effect 2: patch isBuilding flag in-place so nodes don't get re-created/disappear
@@ -322,83 +361,100 @@ export function PageMapTab({
       // A fetch that started during sync just completed — dismiss indicator
       onSyncCleared?.();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFetching]);
 
-  const debouncedSave = useCallback((updatedNodes: Node[], updatedEdges: Edge[]) => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      // Read mapResponse from the ref so background refetches that fire between
-      // scheduling and execution don't replace in-flight edits with stale data.
-      const currentMap = mapResponseRef.current?.pageMapData ?? { web: { nodes: [], edges: [] }, ios: { nodes: [], edges: [] }, android: { nodes: [], edges: [] } };
-      const updatedPlatform = {
-        nodes: updatedNodes.map((n) => ({
-          id: n.id,
-          label: (n.data as PageNodeData).label,
-          pageType: (n.data as PageNodeData).pageType,
-          filePath: (n.data as PageNodeData).filePath,
-          position: n.position,
-          isNew: (n.data as PageNodeData).isNew,
-          hasError: (n.data as PageNodeData).hasError,
-          aiGenerated: (n.data as PageNodeData).aiGenerated,
-          notes: (n.data as PageNodeData).notes,
-          planned: (n.data as PageNodeData).planned ?? false,
-        })),
-        edges: updatedEdges.map((e) => ({
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          connectionType: ((e.data as { connectionType?: string })?.connectionType ?? "nav") as ConnectionType,
-          aiGenerated: (e.data as { aiGenerated?: boolean })?.aiGenerated ?? false,
-        })),
+  const debouncedSave = useCallback(
+    (updatedNodes: Node[], updatedEdges: Edge[]) => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        // Read mapResponse from the ref so background refetches that fire between
+        // scheduling and execution don't replace in-flight edits with stale data.
+        const currentMap = mapResponseRef.current?.pageMapData ?? {
+          web: { nodes: [], edges: [] },
+          ios: { nodes: [], edges: [] },
+          android: { nodes: [], edges: [] },
+        };
+        const updatedPlatform = {
+          nodes: updatedNodes.map((n) => ({
+            id: n.id,
+            label: (n.data as PageNodeData).label,
+            pageType: (n.data as PageNodeData).pageType,
+            filePath: (n.data as PageNodeData).filePath,
+            position: n.position,
+            isNew: (n.data as PageNodeData).isNew,
+            hasError: (n.data as PageNodeData).hasError,
+            aiGenerated: (n.data as PageNodeData).aiGenerated,
+            notes: (n.data as PageNodeData).notes,
+            planned: (n.data as PageNodeData).planned ?? false,
+          })),
+          edges: updatedEdges.map((e) => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            connectionType: ((e.data as { connectionType?: string })?.connectionType ??
+              "nav") as ConnectionType,
+            aiGenerated: (e.data as { aiGenerated?: boolean })?.aiGenerated ?? false,
+          })),
+        };
+        const payload: PageMapData = { ...currentMap, [platform]: updatedPlatform } as PageMapData;
+        // Do NOT invalidate the query on save — refetching after every drag/edit causes
+        // mapResponse to get a new object reference → Effect 1 resets all nodes → nodes
+        // visually disappear/snap. The local state is already up-to-date; the next
+        // scheduled refetch or explicit re-analyze will pick up server changes.
+        // NOTE: do not clear pendingDeletedNodeIdsRef here. Clearing on mutation ACK
+        // is premature — an older pre-delete in-flight save could ACK first. Instead,
+        // Effect 1 reconciles the set lazily once the server snapshot confirms deletion.
+        putPageMap.mutate({ id: projectId, data: payload });
+      }, 800);
+      // mapResponseRef is a stable ref — intentionally excluded from deps so the timer
+      // identity doesn't change on every background refetch.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [platform, projectId, putPageMap],
+  );
+
+  const onNodeDragStop: OnNodeDrag = useCallback(
+    (_evt, _node, allNodes) => {
+      debouncedSave(allNodes, edges);
+    },
+    [debouncedSave, edges],
+  );
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      const newEdge: Edge = {
+        ...connection,
+        id: `edge-user-${Date.now()}`,
+        type: "pageEdge",
+        markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+        data: { connectionType: "nav" as ConnectionType, aiGenerated: false },
       };
-      const payload: PageMapData = { ...currentMap, [platform]: updatedPlatform } as PageMapData;
-      // Do NOT invalidate the query on save — refetching after every drag/edit causes
-      // mapResponse to get a new object reference → Effect 1 resets all nodes → nodes
-      // visually disappear/snap. The local state is already up-to-date; the next
-      // scheduled refetch or explicit re-analyze will pick up server changes.
-      // NOTE: do not clear pendingDeletedNodeIdsRef here. Clearing on mutation ACK
-      // is premature — an older pre-delete in-flight save could ACK first. Instead,
-      // Effect 1 reconciles the set lazily once the server snapshot confirms deletion.
-      putPageMap.mutate({ id: projectId, data: payload });
-    }, 800);
-  // mapResponseRef is a stable ref — intentionally excluded from deps so the timer
-  // identity doesn't change on every background refetch.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [platform, projectId, putPageMap]);
+      setEdges((prev) => {
+        const updated = addEdge(newEdge, prev);
+        // Use nodesRef so we read current nodes, not the stale closure value
+        debouncedSave(nodesRef.current, updated);
+        return updated;
+      });
+    },
+    [debouncedSave, setEdges],
+  );
 
-  const onNodeDragStop: OnNodeDrag = useCallback((_evt, _node, allNodes) => {
-    debouncedSave(allNodes, edges);
-  }, [debouncedSave, edges]);
-
-  const onConnect = useCallback((connection: Connection) => {
-    const newEdge: Edge = {
-      ...connection,
-      id: `edge-user-${Date.now()}`,
-      type: "pageEdge",
-      markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-      data: { connectionType: "nav" as ConnectionType, aiGenerated: false },
-    };
-    setEdges((prev) => {
-      const updated = addEdge(newEdge, prev);
-      // Use nodesRef so we read current nodes, not the stale closure value
-      debouncedSave(nodesRef.current, updated);
-      return updated;
-    });
-  }, [debouncedSave, setEdges]);
-
-  const onEdgesDelete: OnEdgesDelete = useCallback((deleted) => {
-    setSelectedEdgeId((prev) => {
-      if (prev && deleted.some((e) => e.id === prev)) return null;
-      return prev;
-    });
-    setEdges((prev) => {
-      const deletedIds = new Set(deleted.map((e) => e.id));
-      const updated = prev.filter((e) => !deletedIds.has(e.id));
-      debouncedSave(nodesRef.current, updated);
-      return updated;
-    });
-  }, [debouncedSave, setEdges]);
+  const onEdgesDelete: OnEdgesDelete = useCallback(
+    (deleted) => {
+      setSelectedEdgeId((prev) => {
+        if (prev && deleted.some((e) => e.id === prev)) return null;
+        return prev;
+      });
+      setEdges((prev) => {
+        const deletedIds = new Set(deleted.map((e) => e.id));
+        const updated = prev.filter((e) => !deletedIds.has(e.id));
+        debouncedSave(nodesRef.current, updated);
+        return updated;
+      });
+    },
+    [debouncedSave, setEdges],
+  );
 
   const handleReanalyze = useCallback(() => {
     analyzePageMap.mutate(
@@ -420,7 +476,10 @@ export function PageMapTab({
   const handleExport = useCallback(async () => {
     if (!canvasRef.current) return;
     try {
-      const canvas = await html2canvas(canvasRef.current, { backgroundColor: "#09090b", useCORS: false });
+      const canvas = await html2canvas(canvasRef.current, {
+        backgroundColor: "#09090b",
+        useCORS: false,
+      });
       const link = document.createElement("a");
       link.download = `page-map-${projectId}-${platform}.png`;
       link.href = canvas.toDataURL("image/png");
@@ -434,20 +493,21 @@ export function PageMapTab({
     ? (nodes.find((n) => n.id === selectedNodeId)?.data as PageNodeData | undefined)
     : null;
 
-  const selectedNodeState: PageMapNodeState | null = selectedNodeId && selectedNode
-    ? {
-        id: selectedNodeId,
-        label: selectedNode.label,
-        pageType: selectedNode.pageType,
-        filePath: selectedNode.filePath,
-        position: nodes.find((n) => n.id === selectedNodeId)?.position ?? { x: 0, y: 0 },
-        isNew: selectedNode.isNew,
-        hasError: selectedNode.hasError,
-        aiGenerated: selectedNode.aiGenerated,
-        notes: selectedNode.notes,
-        planned: selectedNode.planned,
-      }
-    : null;
+  const selectedNodeState: PageMapNodeState | null =
+    selectedNodeId && selectedNode
+      ? {
+          id: selectedNodeId,
+          label: selectedNode.label,
+          pageType: selectedNode.pageType,
+          filePath: selectedNode.filePath,
+          position: nodes.find((n) => n.id === selectedNodeId)?.position ?? { x: 0, y: 0 },
+          isNew: selectedNode.isNew,
+          hasError: selectedNode.hasError,
+          aiGenerated: selectedNode.aiGenerated,
+          notes: selectedNode.notes,
+          planned: selectedNode.planned,
+        }
+      : null;
 
   const selectedEdgeState: PageMapEdgeState | null = (() => {
     if (!selectedEdgeId) return null;
@@ -459,57 +519,68 @@ export function PageMapTab({
       id: edge.id,
       sourceLabel: (sourceNode?.data as PageNodeData | undefined)?.label ?? edge.source,
       targetLabel: (targetNode?.data as PageNodeData | undefined)?.label ?? edge.target,
-      connectionType: ((edge.data as { connectionType?: ConnectionType })?.connectionType ?? "nav") as ConnectionType,
+      connectionType: ((edge.data as { connectionType?: ConnectionType })?.connectionType ??
+        "nav") as ConnectionType,
       aiGenerated: (edge.data as { aiGenerated?: boolean })?.aiGenerated ?? false,
     };
   })();
 
-  const handleEdgeSave = useCallback((edgeId: string, connectionType: ConnectionType) => {
-    setEdges((prev) => {
-      const updated = prev.map((e) =>
-        e.id === edgeId
-          ? { ...e, data: { ...(e.data as object), connectionType } }
-          : e,
-      );
-      debouncedSave(nodesRef.current, updated);
-      return updated;
-    });
-  }, [setEdges, debouncedSave]);
-
-  const handleEdgeDelete = useCallback((edgeId: string) => {
-    setSelectedEdgeId(null);
-    setEdges((prev) => {
-      const updated = prev.filter((e) => e.id !== edgeId);
-      debouncedSave(nodesRef.current, updated);
-      return updated;
-    });
-  }, [setEdges, debouncedSave]);
-
-  const handleDetailSave = useCallback((updated: PageMapNodeState) => {
-    // Use a functional updater so we capture the post-setNodes array, not the
-    // stale `nodes` closure that existed before setNodes ran.
-    setNodes((prev) => {
-      const updatedNodes = prev.map((n) => {
-        if (n.id !== updated.id) return n;
-        return {
-          ...n,
-          data: {
-            ...(n.data as PageNodeData),
-            label: updated.label,
-            pageType: updated.pageType,
-            notes: updated.notes,
-          },
-        };
+  const handleEdgeSave = useCallback(
+    (edgeId: string, connectionType: ConnectionType) => {
+      setEdges((prev) => {
+        const updated = prev.map((e) =>
+          e.id === edgeId ? { ...e, data: { ...(e.data as object), connectionType } } : e,
+        );
+        debouncedSave(nodesRef.current, updated);
+        return updated;
       });
-      nodesRef.current = updatedNodes;
-      debouncedSave(updatedNodes, edgesRef.current);
-      return updatedNodes;
-    });
-  }, [setNodes, debouncedSave]);
+    },
+    [setEdges, debouncedSave],
+  );
 
-  const handleFileOpen = useCallback((filePath: string) => {
-    onSwitchToCode(filePath);
-  }, [onSwitchToCode]);
+  const handleEdgeDelete = useCallback(
+    (edgeId: string) => {
+      setSelectedEdgeId(null);
+      setEdges((prev) => {
+        const updated = prev.filter((e) => e.id !== edgeId);
+        debouncedSave(nodesRef.current, updated);
+        return updated;
+      });
+    },
+    [setEdges, debouncedSave],
+  );
+
+  const handleDetailSave = useCallback(
+    (updated: PageMapNodeState) => {
+      // Use a functional updater so we capture the post-setNodes array, not the
+      // stale `nodes` closure that existed before setNodes ran.
+      setNodes((prev) => {
+        const updatedNodes = prev.map((n) => {
+          if (n.id !== updated.id) return n;
+          return {
+            ...n,
+            data: {
+              ...(n.data as PageNodeData),
+              label: updated.label,
+              pageType: updated.pageType,
+              notes: updated.notes,
+            },
+          };
+        });
+        nodesRef.current = updatedNodes;
+        debouncedSave(updatedNodes, edgesRef.current);
+        return updatedNodes;
+      });
+    },
+    [setNodes, debouncedSave],
+  );
+
+  const handleFileOpen = useCallback(
+    (filePath: string) => {
+      onSwitchToCode(filePath);
+    },
+    [onSwitchToCode],
+  );
 
   const handleAddPage = useCallback(() => {
     const id = `user-${Date.now()}`;
@@ -520,7 +591,7 @@ export function PageMapTab({
     const containerW = containerEl?.clientWidth ?? 800;
     const containerH = containerEl?.clientHeight ?? 600;
     const flowX = (containerW / 2 - vp.x) / vp.zoom - 104; // offset by half node width
-    const flowY = (containerH / 2 - vp.y) / vp.zoom - 80;  // offset by half node height
+    const flowY = (containerH / 2 - vp.y) / vp.zoom - 80; // offset by half node height
 
     const newNode: Node = {
       id,
@@ -548,7 +619,11 @@ export function PageMapTab({
       // Immediate (non-debounced) save for the add action.
       // Read from mapResponseRef so we get the latest server snapshot even if a
       // background refetch updated mapResponse after this callback was created.
-      const currentMap = mapResponseRef.current?.pageMapData ?? { web: { nodes: [], edges: [] }, ios: { nodes: [], edges: [] }, android: { nodes: [], edges: [] } };
+      const currentMap = mapResponseRef.current?.pageMapData ?? {
+        web: { nodes: [], edges: [] },
+        ios: { nodes: [], edges: [] },
+        android: { nodes: [], edges: [] },
+      };
       const updatedPlatform = {
         nodes: updated.map((n) => ({
           id: n.id,
@@ -566,7 +641,8 @@ export function PageMapTab({
           id: e.id,
           source: e.source,
           target: e.target,
-          connectionType: ((e.data as { connectionType?: string })?.connectionType ?? "nav") as ConnectionType,
+          connectionType: ((e.data as { connectionType?: string })?.connectionType ??
+            "nav") as ConnectionType,
           aiGenerated: (e.data as { aiGenerated?: boolean })?.aiGenerated ?? false,
         })),
       };
@@ -577,30 +653,36 @@ export function PageMapTab({
       return updated;
     });
     setSelectedNodeId(id);
-  // mapResponseRef and edgesRef are stable refs — intentionally omitted from deps
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // mapResponseRef and edgesRef are stable refs — intentionally omitted from deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, platform, handleNodeClick, handlePreviewClick, setNodes, putPageMap]);
 
-  const handleModifyPage = useCallback((node: PageMapNodeState) => {
-    const isPlanned = node.planned;
-    const base = isPlanned ? `Build the ${node.label} page` : `Modify the ${node.label} page`;
-    const suffix = node.notes ? `: ${node.notes}` : ": ";
-    onSwitchToChat(base + suffix);
-  }, [onSwitchToChat]);
+  const handleModifyPage = useCallback(
+    (node: PageMapNodeState) => {
+      const isPlanned = node.planned;
+      const base = isPlanned ? `Build the ${node.label} page` : `Modify the ${node.label} page`;
+      const suffix = node.notes ? `: ${node.notes}` : ": ";
+      onSwitchToChat(base + suffix);
+    },
+    [onSwitchToChat],
+  );
 
-  const handleDeleteNode = useCallback((nodeId: string) => {
-    // Register the deletion immediately so Effect 1 can filter it out of any
-    // background refetch that arrives before the debounced save completes.
-    pendingDeletedNodeIdsRef.current.add(nodeId);
-    const updatedEdges = edges.filter((e) => e.source !== nodeId && e.target !== nodeId);
-    setEdges(updatedEdges);
-    setNodes((prev) => {
-      const updated = prev.filter((n) => n.id !== nodeId);
-      debouncedSave(updated, updatedEdges);
-      return updated;
-    });
-    setSelectedNodeId(null);
-  }, [edges, setNodes, setEdges, debouncedSave]);
+  const handleDeleteNode = useCallback(
+    (nodeId: string) => {
+      // Register the deletion immediately so Effect 1 can filter it out of any
+      // background refetch that arrives before the debounced save completes.
+      pendingDeletedNodeIdsRef.current.add(nodeId);
+      const updatedEdges = edges.filter((e) => e.source !== nodeId && e.target !== nodeId);
+      setEdges(updatedEdges);
+      setNodes((prev) => {
+        const updated = prev.filter((n) => n.id !== nodeId);
+        debouncedSave(updated, updatedEdges);
+        return updated;
+      });
+      setSelectedNodeId(null);
+    },
+    [edges, setNodes, setEdges, debouncedSave],
+  );
 
   const PLATFORMS: { key: Platform; label: string; Icon: React.ElementType }[] = [
     { key: "web", label: "Web", Icon: Globe },
@@ -683,7 +765,9 @@ export function PageMapTab({
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
             </span>
-            {(isSyncingAfterEdit || analyzePageMap.isPending) ? "Syncing page map…" : "Updating map after build…"}
+            {isSyncingAfterEdit || analyzePageMap.isPending
+              ? "Syncing page map…"
+              : "Updating map after build…"}
           </div>
         )}
       </div>
@@ -710,8 +794,13 @@ export function PageMapTab({
             onNodeDragStop={onNodeDragStop}
             onEdgesDelete={onEdgesDelete}
             onEdgeClick={onEdgeClick}
-            onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
-            onMove={(_evt, viewport) => { viewportRef.current = viewport; }}
+            onPaneClick={() => {
+              setSelectedNodeId(null);
+              setSelectedEdgeId(null);
+            }}
+            onMove={(_evt, viewport) => {
+              viewportRef.current = viewport;
+            }}
             onInit={(instance: ReactFlowInstance) => {
               // fitView exactly once — subsequent Effect 1 re-fires must not snap the camera
               if (!initialisedRef.current) {
@@ -759,7 +848,15 @@ export function PageMapTab({
   );
 }
 
-function EmptyState({ onAnalyze, isAnalyzing, onAddPage }: { onAnalyze: () => void; isAnalyzing: boolean; onAddPage: () => void }) {
+function EmptyState({
+  onAnalyze,
+  isAnalyzing,
+  onAddPage,
+}: {
+  onAnalyze: () => void;
+  isAnalyzing: boolean;
+  onAddPage: () => void;
+}) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-5 text-center px-8">
       <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
@@ -768,7 +865,8 @@ function EmptyState({ onAnalyze, isAnalyzing, onAddPage }: { onAnalyze: () => vo
       <div>
         <div className="text-base font-semibold text-foreground">No pages mapped yet</div>
         <div className="text-sm text-muted-foreground mt-1 max-w-xs">
-          Analyze your app to discover existing pages, or add placeholder pages to plan your structure first.
+          Analyze your app to discover existing pages, or add placeholder pages to plan your
+          structure first.
         </div>
       </div>
       <div className="flex items-center gap-3">
@@ -810,7 +908,8 @@ function ComingSoonState({ platform }: { platform: Platform }) {
           {platform === "ios" ? "iOS" : "Android"} coming soon
         </div>
         <div className="text-sm text-muted-foreground mt-1 max-w-xs">
-          Your app will be mapped here once {platform === "ios" ? "iOS" : "Android"} generation is active. Currently only Web mapping is supported.
+          Your app will be mapped here once {platform === "ios" ? "iOS" : "Android"} generation is
+          active. Currently only Web mapping is supported.
         </div>
       </div>
     </div>

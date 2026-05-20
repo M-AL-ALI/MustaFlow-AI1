@@ -49,9 +49,7 @@ const clerkPubKey = publishableKeyFromHost(
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
 
 function stripBase(path: string): string {
-  return basePath && path.startsWith(basePath)
-    ? path.slice(basePath.length) || "/"
-    : path;
+  return basePath && path.startsWith(basePath) ? path.slice(basePath.length) || "/" : path;
 }
 
 if (!clerkPubKey) {
@@ -99,8 +97,7 @@ const clerkAppearance = {
     logoBox: "flex justify-center pt-2",
     logoImage: "h-12 w-12",
     socialButtonsBlockButton: "border-zinc-700 hover:bg-zinc-800 text-zinc-100",
-    formButtonPrimary:
-      "bg-[#4a90e2] hover:bg-[#3a7fd1] text-white font-semibold shadow-none",
+    formButtonPrimary: "bg-[#4a90e2] hover:bg-[#3a7fd1] text-white font-semibold shadow-none",
     formFieldInput:
       "bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-600 focus:border-[#4a90e2]",
     footerAction: "bg-zinc-900/50",
@@ -162,7 +159,12 @@ function Protected({ children }: { children: React.ReactNode }) {
 }
 
 function isHttpError(err: unknown): err is { status: number } {
-  return err != null && typeof err === "object" && "status" in err && typeof (err as { status: unknown }).status === "number";
+  return (
+    err != null &&
+    typeof err === "object" &&
+    "status" in err &&
+    typeof (err as { status: unknown }).status === "number"
+  );
 }
 
 // Redirects to /projects and shows a toast explaining the reason.
@@ -200,8 +202,7 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 
   if (meQuery.isError) {
     const isAuthError =
-      isHttpError(meQuery.error) &&
-      (meQuery.error.status === 401 || meQuery.error.status === 403);
+      isHttpError(meQuery.error) && (meQuery.error.status === 401 || meQuery.error.status === 403);
 
     if (isAuthError) {
       return <AdminRedirect />;
@@ -258,11 +259,7 @@ function ThemeApplier() {
 function SignInPage() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-      <SignIn
-        routing="path"
-        path={`${basePath}/sign-in`}
-        signUpUrl={`${basePath}/sign-up`}
-      />
+      <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
     </div>
   );
 }
@@ -270,11 +267,7 @@ function SignInPage() {
 function SignUpPage() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-      <SignUp
-        routing="path"
-        path={`${basePath}/sign-up`}
-        signInUrl={`${basePath}/sign-in`}
-      />
+      <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />
     </div>
   );
 }
@@ -326,111 +319,111 @@ function ClerkProviderWithRoutes() {
         <ThemeApplier />
         <ClerkQueryClientCacheInvalidator />
         <WorkspaceProvider>
-        <TooltipProvider>
-          <Switch>
-            {/* ── Public routes ── */}
-            <Route path="/" component={HomeRoute} />
-            {/* REQUIRED — /*? wildcard matches bare URL + OAuth sub-paths */}
-            <Route path="/sign-in/*?" component={SignInPage} />
-            <Route path="/sign-up/*?" component={SignUpPage} />
-            {/* Backward-compat redirect from old /login stub */}
-            <Route path="/login">
-              <Redirect to="/sign-in" />
-            </Route>
+          <TooltipProvider>
+            <Switch>
+              {/* ── Public routes ── */}
+              <Route path="/" component={HomeRoute} />
+              {/* REQUIRED — /*? wildcard matches bare URL + OAuth sub-paths */}
+              <Route path="/sign-in/*?" component={SignInPage} />
+              <Route path="/sign-up/*?" component={SignUpPage} />
+              {/* Backward-compat redirect from old /login stub */}
+              <Route path="/login">
+                <Redirect to="/sign-in" />
+              </Route>
 
-            {/* ── Protected routes ── */}
-            <Route path="/projects">
-              <Protected>
-                <AppLayout>
-                  <ProjectsPage />
-                </AppLayout>
-              </Protected>
-            </Route>
-            <Route path="/projects/:id">
-              <Protected>
-                <AppLayout>
-                  <ProjectWorkspacePage />
-                </AppLayout>
-              </Protected>
-            </Route>
-            <Route path="/knowledge">
-              <Protected>
-                <AppLayout>
-                  <KnowledgePage />
-                </AppLayout>
-              </Protected>
-            </Route>
-            <Route path="/settings">
-              <Protected>
-                <AppLayout>
-                  <SettingsPage />
-                </AppLayout>
-              </Protected>
-            </Route>
-            <Route path="/admin">
-              <Protected>
-                <AdminGuard>
+              {/* ── Protected routes ── */}
+              <Route path="/projects">
+                <Protected>
                   <AppLayout>
-                    <AdminPage />
+                    <ProjectsPage />
                   </AppLayout>
-                </AdminGuard>
-              </Protected>
-            </Route>
-            <Route path="/billing">
-              <Protected>
-                <AppLayout>
-                  <BillingPage />
-                </AppLayout>
-              </Protected>
-            </Route>
-            <Route path="/published">
-              <Protected>
-                <AppLayout>
-                  <PublishedPage />
-                </AppLayout>
-              </Protected>
-            </Route>
-            <Route path="/integrations">
-              <Protected>
-                <AppLayout>
-                  <IntegrationsPage />
-                </AppLayout>
-              </Protected>
-            </Route>
-            <Route path="/security">
-              <Protected>
-                <AppLayout>
-                  <SecurityPage />
-                </AppLayout>
-              </Protected>
-            </Route>
+                </Protected>
+              </Route>
+              <Route path="/projects/:id">
+                <Protected>
+                  <AppLayout>
+                    <ProjectWorkspacePage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/knowledge">
+                <Protected>
+                  <AppLayout>
+                    <KnowledgePage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/settings">
+                <Protected>
+                  <AppLayout>
+                    <SettingsPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/admin">
+                <Protected>
+                  <AdminGuard>
+                    <AppLayout>
+                      <AdminPage />
+                    </AppLayout>
+                  </AdminGuard>
+                </Protected>
+              </Route>
+              <Route path="/billing">
+                <Protected>
+                  <AppLayout>
+                    <BillingPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/published">
+                <Protected>
+                  <AppLayout>
+                    <PublishedPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/integrations">
+                <Protected>
+                  <AppLayout>
+                    <IntegrationsPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/security">
+                <Protected>
+                  <AppLayout>
+                    <SecurityPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
 
-            {/* ── Public info pages ── */}
-            <Route path="/pricing">
-              <AppLayout>
-                <PricingPage />
-              </AppLayout>
-            </Route>
-            <Route path="/terms">
-              <AppLayout>
-                <TermsPage />
-              </AppLayout>
-            </Route>
-            <Route path="/privacy">
-              <AppLayout>
-                <PrivacyPage />
-              </AppLayout>
-            </Route>
-            <Route path="/help">
-              <AppLayout>
-                <HelpPage />
-              </AppLayout>
-            </Route>
+              {/* ── Public info pages ── */}
+              <Route path="/pricing">
+                <AppLayout>
+                  <PricingPage />
+                </AppLayout>
+              </Route>
+              <Route path="/terms">
+                <AppLayout>
+                  <TermsPage />
+                </AppLayout>
+              </Route>
+              <Route path="/privacy">
+                <AppLayout>
+                  <PrivacyPage />
+                </AppLayout>
+              </Route>
+              <Route path="/help">
+                <AppLayout>
+                  <HelpPage />
+                </AppLayout>
+              </Route>
 
-            <Route component={NotFound} />
-          </Switch>
-          <Toaster />
-        </TooltipProvider>
+              <Route component={NotFound} />
+            </Switch>
+            <Toaster />
+          </TooltipProvider>
         </WorkspaceProvider>
       </QueryClientProvider>
     </ClerkProvider>

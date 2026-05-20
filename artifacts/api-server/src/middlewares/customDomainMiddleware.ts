@@ -25,7 +25,12 @@ function isPlatformHost(hostname: string): boolean {
   // IPv4 / IPv6 literals
   if (/^[\d.:[\]]+$/.test(hostname)) return true;
   // Replit internal hosts
-  if (hostname.includes(".replit.") || hostname.includes(".repl.co") || hostname.includes(".repl.dev")) return true;
+  if (
+    hostname.includes(".replit.") ||
+    hostname.includes(".repl.co") ||
+    hostname.includes(".repl.dev")
+  )
+    return true;
   // Platform subdomains (e.g. xyz.mustaflow.app)
   if (hostname === PLATFORM_DOMAIN || hostname.endsWith("." + PLATFORM_DOMAIN)) return true;
   return false;
@@ -57,12 +62,7 @@ export async function customDomainMiddleware(
   const [project] = await db
     .select({ id: projectsTable.id })
     .from(projectsTable)
-    .where(
-      and(
-        eq(projectsTable.customDomain, hostname),
-        isNull(projectsTable.deletedAt),
-      ),
-    );
+    .where(and(eq(projectsTable.customDomain, hostname), isNull(projectsTable.deletedAt)));
 
   if (!project) {
     next();

@@ -21,7 +21,8 @@ const CATEGORIES: IntegrationCategory[] = [
     integrations: [
       {
         name: "OpenAI (via Replit AI Integration)",
-        description: "Powers the AI builder. Routed through Replit's managed integration — no API key required.",
+        description:
+          "Powers the AI builder. Routed through Replit's managed integration — no API key required.",
         status: "active",
         note: "Active. gpt-4o-mini (Lite/Eco) and gpt-4.5 (Power/Pro) models in use.",
       },
@@ -32,7 +33,8 @@ const CATEGORIES: IntegrationCategory[] = [
     integrations: [
       {
         name: "Clerk",
-        description: "User sign-in, sign-up, session management. Managed by Replit's Clerk integration.",
+        description:
+          "User sign-in, sign-up, session management. Managed by Replit's Clerk integration.",
         status: "active",
         note: "Active. CLERK_SECRET_KEY and CLERK_PUBLISHABLE_KEY must be set in production.",
         envVars: ["CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY", "VITE_CLERK_PUBLISHABLE_KEY"],
@@ -44,7 +46,8 @@ const CATEGORIES: IntegrationCategory[] = [
     integrations: [
       {
         name: "Stripe",
-        description: "Credit top-up purchases. Users buy Starter (500), Builder (2,500), or Power (10,000) packs.",
+        description:
+          "Credit top-up purchases. Users buy Starter (500), Builder (2,500), or Power (10,000) packs.",
         status: "setup-required",
         envVars: [
           "STRIPE_SECRET_KEY",
@@ -62,7 +65,8 @@ const CATEGORIES: IntegrationCategory[] = [
     integrations: [
       {
         name: "Cloudflare for SaaS",
-        description: "Custom domain SSL automation. Provisions TLS certificates for user-configured custom domains.",
+        description:
+          "Custom domain SSL automation. Provisions TLS certificates for user-configured custom domains.",
         status: "setup-required",
         envVars: ["CF_ZONE_ID", "CF_API_TOKEN", "PLATFORM_DOMAIN", "PLATFORM_CNAME_TARGET"],
         note: "SSL activation endpoint is live. Configure CF keys to enable automated certificate provisioning.",
@@ -74,7 +78,8 @@ const CATEGORIES: IntegrationCategory[] = [
     integrations: [
       {
         name: "Google Maps / Mapbox",
-        description: "Embed maps in generated apps. Users can provide their own API key via the project secrets vault.",
+        description:
+          "Embed maps in generated apps. Users can provide their own API key via the project secrets vault.",
         status: "coming-soon",
         note: "Planned. Users can currently add map API keys as project secrets and reference them in their app.",
       },
@@ -170,7 +175,9 @@ export default function IntegrationsPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h3 className="text-sm font-semibold text-foreground">{integration.name}</h3>
-                    <p className="text-sm text-muted-foreground mt-0.5">{integration.description}</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">
+                      {integration.description}
+                    </p>
                   </div>
                   <StatusBadge status={integration.status} />
                 </div>
@@ -210,8 +217,8 @@ export default function IntegrationsPage() {
         </h2>
         <p className="text-sm text-muted-foreground">
           When your generated app needs third-party API keys (maps, email, payments), add them in
-          the project's Tools tab under Secrets. Secret values are encrypted at rest with AES-256-GCM
-          and are never exposed in the API response — only a masked preview is shown.
+          the project's Tools tab under Secrets. Secret values are encrypted at rest with
+          AES-256-GCM and are never exposed in the API response — only a masked preview is shown.
         </p>
       </div>
     </div>

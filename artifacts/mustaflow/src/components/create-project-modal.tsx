@@ -11,10 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  useCreateProject,
-  getListProjectsQueryKey,
-} from "@workspace/api-client-react";
+import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import {
@@ -155,8 +152,7 @@ export function CreateProjectModal({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const resolvedName =
-      name.trim() || (prompt.trim() ? nameFromPrompt(prompt) : "New Project");
+    const resolvedName = name.trim() || (prompt.trim() ? nameFromPrompt(prompt) : "New Project");
 
     createProject.mutate(
       {
@@ -221,7 +217,6 @@ export function CreateProjectModal({
             </DialogHeader>
 
             <form onSubmit={handleSubmit} className="space-y-5 pt-1">
-
               {/* Platform tab selector */}
               <div className="flex items-center bg-muted border border-border rounded-lg p-1 gap-1">
                 <button
@@ -259,7 +254,8 @@ export function CreateProjectModal({
                   <div>
                     <span className="font-medium">Expo / React Native</span>
                     {" — "}
-                    Generates iOS + Android source code with a web preview. Scan the QR code with Expo Go to run on your device.
+                    Generates iOS + Android source code with a web preview. Scan the QR code with
+                    Expo Go to run on your device.
                   </div>
                 </div>
               )}
@@ -268,9 +264,7 @@ export function CreateProjectModal({
               <div
                 className={cn(
                   "rounded-xl border p-3 transition-colors",
-                  selectedTemplate
-                    ? "border-primary/50 bg-primary/5"
-                    : "border-border bg-muted/40",
+                  selectedTemplate ? "border-primary/50 bg-primary/5" : "border-border bg-muted/40",
                 )}
               >
                 {selectedTemplate ? (
@@ -330,7 +324,10 @@ export function CreateProjectModal({
                 <Input
                   id="cp-name"
                   value={name}
-                  onChange={(e) => { setName(e.target.value); setNameDirty(true); }}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setNameDirty(true);
+                  }}
                   placeholder={
                     selectedTemplate
                       ? selectedTemplate.title
@@ -396,14 +393,18 @@ export function CreateProjectModal({
                       </button>
                     ))}
                   </div>
-                  <p className="text-xs text-muted-foreground">All mobile projects target iOS and Android via Expo.</p>
+                  <p className="text-xs text-muted-foreground">
+                    All mobile projects target iOS and Android via Expo.
+                  </p>
                 </div>
               )}
 
               {/* First prompt */}
               <div className="space-y-1.5">
                 <Label htmlFor="cp-prompt">
-                  {selectedTemplate ? "Prompt (from template — edit freely)" : "First prompt (optional)"}
+                  {selectedTemplate
+                    ? "Prompt (from template — edit freely)"
+                    : "First prompt (optional)"}
                 </Label>
                 <Textarea
                   id="cp-prompt"

@@ -160,14 +160,9 @@ function mergeWithExisting(
   const nodes = [...mergedAiNodes, ...plannedNodes];
 
   const aiEdgeIds = new Set(aiEdges.map((e) => e.id));
-  const userEdges = existing.edges.filter(
-    (e) => !e.aiGenerated && !aiEdgeIds.has(e.id),
-  );
+  const userEdges = existing.edges.filter((e) => !e.aiGenerated && !aiEdgeIds.has(e.id));
 
-  const edges = [
-    ...aiEdges.map((e) => ({ ...e, aiGenerated: true })),
-    ...userEdges,
-  ];
+  const edges = [...aiEdges.map((e) => ({ ...e, aiGenerated: true })), ...userEdges];
 
   return { nodes, edges };
 }
@@ -178,10 +173,7 @@ function mergeWithExisting(
  * Fire-and-forget safe — any errors are caught internally.
  */
 export async function extractPageMap(projectId: number): Promise<void> {
-  const [project] = await db
-    .select()
-    .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
   if (!project) return;
 
   const fileRows = await db
@@ -197,11 +189,7 @@ export async function extractPageMap(projectId: number): Promise<void> {
 
   const existingMap = (project.pageMapData as PageMapData | null) ?? EMPTY_PAGE_MAP;
 
-  const webPlatform = await extractPageMapForFiles(
-    files,
-    "web",
-    existingMap.web,
-  );
+  const webPlatform = await extractPageMapForFiles(files, "web", existingMap.web);
 
   const updatedMap: PageMapData = { ...existingMap, web: webPlatform };
 
@@ -210,7 +198,10 @@ export async function extractPageMap(projectId: number): Promise<void> {
     .set({ pageMapData: updatedMap })
     .where(eq(projectsTable.id, projectId));
 
-  logger.info({ projectId, nodeCount: webPlatform.nodes.length }, "Page map extracted and persisted");
+  logger.info(
+    { projectId, nodeCount: webPlatform.nodes.length },
+    "Page map extracted and persisted",
+  );
 }
 
 /**
@@ -226,10 +217,7 @@ export async function extractPageMapForFiles(
   }
 
   const pageFiles = files.filter(
-    (f) =>
-      f.mimeType === "text/html" ||
-      f.path.endsWith(".html") ||
-      f.path === "index.html",
+    (f) => f.mimeType === "text/html" || f.path.endsWith(".html") || f.path === "index.html",
   );
 
   if (pageFiles.length === 0) {

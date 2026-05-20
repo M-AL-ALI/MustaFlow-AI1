@@ -67,12 +67,15 @@ async function emitEvent(
   filePath?: string,
 ): Promise<void> {
   try {
-    const [row] = await db.insert(taskEventsTable).values({
-      taskId,
-      eventType,
-      message,
-      filePath: filePath ?? null,
-    }).returning();
+    const [row] = await db
+      .insert(taskEventsTable)
+      .values({
+        taskId,
+        eventType,
+        message,
+        filePath: filePath ?? null,
+      })
+      .returning();
     if (row) {
       publishTaskEvent({
         id: row.id,
@@ -100,9 +103,7 @@ async function loadFiles(projectId: number): Promise<BuilderFile[]> {
   }));
 }
 
-async function snapshotFilesForVersion(
-  projectId: number,
-): Promise<FileSnapshotEntry[]> {
+async function snapshotFilesForVersion(projectId: number): Promise<FileSnapshotEntry[]> {
   const rows = await db
     .select()
     .from(projectFilesTable)
@@ -125,9 +126,7 @@ async function writeFiles(
   replaceAll: boolean,
 ): Promise<void> {
   if (replaceAll) {
-    await db
-      .delete(projectFilesTable)
-      .where(eq(projectFilesTable.projectId, projectId));
+    await db.delete(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
   } else if (files.length > 0) {
     await db.delete(projectFilesTable).where(
       and(
@@ -154,17 +153,11 @@ async function writeFiles(
 /**
  * Bulk-safe file deleter — one DELETE with inArray instead of N individual deletes.
  */
-async function deleteFiles(
-  projectId: number,
-  paths: string[],
-): Promise<void> {
+async function deleteFiles(projectId: number, paths: string[]): Promise<void> {
   if (paths.length === 0) return;
-  await db.delete(projectFilesTable).where(
-    and(
-      eq(projectFilesTable.projectId, projectId),
-      inArray(projectFilesTable.path, paths),
-    ),
-  );
+  await db
+    .delete(projectFilesTable)
+    .where(and(eq(projectFilesTable.projectId, projectId), inArray(projectFilesTable.path, paths)));
 }
 
 /** Map of integration name → required secret key names (subset of the frontend registry). */
@@ -175,17 +168,35 @@ const INTEGRATION_KEY_MAP: Array<{ name: string; keys: string[] }> = [
   { name: "Clerk", keys: ["CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"] },
   { name: "Auth0", keys: ["AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"] },
   { name: "Supabase Auth", keys: ["SUPABASE_URL", "SUPABASE_ANON_KEY"] },
-  { name: "Firebase Auth", keys: ["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN", "FIREBASE_PROJECT_ID"] },
+  {
+    name: "Firebase Auth",
+    keys: ["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN", "FIREBASE_PROJECT_ID"],
+  },
   { name: "PostgreSQL / Neon", keys: ["DATABASE_URL"] },
   { name: "Supabase", keys: ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY"] },
   { name: "Firebase Firestore", keys: ["FIREBASE_PROJECT_ID", "FIREBASE_API_KEY"] },
-  { name: "AWS S3", keys: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_S3_BUCKET", "AWS_REGION"] },
-  { name: "Cloudflare R2", keys: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_ACCOUNT_ID"] },
+  {
+    name: "AWS S3",
+    keys: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_S3_BUCKET", "AWS_REGION"],
+  },
+  {
+    name: "Cloudflare R2",
+    keys: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_ACCOUNT_ID"],
+  },
   { name: "Supabase Storage", keys: ["SUPABASE_URL", "SUPABASE_SERVICE_KEY"] },
-  { name: "Stripe", keys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"] },
-  { name: "Stripe Connect", keys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_CONNECT_CLIENT_ID"] },
+  {
+    name: "Stripe",
+    keys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+  },
+  {
+    name: "Stripe Connect",
+    keys: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_CONNECT_CLIENT_ID"],
+  },
   { name: "Google Maps", keys: ["GOOGLE_MAPS_API_KEY"] },
-  { name: "Apple Maps", keys: ["APPLE_MAPS_KEY_ID", "APPLE_MAPS_TEAM_ID", "APPLE_MAPS_PRIVATE_KEY"] },
+  {
+    name: "Apple Maps",
+    keys: ["APPLE_MAPS_KEY_ID", "APPLE_MAPS_TEAM_ID", "APPLE_MAPS_PRIVATE_KEY"],
+  },
   { name: "Mapbox", keys: ["MAPBOX_PUBLIC_TOKEN"] },
   { name: "Resend", keys: ["RESEND_API_KEY"] },
   { name: "SendGrid", keys: ["SENDGRID_API_KEY"] },
@@ -220,10 +231,14 @@ async function loadActiveIntegrations(projectId: number): Promise<string> {
     }).map((i) => i.name);
     const parts: string[] = [];
     if (active.length > 0) {
-      parts.push(`ACTIVE INTEGRATIONS (connected and verified): ${active.join(", ")}. When generating or refining code, prefer these services over alternatives and reference their environment variables from project secrets.`);
+      parts.push(
+        `ACTIVE INTEGRATIONS (connected and verified): ${active.join(", ")}. When generating or refining code, prefer these services over alternatives and reference their environment variables from project secrets.`,
+      );
     }
     if (partial.length > 0) {
-      parts.push(`PARTIALLY CONFIGURED (keys present but not yet verified): ${partial.join(", ")}. These may work but have not been verified — mention them if the user asks.`);
+      parts.push(
+        `PARTIALLY CONFIGURED (keys present but not yet verified): ${partial.join(", ")}. These may work but have not been verified — mention them if the user asks.`,
+      );
     }
     return parts.join("\n");
   } catch {
@@ -387,9 +402,7 @@ async function loadKnowledgeContext(
  * Look up the most recent plan-mode assistant message for this project and return
  * its plan JSON to store as a version annotation (planSnapshot).
  */
-async function loadLatestPlanSnapshot(
-  projectId: number,
-): Promise<Record<string, unknown> | null> {
+async function loadLatestPlanSnapshot(projectId: number): Promise<Record<string, unknown> | null> {
   try {
     const [row] = await db
       .select({ plan: chatMessagesTable.plan })
@@ -412,10 +425,7 @@ async function loadLatestPlanSnapshot(
   }
 }
 
-async function generateFixSuggestions(
-  userPrompt: string,
-  errorMessage: string,
-): Promise<string[]> {
+async function generateFixSuggestions(userPrompt: string, errorMessage: string): Promise<string[]> {
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-5-mini",
@@ -470,21 +480,13 @@ async function autoWriteFailureLesson(
  * If so, writes a "recurring warning" escalation entry to the Knowledge Vault so the AI
  * can proactively avoid the pattern in future builds.
  */
-async function maybeEscalateWarnings(
-  projectId: number,
-  currentWarnings: string[],
-): Promise<void> {
+async function maybeEscalateWarnings(projectId: number, currentWarnings: string[]): Promise<void> {
   if (currentWarnings.length === 0) return;
   try {
     const prevTasks = await db
       .select({ report: agentTasksTable.report })
       .from(agentTasksTable)
-      .where(
-        and(
-          eq(agentTasksTable.projectId, projectId),
-          eq(agentTasksTable.status, "completed"),
-        ),
-      )
+      .where(and(eq(agentTasksTable.projectId, projectId), eq(agentTasksTable.status, "completed")))
       .orderBy(desc(agentTasksTable.createdAt))
       .limit(3);
 
@@ -582,14 +584,27 @@ async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
           eq(agentTasksTable.status, "queued"),
         ),
       );
-    logger.info({ queueBatchId: failedTask.queueBatchId }, "Cancelled remaining batch tasks after failure");
+    logger.info(
+      { queueBatchId: failedTask.queueBatchId },
+      "Cancelled remaining batch tasks after failure",
+    );
   } catch (err) {
     logger.warn({ err }, "Failed to cancel remaining batch tasks");
   }
 }
 
 export async function runJob(input: JobInput): Promise<void> {
-  const { taskId, projectId, kind, userPrompt, agentMode, conversationHistory, queueBatchId, queueIndex, queueTotalCount } = input;
+  const {
+    taskId,
+    projectId,
+    kind,
+    userPrompt,
+    agentMode,
+    conversationHistory,
+    queueBatchId,
+    queueIndex,
+    queueTotalCount,
+  } = input;
 
   await emitEvent(taskId, "queued", "Task received, starting pipeline…");
 
@@ -598,10 +613,7 @@ export async function runJob(input: JobInput): Promise<void> {
     .set({ status: kind === "build" ? "building" : "planning" })
     .where(eq(agentTasksTable.id, taskId));
 
-  const [project] = await db
-    .select()
-    .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
   if (!project) {
     await emitEvent(taskId, "failed", "Project not found.");
     await db
@@ -615,7 +627,10 @@ export async function runJob(input: JobInput): Promise<void> {
     return;
   }
 
-  const { context: knowledgeContext, applied: knowledgeApplied } = await loadKnowledgeContext(projectId, userPrompt);
+  const { context: knowledgeContext, applied: knowledgeApplied } = await loadKnowledgeContext(
+    projectId,
+    userPrompt,
+  );
 
   // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
   const creditCost = CREDIT_COST[agentMode] ?? 1;
@@ -650,7 +665,9 @@ export async function runJob(input: JobInput): Promise<void> {
         db
           .select({ report: agentTasksTable.report })
           .from(agentTasksTable)
-          .where(and(eq(agentTasksTable.projectId, projectId), eq(agentTasksTable.status, "completed")))
+          .where(
+            and(eq(agentTasksTable.projectId, projectId), eq(agentTasksTable.status, "completed")),
+          )
           .orderBy(desc(agentTasksTable.completedAt))
           .limit(1),
         db
@@ -714,16 +731,14 @@ export async function runJob(input: JobInput): Promise<void> {
     } else {
       await emitEvent(taskId, "reading_files", "Reading current project files…");
       const existingFiles = await loadFiles(projectId);
-      await emitEvent(
-        taskId,
-        "reading_files",
-        `Loaded ${existingFiles.length} existing file(s).`,
-      );
+      await emitEvent(taskId, "reading_files", `Loaded ${existingFiles.length} existing file(s).`);
 
       await emitEvent(
         taskId,
         "generating_code",
-        isMobileProject ? "Applying change to Expo project with AI…" : "Applying change request with AI…",
+        isMobileProject
+          ? "Applying change to Expo project with AI…"
+          : "Applying change request with AI…",
       );
 
       const result = isMobileProject
@@ -757,12 +772,7 @@ export async function runJob(input: JobInput): Promise<void> {
 
       if (result.changedFiles.length > 0) {
         for (const f of result.changedFiles) {
-          await emitEvent(
-            taskId,
-            "editing_files",
-            `Updating ${f.path}`,
-            f.path,
-          );
+          await emitEvent(taskId, "editing_files", `Updating ${f.path}`, f.path);
         }
         await writeFiles(projectId, result.changedFiles, false);
       }
@@ -785,11 +795,7 @@ export async function runJob(input: JobInput): Promise<void> {
       report.knowledgeApplied = knowledgeApplied;
     }
 
-    await emitEvent(
-      taskId,
-      "saving_version",
-      "Saving version rollback point…",
-    );
+    await emitEvent(taskId, "saving_version", "Saving version rollback point…");
     const snapshot = await snapshotFilesForVersion(projectId);
 
     // Fetch the most recent plan snapshot to annotate this version
@@ -829,7 +835,12 @@ export async function runJob(input: JobInput): Promise<void> {
             db.update(agentTasksTable)
               .set({ report: { ...report, codeSmells: smells } })
               .where(eq(agentTasksTable.id, taskId))
-              .catch((err: unknown) => logger.warn({ err, taskId }, "Failed to persist code-smell scan results (non-fatal)"));
+              .catch((err: unknown) =>
+                logger.warn(
+                  { err, taskId },
+                  "Failed to persist code-smell scan results (non-fatal)",
+                ),
+              );
           }
         } catch (err) {
           logger.warn({ err, taskId }, "Code-smell scan error (non-fatal)");
@@ -930,8 +941,7 @@ export async function runJob(input: JobInput): Promise<void> {
     });
   } catch (err) {
     logger.error({ err, taskId, projectId }, "Builder job failed");
-    const message =
-      err instanceof Error ? err.message : "Unknown builder error";
+    const message = err instanceof Error ? err.message : "Unknown builder error";
     await emitEvent(taskId, "failed", message);
 
     // Generate specific fix suggestions via AI (parallel with DB writes)
@@ -950,7 +960,18 @@ export async function runJob(input: JobInput): Promise<void> {
     // Store fix suggestions on the task record
     await db
       .update(agentTasksTable)
-      .set({ report: { userRequest: userPrompt, filesCreated: [], filesChanged: [], filesRemoved: [], previewUpdated: false, warnings: [], suggestions, integrationsNeeded: [] } })
+      .set({
+        report: {
+          userRequest: userPrompt,
+          filesCreated: [],
+          filesChanged: [],
+          filesRemoved: [],
+          previewUpdated: false,
+          warnings: [],
+          suggestions,
+          integrationsNeeded: [],
+        },
+      })
       .where(eq(agentTasksTable.id, taskId));
 
     // Auto-write a diagnostic lesson to the Knowledge Vault
@@ -972,7 +993,10 @@ export async function runJob(input: JobInput): Promise<void> {
         content: `Build failed: ${message}`,
         agentMode,
         planMode: false,
-        plan: { kind: "error", message, suggestions, ...errBatchMeta } as unknown as Record<string, unknown>,
+        plan: { kind: "error", message, suggestions, ...errBatchMeta } as unknown as Record<
+          string,
+          unknown
+        >,
       });
     } catch {
       // best-effort
@@ -1010,10 +1034,7 @@ async function extractAppJsonSummary(projectId: number): Promise<string> {
       .select({ content: projectFilesTable.content })
       .from(projectFilesTable)
       .where(
-        and(
-          eq(projectFilesTable.projectId, projectId),
-          eq(projectFilesTable.path, "app.json"),
-        ),
+        and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, "app.json")),
       )
       .limit(1);
     if (!row) return "(no app.json found in project files)";
@@ -1042,7 +1063,11 @@ async function runEasBuildJob(input: EasJobInput): Promise<void> {
 
     await db
       .update(deploymentLogsTable)
-      .set({ buildId: easBuildId, status: "building", note: `EAS build in progress (id: ${easBuildId})` })
+      .set({
+        buildId: easBuildId,
+        status: "building",
+        note: `EAS build in progress (id: ${easBuildId})`,
+      })
       .where(eq(deploymentLogsTable.id, deploymentLogId));
 
     // Poll for completion (max 15 min, every 15 s)
@@ -1071,16 +1096,22 @@ async function runEasBuildJob(input: EasJobInput): Promise<void> {
       try {
         await db
           .update(deploymentLogsTable)
-          .set({ status: "submitting", note: "Build succeeded — submitting to store…", downloadUrl: downloadUrl ?? undefined })
+          .set({
+            status: "submitting",
+            note: "Build succeeded — submitting to store…",
+            downloadUrl: downloadUrl ?? undefined,
+          })
           .where(eq(deploymentLogsTable.id, deploymentLogId));
 
         await triggerEasSubmit({ accessToken, buildId: easBuildId, platform, appOwner });
-        testflightUrl = platform === "ios"
-          ? "https://appstoreconnect.apple.com/apps"
-          : "https://play.google.com/console";
-        submissionNote = platform === "ios"
-          ? "Submitted to TestFlight. Check App Store Connect for processing status."
-          : "Uploaded to Google Play Internal Testing track.";
+        testflightUrl =
+          platform === "ios"
+            ? "https://appstoreconnect.apple.com/apps"
+            : "https://play.google.com/console";
+        submissionNote =
+          platform === "ios"
+            ? "Submitted to TestFlight. Check App Store Connect for processing status."
+            : "Uploaded to Google Play Internal Testing track.";
       } catch (submitErr) {
         logger.warn({ submitErr, easBuildId }, "EAS submit failed (build still succeeded)");
         submissionNote = `Build succeeded. Auto-submit failed: ${submitErr instanceof Error ? submitErr.message : "unknown error"}`;
@@ -1088,21 +1119,47 @@ async function runEasBuildJob(input: EasJobInput): Promise<void> {
 
       await db
         .update(deploymentLogsTable)
-        .set({ status: "submitted", downloadUrl: downloadUrl ?? undefined, testflightUrl: testflightUrl ?? undefined, note: submissionNote })
+        .set({
+          status: "submitted",
+          downloadUrl: downloadUrl ?? undefined,
+          testflightUrl: testflightUrl ?? undefined,
+          note: submissionNote,
+        })
         .where(eq(deploymentLogsTable.id, deploymentLogId));
 
       void writeKnowledge({
         title: `EAS ${platform} build succeeded`,
         content: `Project ${projectId} EAS ${platform} build (id: ${easBuildId}) completed and submitted. ${submissionNote}`,
-        type: "build", category: "event", severity: "info", projectId, userId,
+        type: "build",
+        category: "event",
+        severity: "info",
+        projectId,
+        userId,
       });
 
-      void db.insert(chatMessagesTable).values({
-        projectId, role: "system",
-        content: `${platform === "ios" ? "iOS" : "Android"} cloud build succeeded and submitted. ${submissionNote}`,
-        agentMode: "eco", planMode: false,
-        plan: { kind: "report", report: { userRequest: `EAS ${platform} build`, filesCreated: [], filesChanged: [], filesRemoved: [], previewUpdated: false, warnings: [] } } as unknown as Record<string, unknown>,
-      }).catch(() => { /* best-effort */ });
+      void db
+        .insert(chatMessagesTable)
+        .values({
+          projectId,
+          role: "system",
+          content: `${platform === "ios" ? "iOS" : "Android"} cloud build succeeded and submitted. ${submissionNote}`,
+          agentMode: "eco",
+          planMode: false,
+          plan: {
+            kind: "report",
+            report: {
+              userRequest: `EAS ${platform} build`,
+              filesCreated: [],
+              filesChanged: [],
+              filesRemoved: [],
+              previewUpdated: false,
+              warnings: [],
+            },
+          } as unknown as Record<string, unknown>,
+        })
+        .catch(() => {
+          /* best-effort */
+        });
     } else {
       const errorMsg = finalBuild.error?.message ?? `EAS build ${finalBuild.status}`;
       await db
@@ -1113,22 +1170,34 @@ async function runEasBuildJob(input: EasJobInput): Promise<void> {
       void writeKnowledge({
         title: `EAS ${platform} build failed`,
         content: `Project ${projectId} EAS ${platform} build (id: ${easBuildId}) failed: ${errorMsg}. Check credentials in project Secrets.`,
-        type: "build", category: "diagnostic", severity: "error", projectId, userId,
+        type: "build",
+        category: "diagnostic",
+        severity: "error",
+        projectId,
+        userId,
       });
 
-      void db.insert(chatMessagesTable).values({
-        projectId, role: "assistant",
-        content: `${platform === "ios" ? "iOS" : "Android"} cloud build failed: ${errorMsg}`,
-        agentMode: "eco", planMode: false,
-        plan: {
-          kind: "error", message: errorMsg,
-          suggestions: [
-            "Check your Apple/Google credentials in the project Secrets tab.",
-            "Verify your app.json has a valid bundleIdentifier / package name.",
-            "Review the EAS dashboard for detailed build logs.",
-          ],
-        } as unknown as Record<string, unknown>,
-      }).catch(() => { /* best-effort */ });
+      void db
+        .insert(chatMessagesTable)
+        .values({
+          projectId,
+          role: "assistant",
+          content: `${platform === "ios" ? "iOS" : "Android"} cloud build failed: ${errorMsg}`,
+          agentMode: "eco",
+          planMode: false,
+          plan: {
+            kind: "error",
+            message: errorMsg,
+            suggestions: [
+              "Check your Apple/Google credentials in the project Secrets tab.",
+              "Verify your app.json has a valid bundleIdentifier / package name.",
+              "Review the EAS dashboard for detailed build logs.",
+            ],
+          } as unknown as Record<string, unknown>,
+        })
+        .catch(() => {
+          /* best-effort */
+        });
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown EAS error";

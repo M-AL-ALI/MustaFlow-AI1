@@ -1,8 +1,25 @@
 import { useState, useEffect, useCallback } from "react";
-import { CheckCircle2, XCircle, Loader2, Circle, ChevronDown, ChevronUp, RotateCcw, Ban } from "lucide-react";
+import {
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Circle,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+  Ban,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type TaskStatus = "queued" | "planning" | "building" | "testing" | "needs_approval" | "completed" | "failed" | "canceled";
+type TaskStatus =
+  | "queued"
+  | "planning"
+  | "building"
+  | "testing"
+  | "needs_approval"
+  | "completed"
+  | "failed"
+  | "canceled";
 
 interface BatchTask {
   id: number;
@@ -29,7 +46,13 @@ interface QueueProgressStripProps {
   onRetry: (remainingMessages: string[], agentMode: string) => void;
 }
 
-const ACTIVE_STATUSES: Set<string> = new Set(["queued", "planning", "building", "testing", "needs_approval"]);
+const ACTIVE_STATUSES: Set<string> = new Set([
+  "queued",
+  "planning",
+  "building",
+  "testing",
+  "needs_approval",
+]);
 
 function TaskStepIcon({ status }: { status: TaskStatus }) {
   if (status === "completed") {
@@ -47,7 +70,12 @@ function TaskStepIcon({ status }: { status: TaskStatus }) {
   return <Circle className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />;
 }
 
-export function QueueProgressStrip({ projectId, batchId, onComplete, onRetry }: QueueProgressStripProps) {
+export function QueueProgressStrip({
+  projectId,
+  batchId,
+  onComplete,
+  onRetry,
+}: QueueProgressStripProps) {
   const [batch, setBatch] = useState<BatchState | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -101,7 +129,9 @@ export function QueueProgressStrip({ projectId, batchId, onComplete, onRetry }: 
     if (!batch) return;
     const failedIdx = batch.tasks.findIndex((t) => t.status === "failed");
     const retryTasks = batch.tasks.filter(
-      (t, idx) => idx >= failedIdx && (t.status === "failed" || t.status === "queued" || t.status === "canceled"),
+      (t, idx) =>
+        idx >= failedIdx &&
+        (t.status === "failed" || t.status === "queued" || t.status === "canceled"),
     );
     const messages = retryTasks.map((t) => t.prompt ?? t.title).filter(Boolean);
     if (messages.length > 0) {
@@ -111,35 +141,35 @@ export function QueueProgressStrip({ projectId, batchId, onComplete, onRetry }: 
 
   if (!batch) return null;
 
-  const runningTask = batch.tasks.find((t) => ACTIVE_STATUSES.has(t.status) && t.status !== "queued");
+  const runningTask = batch.tasks.find(
+    (t) => ACTIVE_STATUSES.has(t.status) && t.status !== "queued",
+  );
   const hasFailure = batch.failedCount > 0;
   const allDone = batch.tasks.every((t) => !ACTIVE_STATUSES.has(t.status));
   const hasQueued = batch.tasks.some((t) => t.status === "queued");
 
   return (
-    <div className={cn(
-      "shrink-0 border-t border-border/50 bg-muted/30 transition-all duration-200",
-      done && "opacity-60",
-    )}>
+    <div
+      className={cn(
+        "shrink-0 border-t border-border/50 bg-muted/30 transition-all duration-200",
+        done && "opacity-60",
+      )}
+    >
       <div className="px-3 py-2 flex items-center gap-2">
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           {!allDone && !hasFailure && (
             <Loader2 className="h-3 w-3 text-primary animate-spin shrink-0" />
           )}
-          {allDone && !hasFailure && (
-            <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
-          )}
-          {hasFailure && (
-            <XCircle className="h-3 w-3 text-destructive shrink-0" />
-          )}
+          {allDone && !hasFailure && <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />}
+          {hasFailure && <XCircle className="h-3 w-3 text-destructive shrink-0" />}
           <span className="text-[11px] font-semibold text-foreground truncate">
             {allDone
               ? hasFailure
                 ? `Queue paused — task failed`
                 : `Queue complete — ${batch.completedCount} task${batch.completedCount !== 1 ? "s" : ""} done`
               : runningTask
-              ? `Running task ${(runningTask.queueIndex ?? 0) + 1} of ${batch.totalCount}…`
-              : `Queue: ${batch.completedCount} of ${batch.totalCount} done`}
+                ? `Running task ${(runningTask.queueIndex ?? 0) + 1} of ${batch.totalCount}…`
+                : `Queue: ${batch.completedCount} of ${batch.totalCount} done`}
           </span>
         </div>
 
@@ -168,7 +198,11 @@ export function QueueProgressStrip({ projectId, batchId, onComplete, onRetry }: 
             className="w-5 h-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
             title={collapsed ? "Expand" : "Collapse"}
           >
-            {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+            {collapsed ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronUp className="h-3.5 w-3.5" />
+            )}
           </button>
         </div>
       </div>
@@ -188,23 +222,29 @@ export function QueueProgressStrip({ projectId, batchId, onComplete, onRetry }: 
               <span className="text-[9px] font-bold text-muted-foreground/50 w-3 shrink-0">
                 {idx + 1}
               </span>
-              <span className={cn(
-                "flex-1 text-[11px] truncate",
-                task.status === "completed" && "text-muted-foreground",
-                task.status === "failed" && "text-destructive",
-                task.status === "canceled" && "text-muted-foreground/40 line-through",
-                ACTIVE_STATUSES.has(task.status) && task.status !== "queued" && "text-foreground font-medium",
-              )}>
+              <span
+                className={cn(
+                  "flex-1 text-[11px] truncate",
+                  task.status === "completed" && "text-muted-foreground",
+                  task.status === "failed" && "text-destructive",
+                  task.status === "canceled" && "text-muted-foreground/40 line-through",
+                  ACTIVE_STATUSES.has(task.status) &&
+                    task.status !== "queued" &&
+                    "text-foreground font-medium",
+                )}
+              >
                 {task.prompt ?? task.title}
               </span>
-              <span className={cn(
-                "text-[9px] shrink-0 capitalize font-medium",
-                task.status === "completed" && "text-green-400",
-                task.status === "failed" && "text-destructive",
-                task.status === "canceled" && "text-muted-foreground/40",
-                task.status === "queued" && "text-muted-foreground/50",
-                ACTIVE_STATUSES.has(task.status) && task.status !== "queued" && "text-primary",
-              )}>
+              <span
+                className={cn(
+                  "text-[9px] shrink-0 capitalize font-medium",
+                  task.status === "completed" && "text-green-400",
+                  task.status === "failed" && "text-destructive",
+                  task.status === "canceled" && "text-muted-foreground/40",
+                  task.status === "queued" && "text-muted-foreground/50",
+                  ACTIVE_STATUSES.has(task.status) && task.status !== "queued" && "text-primary",
+                )}
+              >
                 {task.status === "building" || task.status === "planning" ? "running" : task.status}
               </span>
             </div>

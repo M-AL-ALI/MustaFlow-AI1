@@ -30,7 +30,10 @@ export function WorkspaceSwitcher() {
             {currentWorkspace?.name ?? "My Workspace"}
           </span>
           <ChevronDown
-            className={cn("h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform", open && "rotate-180")}
+            className={cn(
+              "h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform",
+              open && "rotate-180",
+            )}
           />
         </button>
 

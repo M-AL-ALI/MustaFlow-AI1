@@ -18,8 +18,7 @@ import { activateSslForProject } from "./ssl";
 const router: IRouter = Router();
 
 /** Canonical CNAME target that users must point their domain to. */
-const CNAME_TARGET =
-  process.env.PLATFORM_CNAME_TARGET ?? "hosted.mustaflow.app";
+const CNAME_TARGET = process.env.PLATFORM_CNAME_TARGET ?? "hosted.mustaflow.app";
 
 /** Platform root domain used to build auto-subdomains. */
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
@@ -43,155 +42,122 @@ function isDuplicateKeyError(err: unknown): boolean {
 }
 
 // ── GET /api/projects/:id/domain ─────────────────────────────────────────────
-router.get(
-  "/projects/:id/domain",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
+router.get("/projects/:id/domain", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
 
-    const [project] = await db
-      .select({
-        id: projectsTable.id,
-        publicSlug: projectsTable.publicSlug,
-        customDomain: projectsTable.customDomain,
-        domainStatus: projectsTable.domainStatus,
-        sslStatus: projectsTable.sslStatus,
-        publishedSnapshotId: projectsTable.publishedSnapshotId,
-        verificationToken: projectsTable.verificationToken,
-      })
-      .from(projectsTable)
-      .where(
-        and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)),
-      );
+  const [project] = await db
+    .select({
+      id: projectsTable.id,
+      publicSlug: projectsTable.publicSlug,
+      customDomain: projectsTable.customDomain,
+      domainStatus: projectsTable.domainStatus,
+      sslStatus: projectsTable.sslStatus,
+      publishedSnapshotId: projectsTable.publishedSnapshotId,
+      verificationToken: projectsTable.verificationToken,
+    })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
-    if (!project) {
-      res.status(404).json({ error: "Project not found" });
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const txtName = project.customDomain ? `_mustaflow.${project.customDomain}` : null;
+
+  res.json({
+    subdomain: buildSubdomain(project.publicSlug),
+    subdomainUrl: project.publicSlug ? `https://${buildSubdomain(project.publicSlug)}` : null,
+    cnameTarget: CNAME_TARGET,
+    platformDomain: PLATFORM_DOMAIN,
+    customDomain: project.customDomain ?? null,
+    domainStatus: project.domainStatus,
+    sslStatus: project.sslStatus,
+    isPublished: project.publishedSnapshotId !== null,
+    // TXT ownership verification
+    verificationToken: project.verificationToken ?? null,
+    txtName,
+    txtValue: project.verificationToken ?? null,
+  });
+});
+
+// ── PATCH /api/projects/:id/domain ───────────────────────────────────────────
+router.patch("/projects/:id/domain", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  const { customDomain } = req.body as { customDomain?: string | null };
+
+  if (customDomain !== undefined && customDomain !== null) {
+    const cleaned = String(customDomain)
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/\/.*$/, "");
+
+    const hostnameRe = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
+    if (!hostnameRe.test(cleaned)) {
+      res.status(400).json({
+        error:
+          "Invalid domain format. Use a bare hostname like app.example.com — no protocol, no trailing slash.",
+      });
       return;
     }
 
-    const txtName = project.customDomain
-      ? `_mustaflow.${project.customDomain}`
-      : null;
-
-    res.json({
-      subdomain: buildSubdomain(project.publicSlug),
-      subdomainUrl: project.publicSlug
-        ? `https://${buildSubdomain(project.publicSlug)}`
-        : null,
-      cnameTarget: CNAME_TARGET,
-      platformDomain: PLATFORM_DOMAIN,
-      customDomain: project.customDomain ?? null,
-      domainStatus: project.domainStatus,
-      sslStatus: project.sslStatus,
-      isPublished: project.publishedSnapshotId !== null,
-      // TXT ownership verification
-      verificationToken: project.verificationToken ?? null,
-      txtName,
-      txtValue: project.verificationToken ?? null,
-    });
-  },
-);
-
-// ── PATCH /api/projects/:id/domain ───────────────────────────────────────────
-router.patch(
-  "/projects/:id/domain",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    const { customDomain } = req.body as { customDomain?: string | null };
-
-    if (customDomain !== undefined && customDomain !== null) {
-      const cleaned = String(customDomain)
-        .trim()
-        .toLowerCase()
-        .replace(/^https?:\/\//, "")
-        .replace(/\/.*$/, "");
-
-      const hostnameRe = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
-      if (!hostnameRe.test(cleaned)) {
-        res.status(400).json({
-          error:
-            "Invalid domain format. Use a bare hostname like app.example.com — no protocol, no trailing slash.",
-        });
-        return;
-      }
-
-      // Warn on apex/root domain (no subdomain prefix) — recommend www or a subdomain
-      const parts = cleaned.split(".");
-      if (parts.length === 2) {
-        res.status(400).json({
-          error:
-            "Apex (root) domains require special DNS records that vary by provider. Use a subdomain instead, e.g. www.example.com or app.example.com.",
-        });
-        return;
-      }
-
-      // Fetch existing token so we preserve it on re-save of the same domain
-      const [existing] = await db
-        .select({ verificationToken: projectsTable.verificationToken, customDomain: projectsTable.customDomain })
-        .from(projectsTable)
-        .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-
-      const token =
-        existing?.customDomain === cleaned && existing.verificationToken
-          ? existing.verificationToken
-          : generateVerificationToken();
-
-      try {
-        await db
-          .update(projectsTable)
-          .set({
-            customDomain: cleaned,
-            domainStatus: "pending_verification",
-            sslStatus: "pending",
-            verificationToken: token,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-      } catch (err) {
-        if (isDuplicateKeyError(err)) {
-          res.status(409).json({
-            error: "This domain is already connected to another project.",
-          });
-          return;
-        }
-        throw err;
-      }
-
-      res.json({
-        customDomain: cleaned,
-        domainStatus: "pending_verification",
-        sslStatus: "pending",
-        cnameTarget: CNAME_TARGET,
-        verificationToken: token,
-        txtName: `_mustaflow.${cleaned}`,
-        txtValue: token,
+    // Warn on apex/root domain (no subdomain prefix) — recommend www or a subdomain
+    const parts = cleaned.split(".");
+    if (parts.length === 2) {
+      res.status(400).json({
+        error:
+          "Apex (root) domains require special DNS records that vary by provider. Use a subdomain instead, e.g. www.example.com or app.example.com.",
       });
-    } else {
-      // Clear the custom domain
+      return;
+    }
+
+    // Fetch existing token so we preserve it on re-save of the same domain
+    const [existing] = await db
+      .select({
+        verificationToken: projectsTable.verificationToken,
+        customDomain: projectsTable.customDomain,
+      })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+    const token =
+      existing?.customDomain === cleaned && existing.verificationToken
+        ? existing.verificationToken
+        : generateVerificationToken();
+
+    try {
       await db
         .update(projectsTable)
         .set({
-          customDomain: null,
-          domainStatus: "unconfigured",
+          customDomain: cleaned,
+          domainStatus: "pending_verification",
           sslStatus: "pending",
-          verificationToken: null,
+          verificationToken: token,
           updatedAt: new Date(),
         })
         .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-
-      res.json({ customDomain: null, domainStatus: "unconfigured" });
+    } catch (err) {
+      if (isDuplicateKeyError(err)) {
+        res.status(409).json({
+          error: "This domain is already connected to another project.",
+        });
+        return;
+      }
+      throw err;
     }
-  },
-);
 
-// ── DELETE /api/projects/:id/domain ──────────────────────────────────────────
-router.delete(
-  "/projects/:id/domain",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-
+    res.json({
+      customDomain: cleaned,
+      domainStatus: "pending_verification",
+      sslStatus: "pending",
+      cnameTarget: CNAME_TARGET,
+      verificationToken: token,
+      txtName: `_mustaflow.${cleaned}`,
+      txtValue: token,
+    });
+  } else {
+    // Clear the custom domain
     await db
       .update(projectsTable)
       .set({
@@ -204,8 +170,26 @@ router.delete(
       .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
     res.json({ customDomain: null, domainStatus: "unconfigured" });
-  },
-);
+  }
+});
+
+// ── DELETE /api/projects/:id/domain ──────────────────────────────────────────
+router.delete("/projects/:id/domain", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+
+  await db
+    .update(projectsTable)
+    .set({
+      customDomain: null,
+      domainStatus: "unconfigured",
+      sslStatus: "pending",
+      verificationToken: null,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+  res.json({ customDomain: null, domainStatus: "unconfigured" });
+});
 
 // ── POST /api/projects/:id/domain/verify ─────────────────────────────────────
 //
@@ -228,9 +212,7 @@ router.post(
         verificationToken: projectsTable.verificationToken,
       })
       .from(projectsTable)
-      .where(
-        and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)),
-      );
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
     if (!project || !project.customDomain) {
       res.status(400).json({ error: "No custom domain configured" });
@@ -252,9 +234,7 @@ router.post(
       if (token) {
         try {
           txtRecords = await dns.resolveTxt(txtLookup);
-          txtVerified = txtRecords
-            .flat()
-            .some((v) => v.trim() === token.trim());
+          txtVerified = txtRecords.flat().some((v) => v.trim() === token.trim());
         } catch {
           txtVerified = false;
         }
@@ -293,9 +273,9 @@ router.post(
           .from(projectsTable)
           .where(eq(projectsTable.id, projectId));
 
-        void activateSslForProject(projectId, domain, projectForSsl?.cfHostnameId).catch(
-          () => { /* best-effort — errors stored in ssl_error column */ },
-        );
+        void activateSslForProject(projectId, domain, projectForSsl?.cfHostnameId).catch(() => {
+          /* best-effort — errors stored in ssl_error column */
+        });
 
         res.json({
           verified: true,
@@ -324,9 +304,7 @@ router.post(
           );
         }
 
-        hints.push(
-          "DNS changes can take up to 48 hours to propagate.",
-        );
+        hints.push("DNS changes can take up to 48 hours to propagate.");
 
         await db
           .update(projectsTable)
@@ -348,7 +326,8 @@ router.post(
     } catch (err) {
       req.log.warn({ err, domain }, "Domain verification error");
       res.status(500).json({
-        error: "DNS check failed — this can happen during heavy propagation. Please try again in a few minutes.",
+        error:
+          "DNS check failed — this can happen during heavy propagation. Please try again in a few minutes.",
       });
     }
   },

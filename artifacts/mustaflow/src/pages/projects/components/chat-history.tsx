@@ -215,10 +215,7 @@ function InlineReportCard({
           {smellsOpen && (
             <ul className="mt-1.5 space-y-1 pl-4">
               {report.codeSmells.map((smell, i) => (
-                <li
-                  key={i}
-                  className="text-[10px] text-muted-foreground leading-relaxed list-disc"
-                >
+                <li key={i} className="text-[10px] text-muted-foreground leading-relaxed list-disc">
                   {smell}
                 </li>
               ))}
@@ -429,9 +426,7 @@ export function ChatHistory({
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 
   const filtered = (messages ?? []).filter((m) =>
-    searchQuery.trim()
-      ? m.content.toLowerCase().includes(searchQuery.toLowerCase())
-      : true,
+    searchQuery.trim() ? m.content.toLowerCase().includes(searchQuery.toLowerCase()) : true,
   );
 
   const grouped: { dateKey: string; label: string; msgs: Message[] }[] = [];
@@ -519,10 +514,7 @@ export function ChatHistory({
         {isLoading && (
           <div className="space-y-3 pt-2">
             {[1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className={cn("flex", i % 2 === 0 ? "justify-end" : "justify-start")}
-              >
+              <div key={i} className={cn("flex", i % 2 === 0 ? "justify-end" : "justify-start")}>
                 <div
                   className={cn(
                     "h-10 rounded-xl bg-muted animate-pulse",

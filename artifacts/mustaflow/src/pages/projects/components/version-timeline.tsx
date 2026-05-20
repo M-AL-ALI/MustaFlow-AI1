@@ -57,17 +57,22 @@ function detectTrigger(label: string): TriggerKind {
   const lower = label.toLowerCase();
   if (lower.includes("rollback") || lower.includes("restore")) return "rollback";
   if (lower.includes("publish")) return "publish";
-  if (lower.includes("refine") || lower.includes("change") || lower.includes("update")) return "refine";
-  if (lower.includes("build") || lower.includes("initial") || lower.includes("generat")) return "build";
+  if (lower.includes("refine") || lower.includes("change") || lower.includes("update"))
+    return "refine";
+  if (lower.includes("build") || lower.includes("initial") || lower.includes("generat"))
+    return "build";
   return "manual";
 }
 
 const triggerConfig: Record<TriggerKind, { label: string; className: string }> = {
-  build:    { label: "Build",    className: "bg-blue-500/15 text-blue-400 border-blue-500/30" },
-  refine:   { label: "Refine",   className: "bg-violet-500/15 text-violet-400 border-violet-500/30" },
-  rollback: { label: "Rollback", className: "bg-orange-500/15 text-orange-400 border-orange-500/30" },
-  publish:  { label: "Publish",  className: "bg-green-500/15 text-green-400 border-green-500/30" },
-  manual:   { label: "Manual",   className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
+  build: { label: "Build", className: "bg-blue-500/15 text-blue-400 border-blue-500/30" },
+  refine: { label: "Refine", className: "bg-violet-500/15 text-violet-400 border-violet-500/30" },
+  rollback: {
+    label: "Rollback",
+    className: "bg-orange-500/15 text-orange-400 border-orange-500/30",
+  },
+  publish: { label: "Publish", className: "bg-green-500/15 text-green-400 border-green-500/30" },
+  manual: { label: "Manual", className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
 };
 
 type DiffLine =
@@ -101,13 +106,18 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
   while (i < m || j < n) {
     if (i < m && j < n && oldLines[i] === newLines[j]) {
       result.push({ kind: "same", text: oldLines[i]!, lineA, lineB });
-      i++; j++; lineA++; lineB++;
+      i++;
+      j++;
+      lineA++;
+      lineB++;
     } else if (j < n && (i >= m || (dp[i]![j + 1] ?? 0) >= (dp[i + 1]![j] ?? 0))) {
       result.push({ kind: "add", text: newLines[j]!, lineB });
-      j++; lineB++;
+      j++;
+      lineB++;
     } else {
       result.push({ kind: "remove", text: oldLines[i]!, lineA });
-      i++; lineA++;
+      i++;
+      lineA++;
     }
   }
   return result;
@@ -157,8 +167,8 @@ function FileDiffViewer({
           <div className="p-8 text-center text-muted-foreground">
             <div className="text-sm font-medium mb-2">File too large to diff in browser</div>
             <div className="text-xs">
-              This file has {snapshotLines.toLocaleString()} + {currentLines.toLocaleString()} lines.
-              Download or export the project to compare large files externally.
+              This file has {snapshotLines.toLocaleString()} + {currentLines.toLocaleString()}{" "}
+              lines. Download or export the project to compare large files externally.
             </div>
           </div>
         ) : addCount === 0 && removeCount === 0 ? (
@@ -177,16 +187,15 @@ function FileDiffViewer({
                   line.kind === "add"
                     ? "bg-green-950/50"
                     : line.kind === "remove"
-                    ? "bg-red-950/50"
-                    : "";
-                const prefix =
-                  line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " ";
+                      ? "bg-red-950/50"
+                      : "";
+                const prefix = line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " ";
                 const textClass =
                   line.kind === "add"
                     ? "text-green-300"
                     : line.kind === "remove"
-                    ? "text-red-300"
-                    : "text-[#d4d4d4]";
+                      ? "text-red-300"
+                      : "text-[#d4d4d4]";
 
                 return (
                   <tr key={idx} className={rowClass}>
@@ -297,8 +306,12 @@ function SnapshotFileBrowser({
             className="flex items-center gap-2 py-1 px-2 rounded hover:bg-muted/50 group"
           >
             <FileCode2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="font-mono text-xs text-foreground truncate flex-1 min-w-0">{f.path}</span>
-            <span className="text-[10px] text-muted-foreground shrink-0">{formatBytes(sizeBytes)}</span>
+            <span className="font-mono text-xs text-foreground truncate flex-1 min-w-0">
+              {f.path}
+            </span>
+            <span className="text-[10px] text-muted-foreground shrink-0">
+              {formatBytes(sizeBytes)}
+            </span>
             {!existsInCurrent && (
               <span className="text-[10px] text-orange-400 shrink-0">new in restore</span>
             )}
@@ -306,7 +319,9 @@ function SnapshotFileBrowser({
               onClick={() => void handleCompare(f)}
               disabled={isComparing}
               className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary shrink-0 disabled:opacity-50 transition-colors"
-              title={existsInCurrent ? "Compare with current version" : "View file (not in current)"}
+              title={
+                existsInCurrent ? "Compare with current version" : "View file (not in current)"
+              }
             >
               {isComparing ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -338,7 +353,9 @@ function RollbackFileList({
   if (isLoading) {
     return (
       <div className="space-y-1.5">
-        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-5 w-full" />)}
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-5 w-full" />
+        ))}
       </div>
     );
   }
@@ -360,7 +377,10 @@ function RollbackFileList({
           </div>
           <div className="max-h-28 overflow-y-auto space-y-0.5">
             {overwritten.map((f) => (
-              <div key={f.path} className="flex items-center gap-1.5 text-xs text-foreground font-mono truncate">
+              <div
+                key={f.path}
+                className="flex items-center gap-1.5 text-xs text-foreground font-mono truncate"
+              >
                 <FileCode2 className="h-3 w-3 text-muted-foreground shrink-0" />
                 {f.path}
               </div>
@@ -375,7 +395,10 @@ function RollbackFileList({
           </div>
           <div className="max-h-28 overflow-y-auto space-y-0.5">
             {restored.map((f) => (
-              <div key={f.path} className="flex items-center gap-1.5 text-xs text-green-300 font-mono truncate">
+              <div
+                key={f.path}
+                className="flex items-center gap-1.5 text-xs text-green-300 font-mono truncate"
+              >
                 <FilePlus className="h-3 w-3 shrink-0" />
                 {f.path}
               </div>
@@ -390,7 +413,10 @@ function RollbackFileList({
           </div>
           <div className="max-h-28 overflow-y-auto space-y-0.5">
             {deleted.map((f) => (
-              <div key={f.path} className="flex items-center gap-1.5 text-xs text-red-300 font-mono truncate">
+              <div
+                key={f.path}
+                className="flex items-center gap-1.5 text-xs text-red-300 font-mono truncate"
+              >
                 <FileMinus className="h-3 w-3 shrink-0" />
                 {f.path}
               </div>
@@ -433,7 +459,12 @@ function RollbackDrawer({
   }, [version, projectId, rollback, onClose, onSuccess]);
 
   return (
-    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Sheet
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
@@ -441,8 +472,8 @@ function RollbackDrawer({
             Restore version
           </SheetTitle>
           <SheetDescription>
-            Restoring <strong className="text-foreground">{version?.label}</strong> will replace your
-            current project files with this snapshot.
+            Restoring <strong className="text-foreground">{version?.label}</strong> will replace
+            your current project files with this snapshot.
           </SheetDescription>
         </SheetHeader>
 
@@ -476,11 +507,7 @@ function RollbackDrawer({
           <Button variant="outline" onClick={onClose} disabled={rollback.isPending}>
             Cancel
           </Button>
-          <Button
-            variant="destructive"
-            onClick={handleConfirm}
-            disabled={rollback.isPending}
-          >
+          <Button variant="destructive" onClick={handleConfirm} disabled={rollback.isPending}>
             {rollback.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -623,8 +650,7 @@ export function VersionTimeline({
                       </div>
                     )}
                     <div className="text-[11px] text-muted-foreground mt-1">
-                      {relativeTime(v.createdAt)} &middot;{" "}
-                      {new Date(v.createdAt).toLocaleString()}
+                      {relativeTime(v.createdAt)} &middot; {new Date(v.createdAt).toLocaleString()}
                     </div>
                   </div>
 

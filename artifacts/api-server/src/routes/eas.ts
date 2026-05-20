@@ -24,9 +24,7 @@ const EAS_GQL = `${EAS_API}/graphql`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function fetchEasUserInfo(
-  token: string,
-): Promise<{ username: string; id: string } | null> {
+async function fetchEasUserInfo(token: string): Promise<{ username: string; id: string } | null> {
   try {
     const res = await fetch(`${EAS_API}/v2/auth/userinfo`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -133,10 +131,7 @@ async function triggerEasGqlBuild(
   return data?.build ?? null;
 }
 
-async function pollEasBuild(
-  token: string,
-  easBuildId: string,
-): Promise<EasBuildData | null> {
+async function pollEasBuild(token: string, easBuildId: string): Promise<EasBuildData | null> {
   type BuildQuery = { build: { byId: EasBuildData | null } };
   const data = await easGql<BuildQuery>(
     token,
@@ -171,15 +166,15 @@ async function pollEasBuild(
       if (!b) return null;
       // Prefer explicit logsPageUrl, fall back to buildPageUrl or construct from known expo.dev path
       const restLogsUrl =
-        b.logsPageUrl ??
-        b.buildPageUrl ??
-        `https://expo.dev/builds/${easBuildId}`;
+        b.logsPageUrl ?? b.buildPageUrl ?? `https://expo.dev/builds/${easBuildId}`;
       return {
         id: easBuildId,
         status: b.status ?? "unknown",
         platform: b.platform ?? "unknown",
         logsPageUrl: restLogsUrl,
-        artifacts: b.artifacts ? { buildUrl: b.artifacts.buildUrl ?? b.artifacts.applicationArchiveUrl ?? null } : null,
+        artifacts: b.artifacts
+          ? { buildUrl: b.artifacts.buildUrl ?? b.artifacts.applicationArchiveUrl ?? null }
+          : null,
         expirationDate: b.expirationDate ?? null,
       };
     } catch {
@@ -242,10 +237,16 @@ router.post(
   requireProjectOwnership,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
-    if (!Number.isFinite(projectId)) { res.status(400).json({ error: "Invalid project id" }); return; }
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
 
     const { token } = req.body as { token?: string };
-    if (!token?.trim()) { res.status(400).json({ error: "token is required" }); return; }
+    if (!token?.trim()) {
+      res.status(400).json({ error: "token is required" });
+      return;
+    }
 
     const userInfo = await fetchEasUserInfo(token.trim());
     if (!userInfo) {
@@ -296,7 +297,10 @@ router.post(
   requireProjectOwnership,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
-    if (!Number.isFinite(projectId)) { res.status(400).json({ error: "Invalid project id" }); return; }
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
 
     const body = req.body as { platform?: "ios" | "android"; profile?: string };
     const platform = body.platform ?? "android";
@@ -357,14 +361,17 @@ router.post(
         checksResult: { fullName, profile, reason: "graphql_trigger_failed" },
       });
       res.status(502).json({
-        error: "EAS build trigger failed. The project may not have an eas.json, or the profile does not exist.",
+        error:
+          "EAS build trigger failed. The project may not have an eas.json, or the profile does not exist.",
         hint: "check_eas_json",
       });
       return;
     }
 
     // 6. Persist in deployment_logs so it appears in the Deployment Logs tab
-    const logsUrl = buildResult.logsPageUrl ?? `https://expo.dev/accounts/${owner}/projects/${appInfo.slug}/builds/${buildResult.id}`;
+    const logsUrl =
+      buildResult.logsPageUrl ??
+      `https://expo.dev/accounts/${owner}/projects/${appInfo.slug}/builds/${buildResult.id}`;
     const [log] = await db
       .insert(deploymentLogsTable)
       .values({
@@ -403,45 +410,46 @@ router.post(
 );
 
 // ── GET /api/projects/:id/eas/builds ─────────────────────────────────────────
-router.get(
-  "/projects/:id/eas/builds",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    if (!Number.isFinite(projectId)) { res.status(400).json({ error: "Invalid project id" }); return; }
+router.get("/projects/:id/eas/builds", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  if (!Number.isFinite(projectId)) {
+    res.status(400).json({ error: "Invalid project id" });
+    return;
+  }
 
-    const rows = await db
-      .select()
-      .from(deploymentLogsTable)
-      .where(and(eq(deploymentLogsTable.projectId, projectId), like(deploymentLogsTable.env, "eas-%")))
-      .orderBy(desc(deploymentLogsTable.createdAt))
-      .limit(20);
+  const rows = await db
+    .select()
+    .from(deploymentLogsTable)
+    .where(
+      and(eq(deploymentLogsTable.projectId, projectId), like(deploymentLogsTable.env, "eas-%")),
+    )
+    .orderBy(desc(deploymentLogsTable.createdAt))
+    .limit(20);
 
-    const hasToken = !!(await getEasTokenForProject(projectId));
-    const appInfo = await getAppJson(projectId);
+  const hasToken = !!(await getEasTokenForProject(projectId));
+  const appInfo = await getAppJson(projectId);
 
-    res.json({
-      hasToken,
-      appSlug: appInfo?.slug ?? null,
-      appName: appInfo?.name ?? null,
-      builds: rows.map((r) => {
-        const meta = (r.checksResult ?? {}) as Record<string, unknown>;
-        return {
-          id: r.id,
-          env: r.env,
-          status: r.status,
-          publicUrl: r.publicUrl,
-          note: r.note,
-          createdAt: r.createdAt,
-          easBuildId: (meta.easBuildId as string) ?? null,
-          logsPageUrl: (meta.logsPageUrl as string) ?? null,
-          easStatus: (meta.easStatus as string) ?? null,
-          logSnippet: (meta.logSnippet as string) ?? null,
-        };
-      }),
-    });
-  },
-);
+  res.json({
+    hasToken,
+    appSlug: appInfo?.slug ?? null,
+    appName: appInfo?.name ?? null,
+    builds: rows.map((r) => {
+      const meta = (r.checksResult ?? {}) as Record<string, unknown>;
+      return {
+        id: r.id,
+        env: r.env,
+        status: r.status,
+        publicUrl: r.publicUrl,
+        note: r.note,
+        createdAt: r.createdAt,
+        easBuildId: (meta.easBuildId as string) ?? null,
+        logsPageUrl: (meta.logsPageUrl as string) ?? null,
+        easStatus: (meta.easStatus as string) ?? null,
+        logSnippet: (meta.logSnippet as string) ?? null,
+      };
+    }),
+  });
+});
 
 // ── POST /api/projects/:id/eas/builds ─────────────────────────────────────────
 // Link an existing EAS build by ID (polls EAS API) or by a direct exp:// / download URL.
@@ -450,7 +458,10 @@ router.post(
   requireProjectOwnership,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
-    if (!Number.isFinite(projectId)) { res.status(400).json({ error: "Invalid project id" }); return; }
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
 
     const body = req.body as { platform?: "ios" | "android"; easBuildId?: string; expUrl?: string };
     const platform = body.platform ?? "android";
@@ -497,7 +508,10 @@ router.post(
       })
       .returning();
 
-    if (!log) { res.status(500).json({ error: "Failed to create build log entry" }); return; }
+    if (!log) {
+      res.status(500).json({ error: "Failed to create build log entry" });
+      return;
+    }
 
     res.status(201).json({
       id: log.id,
@@ -530,13 +544,21 @@ router.patch(
       .where(and(eq(deploymentLogsTable.id, logId), eq(deploymentLogsTable.projectId, projectId)))
       .limit(1);
 
-    if (!existing) { res.status(404).json({ error: "Build log not found" }); return; }
+    if (!existing) {
+      res.status(404).json({ error: "Build log not found" });
+      return;
+    }
 
     const meta = (existing.checksResult ?? {}) as Record<string, unknown>;
     const easBuildId = meta.easBuildId as string | undefined;
 
     if (!easBuildId) {
-      res.json({ id: existing.id, status: existing.status, publicUrl: existing.publicUrl, note: existing.note });
+      res.json({
+        id: existing.id,
+        status: existing.status,
+        publicUrl: existing.publicUrl,
+        note: existing.note,
+      });
       return;
     }
 
@@ -588,7 +610,10 @@ router.patch(
       .where(eq(deploymentLogsTable.id, logId))
       .returning();
 
-    logger.info({ projectId, logId, easBuildId, easStatus: build.status }, "EAS build status refreshed");
+    logger.info(
+      { projectId, logId, easBuildId, easStatus: build.status },
+      "EAS build status refreshed",
+    );
 
     res.json({
       id: updated?.id ?? logId,

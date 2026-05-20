@@ -26,9 +26,7 @@ function PublicUrl({ slug }: { slug: string }) {
 
   return (
     <div className="flex items-center gap-2 min-w-0">
-      <code className="text-xs text-muted-foreground truncate max-w-[240px]">
-        /api/p/{slug}/
-      </code>
+      <code className="text-xs text-muted-foreground truncate max-w-[240px]">/api/p/{slug}/</code>
       <button
         onClick={copy}
         title="Copy public URL"
@@ -73,7 +71,9 @@ export default function PublishedPage() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+  }, []);
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">

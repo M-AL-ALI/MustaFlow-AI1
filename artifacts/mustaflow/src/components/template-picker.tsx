@@ -85,33 +85,32 @@ export function TemplatePicker({
     return matchesCategory && matchesSearch;
   });
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      const cards = Array.from(
-        e.currentTarget.querySelectorAll<HTMLButtonElement>("[data-template-card]"),
-      );
-      const idx = cards.indexOf(document.activeElement as HTMLButtonElement);
-      if (idx === -1) return;
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const cards = Array.from(
+      e.currentTarget.querySelectorAll<HTMLButtonElement>("[data-template-card]"),
+    );
+    const idx = cards.indexOf(document.activeElement as HTMLButtonElement);
+    if (idx === -1) return;
 
-      if (e.key === "ArrowRight" && idx < cards.length - 1) {
-        cards[idx + 1]?.focus();
+    if (e.key === "ArrowRight" && idx < cards.length - 1) {
+      cards[idx + 1]?.focus();
+      e.preventDefault();
+    } else if (e.key === "ArrowLeft" && idx > 0) {
+      cards[idx - 1]?.focus();
+      e.preventDefault();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      // Derive actual column count from rendered card positions rather than
+      // hardcoding breakpoint assumptions that may not match the grid CSS.
+      const firstTop = cards[0]?.getBoundingClientRect().top ?? 0;
+      const cols =
+        cards.filter((c) => Math.abs(c.getBoundingClientRect().top - firstTop) < 4).length || 1;
+      const target = e.key === "ArrowDown" ? cards[idx + cols] : cards[idx - cols];
+      if (target) {
+        target.focus();
         e.preventDefault();
-      } else if (e.key === "ArrowLeft" && idx > 0) {
-        cards[idx - 1]?.focus();
-        e.preventDefault();
-      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        // Derive actual column count from rendered card positions rather than
-        // hardcoding breakpoint assumptions that may not match the grid CSS.
-        const firstTop = cards[0]?.getBoundingClientRect().top ?? 0;
-        const cols = cards.filter(
-          (c) => Math.abs(c.getBoundingClientRect().top - firstTop) < 4,
-        ).length || 1;
-        const target = e.key === "ArrowDown" ? cards[idx + cols] : cards[idx - cols];
-        if (target) { target.focus(); e.preventDefault(); }
       }
-    },
-    [],
-  );
+    }
+  }, []);
 
   return (
     <div className="flex flex-col gap-4">
@@ -178,10 +177,7 @@ export function TemplatePicker({
         </div>
       ) : (
         <div
-          className={cn(
-            "grid gap-3",
-            compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3",
-          )}
+          className={cn("grid gap-3", compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3")}
           onKeyDown={handleKeyDown}
           role="list"
           aria-label="Template gallery"

@@ -80,9 +80,7 @@ async function handleStripeWebhook(
       }
 
       const payload = `${timestamp}.${rawBody.toString()}`;
-      const expectedSig = createHmac("sha256", STRIPE_WEBHOOK_SECRET)
-        .update(payload)
-        .digest("hex");
+      const expectedSig = createHmac("sha256", STRIPE_WEBHOOK_SECRET).update(payload).digest("hex");
 
       if (expectedSig !== receivedSig) {
         res.status(400).json({ error: "Webhook signature mismatch" });
@@ -149,7 +147,10 @@ const router: IRouter = Router();
 // GET /api/billing/credits — current credit balance (alias for /api/credits)
 router.get("/billing/credits", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const credits = await getOrCreateCredits(userId);
   res.json({ userId: credits.userId, balance: credits.balance, updatedAt: credits.updatedAt });
 });
@@ -157,7 +158,10 @@ router.get("/billing/credits", async (req, res): Promise<void> => {
 // GET /api/billing/transactions — transaction history (alias for /api/credits/transactions)
 router.get("/billing/transactions", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const rows = await db
     .select()
     .from(creditTransactionsTable)

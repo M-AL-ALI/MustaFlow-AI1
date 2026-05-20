@@ -1,11 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
-import {
-  db,
-  projectsTable,
-  chatMessagesTable,
-  agentTasksTable,
-} from "@workspace/db";
+import { db, projectsTable, chatMessagesTable, agentTasksTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import {
   CreateProjectBody,
@@ -91,9 +86,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       description: projectInput.description ?? null,
       kind: projectInput.kind,
       platform,
-      lastTaskSummary: initialPrompt
-        ? `Initial idea: ${initialPrompt.slice(0, 120)}`
-        : null,
+      lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
     })
     .returning();
 

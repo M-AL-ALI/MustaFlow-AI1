@@ -23,17 +23,11 @@ const MobileAppSettingsInputSchema = z.object({
   appName: z.string().min(1, "App name is required").optional(),
   bundleId: z
     .string()
-    .regex(
-      BUNDLE_ID_RE,
-      "Bundle ID must be reverse-domain format, e.g. com.company.appname",
-    )
+    .regex(BUNDLE_ID_RE, "Bundle ID must be reverse-domain format, e.g. com.company.appname")
     .optional(),
   packageName: z
     .string()
-    .regex(
-      BUNDLE_ID_RE,
-      "Package name must be reverse-domain format, e.g. com.company.appname",
-    )
+    .regex(BUNDLE_ID_RE, "Package name must be reverse-domain format, e.g. com.company.appname")
     .optional(),
   version: z.string().min(1, "Version is required").optional(),
   splashBackgroundColor: z
@@ -86,9 +80,11 @@ async function writeFiles(
       ),
     ),
   );
-  await db.insert(projectFilesTable).values(
-    files.map((f) => ({ projectId, path: f.path, content: f.content, mimeType: f.mimeType })),
-  );
+  await db
+    .insert(projectFilesTable)
+    .values(
+      files.map((f) => ({ projectId, path: f.path, content: f.content, mimeType: f.mimeType })),
+    );
 }
 
 /** Read and parse app.json for a project; returns null if absent or invalid. */
@@ -98,12 +94,7 @@ async function readAppJson(
   const [fileRow] = await db
     .select()
     .from(projectFilesTable)
-    .where(
-      and(
-        eq(projectFilesTable.projectId, projectId),
-        eq(projectFilesTable.path, "app.json"),
-      ),
-    );
+    .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, "app.json")));
   if (!fileRow) return null;
   try {
     const appJson = JSON.parse(fileRow.content) as Record<string, unknown>;
@@ -120,12 +111,8 @@ function expoToSettings(expo: Record<string, unknown>, projectId: number) {
   const iconUrl = `/api/projects/${projectId}/preview/${iconPath.replace(/^\.\//, "")}`;
   return {
     appName: String(expo.name ?? ""),
-    bundleId: String(
-      ((expo.ios ?? {}) as Record<string, unknown>).bundleIdentifier ?? "",
-    ),
-    packageName: String(
-      ((expo.android ?? {}) as Record<string, unknown>).package ?? "",
-    ),
+    bundleId: String(((expo.ios ?? {}) as Record<string, unknown>).bundleIdentifier ?? ""),
+    packageName: String(((expo.android ?? {}) as Record<string, unknown>).package ?? ""),
     version: String(expo.version ?? ""),
     splashBackgroundColor: String(
       ((expo.splash ?? {}) as Record<string, unknown>).backgroundColor ?? "#ffffff",
@@ -150,12 +137,7 @@ router.get(
     const [project] = await db
       .select({ id: projectsTable.id, kind: projectsTable.kind })
       .from(projectsTable)
-      .where(
-        and(
-          eq(projectsTable.id, projectId),
-          sql`${projectsTable.deletedAt} IS NULL`,
-        ),
-      );
+      .where(and(eq(projectsTable.id, projectId), sql`${projectsTable.deletedAt} IS NULL`));
 
     if (!project) {
       res.status(404).json({ error: "Project not found" });
@@ -212,12 +194,7 @@ router.post(
         ownerId: projectsTable.ownerId,
       })
       .from(projectsTable)
-      .where(
-        and(
-          eq(projectsTable.id, projectId),
-          sql`${projectsTable.deletedAt} IS NULL`,
-        ),
-      );
+      .where(and(eq(projectsTable.id, projectId), sql`${projectsTable.deletedAt} IS NULL`));
 
     if (!project) {
       res.status(404).json({ error: "Project not found" });
@@ -268,7 +245,7 @@ router.post(
       const appJsonResult = await readAppJson(projectId);
       const expo: Record<string, unknown> = appJsonResult?.expo ?? {};
       const appJson: Record<string, unknown> = appJsonResult
-        ? JSON.parse(appJsonResult.row.content) as Record<string, unknown>
+        ? (JSON.parse(appJsonResult.row.content) as Record<string, unknown>)
         : { expo: {} };
 
       if (appName !== undefined) {
@@ -318,10 +295,7 @@ router.post(
         expo.icon = "./assets/icon.png";
         // Also set as adaptive icon for completeness
         const androidAdaptiveIcon = (expo.android ?? {}) as Record<string, unknown>;
-        const adaptiveIcon = (androidAdaptiveIcon.adaptiveIcon ?? {}) as Record<
-          string,
-          unknown
-        >;
+        const adaptiveIcon = (androidAdaptiveIcon.adaptiveIcon ?? {}) as Record<string, unknown>;
         adaptiveIcon.foregroundImage = "./assets/icon.png";
         adaptiveIcon.backgroundColor = splashBackgroundColor ?? "#ffffff";
         androidAdaptiveIcon.adaptiveIcon = adaptiveIcon;

@@ -62,11 +62,7 @@ export interface TriggerSubmitInput {
   appOwner: string;
 }
 
-async function easFetch<T>(
-  path: string,
-  accessToken: string,
-  options?: RequestInit,
-): Promise<T> {
+async function easFetch<T>(path: string, accessToken: string, options?: RequestInit): Promise<T> {
   const url = `${EAS_API_BASE}${path}`;
   const res = await fetch(url, {
     ...options,
@@ -101,11 +97,10 @@ export async function triggerEasBuild(input: TriggerBuildInput): Promise<EasBuil
     autoSubmit: false,
   };
 
-  const result = await easFetch<{ data: EasBuild }>(
-    "/builds",
-    accessToken,
-    { method: "POST", body: JSON.stringify(body) },
-  );
+  const result = await easFetch<{ data: EasBuild }>("/builds", accessToken, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 
   return result.data;
 }
@@ -113,14 +108,8 @@ export async function triggerEasBuild(input: TriggerBuildInput): Promise<EasBuil
 /**
  * Poll the status of an EAS build.
  */
-export async function getEasBuildStatus(
-  accessToken: string,
-  buildId: string,
-): Promise<EasBuild> {
-  const result = await easFetch<{ data: EasBuild }>(
-    `/builds/${buildId}`,
-    accessToken,
-  );
+export async function getEasBuildStatus(accessToken: string, buildId: string): Promise<EasBuild> {
+  const result = await easFetch<{ data: EasBuild }>(`/builds/${buildId}`, accessToken);
   return result.data;
 }
 
@@ -138,11 +127,10 @@ export async function triggerEasSubmit(input: TriggerSubmitInput): Promise<EasSu
     submissionProfile: "production",
   };
 
-  const result = await easFetch<{ data: EasSubmission }>(
-    "/submissions",
-    accessToken,
-    { method: "POST", body: JSON.stringify(body) },
-  );
+  const result = await easFetch<{ data: EasSubmission }>("/submissions", accessToken, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 
   return result.data;
 }
@@ -151,10 +139,7 @@ export async function triggerEasSubmit(input: TriggerSubmitInput): Promise<EasSu
  * Fetch build log chunks for a build.
  * Returns raw log text (may be empty if not yet available).
  */
-export async function getEasBuildLogs(
-  accessToken: string,
-  buildId: string,
-): Promise<string> {
+export async function getEasBuildLogs(accessToken: string, buildId: string): Promise<string> {
   try {
     const result = await easFetch<{ data?: { logs?: string } }>(
       `/builds/${buildId}/logs`,

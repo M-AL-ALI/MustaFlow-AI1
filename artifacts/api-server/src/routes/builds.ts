@@ -9,12 +9,7 @@
 
 import { Router, type IRouter } from "express";
 import { eq, and, inArray, desc } from "drizzle-orm";
-import {
-  db,
-  projectsTable,
-  deploymentLogsTable,
-  secretsTable,
-} from "@workspace/db";
+import { db, projectsTable, deploymentLogsTable, secretsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService } from "../lib/encryption";
 import { getOrCreateCredits, deductCredits } from "./credits";
@@ -25,10 +20,7 @@ import { enqueueEasJob, EAS_BUILD_CREDIT_COST, extractAppJsonSummary } from "../
 const router: IRouter = Router();
 
 // ── Helper: read a secret value for a project (decrypted) ────────────────────
-async function getProjectSecret(
-  projectId: number,
-  name: string,
-): Promise<string | null> {
+async function getProjectSecret(projectId: number, name: string): Promise<string | null> {
   const [row] = await db
     .select()
     .from(secretsTable)
@@ -42,154 +34,142 @@ async function getProjectSecret(
 }
 
 // ── POST /api/projects/:id/builds ─────────────────────────────────────────────
-router.post(
-  "/projects/:id/builds",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    const { platform } = req.body as { platform?: string };
+router.post("/projects/:id/builds", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  const { platform } = req.body as { platform?: string };
 
-    if (platform !== "ios" && platform !== "android") {
-      res.status(400).json({ error: "platform must be 'ios' or 'android'" });
-      return;
-    }
+  if (platform !== "ios" && platform !== "android") {
+    res.status(400).json({ error: "platform must be 'ios' or 'android'" });
+    return;
+  }
 
-    // Load project
-    const [project] = await db
-      .select()
-      .from(projectsTable)
-      .where(eq(projectsTable.id, projectId));
-    if (!project) {
-      res.status(404).json({ error: "Project not found" });
-      return;
-    }
+  // Load project
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
 
-    // Check project is mobile
-    const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind);
-    if (!isMobile) {
-      res.status(400).json({ error: "EAS builds are only available for mobile projects." });
-      return;
-    }
+  // Check project is mobile
+  const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind);
+  if (!isMobile) {
+    res.status(400).json({ error: "EAS builds are only available for mobile projects." });
+    return;
+  }
 
-    const userId = req.userId ?? "unknown";
+  const userId = req.userId ?? "unknown";
 
-    // Read EAS credentials before touching credits
-    const accessToken = await getProjectSecret(projectId, "EAS_ACCESS_TOKEN");
-    if (!accessToken) {
-      res.status(422).json({
-        error:
-          "EAS_ACCESS_TOKEN is not configured. Add it to the project Secrets tab to enable EAS builds.",
+  // Read EAS credentials before touching credits
+  const accessToken = await getProjectSecret(projectId, "EAS_ACCESS_TOKEN");
+  if (!accessToken) {
+    res.status(422).json({
+      error:
+        "EAS_ACCESS_TOKEN is not configured. Add it to the project Secrets tab to enable EAS builds.",
+    });
+    return;
+  }
+
+  // Credit pre-flight check
+  if (project.ownerId) {
+    const credits = await getOrCreateCredits(project.ownerId);
+    if (credits.balance < EAS_BUILD_CREDIT_COST) {
+      res.status(402).json({
+        error: `Insufficient credits. An EAS build costs ${EAS_BUILD_CREDIT_COST} credits but your balance is ${credits.balance}. Top up in Billing to continue.`,
       });
       return;
     }
+  }
 
-    // Credit pre-flight check
-    if (project.ownerId) {
-      const credits = await getOrCreateCredits(project.ownerId);
-      if (credits.balance < EAS_BUILD_CREDIT_COST) {
-        res.status(402).json({
-          error: `Insufficient credits. An EAS build costs ${EAS_BUILD_CREDIT_COST} credits but your balance is ${credits.balance}. Top up in Billing to continue.`,
-        });
-        return;
-      }
-    }
+  // Derive app slug / owner from project secrets or project metadata
+  const appSlug =
+    (await getProjectSecret(projectId, "EXPO_APP_SLUG")) ??
+    project.name
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-")
+      .replace(/^-+|-+$/g, "");
+  const appOwner = (await getProjectSecret(projectId, "EXPO_ACCOUNT_NAME")) ?? userId;
 
-    // Derive app slug / owner from project secrets or project metadata
-    const appSlug =
-      (await getProjectSecret(projectId, "EXPO_APP_SLUG")) ??
-      project.name
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, "-")
-        .replace(/^-+|-+$/g, "");
-    const appOwner =
-      (await getProjectSecret(projectId, "EXPO_ACCOUNT_NAME")) ?? userId;
+  // Extract app.json summary from project files (for logging / knowledge vault context)
+  const appJsonSummary = await extractAppJsonSummary(projectId);
 
-    // Extract app.json summary from project files (for logging / knowledge vault context)
-    const appJsonSummary = await extractAppJsonSummary(projectId);
-
-    // Deduct credits immediately (at queue time, not post-success)
-    if (project.ownerId) {
-      try {
-        await deductCredits(userId, EAS_BUILD_CREDIT_COST, {
-          type: "build",
-          description: `EAS ${platform} build queued — project ${projectId}`,
-          projectId,
-        });
-      } catch (creditErr) {
-        logger.warn({ creditErr }, "Credit deduction failed at queue time");
-        res.status(402).json({ error: "Credit deduction failed. Check your balance." });
-        return;
-      }
-    }
-
-    // Create deployment log entry
-    const [deployLog] = await db
-      .insert(deploymentLogsTable)
-      .values({
+  // Deduct credits immediately (at queue time, not post-success)
+  if (project.ownerId) {
+    try {
+      await deductCredits(userId, EAS_BUILD_CREDIT_COST, {
+        type: "build",
+        description: `EAS ${platform} build queued — project ${projectId}`,
         projectId,
-        userId,
-        env: platform,
-        status: "queued",
-        platform,
-        note: `EAS ${platform} build queued`,
-      })
-      .returning();
-
-    if (!deployLog) {
-      res.status(500).json({ error: "Failed to create build record" });
+      });
+    } catch (creditErr) {
+      logger.warn({ creditErr }, "Credit deduction failed at queue time");
+      res.status(402).json({ error: "Credit deduction failed. Check your balance." });
       return;
     }
+  }
 
-    // Enqueue the EAS job (background — does not block HTTP response)
-    enqueueEasJob({
-      deploymentLogId: deployLog.id,
+  // Create deployment log entry
+  const [deployLog] = await db
+    .insert(deploymentLogsTable)
+    .values({
       projectId,
       userId,
-      platform: platform as "ios" | "android",
-      accessToken,
-      appSlug,
-      appOwner,
-      appJsonSummary,
-    });
-
-    logger.info({ projectId, platform, deploymentLogId: deployLog.id }, "EAS build job enqueued");
-
-    res.status(202).json({
-      ok: true,
-      buildLogId: deployLog.id,
-      platform,
+      env: platform,
       status: "queued",
-      note: `EAS ${platform} build queued. Poll GET /api/projects/${projectId}/builds/${deployLog.id} for status.`,
-    });
-  },
-);
+      platform,
+      note: `EAS ${platform} build queued`,
+    })
+    .returning();
+
+  if (!deployLog) {
+    res.status(500).json({ error: "Failed to create build record" });
+    return;
+  }
+
+  // Enqueue the EAS job (background — does not block HTTP response)
+  enqueueEasJob({
+    deploymentLogId: deployLog.id,
+    projectId,
+    userId,
+    platform: platform as "ios" | "android",
+    accessToken,
+    appSlug,
+    appOwner,
+    appJsonSummary,
+  });
+
+  logger.info({ projectId, platform, deploymentLogId: deployLog.id }, "EAS build job enqueued");
+
+  res.status(202).json({
+    ok: true,
+    buildLogId: deployLog.id,
+    platform,
+    status: "queued",
+    note: `EAS ${platform} build queued. Poll GET /api/projects/${projectId}/builds/${deployLog.id} for status.`,
+  });
+});
 
 // ── GET /api/projects/:id/builds ──────────────────────────────────────────────
-router.get(
-  "/projects/:id/builds",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    if (!Number.isFinite(projectId)) {
-      res.status(400).json({ error: "Invalid project id" });
-      return;
-    }
+router.get("/projects/:id/builds", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  if (!Number.isFinite(projectId)) {
+    res.status(400).json({ error: "Invalid project id" });
+    return;
+  }
 
-    const rows = await db
-      .select()
-      .from(deploymentLogsTable)
-      .where(
-        and(
-          eq(deploymentLogsTable.projectId, projectId),
-          inArray(deploymentLogsTable.env, ["ios", "android"]),
-        ),
-      )
-      .orderBy(desc(deploymentLogsTable.createdAt))
-      .limit(50);
+  const rows = await db
+    .select()
+    .from(deploymentLogsTable)
+    .where(
+      and(
+        eq(deploymentLogsTable.projectId, projectId),
+        inArray(deploymentLogsTable.env, ["ios", "android"]),
+      ),
+    )
+    .orderBy(desc(deploymentLogsTable.createdAt))
+    .limit(50);
 
-    res.json({ builds: rows });
-  },
-);
+  res.json({ builds: rows });
+});
 
 // ── GET /api/projects/:id/builds/:buildLogId ──────────────────────────────────
 router.get(
@@ -208,10 +188,7 @@ router.get(
       .select()
       .from(deploymentLogsTable)
       .where(
-        and(
-          eq(deploymentLogsTable.id, buildLogId),
-          eq(deploymentLogsTable.projectId, projectId),
-        ),
+        and(eq(deploymentLogsTable.id, buildLogId), eq(deploymentLogsTable.projectId, projectId)),
       );
 
     if (!row) {
@@ -240,10 +217,7 @@ router.get(
       .select()
       .from(deploymentLogsTable)
       .where(
-        and(
-          eq(deploymentLogsTable.id, buildLogId),
-          eq(deploymentLogsTable.projectId, projectId),
-        ),
+        and(eq(deploymentLogsTable.id, buildLogId), eq(deploymentLogsTable.projectId, projectId)),
       );
 
     if (!row || !row.buildId) {

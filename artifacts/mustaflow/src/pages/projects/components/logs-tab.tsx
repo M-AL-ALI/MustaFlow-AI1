@@ -52,17 +52,45 @@ type MobileBuildRow = {
 
 function StatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { label: string; className: string; spin?: boolean }> = {
-    completed: { label: "Completed", className: "bg-green-500/10 text-green-400 border-green-500/20" },
-    failed: { label: "Failed", className: "bg-destructive/10 text-destructive border-destructive/20" },
-    building: { label: "Building", className: "bg-primary/10 text-primary border-primary/20", spin: true },
-    planning: { label: "Planning", className: "bg-violet-500/10 text-violet-400 border-violet-500/20", spin: true },
-    testing: { label: "Testing", className: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20", spin: true },
+    completed: {
+      label: "Completed",
+      className: "bg-green-500/10 text-green-400 border-green-500/20",
+    },
+    failed: {
+      label: "Failed",
+      className: "bg-destructive/10 text-destructive border-destructive/20",
+    },
+    building: {
+      label: "Building",
+      className: "bg-primary/10 text-primary border-primary/20",
+      spin: true,
+    },
+    planning: {
+      label: "Planning",
+      className: "bg-violet-500/10 text-violet-400 border-violet-500/20",
+      spin: true,
+    },
+    testing: {
+      label: "Testing",
+      className: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
+      spin: true,
+    },
     queued: { label: "Queued", className: "bg-muted text-muted-foreground border-border" },
   };
-  const c = cfg[status] ?? { label: status, className: "bg-muted text-muted-foreground border-border" };
+  const c = cfg[status] ?? {
+    label: status,
+    className: "bg-muted text-muted-foreground border-border",
+  };
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium shrink-0", c.className)}>
-      {c.spin && <span className="w-2 h-2 rounded-full border border-current border-t-transparent animate-spin" />}
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium shrink-0",
+        c.className,
+      )}
+    >
+      {c.spin && (
+        <span className="w-2 h-2 rounded-full border border-current border-t-transparent animate-spin" />
+      )}
       {c.label}
     </span>
   );
@@ -71,16 +99,40 @@ function StatusBadge({ status }: { status: string }) {
 function MobileBuildStatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { label: string; className: string; spin?: boolean }> = {
     queued: { label: "Queued", className: "bg-muted text-muted-foreground border-border" },
-    building: { label: "Building", className: "bg-primary/10 text-primary border-primary/20", spin: true },
-    submitting: { label: "Submitting", className: "bg-violet-500/10 text-violet-400 border-violet-500/20", spin: true },
-    submitted: { label: "Submitted", className: "bg-green-500/10 text-green-400 border-green-500/20" },
+    building: {
+      label: "Building",
+      className: "bg-primary/10 text-primary border-primary/20",
+      spin: true,
+    },
+    submitting: {
+      label: "Submitting",
+      className: "bg-violet-500/10 text-violet-400 border-violet-500/20",
+      spin: true,
+    },
+    submitted: {
+      label: "Submitted",
+      className: "bg-green-500/10 text-green-400 border-green-500/20",
+    },
     passed: { label: "Passed", className: "bg-green-500/10 text-green-400 border-green-500/20" },
-    failed: { label: "Failed", className: "bg-destructive/10 text-destructive border-destructive/20" },
+    failed: {
+      label: "Failed",
+      className: "bg-destructive/10 text-destructive border-destructive/20",
+    },
   };
-  const c = cfg[status] ?? { label: status, className: "bg-muted text-muted-foreground border-border" };
+  const c = cfg[status] ?? {
+    label: status,
+    className: "bg-muted text-muted-foreground border-border",
+  };
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium shrink-0", c.className)}>
-      {c.spin && <span className="w-1.5 h-1.5 rounded-full border border-current border-t-transparent animate-spin" />}
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium shrink-0",
+        c.className,
+      )}
+    >
+      {c.spin && (
+        <span className="w-1.5 h-1.5 rounded-full border border-current border-t-transparent animate-spin" />
+      )}
       {c.label}
     </span>
   );
@@ -181,8 +233,8 @@ function TaskRow({
         task.status === "failed"
           ? "border-destructive/30 bg-destructive/5"
           : task.status === "completed"
-          ? "border-border bg-card"
-          : "border-border bg-card/50",
+            ? "border-border bg-card"
+            : "border-border bg-card/50",
       )}
     >
       <button
@@ -281,10 +333,14 @@ function TaskRow({
                 <FileCode2 className="h-3 w-3" /> Files changed
               </div>
               {filesCreated.slice(0, 6).map((p) => (
-                <div key={`c-${p}`} className="font-mono text-[10px] text-green-400 truncate">+ {p}</div>
+                <div key={`c-${p}`} className="font-mono text-[10px] text-green-400 truncate">
+                  + {p}
+                </div>
               ))}
               {filesChanged.slice(0, 6).map((p) => (
-                <div key={`m-${p}`} className="font-mono text-[10px] text-yellow-400 truncate">~ {p}</div>
+                <div key={`m-${p}`} className="font-mono text-[10px] text-yellow-400 truncate">
+                  ~ {p}
+                </div>
               ))}
             </div>
           )}
@@ -297,33 +353,39 @@ function TaskRow({
               </div>
               <div className="space-y-1">
                 {report.nativeFeatures.map((feature, i) => (
-                  <div key={i} className="flex items-center gap-2 bg-blue-500/8 border border-blue-500/20 rounded-lg px-2.5 py-1.5">
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 bg-blue-500/8 border border-blue-500/20 rounded-lg px-2.5 py-1.5"
+                  >
                     <Smartphone className="h-3 w-3 text-blue-400 shrink-0" />
                     <span className="text-[11px] text-blue-300/90 flex-1">{feature}</span>
                     <span className="text-[10px] text-blue-400/50 shrink-0">Device only</span>
                   </div>
                 ))}
                 <p className="text-[10px] text-muted-foreground px-0.5">
-                  These permissions are added to app.json and require a real device to test — they will not work in the web preview.
+                  These permissions are added to app.json and require a real device to test — they
+                  will not work in the web preview.
                 </p>
               </div>
             </div>
           )}
-          {task.status === "completed" && report?.knowledgeApplied && report.knowledgeApplied.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                <BookOpen className="h-3 w-3 text-primary" /> Lessons applied
-              </div>
-              {report.knowledgeApplied.map((k, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <span className="text-[9px] font-medium text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0">
-                    {k.category}
-                  </span>
-                  <span className="text-[11px] text-foreground truncate">{k.title}</span>
+          {task.status === "completed" &&
+            report?.knowledgeApplied &&
+            report.knowledgeApplied.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <BookOpen className="h-3 w-3 text-primary" /> Lessons applied
                 </div>
-              ))}
-            </div>
-          )}
+                {report.knowledgeApplied.map((k, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-medium text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0">
+                      {k.category}
+                    </span>
+                    <span className="text-[11px] text-foreground truncate">{k.title}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
           {task.status === "completed" && report?.nextRecommendation && (
             <div className="text-[11px] text-muted-foreground italic border-t border-border pt-2">
@@ -372,7 +434,9 @@ function MobileBuildRow({
         const data = (await res.json()) as { logs?: string };
         setLogs(data.logs ?? "");
       }
-    } catch { /* ignore */ } finally {
+    } catch {
+      /* ignore */
+    } finally {
       setLogsLoading(false);
     }
   }, [expanded, build.buildId, build.id, projectId]);
@@ -398,8 +462,8 @@ function MobileBuildRow({
         build.status === "failed"
           ? "border-destructive/30 bg-destructive/5"
           : build.status === "submitted" || build.status === "passed"
-          ? "border-green-500/20 bg-card"
-          : "border-border bg-card/50",
+            ? "border-green-500/20 bg-card"
+            : "border-border bg-card/50",
       )}
     >
       <button
@@ -407,7 +471,12 @@ function MobileBuildRow({
         onClick={() => setExpanded((v) => !v)}
       >
         <div className="mt-0.5 shrink-0">
-          <PlatformIcon className={cn("h-4 w-4", build.platform === "android" ? "text-green-500" : "text-primary")} />
+          <PlatformIcon
+            className={cn(
+              "h-4 w-4",
+              build.platform === "android" ? "text-green-500" : "text-primary",
+            )}
+          />
         </div>
 
         <div className="flex-1 min-w-0">
@@ -521,7 +590,9 @@ function MobileBuildRow({
                 ) : logs ? (
                   logs
                 ) : isActive ? (
-                  <span className="text-muted-foreground">Build in progress — logs will appear here…</span>
+                  <span className="text-muted-foreground">
+                    Build in progress — logs will appear here…
+                  </span>
                 ) : (
                   <span className="text-muted-foreground">No logs available.</span>
                 )}
@@ -547,7 +618,11 @@ export function LogsTab({
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
   const { data: tasks, isLoading } = useListTasks(projectId, {
-    query: { enabled: !!projectId, queryKey: getListTasksQueryKey(projectId), refetchInterval: 5000 },
+    query: {
+      enabled: !!projectId,
+      queryKey: getListTasksQueryKey(projectId),
+      refetchInterval: 5000,
+    },
   });
 
   const [mobileBuilds, setMobileBuilds] = useState<MobileBuildRow[]>([]);
@@ -560,7 +635,9 @@ export function LogsTab({
         const data = (await res.json()) as { builds: MobileBuildRow[] };
         setMobileBuilds(data.builds ?? []);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [projectId, isMobile]);
 
   // Initial fetch

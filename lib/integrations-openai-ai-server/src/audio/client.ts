@@ -70,12 +70,17 @@ export async function convertToWav(audioBuffer: Buffer): Promise<Buffer> {
 
     await new Promise<void>((resolve, reject) => {
       const ffmpeg = spawn("ffmpeg", [
-        "-i", inputPath,
+        "-i",
+        inputPath,
         "-vn",
-        "-f", "wav",
-        "-ar", "16000",
-        "-ac", "1",
-        "-acodec", "pcm_s16le",
+        "-f",
+        "wav",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-acodec",
+        "pcm_s16le",
         "-y",
         outputPath,
       ]);
@@ -99,7 +104,7 @@ export async function convertToWav(audioBuffer: Buffer): Promise<Buffer> {
  * Auto-detect and convert audio to OpenAI-compatible format.
  */
 export async function ensureCompatibleFormat(
-  audioBuffer: Buffer
+  audioBuffer: Buffer,
 ): Promise<{ buffer: Buffer; format: "wav" | "mp3" }> {
   const detected = detectAudioFormat(audioBuffer);
   if (detected === "wav") return { buffer: audioBuffer, format: "wav" };
@@ -113,19 +118,19 @@ export async function voiceChat(
   audioBuffer: Buffer,
   voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "alloy",
   inputFormat: "wav" | "mp3" = "wav",
-  outputFormat: "wav" | "mp3" = "mp3"
+  outputFormat: "wav" | "mp3" = "mp3",
 ): Promise<{ transcript: string; audioResponse: Buffer }> {
   const audioBase64 = audioBuffer.toString("base64");
   const response = await openai.chat.completions.create({
     model: "gpt-audio",
     modalities: ["text", "audio"],
     audio: { voice, format: outputFormat },
-    messages: [{
-      role: "user",
-      content: [
-        { type: "input_audio", input_audio: { data: audioBase64, format: inputFormat } },
-      ],
-    }],
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "input_audio", input_audio: { data: audioBase64, format: inputFormat } }],
+      },
+    ],
   });
   const message = response.choices[0]?.message as any;
   const transcript = message?.audio?.transcript || message?.content || "";
@@ -140,19 +145,19 @@ export async function voiceChat(
 export async function voiceChatStream(
   audioBuffer: Buffer,
   voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "alloy",
-  inputFormat: "wav" | "mp3" = "wav"
+  inputFormat: "wav" | "mp3" = "wav",
 ): Promise<AsyncIterable<{ type: "transcript" | "audio"; data: string }>> {
   const audioBase64 = audioBuffer.toString("base64");
   const stream = await openai.chat.completions.create({
     model: "gpt-audio",
     modalities: ["text", "audio"],
     audio: { voice, format: "pcm16" },
-    messages: [{
-      role: "user",
-      content: [
-        { type: "input_audio", input_audio: { data: audioBase64, format: inputFormat } },
-      ],
-    }],
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "input_audio", input_audio: { data: audioBase64, format: inputFormat } }],
+      },
+    ],
     stream: true,
   });
 
@@ -174,7 +179,7 @@ export async function voiceChatStream(
 export async function textToSpeech(
   text: string,
   voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "alloy",
-  format: "wav" | "mp3" | "flac" | "opus" | "pcm16" = "wav"
+  format: "wav" | "mp3" | "flac" | "opus" | "pcm16" = "wav",
 ): Promise<Buffer> {
   const response = await openai.chat.completions.create({
     model: "gpt-audio",
@@ -192,7 +197,7 @@ export async function textToSpeech(
 /** Streaming Text-to-Speech. */
 export async function textToSpeechStream(
   text: string,
-  voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "alloy"
+  voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "alloy",
 ): Promise<AsyncIterable<string>> {
   const stream = await openai.chat.completions.create({
     model: "gpt-audio",
@@ -219,7 +224,7 @@ export async function textToSpeechStream(
 /** Speech-to-Text using gpt-4o-mini-transcribe. */
 export async function speechToText(
   audioBuffer: Buffer,
-  format: "wav" | "mp3" | "webm" = "wav"
+  format: "wav" | "mp3" | "webm" = "wav",
 ): Promise<string> {
   const file = await toFile(audioBuffer, `audio.${format}`);
   const response = await openai.audio.transcriptions.create({
@@ -232,7 +237,7 @@ export async function speechToText(
 /** Streaming Speech-to-Text. */
 export async function speechToTextStream(
   audioBuffer: Buffer,
-  format: "wav" | "mp3" | "webm" = "wav"
+  format: "wav" | "mp3" | "webm" = "wav",
 ): Promise<AsyncIterable<string>> {
   const file = await toFile(audioBuffer, `audio.${format}`);
   const stream = await openai.audio.transcriptions.create({

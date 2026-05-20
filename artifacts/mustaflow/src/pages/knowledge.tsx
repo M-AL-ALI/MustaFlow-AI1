@@ -35,16 +35,24 @@ import {
 
 function getTypeIcon(type: string) {
   switch (type) {
-    case "build": return Hammer;
-    case "refine": return RefreshCw;
-    case "rollback": return RotateCcw;
+    case "build":
+      return Hammer;
+    case "refine":
+      return RefreshCw;
+    case "rollback":
+      return RotateCcw;
     case "publish":
-    case "publish_failed": return Globe;
-    case "secret_change": return KeyRound;
-    case "manual_edit": return FilePen;
+    case "publish_failed":
+      return Globe;
+    case "secret_change":
+      return KeyRound;
+    case "manual_edit":
+      return FilePen;
     case "secret_warning":
-    case "integration_needed": return FileWarning;
-    default: return NotebookPen;
+    case "integration_needed":
+      return FileWarning;
+    default:
+      return NotebookPen;
   }
 }
 
@@ -52,14 +60,22 @@ function getTypeColor(type: string, severity: string) {
   if (severity === "error") return "text-destructive border-destructive/40 bg-destructive/10";
   if (severity === "warning") return "text-yellow-400 border-yellow-500/30 bg-yellow-500/10";
   switch (type) {
-    case "build": return "text-primary border-primary/40 bg-primary/10";
-    case "refine": return "text-blue-400 border-blue-500/40 bg-blue-500/10";
-    case "rollback": return "text-orange-400 border-orange-500/40 bg-orange-500/10";
-    case "publish": return "text-green-400 border-green-500/40 bg-green-500/10";
-    case "publish_failed": return "text-destructive border-destructive/40 bg-destructive/10";
-    case "secret_change": return "text-purple-400 border-purple-500/40 bg-purple-500/10";
-    case "manual_edit": return "text-cyan-400 border-cyan-500/40 bg-cyan-500/10";
-    default: return "text-muted-foreground border-border bg-muted/40";
+    case "build":
+      return "text-primary border-primary/40 bg-primary/10";
+    case "refine":
+      return "text-blue-400 border-blue-500/40 bg-blue-500/10";
+    case "rollback":
+      return "text-orange-400 border-orange-500/40 bg-orange-500/10";
+    case "publish":
+      return "text-green-400 border-green-500/40 bg-green-500/10";
+    case "publish_failed":
+      return "text-destructive border-destructive/40 bg-destructive/10";
+    case "secret_change":
+      return "text-purple-400 border-purple-500/40 bg-purple-500/10";
+    case "manual_edit":
+      return "text-cyan-400 border-cyan-500/40 bg-cyan-500/10";
+    default:
+      return "text-muted-foreground border-border bg-muted/40";
   }
 }
 
@@ -141,10 +157,12 @@ function PillButton({
     >
       {children}
       {count !== undefined && (
-        <span className={cn(
-          "text-[10px] px-1.5 py-0.5 rounded-full font-medium leading-none",
-          active ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground",
-        )}>
+        <span
+          className={cn(
+            "text-[10px] px-1.5 py-0.5 rounded-full font-medium leading-none",
+            active ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground",
+          )}
+        >
           {count}
         </span>
       )}
@@ -162,13 +180,28 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
 
   const TypeIcon = getTypeIcon(entry.type);
   const typeColor = getTypeColor(entry.type, entry.severity);
-  const SeverityIcon = entry.severity === "error" ? AlertTriangle : entry.severity === "warning" ? AlertTriangle : Info;
-  const severityColor = entry.severity === "error" ? "text-destructive" : entry.severity === "warning" ? "text-yellow-400" : "text-muted-foreground/60";
+  const SeverityIcon =
+    entry.severity === "error"
+      ? AlertTriangle
+      : entry.severity === "warning"
+        ? AlertTriangle
+        : Info;
+  const severityColor =
+    entry.severity === "error"
+      ? "text-destructive"
+      : entry.severity === "warning"
+        ? "text-yellow-400"
+        : "text-muted-foreground/60";
 
   const saveAnnotation = () => {
     updateKnowledge.mutate(
       { id: entry.id, data: { annotation: annotationDraft || null } },
-      { onSuccess: () => { setShowAnnotationInput(false); onUpdate(); } },
+      {
+        onSuccess: () => {
+          setShowAnnotationInput(false);
+          onUpdate();
+        },
+      },
     );
   };
 
@@ -197,19 +230,27 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
     linesRemoved?: number;
   } | null;
 
-  const hasDiff = diffSummary && (
+  const hasDiff =
+    diffSummary &&
     (diffSummary.filesAdded?.length ?? 0) +
-    (diffSummary.filesModified?.length ?? 0) +
-    (diffSummary.filesRemoved?.length ?? 0) > 0
-  );
+      (diffSummary.filesModified?.length ?? 0) +
+      (diffSummary.filesRemoved?.length ?? 0) >
+      0;
 
   return (
-    <div className={cn(
-      "border border-border rounded-lg p-4 bg-card space-y-2 transition-opacity",
-      entry.archivedAt ? "opacity-50" : "",
-    )}>
+    <div
+      className={cn(
+        "border border-border rounded-lg p-4 bg-card space-y-2 transition-opacity",
+        entry.archivedAt ? "opacity-50" : "",
+      )}
+    >
       <div className="flex items-start gap-3">
-        <div className={cn("w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 mt-0.5", typeColor)}>
+        <div
+          className={cn(
+            "w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 mt-0.5",
+            typeColor,
+          )}
+        >
           <TypeIcon className="h-4 w-4" />
         </div>
         <div className="flex-1 min-w-0">
@@ -217,7 +258,9 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
             <div className="flex-1 min-w-0">
               <h3 className="text-sm font-medium text-foreground leading-snug">{entry.title}</h3>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
-                <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium border", typeColor)}>
+                <span
+                  className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium border", typeColor)}
+                >
                   {getTypeLabel(entry.type)}
                 </span>
                 {entry.approvedForReuse && (
@@ -232,7 +275,9 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
                 <span className="text-[10px] text-muted-foreground/50 ml-auto flex items-center gap-1 shrink-0">
                   <Clock className="h-2.5 w-2.5" />
                   {new Date(entry.createdAt).toLocaleDateString(undefined, {
-                    month: "short", day: "numeric", year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
                   })}
                 </span>
               </div>
@@ -243,18 +288,31 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
                 onClick={() => setExpanded((v) => !v)}
                 className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground"
               >
-                {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                {expanded ? (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5" />
+                )}
               </button>
               <button
-                onClick={() => { setShowAnnotationInput((v) => !v); setShowContextMenu(false); }}
-                className={cn("w-6 h-6 flex items-center justify-center", entry.annotation ? "text-primary" : "text-muted-foreground hover:text-foreground")}
+                onClick={() => {
+                  setShowAnnotationInput((v) => !v);
+                  setShowContextMenu(false);
+                }}
+                className={cn(
+                  "w-6 h-6 flex items-center justify-center",
+                  entry.annotation ? "text-primary" : "text-muted-foreground hover:text-foreground",
+                )}
                 title={entry.annotation ? "Edit note" : "Add note"}
               >
                 <MessageSquare className="h-3.5 w-3.5" />
               </button>
               <div className="relative">
                 <button
-                  onClick={() => { setShowContextMenu((v) => !v); setShowAnnotationInput(false); }}
+                  onClick={() => {
+                    setShowContextMenu((v) => !v);
+                    setShowAnnotationInput(false);
+                  }}
                   className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground"
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
@@ -263,7 +321,9 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
                   <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[170px]">
                     {!showConfirmPromote ? (
                       <button
-                        onClick={() => entry.approvedForReuse ? handlePromote() : setShowConfirmPromote(true)}
+                        onClick={() =>
+                          entry.approvedForReuse ? handlePromote() : setShowConfirmPromote(true)
+                        }
                         className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted transition-colors"
                       >
                         <Star className="h-3.5 w-3.5 text-yellow-400" />
@@ -275,8 +335,15 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
                           This lesson will be visible to the AI across all projects.
                         </p>
                         <div className="flex gap-1.5">
-                          <Button size="sm" className="h-6 text-xs px-2" onClick={handlePromote}>Confirm</Button>
-                          <button onClick={() => setShowConfirmPromote(false)} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+                          <Button size="sm" className="h-6 text-xs px-2" onClick={handlePromote}>
+                            Confirm
+                          </Button>
+                          <button
+                            onClick={() => setShowConfirmPromote(false)}
+                            className="text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            Cancel
+                          </button>
                         </div>
                       </div>
                     )}
@@ -318,8 +385,23 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
             autoFocus
           />
           <div className="flex gap-2">
-            <Button size="sm" className="h-6 text-xs px-2" onClick={saveAnnotation} disabled={updateKnowledge.isPending}>Save</Button>
-            <button onClick={() => { setShowAnnotationInput(false); setAnnotationDraft(entry.annotation ?? ""); }} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+            <Button
+              size="sm"
+              className="h-6 text-xs px-2"
+              onClick={saveAnnotation}
+              disabled={updateKnowledge.isPending}
+            >
+              Save
+            </Button>
+            <button
+              onClick={() => {
+                setShowAnnotationInput(false);
+                setAnnotationDraft(entry.annotation ?? "");
+              }}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
@@ -333,7 +415,9 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
           {hasDiff && (
             <div className="space-y-0.5">
               <div className="flex items-center gap-3 mb-1">
-                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">File changes</div>
+                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  File changes
+                </div>
                 {((diffSummary?.linesAdded ?? 0) > 0 || (diffSummary?.linesRemoved ?? 0) > 0) && (
                   <div className="flex gap-2 text-[10px]">
                     {(diffSummary?.linesAdded ?? 0) > 0 && (
@@ -346,18 +430,30 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
                 )}
               </div>
               {(diffSummary?.filesAdded ?? []).map((f) => (
-                <div key={`a-${f}`} className="font-mono text-xs text-green-400 flex items-center gap-1">
-                  <span className="shrink-0">+</span><span className="truncate">{f}</span>
+                <div
+                  key={`a-${f}`}
+                  className="font-mono text-xs text-green-400 flex items-center gap-1"
+                >
+                  <span className="shrink-0">+</span>
+                  <span className="truncate">{f}</span>
                 </div>
               ))}
               {(diffSummary?.filesModified ?? []).map((f) => (
-                <div key={`m-${f}`} className="font-mono text-xs text-yellow-400 flex items-center gap-1">
-                  <span className="shrink-0">~</span><span className="truncate">{f}</span>
+                <div
+                  key={`m-${f}`}
+                  className="font-mono text-xs text-yellow-400 flex items-center gap-1"
+                >
+                  <span className="shrink-0">~</span>
+                  <span className="truncate">{f}</span>
                 </div>
               ))}
               {(diffSummary?.filesRemoved ?? []).map((f) => (
-                <div key={`r-${f}`} className="font-mono text-xs text-red-400/70 flex items-center gap-1">
-                  <span className="shrink-0">-</span><span className="truncate">{f}</span>
+                <div
+                  key={`r-${f}`}
+                  className="font-mono text-xs text-red-400/70 flex items-center gap-1"
+                >
+                  <span className="shrink-0">-</span>
+                  <span className="truncate">{f}</span>
                 </div>
               ))}
             </div>
@@ -366,12 +462,19 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
           {entry.tags && (
             <div className="flex flex-wrap gap-1">
               {entry.tags.split(",").map((tag) => (
-                <span key={tag} className="text-xs px-2 py-0.5 rounded-full bg-muted border border-border/60 text-muted-foreground">{tag.trim()}</span>
+                <span
+                  key={tag}
+                  className="text-xs px-2 py-0.5 rounded-full bg-muted border border-border/60 text-muted-foreground"
+                >
+                  {tag.trim()}
+                </span>
               ))}
             </div>
           )}
           {entry.relatedVersionId && (
-            <div className="text-xs text-muted-foreground/60">Snapshot version #{entry.relatedVersionId}</div>
+            <div className="text-xs text-muted-foreground/60">
+              Snapshot version #{entry.relatedVersionId}
+            </div>
           )}
         </div>
       )}
@@ -396,10 +499,9 @@ export default function KnowledgePage() {
     archived: showArchived,
     limit: 200,
   };
-  const { data: allEntries = [], isLoading: isLoadingAll } = useListKnowledge(
-    allEntriesParams,
-    { query: { queryKey: getListKnowledgeQueryKey(allEntriesParams) } },
-  );
+  const { data: allEntries = [], isLoading: isLoadingAll } = useListKnowledge(allEntriesParams, {
+    query: { queryKey: getListKnowledgeQueryKey(allEntriesParams) },
+  });
 
   const projectParams = {
     projectId: selectedProjectId ?? undefined,
@@ -429,7 +531,10 @@ export default function KnowledgePage() {
   }, [allEntries, projectEntries, selectedProjectId, searchQuery]);
 
   // Counts per filter option (computed from base pool, independent of active filters)
-  const countApproved = useMemo(() => basePool.filter((e) => e.approvedForReuse).length, [basePool]);
+  const countApproved = useMemo(
+    () => basePool.filter((e) => e.approvedForReuse).length,
+    [basePool],
+  );
   const countBySeverity = useMemo(
     () => ({
       info: basePool.filter((e) => e.severity === "info").length,
@@ -537,12 +642,16 @@ export default function KnowledgePage() {
         <div className="flex items-center gap-3 flex-wrap">
           <select
             value={selectedProjectId ?? ""}
-            onChange={(e) => setSelectedProjectId(e.target.value ? parseInt(e.target.value, 10) : null)}
+            onChange={(e) =>
+              setSelectedProjectId(e.target.value ? parseInt(e.target.value, 10) : null)
+            }
             className="text-sm bg-card border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:border-primary/50 min-w-[200px]"
           >
             <option value="">All projects</option>
             {projects.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
             ))}
           </select>
           <div className="relative flex-1 min-w-[200px]">
@@ -554,7 +663,10 @@ export default function KnowledgePage() {
               className="w-full bg-card border border-border rounded-lg pl-9 pr-9 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50"
             />
             {searchQuery && (
-              <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
@@ -582,11 +694,7 @@ export default function KnowledgePage() {
             <div className="h-3 w-px bg-border shrink-0" />
 
             {/* Status */}
-            <PillButton
-              active={!hasActiveFilter}
-              onClick={resetFilters}
-              count={totalVisible}
-            >
+            <PillButton active={!hasActiveFilter} onClick={resetFilters} count={totalVisible}>
               All
             </PillButton>
             <PillButton
@@ -610,7 +718,9 @@ export default function KnowledgePage() {
 
           {/* Severity row */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-14 shrink-0">Severity</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-14 shrink-0">
+              Severity
+            </span>
             {SEVERITY_FILTER_OPTIONS.map((opt) => (
               <PillButton
                 key={opt.value}
@@ -628,7 +738,9 @@ export default function KnowledgePage() {
 
           {/* Type row */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-14 shrink-0">Type</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 w-14 shrink-0">
+              Type
+            </span>
             {CATEGORY_FILTER_OPTIONS.map((opt) => {
               const count = countByType[opt.value] ?? 0;
               if (count === 0 && typeFilter !== opt.value) return null;
@@ -649,7 +761,8 @@ export default function KnowledgePage() {
         {/* Active filter summary */}
         {hasActiveFilter && (
           <p className="text-xs text-muted-foreground/70">
-            Showing <span className="text-foreground font-medium">{totalVisible}</span> {totalVisible === 1 ? "entry" : "entries"} matching active filters
+            Showing <span className="text-foreground font-medium">{totalVisible}</span>{" "}
+            {totalVisible === 1 ? "entry" : "entries"} matching active filters
           </p>
         )}
       </div>
@@ -661,7 +774,9 @@ export default function KnowledgePage() {
             <Star className="h-4 w-4 text-yellow-400" />
             <h2 className="text-lg font-semibold">Global Lessons</h2>
             <span className="text-xs text-muted-foreground ml-1">({filteredGlobal.length})</span>
-            <p className="text-xs text-muted-foreground ml-2">— Approved for reuse across all projects</p>
+            <p className="text-xs text-muted-foreground ml-2">
+              — Approved for reuse across all projects
+            </p>
           </div>
           {isLoading ? (
             <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">
@@ -696,18 +811,22 @@ export default function KnowledgePage() {
                 </span>
               )}
             </h2>
-            <span className="text-xs text-muted-foreground ml-1">({filteredProjectHistory.length})</span>
+            <span className="text-xs text-muted-foreground ml-1">
+              ({filteredProjectHistory.length})
+            </span>
           </div>
 
           {isLoading ? (
-            <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">Loading…</div>
+            <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">
+              Loading…
+            </div>
           ) : filteredProjectHistory.length === 0 ? (
             <div className="border border-border rounded-lg p-6 text-center text-muted-foreground text-sm bg-muted/20">
               {hasActiveFilter
                 ? "No project history entries match the active filters."
                 : selectedProjectId !== null
-                ? "No history entries for this project yet."
-                : "No project history yet. History is recorded automatically as you build."}
+                  ? "No history entries for this project yet."
+                  : "No project history yet. History is recorded automatically as you build."}
             </div>
           ) : selectedProjectId !== null ? (
             <div className="grid gap-3">

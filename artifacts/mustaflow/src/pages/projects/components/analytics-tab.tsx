@@ -57,7 +57,8 @@ export function AnalyticsTab({ project }: { project: Project }) {
           <div>
             <p className="text-sm font-medium text-foreground">No analytics yet</p>
             <p className="text-xs text-muted-foreground mt-1">
-              Publish your app to start tracking deployment activity. Analytics data updates after each publish.
+              Publish your app to start tracking deployment activity. Analytics data updates after
+              each publish.
             </p>
           </div>
         </div>
@@ -74,9 +75,7 @@ export function AnalyticsTab({ project }: { project: Project }) {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold mb-1">Analytics</h2>
-            <p className="text-sm text-muted-foreground">
-              Deployment activity for this project.
-            </p>
+            <p className="text-sm text-muted-foreground">Deployment activity for this project.</p>
           </div>
           <button
             onClick={() => void load()}
@@ -94,9 +93,7 @@ export function AnalyticsTab({ project }: { project: Project }) {
               <span className="text-xs font-medium">Total Publishes</span>
             </div>
             <div className="text-2xl font-bold">{publishCount}</div>
-            <div className="text-[11px] text-muted-foreground/60 mt-1">
-              Times app was published
-            </div>
+            <div className="text-[11px] text-muted-foreground/60 mt-1">Times app was published</div>
           </div>
 
           <div className="bg-card border border-border rounded-xl p-4">
@@ -168,7 +165,8 @@ export function AnalyticsTab({ project }: { project: Project }) {
         </div>
 
         <p className="text-[11px] text-muted-foreground/50 text-center">
-          Analytics data updates after each publish. Traffic metrics (page views, visitors) require an external analytics integration.
+          Analytics data updates after each publish. Traffic metrics (page views, visitors) require
+          an external analytics integration.
         </p>
       </div>
     </div>

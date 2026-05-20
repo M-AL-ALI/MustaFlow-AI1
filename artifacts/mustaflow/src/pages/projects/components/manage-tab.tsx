@@ -65,7 +65,9 @@ export function ManageTab({ projectId }: { projectId: number }) {
   // ── Duplicate ─────────────────────────────────────────────────────────────
   const [duplicating, setDuplicating] = useState(false);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
-  const [duplicateSuccess, setDuplicateSuccess] = useState<{ id: number; name: string } | null>(null);
+  const [duplicateSuccess, setDuplicateSuccess] = useState<{ id: number; name: string } | null>(
+    null,
+  );
 
   // ── Rename ────────────────────────────────────────────────────────────────
   const [renaming, setRenaming] = useState(false);
@@ -150,7 +152,9 @@ export function ManageTab({ projectId }: { projectId: number }) {
       <div className="max-w-2xl mx-auto space-y-8">
         <div>
           <h2 className="text-xl font-bold mb-1">Manage Project</h2>
-          <p className="text-sm text-muted-foreground">Project settings, exports, and danger zone.</p>
+          <p className="text-sm text-muted-foreground">
+            Project settings, exports, and danger zone.
+          </p>
         </div>
 
         {/* Rename */}
@@ -168,7 +172,9 @@ export function ManageTab({ projectId }: { projectId: number }) {
           {renaming ? (
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="edit-name" className="text-xs">Name</Label>
+                <Label htmlFor="edit-name" className="text-xs">
+                  Name
+                </Label>
                 <Input
                   id="edit-name"
                   value={editName}
@@ -178,7 +184,9 @@ export function ManageTab({ projectId }: { projectId: number }) {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="edit-desc" className="text-xs">Description</Label>
+                <Label htmlFor="edit-desc" className="text-xs">
+                  Description
+                </Label>
                 <Textarea
                   id="edit-desc"
                   value={editDesc}
@@ -188,15 +196,9 @@ export function ManageTab({ projectId }: { projectId: number }) {
                   rows={2}
                 />
               </div>
-              {renameError && (
-                <p className="text-xs text-destructive">{renameError}</p>
-              )}
+              {renameError && <p className="text-xs text-destructive">{renameError}</p>}
               <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={handleRename}
-                  disabled={updateProject.isPending}
-                >
+                <Button size="sm" onClick={handleRename} disabled={updateProject.isPending}>
                   {updateProject.isPending ? (
                     <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                   ) : null}
@@ -230,16 +232,14 @@ export function ManageTab({ projectId }: { projectId: number }) {
         </div>
 
         {/* Mobile App Settings — only shown for mobile projects */}
-        {isMobile && (
-          <MobileAppSettingsSection projectId={projectId} />
-        )}
+        {isMobile && <MobileAppSettingsSection projectId={projectId} />}
 
         {/* Export */}
         <div className="bg-card border border-border rounded-xl p-5 space-y-3">
           <h3 className="text-sm font-semibold">Export Files</h3>
           <p className="text-xs text-muted-foreground">
-            Download all generated files as a zip archive. Includes a README, folder structure, and a
-            <code className="mx-1 px-1 bg-muted rounded text-[11px]">.env.example</code>
+            Download all generated files as a zip archive. Includes a README, folder structure, and
+            a<code className="mx-1 px-1 bg-muted rounded text-[11px]">.env.example</code>
             listing required environment variable names — secret values are never included.
           </p>
           <div className="flex items-center gap-2">
@@ -262,8 +262,8 @@ export function ManageTab({ projectId }: { projectId: number }) {
         <div className="bg-card border border-border rounded-xl p-5 space-y-3">
           <h3 className="text-sm font-semibold">Duplicate Project</h3>
           <p className="text-xs text-muted-foreground">
-            Create an independent copy with all files. Secrets are not copied for security — add them
-            separately in the Tools tab of the new project.
+            Create an independent copy with all files. Secrets are not copied for security — add
+            them separately in the Tools tab of the new project.
           </p>
 
           {duplicateSuccess ? (
@@ -275,32 +275,18 @@ export function ManageTab({ projectId }: { projectId: number }) {
                 </span>
               </div>
               <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => setLocation(`/projects/${duplicateSuccess.id}`)}
-                >
+                <Button size="sm" onClick={() => setLocation(`/projects/${duplicateSuccess.id}`)}>
                   Open Duplicate
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setDuplicateSuccess(null)}
-                >
+                <Button variant="outline" size="sm" onClick={() => setDuplicateSuccess(null)}>
                   Dismiss
                 </Button>
               </div>
             </div>
           ) : (
             <div className="space-y-2">
-              {duplicateError && (
-                <p className="text-xs text-destructive">{duplicateError}</p>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDuplicate}
-                disabled={duplicating}
-              >
+              {duplicateError && <p className="text-xs text-destructive">{duplicateError}</p>}
+              <Button variant="outline" size="sm" onClick={handleDuplicate} disabled={duplicating}>
                 {duplicating ? (
                   <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                 ) : (
@@ -325,11 +311,7 @@ export function ManageTab({ projectId }: { projectId: number }) {
                 Deleting a project removes it from your dashboard. All files, versions, tasks, and
                 secrets are archived and cannot be recovered from the UI.
               </p>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setDeleteStage("confirm")}
-              >
+              <Button variant="destructive" size="sm" onClick={() => setDeleteStage("confirm")}>
                 <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                 Delete Project
               </Button>
@@ -339,9 +321,7 @@ export function ManageTab({ projectId }: { projectId: number }) {
               <p className="text-xs text-destructive font-medium">
                 Are you sure? This cannot be undone from the UI.
               </p>
-              {deleteError && (
-                <p className="text-xs text-destructive">{deleteError}</p>
-              )}
+              {deleteError && <p className="text-xs text-destructive">{deleteError}</p>}
               <div className="flex gap-2">
                 <Button
                   variant="destructive"
@@ -359,7 +339,10 @@ export function ManageTab({ projectId }: { projectId: number }) {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => { setDeleteStage("idle"); setDeleteError(null); }}
+                  onClick={() => {
+                    setDeleteStage("idle");
+                    setDeleteError(null);
+                  }}
                   disabled={deleteProject.isPending}
                 >
                   Cancel
@@ -489,8 +472,8 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
       </div>
       <p className="text-xs text-muted-foreground">
         Configure app store metadata. Changes are saved directly to{" "}
-        <code className="px-1 bg-muted rounded text-[11px]">app.json</code> with a rollback
-        snapshot — build the project first if app.json does not yet exist.
+        <code className="px-1 bg-muted rounded text-[11px]">app.json</code> with a rollback snapshot
+        — build the project first if app.json does not yet exist.
       </p>
 
       {isLoading ? (
@@ -503,11 +486,16 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* App Name */}
             <div className="space-y-1.5">
-              <Label htmlFor="ms-app-name" className="text-xs">App Name</Label>
+              <Label htmlFor="ms-app-name" className="text-xs">
+                App Name
+              </Label>
               <Input
                 id="ms-app-name"
                 value={appName}
-                onChange={(e) => { setAppName(e.target.value); setSaveSuccess(false); }}
+                onChange={(e) => {
+                  setAppName(e.target.value);
+                  setSaveSuccess(false);
+                }}
                 placeholder="My Awesome App"
                 className="h-8 text-sm"
               />
@@ -515,11 +503,16 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
 
             {/* Version */}
             <div className="space-y-1.5">
-              <Label htmlFor="ms-version" className="text-xs">Version</Label>
+              <Label htmlFor="ms-version" className="text-xs">
+                Version
+              </Label>
               <Input
                 id="ms-version"
                 value={version}
-                onChange={(e) => { setVersion(e.target.value); setSaveSuccess(false); }}
+                onChange={(e) => {
+                  setVersion(e.target.value);
+                  setSaveSuccess(false);
+                }}
                 placeholder="1.0.0"
                 className="h-8 text-sm"
               />
@@ -528,8 +521,7 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
             {/* Bundle ID (iOS) */}
             <div className="space-y-1.5">
               <Label htmlFor="ms-bundle-id" className="text-xs">
-                Bundle ID{" "}
-                <span className="text-muted-foreground font-normal">(iOS)</span>
+                Bundle ID <span className="text-muted-foreground font-normal">(iOS)</span>
               </Label>
               <Input
                 id="ms-bundle-id"
@@ -542,16 +534,13 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
                 placeholder="com.company.appname"
                 className={`h-8 text-sm font-mono ${bundleIdError ? "border-destructive" : ""}`}
               />
-              {bundleIdError && (
-                <p className="text-[11px] text-destructive">{bundleIdError}</p>
-              )}
+              {bundleIdError && <p className="text-[11px] text-destructive">{bundleIdError}</p>}
             </div>
 
             {/* Package Name (Android) */}
             <div className="space-y-1.5">
               <Label htmlFor="ms-package-name" className="text-xs">
-                Package Name{" "}
-                <span className="text-muted-foreground font-normal">(Android)</span>
+                Package Name <span className="text-muted-foreground font-normal">(Android)</span>
               </Label>
               <Input
                 id="ms-package-name"
@@ -572,7 +561,9 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
 
           {/* Splash Screen Color */}
           <div className="space-y-1.5">
-            <Label htmlFor="ms-splash-color" className="text-xs">Splash Screen Background Color</Label>
+            <Label htmlFor="ms-splash-color" className="text-xs">
+              Splash Screen Background Color
+            </Label>
             <div className="flex items-center gap-2">
               <div
                 className="h-8 w-8 rounded border border-border shrink-0"
@@ -606,11 +597,7 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
                 title="Click to upload icon"
               >
                 {displayIconUrl ? (
-                  <img
-                    src={displayIconUrl}
-                    alt="App icon"
-                    className="h-full w-full object-cover"
-                  />
+                  <img src={displayIconUrl} alt="App icon" className="h-full w-full object-cover" />
                 ) : (
                   <Smartphone className="h-6 w-6 text-muted-foreground/40" />
                 )}
@@ -619,8 +606,8 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
               <div className="flex-1 space-y-1.5">
                 <p className="text-[11px] text-muted-foreground">
                   1024×1024 PNG recommended. Stored as{" "}
-                  <code className="bg-muted px-1 rounded text-[10px]">assets/icon.png</code>{" "}
-                  and referenced in app.json.
+                  <code className="bg-muted px-1 rounded text-[10px]">assets/icon.png</code> and
+                  referenced in app.json.
                 </p>
                 <Button
                   variant="outline"
@@ -636,9 +623,7 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
                     New icon selected — click Save to apply.
                   </p>
                 )}
-                {iconError && (
-                  <p className="text-[11px] text-destructive">{iconError}</p>
-                )}
+                {iconError && <p className="text-[11px] text-destructive">{iconError}</p>}
               </div>
             </div>
             <input
@@ -650,16 +635,10 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
             />
           </div>
 
-          {saveError && (
-            <p className="text-xs text-destructive">{saveError}</p>
-          )}
+          {saveError && <p className="text-xs text-destructive">{saveError}</p>}
 
           <div className="flex items-center gap-3">
-            <Button
-              size="sm"
-              onClick={handleSave}
-              disabled={saveMutation.isPending}
-            >
+            <Button size="sm" onClick={handleSave} disabled={saveMutation.isPending}>
               {saveMutation.isPending ? (
                 <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
               ) : null}

@@ -36,16 +36,24 @@ const PAGE_SIZE = 20;
 
 function getTypeIcon(type: string) {
   switch (type) {
-    case "build": return Hammer;
-    case "refine": return RefreshCw;
-    case "rollback": return RotateCcw;
+    case "build":
+      return Hammer;
+    case "refine":
+      return RefreshCw;
+    case "rollback":
+      return RotateCcw;
     case "publish":
-    case "publish_failed": return Globe;
-    case "secret_change": return KeyRound;
-    case "manual_edit": return FilePen;
+    case "publish_failed":
+      return Globe;
+    case "secret_change":
+      return KeyRound;
+    case "manual_edit":
+      return FilePen;
     case "secret_warning":
-    case "integration_needed": return FileWarning;
-    default: return NotebookPen;
+    case "integration_needed":
+      return FileWarning;
+    default:
+      return NotebookPen;
   }
 }
 
@@ -53,14 +61,22 @@ function getTypeColor(type: string, severity: string) {
   if (severity === "error") return "text-destructive border-destructive/40 bg-destructive/10";
   if (severity === "warning") return "text-yellow-400 border-yellow-500/30 bg-yellow-500/10";
   switch (type) {
-    case "build": return "text-primary border-primary/40 bg-primary/10";
-    case "refine": return "text-blue-400 border-blue-500/40 bg-blue-500/10";
-    case "rollback": return "text-orange-400 border-orange-500/40 bg-orange-500/10";
-    case "publish": return "text-green-400 border-green-500/40 bg-green-500/10";
-    case "publish_failed": return "text-destructive border-destructive/40 bg-destructive/10";
-    case "secret_change": return "text-purple-400 border-purple-500/40 bg-purple-500/10";
-    case "manual_edit": return "text-cyan-400 border-cyan-500/40 bg-cyan-500/10";
-    default: return "text-muted-foreground border-border bg-muted/40";
+    case "build":
+      return "text-primary border-primary/40 bg-primary/10";
+    case "refine":
+      return "text-blue-400 border-blue-500/40 bg-blue-500/10";
+    case "rollback":
+      return "text-orange-400 border-orange-500/40 bg-orange-500/10";
+    case "publish":
+      return "text-green-400 border-green-500/40 bg-green-500/10";
+    case "publish_failed":
+      return "text-destructive border-destructive/40 bg-destructive/10";
+    case "secret_change":
+      return "text-purple-400 border-purple-500/40 bg-purple-500/10";
+    case "manual_edit":
+      return "text-cyan-400 border-cyan-500/40 bg-cyan-500/10";
+    default:
+      return "text-muted-foreground border-border bg-muted/40";
   }
 }
 
@@ -138,7 +154,12 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
   const saveAnnotation = () => {
     updateKnowledge.mutate(
       { id: entry.id, data: { annotation: annotationDraft || null } },
-      { onSuccess: () => { setShowAnnotationInput(false); invalidate(); } },
+      {
+        onSuccess: () => {
+          setShowAnnotationInput(false);
+          invalidate();
+        },
+      },
     );
   };
 
@@ -161,8 +182,18 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
 
   const TypeIcon = getTypeIcon(entry.type);
   const typeColor = getTypeColor(entry.type, entry.severity);
-  const SeverityIcon = entry.severity === "error" ? AlertTriangle : entry.severity === "warning" ? AlertTriangle : Info;
-  const severityColor = entry.severity === "error" ? "text-destructive" : entry.severity === "warning" ? "text-yellow-400" : "text-muted-foreground";
+  const SeverityIcon =
+    entry.severity === "error"
+      ? AlertTriangle
+      : entry.severity === "warning"
+        ? AlertTriangle
+        : Info;
+  const severityColor =
+    entry.severity === "error"
+      ? "text-destructive"
+      : entry.severity === "warning"
+        ? "text-yellow-400"
+        : "text-muted-foreground";
 
   const diffSummary = entry.diffSummary as {
     filesAdded?: string[];
@@ -172,28 +203,37 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
     linesRemoved?: number;
   } | null;
 
-  const hasDiff = diffSummary && (
+  const hasDiff =
+    diffSummary &&
     (diffSummary.filesAdded?.length ?? 0) +
-    (diffSummary.filesModified?.length ?? 0) +
-    (diffSummary.filesRemoved?.length ?? 0) > 0
-  );
+      (diffSummary.filesModified?.length ?? 0) +
+      (diffSummary.filesRemoved?.length ?? 0) >
+      0;
 
   const isError = entry.severity === "error";
 
   // Extract retry prompt from error entry title patterns
-  const retryPromptMatch = entry.title.match(/^Build failed: "(.+)"$/) ??
+  const retryPromptMatch =
+    entry.title.match(/^Build failed: "(.+)"$/) ??
     entry.title.match(/^(?:Build|Refinement) error for: "(.+)"$/);
   const retryPrompt = retryPromptMatch ? retryPromptMatch[1] : null;
 
   return (
-    <div className={cn(
-      "rounded-lg border p-3 space-y-2 bg-card/60 relative",
-      entry.archivedAt ? "opacity-50" : "",
-    )}>
+    <div
+      className={cn(
+        "rounded-lg border p-3 space-y-2 bg-card/60 relative",
+        entry.archivedAt ? "opacity-50" : "",
+      )}
+    >
       {/* Header row */}
       <div className="flex items-start gap-2.5">
         {/* Type icon */}
-        <div className={cn("w-7 h-7 rounded-md border flex items-center justify-center shrink-0 mt-0.5", typeColor)}>
+        <div
+          className={cn(
+            "w-7 h-7 rounded-md border flex items-center justify-center shrink-0 mt-0.5",
+            typeColor,
+          )}
+        >
           <TypeIcon className="h-3.5 w-3.5" />
         </div>
 
@@ -204,7 +244,12 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
               {entry.title}
             </span>
             {/* Severity badge */}
-            <span className={cn("shrink-0 flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide", severityColor)}>
+            <span
+              className={cn(
+                "shrink-0 flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide",
+                severityColor,
+              )}
+            >
               <SeverityIcon className="h-2.5 w-2.5" />
               {entry.severity}
             </span>
@@ -221,7 +266,10 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
             <span className="text-[9px] text-muted-foreground/60 ml-auto flex items-center gap-1 shrink-0">
               <Clock className="h-2.5 w-2.5" />
               {new Date(entry.createdAt).toLocaleString(undefined, {
-                month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
               })}
             </span>
           </div>
@@ -238,8 +286,14 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
           </button>
           {/* Annotation */}
           <button
-            onClick={() => { setShowAnnotationInput((v) => !v); setShowContextMenu(false); }}
-            className={cn("w-5 h-5 flex items-center justify-center transition-colors", entry.annotation ? "text-primary" : "text-muted-foreground hover:text-foreground")}
+            onClick={() => {
+              setShowAnnotationInput((v) => !v);
+              setShowContextMenu(false);
+            }}
+            className={cn(
+              "w-5 h-5 flex items-center justify-center transition-colors",
+              entry.annotation ? "text-primary" : "text-muted-foreground hover:text-foreground",
+            )}
             title={entry.annotation ? "Edit note" : "Add note"}
           >
             <MessageSquare className="h-3 w-3" />
@@ -247,7 +301,10 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
           {/* Context menu */}
           <div className="relative">
             <button
-              onClick={() => { setShowContextMenu((v) => !v); setShowAnnotationInput(false); }}
+              onClick={() => {
+                setShowContextMenu((v) => !v);
+                setShowAnnotationInput(false);
+              }}
               className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
             >
               <MoreHorizontal className="h-3 w-3" />
@@ -274,8 +331,15 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
                       This lesson will be visible to the AI across all projects.
                     </p>
                     <div className="flex gap-1.5">
-                      <Button size="sm" className="h-5 text-[10px] px-2" onClick={handlePromote}>Confirm</Button>
-                      <button onClick={() => setShowConfirmPromote(false)} className="text-[10px] text-muted-foreground hover:text-foreground">Cancel</button>
+                      <Button size="sm" className="h-5 text-[10px] px-2" onClick={handlePromote}>
+                        Confirm
+                      </Button>
+                      <button
+                        onClick={() => setShowConfirmPromote(false)}
+                        className="text-[10px] text-muted-foreground hover:text-foreground"
+                      >
+                        Cancel
+                      </button>
                     </div>
                   </div>
                 )}
@@ -317,10 +381,21 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
             autoFocus
           />
           <div className="flex gap-1.5">
-            <Button size="sm" className="h-5 text-[10px] px-2" onClick={saveAnnotation} disabled={updateKnowledge.isPending}>
+            <Button
+              size="sm"
+              className="h-5 text-[10px] px-2"
+              onClick={saveAnnotation}
+              disabled={updateKnowledge.isPending}
+            >
               Save
             </Button>
-            <button onClick={() => { setShowAnnotationInput(false); setAnnotationDraft(entry.annotation ?? ""); }} className="text-[10px] text-muted-foreground hover:text-foreground">
+            <button
+              onClick={() => {
+                setShowAnnotationInput(false);
+                setAnnotationDraft(entry.annotation ?? "");
+              }}
+              className="text-[10px] text-muted-foreground hover:text-foreground"
+            >
               Cancel
             </button>
           </div>
@@ -333,13 +408,17 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
           {/* Error display */}
           {isError ? (
             <div className="space-y-1.5">
-              <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">What went wrong</div>
+              <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                What went wrong
+              </div>
               <pre className="text-[10px] text-destructive/80 bg-destructive/5 border border-destructive/20 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">
                 {entry.content}
               </pre>
               {retryPrompt && onRetry && (
                 <div className="space-y-1">
-                  <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">What was tried</div>
+                  <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    What was tried
+                  </div>
                   <div className="text-[10px] text-muted-foreground bg-muted/40 border border-border/60 rounded px-2 py-1 italic">
                     "{retryPrompt}"
                   </div>
@@ -362,7 +441,9 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
           {hasDiff && (
             <div className="space-y-0.5">
               <div className="flex items-center gap-2 mb-1">
-                <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">File changes</div>
+                <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  File changes
+                </div>
                 {((diffSummary?.linesAdded ?? 0) > 0 || (diffSummary?.linesRemoved ?? 0) > 0) && (
                   <div className="flex gap-1.5 text-[9px]">
                     {(diffSummary?.linesAdded ?? 0) > 0 && (
@@ -375,18 +456,30 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
                 )}
               </div>
               {(diffSummary?.filesAdded ?? []).map((f) => (
-                <div key={`a-${f}`} className="font-mono text-[10px] text-green-400 flex items-center gap-1">
-                  <span className="shrink-0">+</span><span className="truncate">{f}</span>
+                <div
+                  key={`a-${f}`}
+                  className="font-mono text-[10px] text-green-400 flex items-center gap-1"
+                >
+                  <span className="shrink-0">+</span>
+                  <span className="truncate">{f}</span>
                 </div>
               ))}
               {(diffSummary?.filesModified ?? []).map((f) => (
-                <div key={`m-${f}`} className="font-mono text-[10px] text-yellow-400 flex items-center gap-1">
-                  <span className="shrink-0">~</span><span className="truncate">{f}</span>
+                <div
+                  key={`m-${f}`}
+                  className="font-mono text-[10px] text-yellow-400 flex items-center gap-1"
+                >
+                  <span className="shrink-0">~</span>
+                  <span className="truncate">{f}</span>
                 </div>
               ))}
               {(diffSummary?.filesRemoved ?? []).map((f) => (
-                <div key={`r-${f}`} className="font-mono text-[10px] text-red-400/70 flex items-center gap-1">
-                  <span className="shrink-0">-</span><span className="truncate">{f}</span>
+                <div
+                  key={`r-${f}`}
+                  className="font-mono text-[10px] text-red-400/70 flex items-center gap-1"
+                >
+                  <span className="shrink-0">-</span>
+                  <span className="truncate">{f}</span>
                 </div>
               ))}
             </div>
@@ -404,7 +497,12 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
           {entry.tags && (
             <div className="flex flex-wrap gap-1">
               {entry.tags.split(",").map((tag) => (
-                <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded-full bg-muted border border-border/60 text-muted-foreground">{tag.trim()}</span>
+                <span
+                  key={tag}
+                  className="text-[9px] px-1.5 py-0.5 rounded-full bg-muted border border-border/60 text-muted-foreground"
+                >
+                  {tag.trim()}
+                </span>
               ))}
             </div>
           )}
@@ -442,10 +540,11 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
     offset: page * PAGE_SIZE,
   };
 
-  const { data: pageEntries = [], isLoading, isFetching } = useListKnowledge(
-    queryParams,
-    { query: { queryKey: getListKnowledgeQueryKey(queryParams) } },
-  );
+  const {
+    data: pageEntries = [],
+    isLoading,
+    isFetching,
+  } = useListKnowledge(queryParams, { query: { queryKey: getListKnowledgeQueryKey(queryParams) } });
 
   // Accumulate pages as the user loads more
   useEffect(() => {
@@ -462,7 +561,7 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
         return newEntries.length > 0 ? [...prev, ...newEntries] : prev;
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageEntries]);
 
   // Entries to display: accumulated (or empty while first page loads)
@@ -489,15 +588,17 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
     const save = () => {
       try {
         localStorage.setItem(scrollKey, String(historyScrollRef.current?.scrollTop ?? 0));
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
     window.addEventListener("pagehide", save);
     return () => {
       window.removeEventListener("pagehide", save);
       save();
     };
-  // scrollKey is stable for the component lifetime (projectId is fixed via key={projectId})
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // scrollKey is stable for the component lifetime (projectId is fixed via key={projectId})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Restore saved scroll after entries have loaded and rendered.
@@ -509,9 +610,15 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
     if (!el) return;
     try {
       const raw = localStorage.getItem(scrollKey);
-      if (raw === null) { scrollRestoredRef.current = true; return; }
+      if (raw === null) {
+        scrollRestoredRef.current = true;
+        return;
+      }
       const top = Number.isFinite(Number(raw)) ? Number(raw) : 0;
-      if (top === 0) { scrollRestoredRef.current = true; return; }
+      if (top === 0) {
+        scrollRestoredRef.current = true;
+        return;
+      }
       requestAnimationFrame(() => {
         if (!el || scrollRestoredRef.current) return;
         el.scrollTop = top;
@@ -519,8 +626,10 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
           scrollRestoredRef.current = true;
         }
       });
-    } catch { /* ignore */ }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accumulated.length]);
 
   return (
@@ -533,7 +642,10 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
             Project History
           </span>
           <button
-            onClick={() => { setShowArchived((v) => !v); resetPagination(); }}
+            onClick={() => {
+              setShowArchived((v) => !v);
+              resetPagination();
+            }}
             className={cn(
               "text-[9px] px-1.5 py-0.5 rounded border transition-colors",
               showArchived
@@ -549,12 +661,17 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/60" />
           <input
             value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); }}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+            }}
             placeholder="Search history…"
             className="w-full bg-muted border border-border rounded-md pl-6 pr-6 py-1 text-[11px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
               <X className="h-3 w-3" />
             </button>
           )}
@@ -564,7 +681,9 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
           {FILTER_OPTIONS.map((opt) => (
             <button
               key={opt.value}
-              onClick={() => { setTypeFilter(opt.value === typeFilter ? "" : opt.value); }}
+              onClick={() => {
+                setTypeFilter(opt.value === typeFilter ? "" : opt.value);
+              }}
               className={cn(
                 "text-[9px] px-2 py-0.5 rounded-full border font-medium transition-colors",
                 typeFilter === opt.value
@@ -590,7 +709,9 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
             <Clock className="h-7 w-7 opacity-20" />
             <div className="text-center">
               <div className="text-xs font-medium text-foreground/60">No history yet</div>
-              <div className="text-[10px] opacity-50 mt-0.5">Events are recorded automatically as you build</div>
+              <div className="text-[10px] opacity-50 mt-0.5">
+                Events are recorded automatically as you build
+              </div>
             </div>
           </div>
         )}
@@ -601,12 +722,7 @@ export function HistoryTab({ projectId, onRetry }: HistoryTabProps) {
             </div>
             <div className="space-y-2">
               {group.entries.map((entry) => (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  projectId={projectId}
-                  onRetry={onRetry}
-                />
+                <EntryCard key={entry.id} entry={entry} projectId={projectId} onRetry={onRetry} />
               ))}
             </div>
           </div>

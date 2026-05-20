@@ -43,9 +43,7 @@ export const CLERK_PROXY_PATH = "/api/__clerk";
  * hostname is canonical — otherwise multi-domain/custom-domain flows
  * break.
  */
-export function getClerkProxyHost(req: {
-  headers: IncomingHttpHeaders;
-}): string | undefined {
+export function getClerkProxyHost(req: { headers: IncomingHttpHeaders }): string | undefined {
   const forwarded = req.headers["x-forwarded-host"];
   const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
   const firstHop = raw?.split(",")[0]?.trim();
@@ -66,8 +64,7 @@ export function clerkProxyMiddleware(): RequestHandler {
   return createProxyMiddleware({
     target: CLERK_FAPI,
     changeOrigin: true,
-    pathRewrite: (path: string) =>
-      path.replace(new RegExp(`^${CLERK_PROXY_PATH}`), ""),
+    pathRewrite: (path: string) => path.replace(new RegExp(`^${CLERK_PROXY_PATH}`), ""),
     on: {
       proxyReq: (proxyReq, req) => {
         const protocol = req.headers["x-forwarded-proto"] || "https";

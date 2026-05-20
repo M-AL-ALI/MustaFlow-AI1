@@ -83,27 +83,24 @@ export async function activateSslForProject(
 
     if (!cfHostnameId) {
       // Create the custom hostname in Cloudflare
-      const createResp = await fetch(
-        `${CF_API_BASE}/zones/${CF_ZONE_ID}/custom_hostnames`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${CF_API_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            hostname: domain,
-            ssl: {
-              method: "http",
-              type: "dv",
-              settings: {
-                min_tls_version: "1.2",
-                http2: "on",
-              },
-            },
-          }),
+      const createResp = await fetch(`${CF_API_BASE}/zones/${CF_ZONE_ID}/custom_hostnames`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${CF_API_TOKEN}`,
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify({
+          hostname: domain,
+          ssl: {
+            method: "http",
+            type: "dv",
+            settings: {
+              min_tls_version: "1.2",
+              http2: "on",
+            },
+          },
+        }),
+      });
 
       const createJson = (await createResp.json()) as {
         success: boolean;
@@ -113,8 +110,7 @@ export async function activateSslForProject(
 
       if (!createResp.ok || !createJson.success) {
         const errMsg =
-          createJson.errors?.map((e) => e.message).join("; ") ??
-          "Unknown Cloudflare error";
+          createJson.errors?.map((e) => e.message).join("; ") ?? "Unknown Cloudflare error";
 
         await db
           .update(projectsTable)
@@ -130,9 +126,7 @@ export async function activateSslForProject(
       }
 
       cfHostnameId = createJson.result?.id ?? null;
-      const initialSslStatus = mapCfSslStatus(
-        createJson.result?.ssl?.status,
-      );
+      const initialSslStatus = mapCfSslStatus(createJson.result?.ssl?.status);
 
       await db
         .update(projectsTable)
@@ -179,14 +173,10 @@ export async function activateSslForProject(
       sslStatus: polledStatus,
       cfHostnameId,
       cfRequired: false,
-      message:
-        polledStatus === "active"
-          ? "SSL is active."
-          : "SSL is still provisioning.",
+      message: polledStatus === "active" ? "SSL is active." : "SSL is still provisioning.",
     };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Unexpected error contacting Cloudflare";
+    const message = err instanceof Error ? err.message : "Unexpected error contacting Cloudflare";
 
     await db
       .update(projectsTable)

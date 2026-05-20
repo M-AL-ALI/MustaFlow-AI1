@@ -127,7 +127,9 @@ export function PreviewTab({
         const ready = (data.builds ?? []).find((b) => b.status === "passed" && !!b.publicUrl);
         setEasBuild(ready ?? null);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [project.id, isMobile]);
 
   useEffect(() => {
@@ -139,8 +141,7 @@ export function PreviewTab({
   useEffect(() => {
     const prev = prevWarningsRef.current;
     const changed =
-      validationWarnings.length !== prev.length ||
-      validationWarnings.some((w, i) => w !== prev[i]);
+      validationWarnings.length !== prev.length || validationWarnings.some((w, i) => w !== prev[i]);
     if (changed) {
       setValidationDismissed(false);
       prevWarningsRef.current = validationWarnings;
@@ -151,8 +152,7 @@ export function PreviewTab({
   useEffect(() => {
     const prev = prevNativeFeaturesRef.current;
     const changed =
-      nativeFeatures.length !== prev.length ||
-      nativeFeatures.some((f, i) => f !== prev[i]);
+      nativeFeatures.length !== prev.length || nativeFeatures.some((f, i) => f !== prev[i]);
     if (changed) {
       setNativeFeaturesDismissed(false);
       prevNativeFeaturesRef.current = nativeFeatures;
@@ -185,7 +185,7 @@ export function PreviewTab({
       const data = event.data;
       if (!data || typeof data !== "object" || !data.__mustaflow) return;
       const VALID_LEVELS = ["log", "warn", "error", "info"] as const;
-      type ValidLevel = typeof VALID_LEVELS[number];
+      type ValidLevel = (typeof VALID_LEVELS)[number];
       const rawLevel = data.level as string;
       const level: ValidLevel = (VALID_LEVELS as readonly string[]).includes(rawLevel)
         ? (rawLevel as ValidLevel)
@@ -193,7 +193,10 @@ export function PreviewTab({
       const args = Array.isArray(data.args) ? (data.args as string[]) : [String(data.args)];
       const isCrash = data.type === "crash";
       const id = entryIdRef.current++;
-      setConsoleEntries((prev) => [...prev.slice(-199), { id, level: level as ConsoleEntry["level"], args, ts: Date.now(), isCrash }]);
+      setConsoleEntries((prev) => [
+        ...prev.slice(-199),
+        { id, level: level as ConsoleEntry["level"], args, ts: Date.now(), isCrash },
+      ]);
       if (isCrash) {
         setCrashBanner(args.join(" "));
       }
@@ -233,9 +236,12 @@ export function PreviewTab({
     if (healthTimerRef.current) clearTimeout(healthTimerRef.current);
   }, []);
 
-  useEffect(() => () => {
-    if (healthTimerRef.current) clearTimeout(healthTimerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (healthTimerRef.current) clearTimeout(healthTimerRef.current);
+    },
+    [],
+  );
 
   const errorCount = consoleEntries.filter((e) => e.level === "error").length;
   const warnCount = consoleEntries.filter((e) => e.level === "warn").length;
@@ -262,10 +268,8 @@ export function PreviewTab({
 
   return (
     <div className="flex flex-col h-full bg-background">
-
       {/* Preview toolbar */}
       <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-card">
-
         {/* Device size switcher */}
         <div className="flex items-center bg-muted border border-border rounded-lg p-0.5 gap-0.5 shrink-0">
           {(["desktop", "tablet", "mobile"] as DeviceFrame[]).map((d) => {
@@ -319,7 +323,10 @@ export function PreviewTab({
                     <Smartphone className="h-4 w-4 text-green-400" />
                     {easBuild ? "Native Expo Go" : "Expo Go Preview"}
                   </div>
-                  <button onClick={() => setQrOpen(false)} className="text-muted-foreground hover:text-foreground">
+                  <button
+                    onClick={() => setQrOpen(false)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
                     <X className="h-4 w-4" />
                   </button>
                 </div>
@@ -336,7 +343,9 @@ export function PreviewTab({
                             {isExp ? "EXPO GO" : "NATIVE"}
                           </span>
                           <span className="text-xs text-green-400 flex-1 truncate font-medium">
-                            {isExp ? "Expo Go launch URL ready" : "Native build ready — scan to install"}
+                            {isExp
+                              ? "Expo Go launch URL ready"
+                              : "Native build ready — scan to install"}
                           </span>
                         </div>
                         <div className="flex justify-center mb-3">
@@ -349,7 +358,9 @@ export function PreviewTab({
                           />
                         </div>
                         <div className="bg-muted/60 rounded-lg px-3 py-2 mb-2">
-                          <p className="text-[10px] font-mono text-muted-foreground break-all">{url}</p>
+                          <p className="text-[10px] font-mono text-muted-foreground break-all">
+                            {url}
+                          </p>
                         </div>
                         <div className="flex items-start gap-2 bg-muted/60 rounded-lg p-2.5 text-xs text-muted-foreground">
                           <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-green-400" />
@@ -378,7 +389,10 @@ export function PreviewTab({
                       <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-yellow-400" />
                       <div>
                         <p className="text-foreground font-medium mb-0.5">Web preview</p>
-                        <p>Opens the web preview in your mobile browser. For native device sensors, configure EAS Build in the Publishing tab.</p>
+                        <p>
+                          Opens the web preview in your mobile browser. For native device sensors,
+                          configure EAS Build in the Publishing tab.
+                        </p>
                       </div>
                     </div>
                   </>
@@ -391,25 +405,34 @@ export function PreviewTab({
         <div className="w-px h-4 bg-border shrink-0" />
 
         {/* Status indicator */}
-        <div className={cn(
-          "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium shrink-0",
-          project.status === "building"
-            ? "bg-primary/15 text-primary"
-            : project.status === "published"
-            ? "bg-green-500/15 text-green-500"
-            : project.status === "testing"
-            ? "bg-yellow-500/15 text-yellow-500"
-            : project.status === "failed"
-            ? "bg-destructive/15 text-destructive"
-            : "bg-muted text-muted-foreground",
-        )}>
-          <span className={cn(
-            "w-1.5 h-1.5 rounded-full shrink-0",
-            project.status === "building" ? "bg-primary animate-pulse" :
-            project.status === "published" ? "bg-green-500" :
-            project.status === "testing" ? "bg-yellow-500" :
-            project.status === "failed" ? "bg-destructive" : "bg-muted-foreground",
-          )} />
+        <div
+          className={cn(
+            "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium shrink-0",
+            project.status === "building"
+              ? "bg-primary/15 text-primary"
+              : project.status === "published"
+                ? "bg-green-500/15 text-green-500"
+                : project.status === "testing"
+                  ? "bg-yellow-500/15 text-yellow-500"
+                  : project.status === "failed"
+                    ? "bg-destructive/15 text-destructive"
+                    : "bg-muted text-muted-foreground",
+          )}
+        >
+          <span
+            className={cn(
+              "w-1.5 h-1.5 rounded-full shrink-0",
+              project.status === "building"
+                ? "bg-primary animate-pulse"
+                : project.status === "published"
+                  ? "bg-green-500"
+                  : project.status === "testing"
+                    ? "bg-yellow-500"
+                    : project.status === "failed"
+                      ? "bg-destructive"
+                      : "bg-muted-foreground",
+            )}
+          />
           {project.status}
         </div>
 
@@ -426,8 +449,8 @@ export function PreviewTab({
               consoleOpen
                 ? "bg-zinc-800 text-zinc-100 border-zinc-700"
                 : errorCount > 0
-                ? "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/15"
-                : "bg-muted text-muted-foreground border-border hover:text-foreground",
+                  ? "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/15"
+                  : "bg-muted text-muted-foreground border-border hover:text-foreground",
             )}
             title="Console"
           >
@@ -457,13 +480,7 @@ export function PreviewTab({
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            asChild
-            title="Open in new tab"
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7" asChild title="Open in new tab">
             <a href={previewSrc} target="_blank" rel="noreferrer">
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
@@ -476,7 +493,11 @@ export function PreviewTab({
               onClick={onToggleFocusMode}
               title={focusMode ? "Exit focus mode (Esc)" : "Focus mode — expand preview"}
             >
-              {focusMode ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              {focusMode ? (
+                <Minimize2 className="h-3.5 w-3.5" />
+              ) : (
+                <Maximize2 className="h-3.5 w-3.5" />
+              )}
             </Button>
           )}
         </div>
@@ -487,7 +508,10 @@ export function PreviewTab({
         <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-xs">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           <span className="flex-1">{healthWarning}</span>
-          <button onClick={() => setHealthWarning(null)} className="shrink-0 hover:opacity-70 transition-opacity">
+          <button
+            onClick={() => setHealthWarning(null)}
+            className="shrink-0 hover:opacity-70 transition-opacity"
+          >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -499,7 +523,9 @@ export function PreviewTab({
           <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
             <AlertTriangle className="h-3.5 w-3.5 text-orange-400 shrink-0" />
             <span className="flex-1 text-[11px] font-semibold text-orange-400">
-              {validationWarnings.length} validation {validationWarnings.length === 1 ? "issue" : "issues"} found — the AI flagged problems it could not fully resolve
+              {validationWarnings.length} validation{" "}
+              {validationWarnings.length === 1 ? "issue" : "issues"} found — the AI flagged problems
+              it could not fully resolve
             </span>
             <button
               onClick={() => setValidationDismissed(true)}
@@ -516,7 +542,9 @@ export function PreviewTab({
                 className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/20 rounded-lg px-2.5 py-2"
               >
                 <Wrench className="h-3 w-3 text-orange-400 shrink-0 mt-0.5" />
-                <span className="flex-1 text-[11px] text-orange-300/90 leading-relaxed">{warning}</span>
+                <span className="flex-1 text-[11px] text-orange-300/90 leading-relaxed">
+                  {warning}
+                </span>
                 {onFixPrompt && (
                   <button
                     onClick={() => onFixPrompt(`Fix this issue: ${warning}`)}
@@ -559,7 +587,8 @@ export function PreviewTab({
               </div>
             ))}
             <p className="text-[10px] text-blue-400/60 px-0.5 pt-0.5">
-              These native capabilities are included in the Expo/React Native code but cannot run in the web preview iframe. Use Expo Go on a real device to test them.
+              These native capabilities are included in the Expo/React Native code but cannot run in
+              the web preview iframe. Use Expo Go on a real device to test them.
             </p>
           </div>
         </div>
@@ -592,7 +621,10 @@ export function PreviewTab({
           )}
           <button
             type="button"
-            onClick={() => { setConsoleOpen(true); setCrashBanner(null); }}
+            onClick={() => {
+              setConsoleOpen(true);
+              setCrashBanner(null);
+            }}
             className="shrink-0 text-[10px] font-medium text-destructive/70 hover:text-destructive transition-colors whitespace-nowrap mt-px underline-offset-2 hover:underline"
           >
             Open Console
@@ -623,7 +655,9 @@ export function PreviewTab({
               <div className="h-8 bg-zinc-900 flex items-end px-2 gap-0.5 shrink-0">
                 <div className="h-7 flex items-center gap-2 px-3 bg-zinc-800 rounded-t-lg border border-zinc-700 border-b-0 min-w-[140px] max-w-[200px]">
                   <Globe className="h-3 w-3 text-zinc-400 shrink-0" />
-                  <span className="text-[11px] text-zinc-300 truncate flex-1">{project.name ?? "Preview"}</span>
+                  <span className="text-[11px] text-zinc-300 truncate flex-1">
+                    {project.name ?? "Preview"}
+                  </span>
                   <X className="h-2.5 w-2.5 text-zinc-500 shrink-0" />
                 </div>
               </div>
@@ -634,7 +668,10 @@ export function PreviewTab({
                   <div className="w-3.5 h-3.5 rounded-full bg-yellow-500/80" />
                   <div className="w-3.5 h-3.5 rounded-full bg-green-500/80" />
                 </div>
-                <button onClick={refresh} className="text-zinc-400 hover:text-zinc-200 transition-colors p-1 rounded hover:bg-zinc-700">
+                <button
+                  onClick={refresh}
+                  className="text-zinc-400 hover:text-zinc-200 transition-colors p-1 rounded hover:bg-zinc-700"
+                >
                   <RefreshCw className="h-3 w-3" />
                 </button>
                 <div className="flex-1 flex items-center bg-zinc-900 border border-zinc-700 rounded-md px-3 h-6 gap-2 max-w-md mx-auto">
@@ -718,14 +755,18 @@ export function PreviewTab({
                 <BrainCircuit className="h-5 w-5 text-secondary shrink-0" />
                 <div>
                   <div className="font-medium text-foreground text-xs">Plan Mode</div>
-                  <div className="text-muted-foreground text-[11px]">Generate a detailed plan before building</div>
+                  <div className="text-muted-foreground text-[11px]">
+                    Generate a detailed plan before building
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/60 border border-border text-sm text-left">
                 <Zap className="h-5 w-5 text-primary shrink-0" />
                 <div>
                   <div className="font-medium text-foreground text-xs">Build First Draft</div>
-                  <div className="text-muted-foreground text-[11px]">Generate your app immediately from a prompt</div>
+                  <div className="text-muted-foreground text-[11px]">
+                    Generate your app immediately from a prompt
+                  </div>
                 </div>
               </div>
             </div>
@@ -738,7 +779,10 @@ export function PreviewTab({
 
       {/* Console panel */}
       {hasFiles && consoleOpen && (
-        <div className="shrink-0 border-t border-zinc-800 bg-zinc-950 flex flex-col" style={{ height: 200 }}>
+        <div
+          className="shrink-0 border-t border-zinc-800 bg-zinc-950 flex flex-col"
+          style={{ height: 200 }}
+        >
           <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 shrink-0">
             <Terminal className="h-3.5 w-3.5 text-zinc-400" />
             <span className="text-[11px] font-medium text-zinc-300">Console</span>
@@ -777,24 +821,36 @@ export function PreviewTab({
                     key={entry.id}
                     className={cn(
                       "group flex items-start gap-2 px-3 py-0.5 border-b border-zinc-900 hover:bg-zinc-900/50",
-                      entry.isCrash ? "bg-destructive/10 text-destructive" :
-                      entry.level === "error" ? "text-red-400 bg-red-950/20" :
-                      entry.level === "warn" ? "text-yellow-400" :
-                      entry.level === "info" ? "text-blue-400" :
-                      "text-zinc-300",
+                      entry.isCrash
+                        ? "bg-destructive/10 text-destructive"
+                        : entry.level === "error"
+                          ? "text-red-400 bg-red-950/20"
+                          : entry.level === "warn"
+                            ? "text-yellow-400"
+                            : entry.level === "info"
+                              ? "text-blue-400"
+                              : "text-zinc-300",
                     )}
                   >
-                    <span className={cn(
-                      "shrink-0 uppercase text-[9px] font-bold tracking-wider mt-0.5 w-7",
-                      entry.isCrash ? "text-destructive" :
-                      entry.level === "error" ? "text-red-500" :
-                      entry.level === "warn" ? "text-yellow-500" :
-                      entry.level === "info" ? "text-blue-500" :
-                      "text-zinc-600",
-                    )}>
+                    <span
+                      className={cn(
+                        "shrink-0 uppercase text-[9px] font-bold tracking-wider mt-0.5 w-7",
+                        entry.isCrash
+                          ? "text-destructive"
+                          : entry.level === "error"
+                            ? "text-red-500"
+                            : entry.level === "warn"
+                              ? "text-yellow-500"
+                              : entry.level === "info"
+                                ? "text-blue-500"
+                                : "text-zinc-600",
+                      )}
+                    >
                       {entry.isCrash ? "CRASH" : entry.level}
                     </span>
-                    <span className="flex-1 break-all whitespace-pre-wrap">{entry.args.join(" ")}</span>
+                    <span className="flex-1 break-all whitespace-pre-wrap">
+                      {entry.args.join(" ")}
+                    </span>
                     {entry.level === "error" && onFixPrompt && (
                       <button
                         onClick={() => {
@@ -808,7 +864,11 @@ export function PreviewTab({
                       </button>
                     )}
                     <span className="text-zinc-700 text-[9px] shrink-0 mt-0.5">
-                      {new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                      {new Date(entry.ts).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                      })}
                     </span>
                   </div>
                 ))}
@@ -829,10 +889,14 @@ export function PreviewTab({
             <Terminal className="h-3 w-3" />
             <span>Console</span>
             {errorCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive text-[9px] font-bold">{errorCount} error{errorCount !== 1 ? "s" : ""}</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive text-[9px] font-bold">
+                {errorCount} error{errorCount !== 1 ? "s" : ""}
+              </span>
             )}
             {errorCount === 0 && warnCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-[9px] font-bold">{warnCount} warning{warnCount !== 1 ? "s" : ""}</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-[9px] font-bold">
+                {warnCount} warning{warnCount !== 1 ? "s" : ""}
+              </span>
             )}
             <div className="flex-1" />
             <ChevronUp className="h-3 w-3" />

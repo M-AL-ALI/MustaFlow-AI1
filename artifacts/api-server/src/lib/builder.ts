@@ -44,7 +44,8 @@ const MODE_QUALITY_STANDARDS: Record<AgentMode, string> = {
 const _MODE_QUALITY_HINTS: Record<AgentMode, string> = {
   lite: "Speed over polish. Generate minimal, working code quickly. Keep it simple.",
   eco: "Balance quality and brevity. Write clean, readable code without over-engineering.",
-  power: "Production-grade quality. Prioritize completeness, accessibility, polished UX, and thorough error handling.",
+  power:
+    "Production-grade quality. Prioritize completeness, accessibility, polished UX, and thorough error handling.",
   pro: "Highest quality. Focus on UX excellence, accessibility, robust error handling, edge cases, clean code structure, and long-term maintainability.",
 };
 
@@ -159,7 +160,6 @@ BRAND / LOGO GENERATION:
   - brand/favicon.svg: 32x32 minimal version of the icon
   SVG must use only: rect, circle, ellipse, path, polygon, text. No external resources. Keep files under 3000 chars each.`;
 
-
 const BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, beautiful, working web projects from a single user request. You speak no prose in this mode — your only output is valid JSON.
 
 ${PREVIEW_NOTE}
@@ -253,10 +253,7 @@ function modelFor(mode: AgentMode): string {
  * Inject this outline as a constraint into the main generation prompt to reduce
  * hallucinated or redundant file splits.
  */
-async function runProPlanMicroCall(
-  projectName: string,
-  userPrompt: string,
-): Promise<string> {
+async function runProPlanMicroCall(projectName: string, userPrompt: string): Promise<string> {
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-5-mini",
@@ -264,7 +261,8 @@ async function runProPlanMicroCall(
       messages: [
         {
           role: "system",
-          content: 'You are a web app file planner. Output ONLY valid JSON with no prose: {"files": [{"path": string, "responsibility": string}]}. List every file the app needs with one sentence explaining its responsibility.',
+          content:
+            'You are a web app file planner. Output ONLY valid JSON with no prose: {"files": [{"path": string, "responsibility": string}]}. List every file the app needs with one sentence explaining its responsibility.',
         },
         { role: "user", content: `Project: "${projectName}". Request: ${userPrompt}` },
       ],
@@ -273,9 +271,7 @@ async function runProPlanMicroCall(
     const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
     const parsed = JSON.parse(raw) as { files?: Array<{ path: string; responsibility: string }> };
     if (!Array.isArray(parsed.files) || parsed.files.length === 0) return "";
-    const outline = parsed.files
-      .map((f) => `- ${f.path}: ${f.responsibility}`)
-      .join("\n");
+    const outline = parsed.files.map((f) => `- ${f.path}: ${f.responsibility}`).join("\n");
     return `## Planned File Structure (follow this exactly — do not add or remove files without good reason)\n${outline}`;
   } catch {
     return "";
@@ -300,13 +296,17 @@ function extractStructuralSummary(content: string, mimeType: string): string {
     mimeType === "application/typescript"
   ) {
     // Extract function signatures with parameter names
-    const fnWithParams = [...content.matchAll(
-      /(?:(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)|const\s+(\w+)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*=>)/g,
-    )].slice(0, 10).map((m) => {
-      const name = m[1] ?? m[3] ?? "?";
-      const params = (m[2] ?? m[4] ?? "").replace(/\s+/g, " ").trim();
-      return params ? `${name}(${params})` : `${name}()`;
-    });
+    const fnWithParams = [
+      ...content.matchAll(
+        /(?:(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)|const\s+(\w+)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*=>)/g,
+      ),
+    ]
+      .slice(0, 10)
+      .map((m) => {
+        const name = m[1] ?? m[3] ?? "?";
+        const params = (m[2] ?? m[4] ?? "").replace(/\s+/g, " ").trim();
+        return params ? `${name}(${params})` : `${name}()`;
+      });
     // Extract module-scope const/let declarations
     const constLetMatches = [...content.matchAll(/^(?:export\s+)?(?:const|let)\s+([\w$]+)/gm)]
       .slice(0, 8)
@@ -314,8 +314,12 @@ function extractStructuralSummary(content: string, mimeType: string): string {
     // Extract first JSDoc comment if present
     const jsdocMatch = content.match(/\/\*\*\s*([\s\S]*?)\*\//);
     const jsdocLine = jsdocMatch
-      ? jsdocMatch[1]?.split("\n").find((l) => l.trim().replace(/^\*\s*/, "").length > 0)
-          ?.trim().replace(/^\*\s*/, "").slice(0, 80)
+      ? jsdocMatch[1]
+          ?.split("\n")
+          .find((l) => l.trim().replace(/^\*\s*/, "").length > 0)
+          ?.trim()
+          .replace(/^\*\s*/, "")
+          .slice(0, 80)
       : null;
     const classMatches = content.match(/class\s+\w+/g) ?? [];
     if (fnWithParams.length > 0) lines.push(`Functions: ${fnWithParams.join(", ")}`);
@@ -325,7 +329,8 @@ function extractStructuralSummary(content: string, mimeType: string): string {
   } else if (mimeType === "text/css") {
     const selectorMatches = content.match(/^[.#][\w-]+\s*\{/gm) ?? [];
     const varMatches = content.match(/--[\w-]+:/g) ?? [];
-    if (selectorMatches.length > 0) lines.push(`Selectors: ${selectorMatches.slice(0, 8).join(", ")}`);
+    if (selectorMatches.length > 0)
+      lines.push(`Selectors: ${selectorMatches.slice(0, 8).join(", ")}`);
     if (varMatches.length > 0) lines.push(`CSS vars: ${varMatches.slice(0, 8).join(", ")}`);
   }
 
@@ -340,13 +345,8 @@ function extractStructuralSummary(content: string, mimeType: string): string {
  *
  * Falls back to full content if the total is under 20k chars.
  */
-export function makeCompactManifest(
-  files: BuilderFile[],
-  userPrompt?: string,
-): string {
-  const full = files
-    .map((f) => `--- ${f.path} (${f.mimeType}) ---\n${f.content}`)
-    .join("\n\n");
+export function makeCompactManifest(files: BuilderFile[], userPrompt?: string): string {
+  const full = files.map((f) => `--- ${f.path} (${f.mimeType}) ---\n${f.content}`).join("\n\n");
   if (full.length <= 20000) return full;
 
   const promptLower = (userPrompt ?? "").toLowerCase();
@@ -377,9 +377,10 @@ export function makeCompactManifest(
       if (referencedDirs.has(dir)) {
         const preview = f.content.slice(0, 800);
         const structural = extractStructuralSummary(f.content, f.mimeType);
-        const tail = f.content.length > 800
-          ? `\n…(${f.content.length - 800} more chars)${structural ? ` | Structure: ${structural}` : ""}`
-          : "";
+        const tail =
+          f.content.length > 800
+            ? `\n…(${f.content.length - 800} more chars)${structural ? ` | Structure: ${structural}` : ""}`
+            : "";
         return `--- ${f.path} (${f.mimeType}, ${f.content.length} chars — related dir) ---\n${preview}${tail}`;
       }
 
@@ -419,11 +420,7 @@ function normalizeLine(line: string): string {
 export function applyPatch(content: string, patch: FilePatch): string | null {
   const exactIdx = content.indexOf(patch.find);
   if (exactIdx !== -1) {
-    return (
-      content.slice(0, exactIdx) +
-      patch.replace +
-      content.slice(exactIdx + patch.find.length)
-    );
+    return content.slice(0, exactIdx) + patch.replace + content.slice(exactIdx + patch.find.length);
   }
 
   // Line-based fuzzy fallback — preserves original text outside the matched window
@@ -437,11 +434,9 @@ export function applyPatch(content: string, patch: FilePatch): string | null {
         { path: patch.path, lineOffset: i, findPreview: patch.find.slice(0, 80) },
         "Patch applied via line-based fuzzy match",
       );
-      return [
-        ...contentLines.slice(0, i),
-        patch.replace,
-        ...contentLines.slice(i + findLen),
-      ].join("\n");
+      return [...contentLines.slice(0, i), patch.replace, ...contentLines.slice(i + findLen)].join(
+        "\n",
+      );
     }
   }
 
@@ -575,12 +570,8 @@ export function validateMobileFiles(files: BuilderFile[]): ValidationResult {
   const warnings: string[] = [];
 
   const hasAppJson = files.some((f) => f.path === "app.json");
-  const hasLayout = files.some(
-    (f) => f.path === "app/_layout.tsx" || f.path === "app/_layout.ts",
-  );
-  const hasIndex = files.some(
-    (f) => f.path === "app/index.tsx" || f.path === "app/index.ts",
-  );
+  const hasLayout = files.some((f) => f.path === "app/_layout.tsx" || f.path === "app/_layout.ts");
+  const hasIndex = files.some((f) => f.path === "app/index.tsx" || f.path === "app/index.ts");
   const hasPackageJson = files.some((f) => f.path === "package.json");
 
   if (!hasAppJson) {
@@ -662,7 +653,9 @@ function validateRequiredMeta(f: BuilderFile): string[] {
     );
   }
   // CSP: detect unsafe-inline/unsafe-eval in any existing CSP meta
-  const cspMeta = c.match(/<meta\s[^>]*http-equiv=["']Content-Security-Policy["'][^>]*content=["']([^"']+)["']/i);
+  const cspMeta = c.match(
+    /<meta\s[^>]*http-equiv=["']Content-Security-Policy["'][^>]*content=["']([^"']+)["']/i,
+  );
   if (cspMeta?.[1] && /(unsafe-inline|unsafe-eval)/i.test(cspMeta[1])) {
     warnings.push(
       `${f.path}: CSP contains 'unsafe-inline' or 'unsafe-eval' — these undermine injection protection`,
@@ -702,12 +695,13 @@ function validateNoDangerousPatterns(f: BuilderFile): string[] {
  * Validate a single file and return its critical errors + warnings.
  * Async because CDN reachability requires network I/O.
  */
-async function validateSingleFile(f: BuilderFile): Promise<{ criticalErrors: string[]; warnings: string[] }> {
+async function validateSingleFile(
+  f: BuilderFile,
+): Promise<{ criticalErrors: string[]; warnings: string[] }> {
   const criticalErrors: string[] = [];
   const warnings: string[] = [];
 
-  const isHtml =
-    f.mimeType === "text/html" || f.path.endsWith(".html") || f.path.endsWith(".htm");
+  const isHtml = f.mimeType === "text/html" || f.path.endsWith(".html") || f.path.endsWith(".htm");
   const isJs =
     f.mimeType === "application/javascript" ||
     f.mimeType === "text/javascript" ||
@@ -724,10 +718,8 @@ async function validateSingleFile(f: BuilderFile): Promise<{ criticalErrors: str
       criticalErrors.push(`${f.path}: Missing <head> and <body> — incomplete HTML structure`);
     }
 
-    const openCount = (tag: string) =>
-      (c.match(new RegExp(`<${tag}[\\s>]`, "gi")) ?? []).length;
-    const closeCount = (tag: string) =>
-      (c.match(new RegExp(`</${tag}>`, "gi")) ?? []).length;
+    const openCount = (tag: string) => (c.match(new RegExp(`<${tag}[\\s>]`, "gi")) ?? []).length;
+    const closeCount = (tag: string) => (c.match(new RegExp(`</${tag}>`, "gi")) ?? []).length;
     for (const tag of ["div", "ul", "ol", "table", "form", "script", "style"]) {
       const opens = openCount(tag);
       const closes = closeCount(tag);
@@ -784,14 +776,14 @@ async function validateSingleFile(f: BuilderFile): Promise<{ criticalErrors: str
     }
     const uniqueCdnUrls = [...new Set(cdnUrlsToCheck)].slice(0, 3);
     const reachabilityResults = await Promise.all(
-      uniqueCdnUrls.map((url) =>
-        checkUrlReachable(url).then((ok) => ({ url, ok })),
-      ),
+      uniqueCdnUrls.map((url) => checkUrlReachable(url).then((ok) => ({ url, ok }))),
     );
     for (const { url, ok } of reachabilityResults) {
       if (!ok) {
         // Approved CDN URL is unreachable — escalate to critical so correction pass fires
-        criticalErrors.push(`${f.path}: CDN URL is unreachable in preview (replace with working alternative): ${url.slice(0, 100)}`);
+        criticalErrors.push(
+          `${f.path}: CDN URL is unreachable in preview (replace with working alternative): ${url.slice(0, 100)}`,
+        );
       }
     }
 
@@ -860,9 +852,7 @@ function classifyCriticalErrors(criticalErrors: string[]): CorrectionType {
       e.includes("DOCTYPE") ||
       e.includes("HTML structure"),
   );
-  const hasCdnErrors = criticalErrors.some(
-    (e) => e.includes("CDN") || e.includes("reachable"),
-  );
+  const hasCdnErrors = criticalErrors.some((e) => e.includes("CDN") || e.includes("reachable"));
   if (hasJsErrors) return "js-syntax";
   if (hasHtmlErrors) return "html-structure";
   if (hasCdnErrors) return "cdn-substitution";
@@ -873,10 +863,7 @@ function classifyCriticalErrors(criticalErrors: string[]): CorrectionType {
  * Return a targeted correction instruction based on the error type.
  * Targeted prompts reduce the chance of the correction introducing unrelated regressions.
  */
-function getCorrectionInstruction(
-  type: CorrectionType,
-  criticalErrors: string[],
-): string {
+function getCorrectionInstruction(type: CorrectionType, criticalErrors: string[]): string {
   const errorList = criticalErrors.join("\n");
   switch (type) {
     case "js-syntax":
@@ -896,7 +883,11 @@ function getCorrectionInstruction(
  * charset, viewport, and title even if the model missed them.
  */
 function injectRequiredMetaTags(file: BuilderFile, projectName: string): BuilderFile {
-  if (file.mimeType !== "text/html" && !file.path.endsWith(".html") && !file.path.endsWith(".htm")) {
+  if (
+    file.mimeType !== "text/html" &&
+    !file.path.endsWith(".html") &&
+    !file.path.endsWith(".htm")
+  ) {
     return file;
   }
   let content = file.content;
@@ -961,7 +952,8 @@ export function scanCodeSmells(files: BuilderFile[]): string[] {
           // Heuristic DOM nesting depth check
           let maxDepth = 0;
           let depth = 0;
-          const VOID_TAGS = /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/i;
+          const VOID_TAGS =
+            /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/i;
           for (const match of c.matchAll(/<\/?([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g)) {
             const tag = match[1] ?? "";
             const full = match[0]!;
@@ -1017,13 +1009,8 @@ async function callWithRetry(
       try {
         return JSON.parse(raw) as Record<string, unknown>;
       } catch {
-        logger.warn(
-          { attempt, raw: raw.slice(0, 300), label },
-          "JSON parse failed, will retry",
-        );
-        lastError = new Error(
-          `AI returned malformed JSON on attempt ${attempt + 1}. Retrying…`,
-        );
+        logger.warn({ attempt, raw: raw.slice(0, 300), label }, "JSON parse failed, will retry");
+        lastError = new Error(`AI returned malformed JSON on attempt ${attempt + 1}. Retrying…`);
         if (attempt === 0) {
           messages = [
             ...messages,
@@ -1040,8 +1027,7 @@ async function callWithRetry(
         }
       }
     } catch (apiErr) {
-      lastError =
-        apiErr instanceof Error ? apiErr : new Error(String(apiErr));
+      lastError = apiErr instanceof Error ? apiErr : new Error(String(apiErr));
       logger.error({ err: apiErr, attempt, label }, "OpenAI API call failed");
       if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
     }
@@ -1088,7 +1074,8 @@ async function runCorrectionPass(
     const correctedSubset: BuilderFile[] = rawFiles
       .filter(
         (f): f is { path: string; content: string; mimeType?: string } =>
-          typeof f === "object" && f !== null &&
+          typeof f === "object" &&
+          f !== null &&
           typeof (f as { path?: unknown }).path === "string" &&
           typeof (f as { content?: unknown }).content === "string",
       )
@@ -1109,7 +1096,10 @@ async function runCorrectionPass(
 
     // Hard invariant for builds: merged set must still contain index.html
     if (requireIndexHtml && !mergedFiles.some((f) => f.path === "index.html")) {
-      logger.warn({ label }, "Correction pass did not preserve index.html — falling back to original");
+      logger.warn(
+        { label },
+        "Correction pass did not preserve index.html — falling back to original",
+      );
       return null;
     }
 
@@ -1120,7 +1110,10 @@ async function runCorrectionPass(
       return mergedFiles;
     }
 
-    logger.warn({ label, stillFailing: revalidation.criticalErrors }, "Correction pass output still has critical errors — falling back to original");
+    logger.warn(
+      { label, stillFailing: revalidation.criticalErrors },
+      "Correction pass output still has critical errors — falling back to original",
+    );
     return null;
   } catch (err) {
     logger.warn({ err, label }, "Correction pass threw — falling back to original");
@@ -1157,7 +1150,16 @@ export async function runBuildPipeline(args: {
   integrationContext?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<BuilderResult> {
-  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext, integrationContext, onEvent } = args;
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    conversationHistory,
+    knowledgeContext,
+    integrationContext,
+    onEvent,
+  } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: BUILD_SYSTEM_PROMPT },
@@ -1249,10 +1251,24 @@ export async function runBuildPipeline(args: {
   let postCorrectionWarnings: string[] = [];
 
   if (!validation.passed) {
-    logger.warn({ criticalErrors: validation.criticalErrors }, "Build validation found critical errors — running correction pass");
-    await onEvent?.("validating_output", `Validation found ${validation.criticalErrors.length} issue(s) — running correction…`);
+    logger.warn(
+      { criticalErrors: validation.criticalErrors },
+      "Build validation found critical errors — running correction pass",
+    );
+    await onEvent?.(
+      "validating_output",
+      `Validation found ${validation.criticalErrors.length} issue(s) — running correction…`,
+    );
 
-    const corrected = await runCorrectionPass(messages, parsed, validation.criticalErrors, files, agentMode, "build-correction", true);
+    const corrected = await runCorrectionPass(
+      messages,
+      parsed,
+      validation.criticalErrors,
+      files,
+      agentMode,
+      "build-correction",
+      true,
+    );
     if (corrected !== null) {
       files = corrected;
       // Re-inject meta tags into corrected files too
@@ -1314,7 +1330,17 @@ export async function runRefinePipeline(args: {
   report: TaskReport;
   assistantSummary: string;
 }> {
-  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext, integrationContext, onEvent } = args;
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    existingFiles,
+    conversationHistory,
+    knowledgeContext,
+    integrationContext,
+    onEvent,
+  } = args;
 
   const fileManifest = makeCompactManifest(existingFiles, userPrompt);
 
@@ -1384,7 +1410,10 @@ export async function runRefinePipeline(args: {
   const patchWarnings: string[] = [];
 
   if (rawPatches.length > 0) {
-    const { patched: patchedContents, failed: failedPaths } = applyPatches(existingFiles, rawPatches);
+    const { patched: patchedContents, failed: failedPaths } = applyPatches(
+      existingFiles,
+      rawPatches,
+    );
 
     // Merge successfully patched files (full replacement wins if also present)
     for (const [path, patchedContent] of patchedContents) {
@@ -1403,8 +1432,13 @@ export async function runRefinePipeline(args: {
     // otherwise keep original content (no change) and warn.
     for (const failedPath of failedPaths) {
       if (!fullReplacementPaths.has(failedPath)) {
-        patchWarnings.push(`Patch could not be applied to ${failedPath} — the file was not changed. Try rephrasing the request.`);
-        logger.warn({ failedPath }, "Patch failed and no full replacement available — file unchanged");
+        patchWarnings.push(
+          `Patch could not be applied to ${failedPath} — the file was not changed. Try rephrasing the request.`,
+        );
+        logger.warn(
+          { failedPath },
+          "Patch failed and no full replacement available — file unchanged",
+        );
       }
     }
   }
@@ -1428,11 +1462,25 @@ export async function runRefinePipeline(args: {
     const validation = await validateFiles(filesToValidate);
 
     if (!validation.passed) {
-      logger.warn({ criticalErrors: validation.criticalErrors }, "Refine validation found critical errors — running correction pass");
-      await onEvent?.("validating_output", `Validation found ${validation.criticalErrors.length} issue(s) — running correction…`);
+      logger.warn(
+        { criticalErrors: validation.criticalErrors },
+        "Refine validation found critical errors — running correction pass",
+      );
+      await onEvent?.(
+        "validating_output",
+        `Validation found ${validation.criticalErrors.length} issue(s) — running correction…`,
+      );
 
       // Pass changedFiles as currentFiles — runCorrectionPass merges the corrected subset in
-      const corrected = await runCorrectionPass(messages, parsed, validation.criticalErrors, changedFiles, agentMode, "refine-correction", false);
+      const corrected = await runCorrectionPass(
+        messages,
+        parsed,
+        validation.criticalErrors,
+        changedFiles,
+        agentMode,
+        "refine-correction",
+        false,
+      );
       if (corrected !== null) {
         // corrected is already the fully merged set — replace changedFiles in-place
         changedFiles.splice(0, changedFiles.length, ...corrected);
@@ -1456,15 +1504,11 @@ export async function runRefinePipeline(args: {
   }
 
   const removedPaths = Array.isArray(parsed.filesRemoved)
-    ? parsed.filesRemoved
-        .filter((p): p is string => typeof p === "string")
-        .map(normalizePath)
+    ? parsed.filesRemoved.filter((p): p is string => typeof p === "string").map(normalizePath)
     : [];
 
   const summary =
-    typeof parsed.summary === "string"
-      ? parsed.summary
-      : `Updated ${changedFiles.length} file(s).`;
+    typeof parsed.summary === "string" ? parsed.summary : `Updated ${changedFiles.length} file(s).`;
 
   const aiWarnings = Array.isArray(parsed.warnings)
     ? parsed.warnings.filter((w): w is string => typeof w === "string")
@@ -1480,12 +1524,8 @@ export async function runRefinePipeline(args: {
       : "Refresh the Preview tab to see the change.";
 
   const existingPaths = new Set(existingFiles.map((f) => f.path));
-  const filesCreated = changedFiles
-    .filter((f) => !existingPaths.has(f.path))
-    .map((f) => f.path);
-  const filesChanged = changedFiles
-    .filter((f) => existingPaths.has(f.path))
-    .map((f) => f.path);
+  const filesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
+  const filesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
 
   const report: TaskReport = {
     userRequest: userPrompt,
@@ -1525,7 +1565,19 @@ export const MOBILE_MODULES: MobileModule[] = [
     name: "Authentication (Clerk)",
     description: "User sign-in, sign-up, and session management via Clerk Expo SDK.",
     requiredSecrets: ["CLERK_PUBLISHABLE_KEY"],
-    intentKeywords: ["login", "sign in", "sign up", "signup", "auth", "authentication", "user account", "password", "register", "logout", "session"],
+    intentKeywords: [
+      "login",
+      "sign in",
+      "sign up",
+      "signup",
+      "auth",
+      "authentication",
+      "user account",
+      "password",
+      "register",
+      "logout",
+      "session",
+    ],
     packageDependencies: ["@clerk/clerk-expo", "expo-secure-store"],
     systemPromptChunk: `AUTHENTICATION MODULE (Clerk):
 - Install: @clerk/clerk-expo, expo-secure-store
@@ -1544,7 +1596,20 @@ export const MOBILE_MODULES: MobileModule[] = [
     name: "In-App Purchases (RevenueCat)",
     description: "Subscription paywalls, purchase flows, and entitlement checks via RevenueCat.",
     requiredSecrets: ["REVENUECAT_API_KEY"],
-    intentKeywords: ["subscription", "payment", "purchase", "paywall", "premium", "pro plan", "billing", "buy", "revenuecat", "in-app purchase", "monetize", "pricing"],
+    intentKeywords: [
+      "subscription",
+      "payment",
+      "purchase",
+      "paywall",
+      "premium",
+      "pro plan",
+      "billing",
+      "buy",
+      "revenuecat",
+      "in-app purchase",
+      "monetize",
+      "pricing",
+    ],
     packageDependencies: ["@revenuecat/purchases-react-native"],
     systemPromptChunk: `PAYMENTS MODULE (RevenueCat):
 - Install: @revenuecat/purchases-react-native
@@ -1566,7 +1631,17 @@ export const MOBILE_MODULES: MobileModule[] = [
     name: "Push Notifications (Expo Notifications)",
     description: "FCM and APNS push notifications with Expo Notifications SDK.",
     requiredSecrets: [],
-    intentKeywords: ["push notification", "notification", "alert", "notify", "fcm", "apns", "push", "remind", "badge"],
+    intentKeywords: [
+      "push notification",
+      "notification",
+      "alert",
+      "notify",
+      "fcm",
+      "apns",
+      "push",
+      "remind",
+      "badge",
+    ],
     packageDependencies: ["expo-notifications", "expo-device"],
     systemPromptChunk: `PUSH NOTIFICATIONS MODULE (Expo Notifications):
 - Install: expo-notifications, expo-device
@@ -1591,8 +1666,24 @@ export const MOBILE_MODULES: MobileModule[] = [
     name: "Real-time Database (Supabase)",
     description: "Typed queries, real-time subscriptions, and Row Level Security via Supabase.",
     requiredSecrets: ["SUPABASE_URL", "SUPABASE_ANON_KEY"],
-    intentKeywords: ["real-time", "realtime", "database", "supabase", "live data", "feed", "subscribe", "sync", "backend", "postgres", "data"],
-    packageDependencies: ["@supabase/supabase-js", "@react-native-async-storage/async-storage", "react-native-url-polyfill"],
+    intentKeywords: [
+      "real-time",
+      "realtime",
+      "database",
+      "supabase",
+      "live data",
+      "feed",
+      "subscribe",
+      "sync",
+      "backend",
+      "postgres",
+      "data",
+    ],
+    packageDependencies: [
+      "@supabase/supabase-js",
+      "@react-native-async-storage/async-storage",
+      "react-native-url-polyfill",
+    ],
     systemPromptChunk: `REAL-TIME DATABASE MODULE (Supabase):
 - Install: @supabase/supabase-js, @react-native-async-storage/async-storage, react-native-url-polyfill
 - Create lib/supabase.ts:
@@ -1622,7 +1713,19 @@ export const MOBILE_MODULES: MobileModule[] = [
     name: "Analytics (Amplitude)",
     description: "Event tracking wired to key user actions via Amplitude React Native SDK.",
     requiredSecrets: ["AMPLITUDE_API_KEY"],
-    intentKeywords: ["analytics", "tracking", "events", "amplitude", "posthog", "mixpanel", "user behavior", "conversion", "funnel", "metrics", "track"],
+    intentKeywords: [
+      "analytics",
+      "tracking",
+      "events",
+      "amplitude",
+      "posthog",
+      "mixpanel",
+      "user behavior",
+      "conversion",
+      "funnel",
+      "metrics",
+      "track",
+    ],
     packageDependencies: ["@amplitude/analytics-react-native", "expo-application"],
     systemPromptChunk: `ANALYTICS MODULE (Amplitude):
 - Install: @amplitude/analytics-react-native, expo-application
@@ -1643,7 +1746,18 @@ export const MOBILE_MODULES: MobileModule[] = [
     name: "Deep Links & Universal Links (Expo Linking)",
     description: "Share links, invites, and referral flows using Expo Linking and app schemes.",
     requiredSecrets: [],
-    intentKeywords: ["deep link", "universal link", "share link", "invite", "referral", "share", "open url", "linking", "dynamic link", "branch"],
+    intentKeywords: [
+      "deep link",
+      "universal link",
+      "share link",
+      "invite",
+      "referral",
+      "share",
+      "open url",
+      "linking",
+      "dynamic link",
+      "branch",
+    ],
     packageDependencies: ["expo-linking"],
     systemPromptChunk: `DEEP LINKS MODULE (Expo Linking):
 - Install: expo-linking (included with Expo SDK)
@@ -1664,7 +1778,18 @@ export const MOBILE_MODULES: MobileModule[] = [
     name: "Offline Support (AsyncStorage + Expo SQLite)",
     description: "AsyncStorage caching and SQLite for offline-first data persistence.",
     requiredSecrets: [],
-    intentKeywords: ["offline", "cache", "works offline", "local storage", "sqlite", "no internet", "persist", "sync", "local first", "asyncstorage"],
+    intentKeywords: [
+      "offline",
+      "cache",
+      "works offline",
+      "local storage",
+      "sqlite",
+      "no internet",
+      "persist",
+      "sync",
+      "local first",
+      "asyncstorage",
+    ],
     packageDependencies: ["@react-native-async-storage/async-storage", "expo-sqlite"],
     systemPromptChunk: `OFFLINE SUPPORT MODULE (AsyncStorage + Expo SQLite):
 - Install: @react-native-async-storage/async-storage, expo-sqlite
@@ -1689,7 +1814,21 @@ export const MOBILE_MODULES: MobileModule[] = [
     name: "Camera & Media (Expo Camera + ImagePicker)",
     description: "Camera capture, photo/video picking, and media upload flows.",
     requiredSecrets: [],
-    intentKeywords: ["camera", "photo", "image", "video", "media", "gallery", "picture", "upload photo", "take photo", "scan", "qr", "barcode", "capture"],
+    intentKeywords: [
+      "camera",
+      "photo",
+      "image",
+      "video",
+      "media",
+      "gallery",
+      "picture",
+      "upload photo",
+      "take photo",
+      "scan",
+      "qr",
+      "barcode",
+      "capture",
+    ],
     packageDependencies: ["expo-camera", "expo-image-picker", "expo-media-library"],
     systemPromptChunk: `CAMERA & MEDIA MODULE (Expo Camera + ImagePicker):
 - Install: expo-camera, expo-image-picker, expo-media-library
@@ -1718,8 +1857,17 @@ export const MOBILE_MODULES: MobileModule[] = [
  * keyword matching if the AI call fails.
  */
 const REMOVAL_KEYWORDS = [
-  "remove", "disable", "uninstall", "strip", "delete", "turn off",
-  "get rid of", "take out", "drop", "clean up", "no longer need",
+  "remove",
+  "disable",
+  "uninstall",
+  "strip",
+  "delete",
+  "turn off",
+  "get rid of",
+  "take out",
+  "drop",
+  "clean up",
+  "no longer need",
 ];
 
 function isRemovalIntent(prompt: string): boolean {
@@ -1735,9 +1883,9 @@ export async function detectMobileModules(
   const isRemoving = isRemovalIntent(promptLower);
 
   // Fast keyword pass — collect candidates
-  const keywordMatches = MOBILE_MODULES
-    .filter((m) => m.intentKeywords.some((kw) => promptLower.includes(kw)))
-    .map((m) => m.id);
+  const keywordMatches = MOBILE_MODULES.filter((m) =>
+    m.intentKeywords.some((kw) => promptLower.includes(kw)),
+  ).map((m) => m.id);
 
   // If removal intent: matched modules are being removed, not added
   if (isRemoving && keywordMatches.length > 0) {
@@ -1756,7 +1904,9 @@ export async function detectMobileModules(
   }
 
   try {
-    const moduleList = MOBILE_MODULES.map((m) => `${m.id}: ${m.name} — ${m.description}`).join("\n");
+    const moduleList = MOBILE_MODULES.map((m) => `${m.id}: ${m.name} — ${m.description}`).join(
+      "\n",
+    );
     const response = await openai.chat.completions.create({
       model: "gpt-5-mini",
       max_completion_tokens: 200,
@@ -1775,7 +1925,13 @@ export async function detectMobileModules(
     const aiAdd = Array.isArray(parsed.add) ? parsed.add.filter(validId) : [];
     const aiRemove = Array.isArray(parsed.remove) ? parsed.remove.filter(validId) : [];
     return {
-      toAdd: [...new Set([...keywordMatches, ...aiAdd, ...existingModuleIds.filter((id) => !aiRemove.includes(id))])],
+      toAdd: [
+        ...new Set([
+          ...keywordMatches,
+          ...aiAdd,
+          ...existingModuleIds.filter((id) => !aiRemove.includes(id)),
+        ]),
+      ],
       toRemove: [...new Set(aiRemove)],
     };
   } catch (err) {
@@ -1822,16 +1978,16 @@ function buildModulePromptChunks(
 
   if (detected.toAdd.length > 0) {
     const hasClerkKey = configuredSecretNames?.includes("CLERK_PUBLISHABLE_KEY") ?? false;
-    const chunks = MOBILE_MODULES
-      .filter((m) => detected.toAdd.includes(m.id))
-      .map((m) => {
-        if (m.id === "auth") {
-          return hasClerkKey ? m.systemPromptChunk : AUTH_EXPO_AUTH_SESSION_CHUNK;
-        }
-        return m.systemPromptChunk;
-      });
+    const chunks = MOBILE_MODULES.filter((m) => detected.toAdd.includes(m.id)).map((m) => {
+      if (m.id === "auth") {
+        return hasClerkKey ? m.systemPromptChunk : AUTH_EXPO_AUTH_SESSION_CHUNK;
+      }
+      return m.systemPromptChunk;
+    });
     if (chunks.length > 0) {
-      parts.push(`ACTIVE POWER MODULES — wire these into the generated app:\n\n${chunks.join("\n\n")}`);
+      parts.push(
+        `ACTIVE POWER MODULES — wire these into the generated app:\n\n${chunks.join("\n\n")}`,
+      );
     }
   }
 
@@ -1841,9 +1997,9 @@ function buildModulePromptChunks(
       .join(", ");
     parts.push(
       `MODULES TO REMOVE — the user explicitly asked to remove these integrations:\n` +
-      `${removeNames}\n` +
-      `Delete all related code, imports, providers, and dependencies for these modules. ` +
-      `Do NOT re-add or mention them.`,
+        `${removeNames}\n` +
+        `Delete all related code, imports, providers, and dependencies for these modules. ` +
+        `Do NOT re-add or mention them.`,
     );
   }
 
@@ -1943,13 +2099,12 @@ function autoCorrectPackageJson(files: BuilderFile[], detectedModuleIds: string[
   const updatedPkg = { ...pkg, dependencies: updatedDeps };
   const updatedContent = JSON.stringify(updatedPkg, null, 2);
 
-  logger.info({ added: Object.keys(requiredPackages) }, "Auto-corrected package.json: added module dependencies");
-
-  return files.map((f) =>
-    f.path === "package.json"
-      ? { ...f, content: updatedContent }
-      : f,
+  logger.info(
+    { added: Object.keys(requiredPackages) },
+    "Auto-corrected package.json: added module dependencies",
   );
+
+  return files.map((f) => (f.path === "package.json" ? { ...f, content: updatedContent } : f));
 }
 
 const MOBILE_PREVIEW_NOTE = `MOBILE WEB PREVIEW (index.html) — REQUIRED:
@@ -2086,13 +2241,25 @@ export async function runMobileBuildPipeline(args: {
   configuredSecretNames?: string[];
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<MobileBuilderResult> {
-  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext, activeModuleIds, configuredSecretNames, onEvent } = args;
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    conversationHistory,
+    knowledgeContext,
+    activeModuleIds,
+    configuredSecretNames,
+    onEvent,
+  } = args;
 
   // Intent detection — classify which power modules are needed
   await onEvent?.("planning", "Detecting required power modules…");
   const detectedModules = await detectMobileModules(userPrompt, activeModuleIds ?? []);
   if (detectedModules.toAdd.length > 0) {
-    const moduleNames = detectedModules.toAdd.map((id) => MOBILE_MODULES.find((m) => m.id === id)?.name ?? id).join(", ");
+    const moduleNames = detectedModules.toAdd
+      .map((id) => MOBILE_MODULES.find((m) => m.id === id)?.name ?? id)
+      .join(", ");
     await onEvent?.("planning", `Power modules detected: ${moduleNames}`);
   }
 
@@ -2159,8 +2326,14 @@ export async function runMobileBuildPipeline(args: {
   const mobileValidation = validateMobileFiles(files);
 
   if (!mobileValidation.passed) {
-    logger.warn({ criticalErrors: mobileValidation.criticalErrors }, "Mobile build validation found critical errors — running correction pass");
-    await onEvent?.("validating_output", `Mobile structure validation: ${mobileValidation.criticalErrors.length} issue(s) — running correction…`);
+    logger.warn(
+      { criticalErrors: mobileValidation.criticalErrors },
+      "Mobile build validation found critical errors — running correction pass",
+    );
+    await onEvent?.(
+      "validating_output",
+      `Mobile structure validation: ${mobileValidation.criticalErrors.length} issue(s) — running correction…`,
+    );
 
     const correctionMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
       ...messages,
@@ -2172,12 +2345,18 @@ export async function runMobileBuildPipeline(args: {
     ];
 
     try {
-      const corrected = await callWithRetry(correctionMessages, modelFor(agentMode), 32000, "mobile-build-correction");
+      const corrected = await callWithRetry(
+        correctionMessages,
+        modelFor(agentMode),
+        32000,
+        "mobile-build-correction",
+      );
       const correctedRaw = Array.isArray(corrected.files) ? corrected.files : [];
       const correctedFiles: BuilderFile[] = correctedRaw
         .filter(
           (f): f is { path: string; content: string; mimeType?: string } =>
-            typeof f === "object" && f !== null &&
+            typeof f === "object" &&
+            f !== null &&
             typeof (f as { path?: unknown }).path === "string" &&
             typeof (f as { content?: unknown }).content === "string",
         )
@@ -2264,7 +2443,18 @@ export async function runMobileRefinePipeline(args: {
   assistantSummary: string;
   detectedModuleIds: string[];
 }> {
-  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext, activeModuleIds, configuredSecretNames, onEvent } = args;
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    existingFiles,
+    conversationHistory,
+    knowledgeContext,
+    activeModuleIds,
+    configuredSecretNames,
+    onEvent,
+  } = args;
 
   // Intent detection — detect modules to add or remove for this refine request
   const detectedModules = await detectMobileModules(userPrompt, activeModuleIds ?? []);
@@ -2275,7 +2465,10 @@ export async function runMobileRefinePipeline(args: {
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: MOBILE_REFINE_SYSTEM_PROMPT },
-    { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}` },
+    {
+      role: "system",
+      content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}`,
+    },
   ];
 
   if (knowledgeContext) {
@@ -2318,9 +2511,7 @@ export async function runMobileRefinePipeline(args: {
     }));
 
   const removedPaths = Array.isArray(parsed.filesRemoved)
-    ? parsed.filesRemoved
-        .filter((p): p is string => typeof p === "string")
-        .map(normalizePath)
+    ? parsed.filesRemoved.filter((p): p is string => typeof p === "string").map(normalizePath)
     : [];
 
   const summary =
@@ -2354,7 +2545,8 @@ export async function runMobileRefinePipeline(args: {
     const allFiles = [...existingFiles];
     for (const cf of changedFiles) {
       const idx = allFiles.findIndex((f) => f.path === cf.path);
-      if (idx >= 0) allFiles[idx] = cf; else allFiles.push(cf);
+      if (idx >= 0) allFiles[idx] = cf;
+      else allFiles.push(cf);
     }
     const corrected = autoCorrectPackageJson(allFiles, detectedModuleIds);
     const correctedPkg = corrected.find((f) => f.path === "package.json");
@@ -2395,7 +2587,10 @@ function generateMobileFallbackPreview(
 ): string {
   const screenList = screens
     .slice(0, 6)
-    .map((s) => `<li class="py-2 px-3 bg-gray-800 rounded-lg text-sm text-gray-200">${s.name ?? s.route ?? "Screen"}</li>`)
+    .map(
+      (s) =>
+        `<li class="py-2 px-3 bg-gray-800 rounded-lg text-sm text-gray-200">${s.name ?? s.route ?? "Screen"}</li>`,
+    )
     .join("");
 
   return `<!DOCTYPE html>
@@ -2417,11 +2612,15 @@ function generateMobileFallbackPreview(
           <h1 class="text-xl font-bold text-white">${projectName}</h1>
           <p class="text-sm text-gray-400 mt-1">Expo/React Native App</p>
         </div>
-        ${screens.length > 0 ? `
+        ${
+          screens.length > 0
+            ? `
         <div>
           <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Screens</p>
           <ul class="space-y-2">${screenList}</ul>
-        </div>` : ""}
+        </div>`
+            : ""
+        }
         <div class="bg-blue-900/30 border border-blue-700/40 rounded-xl p-4 text-center">
           <p class="text-sm text-blue-300 font-medium">Generating your app…</p>
           <p class="text-xs text-gray-500 mt-1">The AI is building your Expo project files. The preview will update after the first build.</p>
@@ -2478,7 +2677,8 @@ export async function runPlanPipeline(args: {
       });
       messages.push({
         role: "user",
-        content: "Your plan is missing required fields. Please regenerate with ALL fields: complexityScore (integer 1-10), recommendedMode (lite/eco/power/pro), sitemap (array of objects with name/route/purpose), uxNotes (object keyed by page name), estimatedBuildSeconds (integer). Output ONLY valid JSON.",
+        content:
+          "Your plan is missing required fields. Please regenerate with ALL fields: complexityScore (integer 1-10), recommendedMode (lite/eco/power/pro), sitemap (array of objects with name/route/purpose), uxNotes (object keyed by page name), estimatedBuildSeconds (integer). Output ONLY valid JSON.",
       });
       plan = await callWithRetry(messages, modelFor(agentMode), 8000, "plan-retry");
     }
@@ -2511,13 +2711,10 @@ export function guessMime(path: string): string {
   const lower = path.toLowerCase();
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html";
   if (lower.endsWith(".css")) return "text/css";
-  if (lower.endsWith(".js") || lower.endsWith(".mjs"))
-    return "application/javascript";
-  if (lower.endsWith(".ts") || lower.endsWith(".tsx"))
-    return "application/typescript";
+  if (lower.endsWith(".js") || lower.endsWith(".mjs")) return "application/javascript";
+  if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "application/typescript";
   if (lower.endsWith(".json")) return "application/json";
   if (lower.endsWith(".svg")) return "image/svg+xml";
   if (lower.endsWith(".txt") || lower.endsWith(".md")) return "text/plain";
   return "text/plain";
 }
-

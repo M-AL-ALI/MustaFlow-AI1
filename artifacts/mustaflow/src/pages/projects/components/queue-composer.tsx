@@ -1,5 +1,17 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Plus, X, GripVertical, Trash2, Sparkles, Paperclip, Mic, Paintbrush2, CheckSquare, ServerCog } from "lucide-react";
+import {
+  Send,
+  Plus,
+  X,
+  GripVertical,
+  Trash2,
+  Sparkles,
+  Paperclip,
+  Mic,
+  Paintbrush2,
+  CheckSquare,
+  ServerCog,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -52,12 +64,15 @@ export function QueueComposer({
     }
   }, [promptValue]);
 
-  const updateRow = useCallback((id: string, text: string) => {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, text } : r)));
-    if (rows.length === 1 && onPromptValueChange) {
-      onPromptValueChange(text);
-    }
-  }, [rows.length, onPromptValueChange]);
+  const updateRow = useCallback(
+    (id: string, text: string) => {
+      setRows((prev) => prev.map((r) => (r.id === id ? { ...r, text } : r)));
+      if (rows.length === 1 && onPromptValueChange) {
+        onPromptValueChange(text);
+      }
+    },
+    [rows.length, onPromptValueChange],
+  );
 
   const addRow = useCallback(() => {
     const newId = crypto.randomUUID();
@@ -219,8 +234,8 @@ export function QueueComposer({
                     ? planMode
                       ? "Describe your app — I'll create a plan first…"
                       : isMultiRow
-                      ? "Task 1…"
-                      : "Describe what to build or change…"
+                        ? "Task 1…"
+                        : "Describe what to build or change…"
                     : `Task ${idx + 1}…`
                 }
                 rows={isMultiRow ? 1 : 2}
@@ -258,13 +273,22 @@ export function QueueComposer({
           <div className="flex items-center gap-2 px-3 py-1.5">
             {!isMultiRow && (
               <>
-                <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Attach file">
+                <button
+                  className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
+                  title="Attach file"
+                >
                   <Paperclip className="h-3.5 w-3.5" />
                 </button>
-                <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Attach design">
+                <button
+                  className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
+                  title="Attach design"
+                >
                   <Paintbrush2 className="h-3.5 w-3.5" />
                 </button>
-                <button className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors" title="Voice">
+                <button
+                  className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
+                  title="Voice"
+                >
                   <Mic className="h-3.5 w-3.5" />
                 </button>
                 <button
@@ -300,9 +324,7 @@ export function QueueComposer({
                 className="h-8 px-3 bg-primary rounded-xl flex items-center gap-1.5 shadow-md shadow-primary/30 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground"
               >
                 <Send style={{ width: 14, height: 14 }} />
-                {isMultiRow && (
-                  <span className="text-[10px] font-bold">{rows.length}</span>
-                )}
+                {isMultiRow && <span className="text-[10px] font-bold">{rows.length}</span>}
               </button>
             </div>
           </div>

@@ -33,8 +33,7 @@ router.get("/knowledge", async (req, res): Promise<void> => {
     200,
     typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) || 20 : 20,
   );
-  const offset =
-    typeof req.query.offset === "string" ? parseInt(req.query.offset, 10) || 0 : 0;
+  const offset = typeof req.query.offset === "string" ? parseInt(req.query.offset, 10) || 0 : 0;
 
   let projectCondition: SQL;
 
@@ -170,10 +169,8 @@ router.patch("/knowledge/:id", async (req, res): Promise<void> => {
   }> = {};
 
   if ("annotation" in body) updates.annotation = body.annotation ?? null;
-  if (typeof body.approvedForReuse === "boolean")
-    updates.approvedForReuse = body.approvedForReuse;
-  if (typeof body.archived === "boolean")
-    updates.archivedAt = body.archived ? new Date() : null;
+  if (typeof body.approvedForReuse === "boolean") updates.approvedForReuse = body.approvedForReuse;
+  if (typeof body.archived === "boolean") updates.archivedAt = body.archived ? new Date() : null;
 
   if (Object.keys(updates).length === 0) {
     res.status(400).json({ error: "No valid fields to update" });

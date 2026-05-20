@@ -54,12 +54,20 @@ const SIDEBAR_ITEMS = [
   { icon: Settings, label: "Settings" },
 ];
 
-const TABS = ["Preview", "Canvas", "Tools & Files", "Publishing", "Logs", "Analytics", "Domains", "Manage"];
+const TABS = [
+  "Preview",
+  "Canvas",
+  "Tools & Files",
+  "Publishing",
+  "Logs",
+  "Analytics",
+  "Domains",
+  "Manage",
+];
 
 export function ProfessionalWorkspace() {
   return (
     <div className="flex h-screen bg-zinc-950 text-zinc-100 font-sans overflow-hidden select-none">
-
       {/* Global icon nav */}
       <div className="w-12 bg-zinc-900 border-r border-zinc-800 flex flex-col items-center py-3 gap-1 shrink-0 z-20">
         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center mb-3 shadow-lg">
@@ -91,7 +99,9 @@ export function ProfessionalWorkspace() {
               <div className="text-xs font-semibold truncate text-zinc-100">Towing Co Landing</div>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-[10px] text-zinc-500">web</span>
-                <span className="text-[10px] px-1.5 py-px rounded-full bg-violet-500/20 text-violet-400 font-medium">building</span>
+                <span className="text-[10px] px-1.5 py-px rounded-full bg-violet-500/20 text-violet-400 font-medium">
+                  building
+                </span>
               </div>
             </div>
           </div>
@@ -115,7 +125,6 @@ export function ProfessionalWorkspace() {
 
       {/* Main area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-
         {/* Tab bar */}
         <div className="bg-zinc-900/50 border-b border-zinc-800 px-2 pt-2 flex items-end gap-1 shrink-0">
           {TABS.map((tab, i) => (
@@ -151,11 +160,15 @@ export function ProfessionalWorkspace() {
         {/* Preview area */}
         <div className="flex-1 bg-zinc-950 relative overflow-hidden flex items-center justify-center">
           {/* Checkerboard bg */}
-          <div className="absolute inset-0 opacity-[0.03]" style={{
-            backgroundImage: "linear-gradient(45deg, #fff 25%, transparent 25%), linear-gradient(-45deg, #fff 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #fff 75%), linear-gradient(-45deg, transparent 75%, #fff 75%)",
-            backgroundSize: "20px 20px",
-            backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
-          }} />
+          <div
+            className="absolute inset-0 opacity-[0.03]"
+            style={{
+              backgroundImage:
+                "linear-gradient(45deg, #fff 25%, transparent 25%), linear-gradient(-45deg, #fff 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #fff 75%), linear-gradient(-45deg, transparent 75%, #fff 75%)",
+              backgroundSize: "20px 20px",
+              backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
+            }}
+          />
           {/* Simulated preview frame */}
           <div className="relative z-10 w-[640px] bg-white rounded-lg shadow-2xl overflow-hidden border border-zinc-700">
             <div className="h-7 bg-zinc-100 flex items-center gap-1.5 px-3 border-b border-zinc-200">
@@ -188,7 +201,6 @@ export function ProfessionalWorkspace() {
 
         {/* Activity stream + Chat — fixed bottom */}
         <div className="shrink-0 border-t border-zinc-800 bg-zinc-900/60 backdrop-blur">
-
           {/* Activity stream */}
           <div className="border-b border-zinc-800/60 px-4 py-2">
             <div className="flex items-center gap-2 mb-1.5">
@@ -212,13 +224,15 @@ export function ProfessionalWorkspace() {
                 const isActive = !ev.done;
                 return (
                   <div key={i} className="flex items-center gap-1.5 shrink-0">
-                    <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] ${
-                      isActive
-                        ? "bg-violet-500/15 text-violet-300 border border-violet-500/30"
-                        : ev.done
-                        ? "bg-zinc-800/50 text-zinc-500"
-                        : "bg-zinc-800/50 text-zinc-500"
-                    }`}>
+                    <div
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] ${
+                        isActive
+                          ? "bg-violet-500/15 text-violet-300 border border-violet-500/30"
+                          : ev.done
+                            ? "bg-zinc-800/50 text-zinc-500"
+                            : "bg-zinc-800/50 text-zinc-500"
+                      }`}
+                    >
                       <Icon className={`h-3 w-3 ${isActive ? "animate-pulse" : ""}`} />
                       <span className="whitespace-nowrap">{ev.msg}</span>
                       {ev.done && <CheckCircle2 className="h-3 w-3 text-green-500/70" />}

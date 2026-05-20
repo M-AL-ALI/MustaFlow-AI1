@@ -53,7 +53,8 @@ const PLATFORM_CHECKS: LaunchCheck[] = [
     id: "secret_masking",
     label: "Secret value masking",
     status: "pass",
-    message: "Secret values are never returned by the API — only a masked preview (e.g. ••••••••abcd) is shown.",
+    message:
+      "Secret values are never returned by the API — only a masked preview (e.g. ••••••••abcd) is shown.",
   },
   {
     id: "rate_limits",
@@ -65,13 +66,15 @@ const PLATFORM_CHECKS: LaunchCheck[] = [
     id: "sandbox_preview",
     label: "Preview sandbox isolation",
     status: "pass",
-    message: "Generated app previews run in a sandboxed iframe (allow-scripts allow-forms allow-popups). allow-same-origin is removed.",
+    message:
+      "Generated app previews run in a sandboxed iframe (allow-scripts allow-forms allow-popups). allow-same-origin is removed.",
   },
   {
     id: "soft_delete",
     label: "Soft-delete data protection",
     status: "pass",
-    message: "Deleted projects are soft-deleted (deleted_at set). Data is never hard-deleted automatically.",
+    message:
+      "Deleted projects are soft-deleted (deleted_at set). Data is never hard-deleted automatically.",
   },
 ];
 
@@ -102,7 +105,9 @@ export default function SecurityPage() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+  }, []);
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
@@ -202,9 +207,9 @@ export default function SecurityPage() {
           <div>
             <p className="font-medium text-foreground mb-1">Bootstrap first admin user</p>
             <p className="text-muted-foreground text-xs mb-1.5">
-              Set the <code className="bg-muted px-1 py-0.5 rounded">ADMIN_USER_IDS</code> environment
-              variable to a comma-separated list of Clerk user IDs. Find your Clerk user ID in the
-              Clerk dashboard or from the session.
+              Set the <code className="bg-muted px-1 py-0.5 rounded">ADMIN_USER_IDS</code>{" "}
+              environment variable to a comma-separated list of Clerk user IDs. Find your Clerk user
+              ID in the Clerk dashboard or from the session.
             </p>
             <code className="block text-xs bg-muted text-muted-foreground px-3 py-2 rounded font-mono">
               ADMIN_USER_IDS=user_abc123,user_xyz789
@@ -214,8 +219,17 @@ export default function SecurityPage() {
           <div className="border-t border-border pt-3">
             <p className="font-medium text-foreground mb-1">Stripe (billing)</p>
             <div className="flex flex-wrap gap-1.5">
-              {["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_STARTER", "STRIPE_PRICE_BUILDER", "STRIPE_PRICE_POWER"].map((v) => (
-                <code key={v} className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded font-mono">
+              {[
+                "STRIPE_SECRET_KEY",
+                "STRIPE_WEBHOOK_SECRET",
+                "STRIPE_PRICE_STARTER",
+                "STRIPE_PRICE_BUILDER",
+                "STRIPE_PRICE_POWER",
+              ].map((v) => (
+                <code
+                  key={v}
+                  className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded font-mono"
+                >
                   {v}
                 </code>
               ))}
@@ -223,13 +237,20 @@ export default function SecurityPage() {
           </div>
 
           <div className="border-t border-border pt-3">
-            <p className="font-medium text-foreground mb-1">Cloudflare for SaaS (custom domain SSL)</p>
+            <p className="font-medium text-foreground mb-1">
+              Cloudflare for SaaS (custom domain SSL)
+            </p>
             <div className="flex flex-wrap gap-1.5">
-              {["CF_ZONE_ID", "CF_API_TOKEN", "PLATFORM_DOMAIN", "PLATFORM_CNAME_TARGET"].map((v) => (
-                <code key={v} className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded font-mono">
-                  {v}
-                </code>
-              ))}
+              {["CF_ZONE_ID", "CF_API_TOKEN", "PLATFORM_DOMAIN", "PLATFORM_CNAME_TARGET"].map(
+                (v) => (
+                  <code
+                    key={v}
+                    className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded font-mono"
+                  >
+                    {v}
+                  </code>
+                ),
+              )}
             </div>
           </div>
         </div>

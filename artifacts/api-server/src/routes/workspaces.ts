@@ -72,39 +72,61 @@ router.post("/workspaces", async (req, res): Promise<void> => {
 
 router.get("/workspaces/:id", async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
 
   const userId = req.userId ?? "demo-user";
   const [workspace] = await db
     .select()
     .from(workspacesTable)
-    .where(and(eq(workspacesTable.id, id), eq(workspacesTable.ownerUserId, userId), activeWorkspaces));
+    .where(
+      and(eq(workspacesTable.id, id), eq(workspacesTable.ownerUserId, userId), activeWorkspaces),
+    );
 
-  if (!workspace) { res.status(404).json({ error: "Workspace not found" }); return; }
+  if (!workspace) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
   res.json(workspace);
 });
 
 router.patch("/workspaces/:id", async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
 
   const parsed = WorkspaceUpdateSchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
 
   const userId = req.userId ?? "demo-user";
   const [workspace] = await db
     .update(workspacesTable)
     .set({ ...parsed.data, updatedAt: sql`now()` })
-    .where(and(eq(workspacesTable.id, id), eq(workspacesTable.ownerUserId, userId), activeWorkspaces))
+    .where(
+      and(eq(workspacesTable.id, id), eq(workspacesTable.ownerUserId, userId), activeWorkspaces),
+    )
     .returning();
 
-  if (!workspace) { res.status(404).json({ error: "Workspace not found" }); return; }
+  if (!workspace) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
   res.json(workspace);
 });
 
 router.delete("/workspaces/:id", async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
 
   const userId = req.userId ?? "demo-user";
 
@@ -121,10 +143,15 @@ router.delete("/workspaces/:id", async (req, res): Promise<void> => {
   const [workspace] = await db
     .update(workspacesTable)
     .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
-    .where(and(eq(workspacesTable.id, id), eq(workspacesTable.ownerUserId, userId), activeWorkspaces))
+    .where(
+      and(eq(workspacesTable.id, id), eq(workspacesTable.ownerUserId, userId), activeWorkspaces),
+    )
     .returning();
 
-  if (!workspace) { res.status(404).json({ error: "Workspace not found" }); return; }
+  if (!workspace) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
   res.json({ deleted: true });
 });
 

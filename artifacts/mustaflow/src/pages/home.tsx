@@ -47,19 +47,22 @@ const HOW_IT_WORKS = [
     step: "1",
     icon: FileText,
     title: "Describe your idea",
-    description: "Write what you want to build in plain language. No jargon, no templates — just your idea.",
+    description:
+      "Write what you want to build in plain language. No jargon, no templates — just your idea.",
   },
   {
     step: "2",
     icon: Sparkles,
     title: "AI builds it for you",
-    description: "MustaFlow AI plans, codes, and assembles your app in seconds. Preview it live as it takes shape.",
+    description:
+      "MustaFlow AI plans, codes, and assembles your app in seconds. Preview it live as it takes shape.",
   },
   {
     step: "3",
     icon: Globe,
     title: "Publish instantly",
-    description: "One click publishes your app to a public URL. Share it with anyone, no setup required.",
+    description:
+      "One click publishes your app to a public URL. Share it with anyone, no setup required.",
   },
 ];
 
@@ -76,19 +79,22 @@ export default function HomePage() {
     if (!prompt.trim()) return;
     const words = prompt.trim().split(/\s+/).slice(0, 5).join(" ");
     const name = words.charAt(0).toUpperCase() + words.slice(1);
-    createProject.mutate({
-      data: {
-        name,
-        description: prompt,
-        kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
-        initialPrompt: prompt
-      }
-    }, {
-      onSuccess: (project) => {
-        void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
-        setLocation(`/projects/${project.id}`);
-      }
-    });
+    createProject.mutate(
+      {
+        data: {
+          name,
+          description: prompt,
+          kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
+          initialPrompt: prompt,
+        },
+      },
+      {
+        onSuccess: (project) => {
+          void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
+          setLocation(`/projects/${project.id}`);
+        },
+      },
+    );
   };
 
   function handleTemplateSelect(template: TemplateDefinition) {
@@ -115,10 +121,12 @@ export default function HomePage() {
               No code required
             </p>
             <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight gradient-text mb-5 leading-tight">
-              Describe it.<br className="hidden sm:block" /> Watch it build.
+              Describe it.
+              <br className="hidden sm:block" /> Watch it build.
             </h1>
             <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-              Type your idea in plain language. MustaFlow AI plans, builds, and publishes your app — no coding, no setup.
+              Type your idea in plain language. MustaFlow AI plans, builds, and publishes your app —
+              no coding, no setup.
             </p>
           </div>
 
@@ -264,7 +272,9 @@ export default function HomePage() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-sm mb-1">{item.title}</h3>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{item.description}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {item.description}
+                    </p>
                   </div>
                 </div>
               ))}

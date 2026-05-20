@@ -39,16 +39,24 @@ import {
 
 function getTypeIcon(type: string) {
   switch (type) {
-    case "build": return Hammer;
-    case "refine": return RefreshCw;
-    case "rollback": return RotateCcw;
+    case "build":
+      return Hammer;
+    case "refine":
+      return RefreshCw;
+    case "rollback":
+      return RotateCcw;
     case "publish":
-    case "publish_failed": return Globe;
-    case "secret_change": return KeyRound;
-    case "manual_edit": return FilePen;
+    case "publish_failed":
+      return Globe;
+    case "secret_change":
+      return KeyRound;
+    case "manual_edit":
+      return FilePen;
     case "secret_warning":
-    case "integration_needed": return FileWarning;
-    default: return NotebookPen;
+    case "integration_needed":
+      return FileWarning;
+    default:
+      return NotebookPen;
   }
 }
 
@@ -56,14 +64,22 @@ function getTypeColor(type: string, severity: string) {
   if (severity === "error") return "text-destructive border-destructive/40 bg-destructive/10";
   if (severity === "warning") return "text-yellow-400 border-yellow-500/30 bg-yellow-500/10";
   switch (type) {
-    case "build": return "text-primary border-primary/40 bg-primary/10";
-    case "refine": return "text-blue-400 border-blue-500/40 bg-blue-500/10";
-    case "rollback": return "text-orange-400 border-orange-500/40 bg-orange-500/10";
-    case "publish": return "text-green-400 border-green-500/40 bg-green-500/10";
-    case "publish_failed": return "text-destructive border-destructive/40 bg-destructive/10";
-    case "secret_change": return "text-purple-400 border-purple-500/40 bg-purple-500/10";
-    case "manual_edit": return "text-cyan-400 border-cyan-500/40 bg-cyan-500/10";
-    default: return "text-muted-foreground border-border bg-muted/40";
+    case "build":
+      return "text-primary border-primary/40 bg-primary/10";
+    case "refine":
+      return "text-blue-400 border-blue-500/40 bg-blue-500/10";
+    case "rollback":
+      return "text-orange-400 border-orange-500/40 bg-orange-500/10";
+    case "publish":
+      return "text-green-400 border-green-500/40 bg-green-500/10";
+    case "publish_failed":
+      return "text-destructive border-destructive/40 bg-destructive/10";
+    case "secret_change":
+      return "text-purple-400 border-purple-500/40 bg-purple-500/10";
+    case "manual_edit":
+      return "text-cyan-400 border-cyan-500/40 bg-cyan-500/10";
+    default:
+      return "text-muted-foreground border-border bg-muted/40";
   }
 }
 
@@ -107,15 +123,13 @@ function KnowledgeEntryCard({
   const TypeIcon = getTypeIcon(entry.type);
   const typeColor = getTypeColor(entry.type, entry.severity);
   const SeverityIcon =
-    entry.severity === "error" || entry.severity === "warning"
-      ? AlertTriangle
-      : Info;
+    entry.severity === "error" || entry.severity === "warning" ? AlertTriangle : Info;
   const severityColor =
     entry.severity === "error"
       ? "text-destructive"
       : entry.severity === "warning"
-      ? "text-yellow-400"
-      : "text-muted-foreground/50";
+        ? "text-yellow-400"
+        : "text-muted-foreground/50";
 
   const saveAnnotation = () => {
     updateKnowledge.mutate(
@@ -204,15 +218,10 @@ function KnowledgeEntryCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-start gap-1.5">
             <div className="flex-1 min-w-0">
-              <h3 className="text-xs font-medium text-foreground leading-snug">
-                {entry.title}
-              </h3>
+              <h3 className="text-xs font-medium text-foreground leading-snug">{entry.title}</h3>
               <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                 <span
-                  className={cn(
-                    "text-[10px] px-1.5 py-0.5 rounded font-medium border",
-                    typeColor,
-                  )}
+                  className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium border", typeColor)}
                 >
                   {getTypeLabel(entry.type)}
                 </span>
@@ -227,12 +236,7 @@ function KnowledgeEntryCard({
                     Global
                   </span>
                 )}
-                <span
-                  className={cn(
-                    "flex items-center gap-0.5 text-[10px]",
-                    severityColor,
-                  )}
-                >
+                <span className={cn("flex items-center gap-0.5 text-[10px]", severityColor)}>
                   <SeverityIcon className="h-2.5 w-2.5" />
                   {entry.severity}
                 </span>
@@ -265,9 +269,7 @@ function KnowledgeEntryCard({
                 }}
                 className={cn(
                   "w-5 h-5 flex items-center justify-center",
-                  entry.annotation
-                    ? "text-primary"
-                    : "text-muted-foreground hover:text-foreground",
+                  entry.annotation ? "text-primary" : "text-muted-foreground hover:text-foreground",
                 )}
                 title={entry.annotation ? "Edit note" : "Add note"}
               >
@@ -288,23 +290,17 @@ function KnowledgeEntryCard({
                     {!showConfirmPromote ? (
                       <button
                         onClick={() =>
-                          entry.approvedForReuse
-                            ? handlePromote()
-                            : setShowConfirmPromote(true)
+                          entry.approvedForReuse ? handlePromote() : setShowConfirmPromote(true)
                         }
                         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted transition-colors text-left"
                       >
                         <Star
                           className={cn(
                             "h-3.5 w-3.5",
-                            entry.approvedForReuse
-                              ? "text-yellow-400"
-                              : "text-muted-foreground",
+                            entry.approvedForReuse ? "text-yellow-400" : "text-muted-foreground",
                           )}
                         />
-                        {entry.approvedForReuse
-                          ? "Remove from Global"
-                          : "Approve as Global Lesson"}
+                        {entry.approvedForReuse ? "Remove from Global" : "Approve as Global Lesson"}
                       </button>
                     ) : (
                       <div className="px-3 py-2 space-y-2">
@@ -396,9 +392,7 @@ function KnowledgeEntryCard({
       {/* Expanded content */}
       {expanded && (
         <div className="ml-9 space-y-2 pt-1.5 border-t border-border/50">
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            {entry.content}
-          </p>
+          <p className="text-xs text-muted-foreground leading-relaxed">{entry.content}</p>
           {hasDiff && (
             <div className="space-y-0.5">
               <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
@@ -624,18 +618,13 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       pool = pool.filter(
-        (e) =>
-          e.title.toLowerCase().includes(q) ||
-          e.content.toLowerCase().includes(q),
+        (e) => e.title.toLowerCase().includes(q) || e.content.toLowerCase().includes(q),
       );
     }
     return pool;
   }, [entries, approvedOnly, severityFilter, searchQuery]);
 
-  const approvedCount = useMemo(
-    () => entries.filter((e) => e.approvedForReuse).length,
-    [entries],
-  );
+  const approvedCount = useMemo(() => entries.filter((e) => e.approvedForReuse).length, [entries]);
 
   const countBySeverity = useMemo(
     () => ({
@@ -699,9 +688,7 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BrainCircuit className="h-4 w-4 text-secondary" />
-            <span className="text-sm font-semibold text-foreground">
-              Knowledge Vault
-            </span>
+            <span className="text-sm font-semibold text-foreground">Knowledge Vault</span>
             {!isLoading && entries.length > 0 && (
               <span className="text-xs text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded-full">
                 {entries.length}
@@ -797,9 +784,7 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
           {(["warning", "error"] as const).map((sev) => (
             <button
               key={sev}
-              onClick={() =>
-                setSeverityFilter((v) => (v === sev ? "" : sev))
-              }
+              onClick={() => setSeverityFilter((v) => (v === sev ? "" : sev))}
               className={cn(
                 "text-[10px] px-2.5 py-1 rounded-full border font-medium transition-colors flex items-center gap-1",
                 severityFilter === sev
@@ -927,7 +912,8 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
       {!isLoading && entries.length > 0 && selectedCount === 0 && (
         <div className="shrink-0 px-4 py-2 border-t border-border/50 bg-muted/20">
           <p className="text-[10px] text-muted-foreground/50 leading-relaxed">
-            Entries marked as <span className="text-yellow-400 font-medium">Global Lessons</span> are injected into every AI build across all projects with a 1.5× priority boost.
+            Entries marked as <span className="text-yellow-400 font-medium">Global Lessons</span>{" "}
+            are injected into every AI build across all projects with a 1.5× priority boost.
           </p>
         </div>
       )}

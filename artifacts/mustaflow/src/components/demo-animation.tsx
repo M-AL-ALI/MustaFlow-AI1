@@ -4,9 +4,9 @@ import { Sparkles, ArrowRight, Loader2, CheckCircle2, Monitor } from "lucide-rea
 const PROMPT_TEXT = "A marketplace for local artists to sell prints";
 
 const BUILD_LINES = [
-  { delay: 0,    text: "Planning project structure..." },
-  { delay: 400,  text: "Generating layout & navigation..." },
-  { delay: 900,  text: "Building product listing grid..." },
+  { delay: 0, text: "Planning project structure..." },
+  { delay: 400, text: "Generating layout & navigation..." },
+  { delay: 900, text: "Building product listing grid..." },
   { delay: 1400, text: "Adding search & filter sidebar..." },
   { delay: 1900, text: "Styling with Tailwind CSS..." },
   { delay: 2400, text: "Wiring up interactions..." },
@@ -17,10 +17,10 @@ const BUILD_LINES = [
 type Phase = "typing" | "building" | "preview" | "done";
 
 const PHASE_DURATIONS: Record<Phase, number> = {
-  typing:   2800,
+  typing: 2800,
   building: 4200,
-  preview:  4000,
-  done:     0,
+  preview: 4000,
+  done: 0,
 };
 
 function usePrefersReducedMotion() {
@@ -94,9 +94,7 @@ function TypingPhase() {
         </div>
         <div
           className={`shrink-0 rounded-xl px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-all duration-300 ${
-            done
-              ? "bg-primary text-primary-foreground"
-              : "bg-muted text-muted-foreground"
+            done ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
           }`}
         >
           Start Building
@@ -123,7 +121,11 @@ function BuildingPhase() {
       timers.push(
         setTimeout(() => {
           setVisibleLines((prev) => [...prev, text]);
-          setProgress(Math.round(((BUILD_LINES.findIndex((l) => l.text === text) + 1) / BUILD_LINES.length) * 100));
+          setProgress(
+            Math.round(
+              ((BUILD_LINES.findIndex((l) => l.text === text) + 1) / BUILD_LINES.length) * 100,
+            ),
+          );
         }, delay),
       );
     });
@@ -144,7 +146,8 @@ function BuildingPhase() {
         <div className="p-4 space-y-1.5 font-mono text-xs min-h-[120px]">
           {BUILD_LINES.map((line) => {
             const isVisible = visibleLines.includes(line.text);
-            const isDone = isVisible && line !== BUILD_LINES[BUILD_LINES.length - 1] || progress === 100;
+            const isDone =
+              (isVisible && line !== BUILD_LINES[BUILD_LINES.length - 1]) || progress === 100;
             return (
               <div
                 key={line.text}
@@ -251,7 +254,9 @@ function PreviewPhase() {
       </div>
       <div className="flex items-center justify-center gap-1.5">
         <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-        <span className="text-xs text-muted-foreground">Live at your public URL — share it instantly</span>
+        <span className="text-xs text-muted-foreground">
+          Live at your public URL — share it instantly
+        </span>
       </div>
     </div>
   );
@@ -259,7 +264,11 @@ function PreviewPhase() {
 
 export function DemoAnimation() {
   const reducedMotion = usePrefersReducedMotion();
-  const phase = useLoop(["typing", "building", "preview"] as Phase[], PHASE_DURATIONS, reducedMotion);
+  const phase = useLoop(
+    ["typing", "building", "preview"] as Phase[],
+    PHASE_DURATIONS,
+    reducedMotion,
+  );
 
   return (
     <div className="relative w-full max-w-lg mx-auto">

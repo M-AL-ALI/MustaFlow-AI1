@@ -4,17 +4,41 @@ const RESOURCES = [
   {
     category: "Getting Started",
     items: [
-      { title: "How the AI Builder works", icon: Code2, desc: "Learn how MustaFlow generates and modifies your app." },
-      { title: "Plan Mode vs. Build Mode", icon: FileText, desc: "When to plan first and when to build directly." },
-      { title: "Understanding agent modes", icon: BookOpen, desc: "Lite, Eco, Power, and Pro — what's the difference?" },
+      {
+        title: "How the AI Builder works",
+        icon: Code2,
+        desc: "Learn how MustaFlow generates and modifies your app.",
+      },
+      {
+        title: "Plan Mode vs. Build Mode",
+        icon: FileText,
+        desc: "When to plan first and when to build directly.",
+      },
+      {
+        title: "Understanding agent modes",
+        icon: BookOpen,
+        desc: "Lite, Eco, Power, and Pro — what's the difference?",
+      },
     ],
   },
   {
     category: "Advanced",
     items: [
-      { title: "Adding integrations", icon: Code2, desc: "Connect Stripe, Auth, Maps, and more to your app." },
-      { title: "Managing secrets", icon: FileText, desc: "How to add and use environment variables." },
-      { title: "Version history & rollback", icon: BookOpen, desc: "Restore any previous version of your project." },
+      {
+        title: "Adding integrations",
+        icon: Code2,
+        desc: "Connect Stripe, Auth, Maps, and more to your app.",
+      },
+      {
+        title: "Managing secrets",
+        icon: FileText,
+        desc: "How to add and use environment variables.",
+      },
+      {
+        title: "Version history & rollback",
+        icon: BookOpen,
+        desc: "Restore any previous version of your project.",
+      },
     ],
   },
 ];
@@ -25,11 +49,15 @@ export function ResourcesTab() {
       <div className="max-w-4xl mx-auto space-y-8">
         <div>
           <h2 className="text-xl font-bold mb-1">Resources</h2>
-          <p className="text-sm text-muted-foreground">Guides and documentation to help you build faster.</p>
+          <p className="text-sm text-muted-foreground">
+            Guides and documentation to help you build faster.
+          </p>
         </div>
         {RESOURCES.map((section) => (
           <div key={section.category}>
-            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">{section.category}</h3>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              {section.category}
+            </h3>
             <div className="space-y-2">
               {section.items.map((item) => (
                 <div

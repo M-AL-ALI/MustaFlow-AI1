@@ -1,11 +1,4 @@
-import {
-  pgTable,
-  serial,
-  integer,
-  text,
-  jsonb,
-  timestamp,
-} from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, jsonb, timestamp } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export type FileSnapshotEntry = {
@@ -23,9 +16,7 @@ export const projectVersionsTable = pgTable("project_versions", {
   note: text("note"),
   filesSnapshot: jsonb("files_snapshot").$type<FileSnapshotEntry[]>(),
   planSnapshot: jsonb("plan_snapshot").$type<Record<string, unknown>>(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export type ProjectVersion = typeof projectVersionsTable.$inferSelect;

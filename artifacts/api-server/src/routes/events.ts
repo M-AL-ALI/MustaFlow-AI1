@@ -2,10 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
 import { db, agentTasksTable, taskEventsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
-import {
-  subscribeTaskEvents,
-  type TaskEventPayload,
-} from "../lib/event-bus";
+import { subscribeTaskEvents, type TaskEventPayload } from "../lib/event-bus";
 
 const router: IRouter = Router();
 
@@ -26,12 +23,7 @@ router.get(
     const [task] = await db
       .select({ id: agentTasksTable.id })
       .from(agentTasksTable)
-      .where(
-        and(
-          eq(agentTasksTable.id, taskId),
-          eq(agentTasksTable.projectId, projectId),
-        ),
-      );
+      .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)));
 
     if (!task) {
       res.status(404).json({ error: "Task not found" });
@@ -83,12 +75,7 @@ router.get(
     const [task] = await db
       .select({ id: agentTasksTable.id })
       .from(agentTasksTable)
-      .where(
-        and(
-          eq(agentTasksTable.id, taskId),
-          eq(agentTasksTable.projectId, projectId),
-        ),
-      );
+      .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)));
 
     if (!task) {
       res.status(404).json({ error: "Task not found" });

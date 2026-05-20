@@ -26,8 +26,7 @@ class ClerkAuthAdapter implements AuthAdapter {
   attachUser(req: Request, res: Response, next: NextFunction): void {
     const auth = getAuth(req);
     // sessionClaims.userId handles legacy migrated sessions; auth.userId covers new ones.
-    const userId =
-      (auth?.sessionClaims?.["userId"] as string | undefined) ?? auth?.userId;
+    const userId = (auth?.sessionClaims?.["userId"] as string | undefined) ?? auth?.userId;
     if (!userId) {
       res.status(401).json({ error: "Unauthenticated" });
       return;

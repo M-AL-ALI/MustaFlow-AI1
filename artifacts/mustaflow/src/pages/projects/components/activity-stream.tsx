@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  useListTaskEvents,
-  getListTaskEventsQueryKey,
-} from "@workspace/api-client-react";
+import { useListTaskEvents, getListTaskEventsQueryKey } from "@workspace/api-client-react";
 import {
   Clock,
   BrainCircuit,
@@ -45,10 +42,7 @@ type EventType =
   | "completed"
   | "failed";
 
-const EVENT_META: Record<
-  EventType,
-  { icon: React.ElementType; color: string; label: string }
-> = {
+const EVENT_META: Record<EventType, { icon: React.ElementType; color: string; label: string }> = {
   queued: { icon: Clock, color: "text-muted-foreground", label: "Queued" },
   analyzing_request: {
     icon: Search,
@@ -144,17 +138,14 @@ export function ActivityStream({ projectId, taskId, onDismiss }: Props) {
         const data = query.state.data;
         if (!data || !Array.isArray(data)) return 1500;
         const last = data[data.length - 1];
-        if (last && TERMINAL_STATUSES.has(last.eventType as string))
-          return false;
+        if (last && TERMINAL_STATUSES.has(last.eventType as string)) return false;
         return 1500;
       },
     },
   });
 
   const lastEvent = events[events.length - 1];
-  const isTerminal = lastEvent
-    ? TERMINAL_STATUSES.has(lastEvent.eventType as string)
-    : false;
+  const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
 
@@ -206,8 +197,8 @@ export function ActivityStream({ projectId, taskId, onDismiss }: Props) {
             {isDone
               ? "Build complete"
               : isFailed
-              ? "Build failed"
-              : lastEvent?.message ?? "Initializing…"}
+                ? "Build failed"
+                : (lastEvent?.message ?? "Initializing…")}
           </span>
           <span className="text-[10px] text-muted-foreground shrink-0">
             {events.length} step{events.length !== 1 ? "s" : ""}
@@ -222,10 +213,7 @@ export function ActivityStream({ projectId, taskId, onDismiss }: Props) {
             className="p-0.5 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
           >
             <ChevronDown
-              className={cn(
-                "h-3.5 w-3.5 transition-transform",
-                collapsed && "rotate-180",
-              )}
+              className={cn("h-3.5 w-3.5 transition-transform", collapsed && "rotate-180")}
             />
           </button>
           <button
@@ -242,14 +230,9 @@ export function ActivityStream({ projectId, taskId, onDismiss }: Props) {
 
       {/* Event list */}
       {!collapsed && (
-        <div
-          ref={scrollRef}
-          className="overflow-y-auto max-h-56 p-2 space-y-0.5 hide-scrollbar"
-        >
+        <div ref={scrollRef} className="overflow-y-auto max-h-56 p-2 space-y-0.5 hide-scrollbar">
           {events.map((event, idx) => {
-            const meta =
-              EVENT_META[event.eventType as EventType] ??
-              EVENT_META.queued;
+            const meta = EVENT_META[event.eventType as EventType] ?? EVENT_META.queued;
             const Icon = meta.icon;
             const isLast = idx === events.length - 1;
             const isActive = isLast && !isTerminal;
@@ -259,9 +242,7 @@ export function ActivityStream({ projectId, taskId, onDismiss }: Props) {
                 key={event.id}
                 className={cn(
                   "flex items-start gap-2.5 px-2 py-1.5 rounded-lg text-xs transition-colors",
-                  isActive
-                    ? "bg-primary/10"
-                    : "hover:bg-muted/30",
+                  isActive ? "bg-primary/10" : "hover:bg-muted/30",
                 )}
               >
                 {/* Icon */}
@@ -280,9 +261,7 @@ export function ActivityStream({ projectId, taskId, onDismiss }: Props) {
                   <div
                     className={cn(
                       "truncate leading-tight",
-                      isActive
-                        ? "text-foreground font-medium"
-                        : "text-muted-foreground",
+                      isActive ? "text-foreground font-medium" : "text-muted-foreground",
                     )}
                   >
                     {event.message}

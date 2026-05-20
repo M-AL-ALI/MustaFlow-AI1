@@ -59,9 +59,7 @@ export async function serveSnapshot(
   }
 
   const mime = file.mimeType || guessMime(file.path);
-  res
-    .type(mime)
-    .setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+  res.type(mime).setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
   if (isBinaryMime(mime)) {
     res.end(Buffer.from(file.content, "base64"));
   } else {

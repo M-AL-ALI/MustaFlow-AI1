@@ -7,81 +7,74 @@ import { writeKnowledge } from "../lib/knowledge";
 const router: IRouter = Router();
 
 // POST /api/projects/:id/duplicate — copies a project (files included, secrets excluded)
-router.post(
-  "/projects/:id/duplicate",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
+router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
 
-    const [original] = await db
-      .select()
-      .from(projectsTable)
-      .where(eq(projectsTable.id, projectId));
-    if (!original) {
-      res.status(404).json({ error: "Project not found" });
-      return;
-    }
+  const [original] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
+  if (!original) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
 
-    const files = await db
-      .select()
-      .from(projectFilesTable)
-      .where(eq(projectFilesTable.projectId, projectId));
+  const files = await db
+    .select()
+    .from(projectFilesTable)
+    .where(eq(projectFilesTable.projectId, projectId));
 
-    const [newProject] = await db
-      .insert(projectsTable)
-      .values({
-        name: `${original.name} (copy)`,
-        kind: original.kind,
-        description: original.description,
-        ownerId: req.userId!,
-        status: "draft",
-        agentMode: original.agentMode,
-        lastTaskSummary: `Duplicated from "${original.name}"`,
-      })
-      .returning();
+  const [newProject] = await db
+    .insert(projectsTable)
+    .values({
+      name: `${original.name} (copy)`,
+      kind: original.kind,
+      description: original.description,
+      ownerId: req.userId!,
+      status: "draft",
+      agentMode: original.agentMode,
+      lastTaskSummary: `Duplicated from "${original.name}"`,
+    })
+    .returning();
 
-    if (!newProject) {
-      res.status(500).json({ error: "Failed to create duplicate project" });
-      return;
-    }
+  if (!newProject) {
+    res.status(500).json({ error: "Failed to create duplicate project" });
+    return;
+  }
 
-    if (files.length > 0) {
-      await db.insert(projectFilesTable).values(
-        files.map((f) => ({
-          projectId: newProject.id,
-          path: f.path,
-          content: f.content,
-          mimeType: f.mimeType,
-        })),
-      );
-    }
+  if (files.length > 0) {
+    await db.insert(projectFilesTable).values(
+      files.map((f) => ({
+        projectId: newProject.id,
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+      })),
+    );
+  }
 
-    await db
-      .update(projectsTable)
-      .set({ updatedAt: sql`now()` })
-      .where(eq(projectsTable.id, newProject.id));
+  await db
+    .update(projectsTable)
+    .set({ updatedAt: sql`now()` })
+    .where(eq(projectsTable.id, newProject.id));
 
-    void writeKnowledge({
-      title: `Project duplicated: "${original.name}" → "${newProject.name}"`,
-      content: `User duplicated project "${original.name}" (id:${projectId}) into new project id:${newProject.id}. ${files.length} file(s) copied. Secrets were NOT copied.`,
-      type: "duplicate",
-      category: "event",
-      severity: "info",
-      projectId: newProject.id,
-      userId: req.userId,
-    });
+  void writeKnowledge({
+    title: `Project duplicated: "${original.name}" → "${newProject.name}"`,
+    content: `User duplicated project "${original.name}" (id:${projectId}) into new project id:${newProject.id}. ${files.length} file(s) copied. Secrets were NOT copied.`,
+    type: "duplicate",
+    category: "event",
+    severity: "info",
+    projectId: newProject.id,
+    userId: req.userId,
+  });
 
-    res.status(201).json({
-      id: newProject.id,
-      name: newProject.name,
-      kind: newProject.kind,
-      status: newProject.status,
-      ownerId: newProject.ownerId,
-      filesCount: files.length,
-      secretsCopied: false,
-      note: "Secrets are not copied for security. Add them in the Tools tab.",
-    });
-  },
-);
+  res.status(201).json({
+    id: newProject.id,
+    name: newProject.name,
+    kind: newProject.kind,
+    status: newProject.status,
+    ownerId: newProject.ownerId,
+    filesCount: files.length,
+    secretsCopied: false,
+    note: "Secrets are not copied for security. Add them in the Tools tab.",
+  });
+});
 
 export default router;

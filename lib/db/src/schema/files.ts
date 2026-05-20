@@ -1,11 +1,4 @@
-import {
-  pgTable,
-  serial,
-  integer,
-  text,
-  timestamp,
-  uniqueIndex,
-} from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export const projectFilesTable = pgTable(
@@ -18,15 +11,10 @@ export const projectFilesTable = pgTable(
     path: text("path").notNull(),
     content: text("content").notNull(),
     mimeType: text("mime_type").notNull().default("text/html"),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    pathUniq: uniqueIndex("project_files_project_path_unique").on(
-      t.projectId,
-      t.path,
-    ),
+    pathUniq: uniqueIndex("project_files_project_path_unique").on(t.projectId, t.path),
   }),
 );
 

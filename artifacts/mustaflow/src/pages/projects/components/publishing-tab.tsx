@@ -84,8 +84,11 @@ function EasCredVerifyButton({
         setMessage(data.message ?? null);
         onVerified?.(data.status);
       }
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
   }, [projectId, secretId, onVerified]);
 
   const statusIcon =
@@ -117,8 +120,8 @@ function EasCredVerifyButton({
             status === "verified"
               ? "text-green-500"
               : status === "verification_failed"
-              ? "text-destructive"
-              : "text-muted-foreground",
+                ? "text-destructive"
+                : "text-muted-foreground",
           )}
         >
           {message}
@@ -153,7 +156,11 @@ const WEB_TESTING_CHECKLIST: ChecklistSection[] = [
   {
     title: "Content & Links",
     items: [
-      { id: "w-content", label: "All placeholder content replaced with real content", required: true },
+      {
+        id: "w-content",
+        label: "All placeholder content replaced with real content",
+        required: true,
+      },
       { id: "w-links", label: "All navigation links work", required: true },
       { id: "w-forms", label: "Contact / signup forms submit correctly", required: false },
     ],
@@ -164,10 +171,30 @@ const WEB_PRODUCTION_CHECKLIST: ChecklistSection[] = [
   {
     title: "Pre-publish Gates",
     items: [
-      { id: "wp-secrets", label: "Production secrets configured (not test keys)", icon: Lock, required: true },
-      { id: "wp-rollback", label: "Rollback point saved (latest version snapshot)", icon: RefreshCw, required: true },
-      { id: "wp-env", label: "Environment validated — no dev / test keys in production", icon: ShieldCheck, required: true },
-      { id: "wp-report", label: "Test report reviewed and approved", icon: FileText, required: true },
+      {
+        id: "wp-secrets",
+        label: "Production secrets configured (not test keys)",
+        icon: Lock,
+        required: true,
+      },
+      {
+        id: "wp-rollback",
+        label: "Rollback point saved (latest version snapshot)",
+        icon: RefreshCw,
+        required: true,
+      },
+      {
+        id: "wp-env",
+        label: "Environment validated — no dev / test keys in production",
+        icon: ShieldCheck,
+        required: true,
+      },
+      {
+        id: "wp-report",
+        label: "Test report reviewed and approved",
+        icon: FileText,
+        required: true,
+      },
     ],
   },
   {
@@ -184,17 +211,36 @@ const IOS_CHECKLIST: ChecklistSection[] = [
   {
     title: "Apple Developer Requirements",
     items: [
-      { id: "ios-account", label: "Apple Developer account active ($99 / yr)", icon: UserCheck, required: true },
+      {
+        id: "ios-account",
+        label: "Apple Developer account active ($99 / yr)",
+        icon: UserCheck,
+        required: true,
+      },
       { id: "ios-bundleid", label: "Bundle ID registered (com.yourco.appname)", required: true },
-      { id: "ios-certs", label: "Distribution certificate and provisioning profile created", required: true },
+      {
+        id: "ios-certs",
+        label: "Distribution certificate and provisioning profile created",
+        required: true,
+      },
     ],
   },
   {
     title: "App Assets",
     items: [
-      { id: "ios-icon", label: "App icon set (1024×1024 PNG, no alpha, no rounded corners)", icon: Image, required: true },
+      {
+        id: "ios-icon",
+        label: "App icon set (1024×1024 PNG, no alpha, no rounded corners)",
+        icon: Image,
+        required: true,
+      },
       { id: "ios-splash", label: "Launch screen / splash configured", required: true },
-      { id: "ios-screenshots", label: "App Store screenshots (6.7\", 6.1\", iPad 12.9\")", icon: Camera, required: true },
+      {
+        id: "ios-screenshots",
+        label: 'App Store screenshots (6.7", 6.1", iPad 12.9")',
+        icon: Camera,
+        required: true,
+      },
     ],
   },
   {
@@ -202,8 +248,16 @@ const IOS_CHECKLIST: ChecklistSection[] = [
     items: [
       { id: "ios-expo", label: "Expo build configured (eas build --platform ios)", required: true },
       { id: "ios-tf-upload", label: "IPA uploaded to App Store Connect", required: true },
-      { id: "ios-tf-testers", label: "TestFlight testers invited and build distributed", required: true },
-      { id: "ios-tf-feedback", label: "TestFlight feedback collected and addressed", required: true },
+      {
+        id: "ios-tf-testers",
+        label: "TestFlight testers invited and build distributed",
+        required: true,
+      },
+      {
+        id: "ios-tf-feedback",
+        label: "TestFlight feedback collected and addressed",
+        required: true,
+      },
     ],
   },
   {
@@ -221,23 +275,46 @@ const ANDROID_CHECKLIST: ChecklistSection[] = [
   {
     title: "Google Play Requirements",
     items: [
-      { id: "and-account", label: "Google Play Developer account active ($25 one-time)", icon: UserCheck, required: true },
+      {
+        id: "and-account",
+        label: "Google Play Developer account active ($25 one-time)",
+        icon: UserCheck,
+        required: true,
+      },
       { id: "and-pkg", label: "Package name registered (com.yourco.appname)", required: true },
-      { id: "and-keystore", label: "Upload keystore generated and stored securely", required: true },
+      {
+        id: "and-keystore",
+        label: "Upload keystore generated and stored securely",
+        required: true,
+      },
     ],
   },
   {
     title: "App Assets",
     items: [
-      { id: "and-icon", label: "App icon (512×512 PNG) and adaptive icon configured", icon: Image, required: true },
+      {
+        id: "and-icon",
+        label: "App icon (512×512 PNG) and adaptive icon configured",
+        icon: Image,
+        required: true,
+      },
       { id: "and-feature", label: "Feature graphic (1024×500 PNG)", required: true },
-      { id: "and-screenshots", label: "Play Store screenshots (phone + 7\" tablet)", icon: Camera, required: true },
+      {
+        id: "and-screenshots",
+        label: 'Play Store screenshots (phone + 7" tablet)',
+        icon: Camera,
+        required: true,
+      },
     ],
   },
   {
     title: "Build & Upload",
     items: [
-      { id: "and-expo", label: "Expo build configured (eas build --platform android)", required: true },
+      {
+        id: "and-expo",
+        label: "Expo build configured (eas build --platform android)",
+        required: true,
+      },
       { id: "and-aab", label: "Android App Bundle (.aab) built and uploaded", required: true },
       { id: "and-track", label: "Internal / closed testing track configured", required: true },
       { id: "and-feedback", label: "Testing feedback collected and addressed", required: true },
@@ -444,8 +521,8 @@ function ReadinessGate({
         <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
           <span>
-            {blockingFailed.length} required gate{blockingFailed.length !== 1 ? "s" : ""} must
-            pass before publishing.
+            {blockingFailed.length} required gate{blockingFailed.length !== 1 ? "s" : ""} must pass
+            before publishing.
           </span>
         </div>
       )}
@@ -586,8 +663,11 @@ function EasBuildPanel({
           .map((b) => b.id);
         setState({ ...data, builds: filtered });
       }
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
   }, [projectId, env]);
 
   useEffect(() => {
@@ -598,13 +678,17 @@ function EasBuildPanel({
       if (ids.length > 0) {
         await Promise.allSettled(
           ids.map((id) =>
-            fetch(`/api/projects/${projectId}/eas/builds/${id}`, { method: "PATCH" }).catch(() => {}),
+            fetch(`/api/projects/${projectId}/eas/builds/${id}`, { method: "PATCH" }).catch(
+              () => {},
+            ),
           ),
         );
       }
       void fetchState();
     }, 15_000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [fetchState, projectId]);
 
   const saveToken = async () => {
@@ -618,11 +702,18 @@ function EasBuildPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: tokenInput.trim() }),
       });
-      const data = (await res.json()) as { ok?: boolean; username?: string; error?: string; appSlug?: string };
+      const data = (await res.json()) as {
+        ok?: boolean;
+        username?: string;
+        error?: string;
+        appSlug?: string;
+      };
       if (!res.ok || !data.ok) {
         setTokenError(data.error ?? "Failed to validate token");
       } else {
-        setTokenOk(`Authenticated as @${data.username}${data.appSlug ? ` · app: ${data.appSlug}` : ""}`);
+        setTokenOk(
+          `Authenticated as @${data.username}${data.appSlug ? ` · app: ${data.appSlug}` : ""}`,
+        );
         setTokenInput("");
         setTokenExpanded(false);
         void fetchState();
@@ -651,10 +742,10 @@ function EasBuildPanel({
         if (data.hint === "eas_init_required") {
           setTriggerHint(
             `The app "${data.fullName ?? ""}" isn't registered in EAS yet. ` +
-            `Export your project ZIP, run \`eas init\` in the project folder, then try again.`,
+              `Export your project ZIP, run \`eas init\` in the project folder, then try again.`,
           );
         } else if (data.hint === "check_eas_json") {
-          setTriggerHint("Add an eas.json with a \"preview\" profile to your project, then rebuild.");
+          setTriggerHint('Add an eas.json with a "preview" profile to your project, then rebuild.');
         }
       } else {
         // Build queued — refresh state to show it in Build History
@@ -708,7 +799,9 @@ function EasBuildPanel({
   const reloadLogs = async (logId: number) => {
     setReloadingLogsId(logId);
     try {
-      const res = await fetch(`/api/projects/${projectId}/eas/builds/${logId}?force=1`, { method: "PATCH" });
+      const res = await fetch(`/api/projects/${projectId}/eas/builds/${logId}?force=1`, {
+        method: "PATCH",
+      });
       if (res.ok) {
         const data = (await res.json()) as { logSnippet?: string | null };
         setState((prev) =>
@@ -772,17 +865,24 @@ function EasBuildPanel({
             { label: "Install on Device", done: hasReadyBuild },
           ].map((step, i) => (
             <div key={step.label} className="flex flex-col items-center gap-1.5">
-              <div className={cn(
-                "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border",
-                step.done
-                  ? "bg-green-500/15 text-green-400 border-green-500/30"
-                  : i === (!state?.hasToken ? 0 : !latestBuild ? 1 : 2)
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "bg-muted text-muted-foreground border-border",
-              )}>
+              <div
+                className={cn(
+                  "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border",
+                  step.done
+                    ? "bg-green-500/15 text-green-400 border-green-500/30"
+                    : i === (!state?.hasToken ? 0 : !latestBuild ? 1 : 2)
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-muted text-muted-foreground border-border",
+                )}
+              >
                 {step.done ? <CheckCircle2 className="h-3.5 w-3.5" /> : i + 1}
               </div>
-              <span className={cn("text-[10px]", step.done ? "text-green-400" : "text-muted-foreground")}>
+              <span
+                className={cn(
+                  "text-[10px]",
+                  step.done ? "text-green-400" : "text-muted-foreground",
+                )}
+              >
                 {step.label}
               </span>
             </div>
@@ -807,13 +907,22 @@ function EasBuildPanel({
               Not set
             </span>
           )}
-          {tokenExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+          {tokenExpanded ? (
+            <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
         </button>
         {tokenExpanded && (
           <div className="border-t border-border p-4 space-y-3">
             <p className="text-xs text-muted-foreground">
               Create a personal access token at{" "}
-              <a href="https://expo.dev/settings/access-tokens" target="_blank" rel="noreferrer" className="text-primary hover:underline">
+              <a
+                href="https://expo.dev/settings/access-tokens"
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary hover:underline"
+              >
                 expo.dev/settings/access-tokens
               </a>
               . It will be stored encrypted in your project secrets.
@@ -823,12 +932,22 @@ function EasBuildPanel({
                 type="password"
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void saveToken(); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void saveToken();
+                }}
                 placeholder="expo_pat_…"
                 className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
               />
-              <Button size="sm" onClick={() => void saveToken()} disabled={tokenSaving || !tokenInput.trim()}>
-                {tokenSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              <Button
+                size="sm"
+                onClick={() => void saveToken()}
+                disabled={tokenSaving || !tokenInput.trim()}
+              >
+                {tokenSaving ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
                 <span className="ml-1.5">{state?.hasToken ? "Update" : "Save"}</span>
               </Button>
             </div>
@@ -856,9 +975,7 @@ function EasBuildPanel({
               <h4 className="text-sm font-semibold">Build for Device</h4>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Triggers a native {platformLabel} build on EAS servers (preview profile).
-                {appSlug && (
-                  <span className="ml-1 text-foreground font-mono">{appSlug}</span>
-                )}
+                {appSlug && <span className="ml-1 text-foreground font-mono">{appSlug}</span>}
               </p>
             </div>
             <Button
@@ -867,10 +984,15 @@ function EasBuildPanel({
               disabled={triggering}
               className="shrink-0"
             >
-              {triggering
-                ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Queueing…</>
-                : <><Package className="h-3.5 w-3.5 mr-1.5" /> Build for {platformLabel}</>
-              }
+              {triggering ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Queueing…
+                </>
+              ) : (
+                <>
+                  <Package className="h-3.5 w-3.5 mr-1.5" /> Build for {platformLabel}
+                </>
+              )}
             </Button>
           </div>
 
@@ -895,23 +1017,26 @@ function EasBuildPanel({
               <ChevronDown className="h-3 w-3 ml-auto group-open:rotate-180 transition-transform" />
             </summary>
             <div className="mt-3 space-y-2">
-              {[
-                `export EXPO_TOKEN=<your-eas-token>`,
-                `eas build ${cliFlag} --profile preview`,
-              ].map((cmd) => (
-                <div key={cmd} className="relative group/cmd">
-                  <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2">
-                    <code className="text-xs font-mono text-zinc-300 flex-1 break-all">{cmd}</code>
-                    <button
-                      onClick={() => { void navigator.clipboard.writeText(cmd); }}
-                      className="shrink-0 opacity-0 group-hover/cmd:opacity-100 transition-opacity text-zinc-500 hover:text-zinc-300"
-                      title="Copy"
-                    >
-                      <Copy className="h-3 w-3" />
-                    </button>
+              {[`export EXPO_TOKEN=<your-eas-token>`, `eas build ${cliFlag} --profile preview`].map(
+                (cmd) => (
+                  <div key={cmd} className="relative group/cmd">
+                    <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2">
+                      <code className="text-xs font-mono text-zinc-300 flex-1 break-all">
+                        {cmd}
+                      </code>
+                      <button
+                        onClick={() => {
+                          void navigator.clipboard.writeText(cmd);
+                        }}
+                        className="shrink-0 opacity-0 group-hover/cmd:opacity-100 transition-opacity text-zinc-500 hover:text-zinc-300"
+                        title="Copy"
+                      >
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ),
+              )}
               <a
                 href="https://docs.expo.dev/build/setup/"
                 target="_blank"
@@ -935,12 +1060,18 @@ function EasBuildPanel({
             <Link2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="flex-1 text-left font-medium">Link Existing Build</span>
             <span className="text-xs text-muted-foreground">Paste build ID or exp:// URL</span>
-            {linkExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+            {linkExpanded ? (
+              <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
           </button>
           {linkExpanded && (
             <div className="border-t border-border p-4 space-y-3">
               <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground block">EAS Build ID</label>
+                <label className="text-xs font-medium text-muted-foreground block">
+                  EAS Build ID
+                </label>
                 <input
                   value={linkBuildId}
                   onChange={(e) => setLinkBuildId(e.target.value)}
@@ -971,7 +1102,11 @@ function EasBuildPanel({
                 onClick={() => void linkBuild()}
                 disabled={linking || (!linkBuildId.trim() && !expUrlInput.trim())}
               >
-                {linking ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" /> : <Link2 className="h-3.5 w-3.5 mr-2" />}
+                {linking ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />
+                ) : (
+                  <Link2 className="h-3.5 w-3.5 mr-2" />
+                )}
                 Link Build
               </Button>
             </div>
@@ -996,22 +1131,28 @@ function EasBuildPanel({
               // Determine what to show in the QR / URL row.
               // Prefer an exp:// URL (Expo Go launch). Fall back to artifact download URL.
               const expUrl = build.publicUrl && isExpUrl(build.publicUrl) ? build.publicUrl : null;
-              const downloadUrl = build.publicUrl && !isExpUrl(build.publicUrl) ? build.publicUrl : null;
+              const downloadUrl =
+                build.publicUrl && !isExpUrl(build.publicUrl) ? build.publicUrl : null;
               const qrUrl = expUrl ?? downloadUrl;
 
               const isLogsOpen = expandedLogsId === build.id;
               // Show "View Logs" for any build with a URL/snippet, plus always for failed builds
-              const hasLogs = !!(build.logsPageUrl || build.logSnippet) || build.status === "failed";
+              const hasLogs =
+                !!(build.logsPageUrl || build.logSnippet) || build.status === "failed";
 
               return (
                 <div key={build.id} className="px-4 py-3 space-y-2">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className={cn(
-                      "text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0",
-                      build.status === "passed" ? "bg-green-500/15 text-green-400" :
-                      build.status === "failed" ? "bg-destructive/15 text-destructive" :
-                      "bg-yellow-500/15 text-yellow-500",
-                    )}>
+                    <span
+                      className={cn(
+                        "text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0",
+                        build.status === "passed"
+                          ? "bg-green-500/15 text-green-400"
+                          : build.status === "failed"
+                            ? "bg-destructive/15 text-destructive"
+                            : "bg-yellow-500/15 text-yellow-500",
+                      )}
+                    >
                       {build.status === "started" ? "building" : build.status}
                     </span>
                     {build.status === "started" && (
@@ -1029,7 +1170,9 @@ function EasBuildPanel({
                         disabled={refreshing === build.id}
                         className="shrink-0 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
                       >
-                        <RefreshCw className={cn("h-3 w-3", refreshing === build.id && "animate-spin")} />
+                        <RefreshCw
+                          className={cn("h-3 w-3", refreshing === build.id && "animate-spin")}
+                        />
                         Check status
                       </button>
                     )}
@@ -1045,9 +1188,11 @@ function EasBuildPanel({
                       >
                         <FileText className="h-3 w-3" />
                         {isLogsOpen ? "Hide Logs" : "View Logs"}
-                        {isLogsOpen
-                          ? <ChevronUp className="h-3 w-3" />
-                          : <ChevronDown className="h-3 w-3" />}
+                        {isLogsOpen ? (
+                          <ChevronUp className="h-3 w-3" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3" />
+                        )}
                       </button>
                     )}
                   </div>
@@ -1093,13 +1238,21 @@ function EasBuildPanel({
                               title="Reload logs"
                               className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                             >
-                              <RefreshCw className={cn("h-3 w-3", reloadingLogsId === build.id && "animate-spin")} />
+                              <RefreshCw
+                                className={cn(
+                                  "h-3 w-3",
+                                  reloadingLogsId === build.id && "animate-spin",
+                                )}
+                              />
                             </button>
                           </div>
                         )}
                       </div>
                       {build.logSnippet ? (
-                        <pre ref={expandedLogsId === build.id ? logPreRef : null} className="px-3 py-3 text-[11px] leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">
+                        <pre
+                          ref={expandedLogsId === build.id ? logPreRef : null}
+                          className="px-3 py-3 text-[11px] leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto"
+                        >
                           {build.logSnippet}
                         </pre>
                       ) : (
@@ -1115,10 +1268,11 @@ function EasBuildPanel({
                   {/* URL row — exp:// gets Expo Go label; other URLs get "Download" label */}
                   {build.publicUrl && (
                     <div className="flex items-center gap-2 bg-muted/60 rounded-lg px-3 py-2">
-                      {expUrl
-                        ? <Smartphone className="h-3.5 w-3.5 text-green-400 shrink-0" />
-                        : <QrCode className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      }
+                      {expUrl ? (
+                        <Smartphone className="h-3.5 w-3.5 text-green-400 shrink-0" />
+                      ) : (
+                        <QrCode className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      )}
                       <span className="text-xs font-mono text-foreground flex-1 truncate min-w-0">
                         {build.publicUrl}
                       </span>
@@ -1266,9 +1420,7 @@ function BuildLogViewer({
         </div>
         <div className="flex items-center gap-1.5">
           {fetchedAt && (
-            <span className="text-[10px] text-zinc-600 whitespace-nowrap">
-              {logAge}
-            </span>
+            <span className="text-[10px] text-zinc-600 whitespace-nowrap">{logAge}</span>
           )}
           <button
             onClick={() => void fetchLogs()}
@@ -1288,15 +1440,14 @@ function BuildLogViewer({
             Loading logs…
           </div>
         )}
-        {error && (
-          <div className="text-destructive">{error}</div>
-        )}
+        {error && <div className="text-destructive">{error}</div>}
         {!loading && !error && (!data?.logs || data.logs.trim() === "") && (
           <div className="text-zinc-600">
             {data?.note ?? "No log output yet. Build may still be initializing…"}
           </div>
         )}
-        {data?.logs && data.logs.trim() !== "" && (
+        {data?.logs &&
+          data.logs.trim() !== "" &&
           data.logs.split("\n").map((line, i) => {
             const isError = /error|fail|exception/i.test(line);
             const isWarn = /warn/i.test(line);
@@ -1306,14 +1457,19 @@ function BuildLogViewer({
                 key={i}
                 className={cn(
                   "whitespace-pre-wrap break-all",
-                  isError ? "text-red-400" : isWarn ? "text-yellow-400" : isSuccess ? "text-green-400" : "text-zinc-400",
+                  isError
+                    ? "text-red-400"
+                    : isWarn
+                      ? "text-yellow-400"
+                      : isSuccess
+                        ? "text-green-400"
+                        : "text-zinc-400",
                 )}
               >
                 {line || "\u00A0"}
               </div>
             );
-          })
-        )}
+          })}
         <div ref={bottomRef} />
       </div>
     </div>
@@ -1323,16 +1479,40 @@ function BuildLogViewer({
 function MobileBuildStatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { label: string; className: string; spin?: boolean }> = {
     queued: { label: "Queued", className: "bg-muted text-muted-foreground border-border" },
-    building: { label: "Building", className: "bg-primary/10 text-primary border-primary/20", spin: true },
-    submitting: { label: "Submitting", className: "bg-violet-500/10 text-violet-400 border-violet-500/20", spin: true },
-    submitted: { label: "Submitted", className: "bg-green-500/10 text-green-400 border-green-500/20" },
+    building: {
+      label: "Building",
+      className: "bg-primary/10 text-primary border-primary/20",
+      spin: true,
+    },
+    submitting: {
+      label: "Submitting",
+      className: "bg-violet-500/10 text-violet-400 border-violet-500/20",
+      spin: true,
+    },
+    submitted: {
+      label: "Submitted",
+      className: "bg-green-500/10 text-green-400 border-green-500/20",
+    },
     passed: { label: "Passed", className: "bg-green-500/10 text-green-400 border-green-500/20" },
-    failed: { label: "Failed", className: "bg-destructive/10 text-destructive border-destructive/20" },
+    failed: {
+      label: "Failed",
+      className: "bg-destructive/10 text-destructive border-destructive/20",
+    },
   };
-  const c = cfg[status] ?? { label: status, className: "bg-muted text-muted-foreground border-border" };
+  const c = cfg[status] ?? {
+    label: status,
+    className: "bg-muted text-muted-foreground border-border",
+  };
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium shrink-0", c.className)}>
-      {c.spin && <span className="w-1.5 h-1.5 rounded-full border border-current border-t-transparent animate-spin" />}
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium shrink-0",
+        c.className,
+      )}
+    >
+      {c.spin && (
+        <span className="w-1.5 h-1.5 rounded-full border border-current border-t-transparent animate-spin" />
+      )}
       {c.label}
     </span>
   );
@@ -1398,18 +1578,29 @@ export function PublishingTab({
   const creditFetchRef = useRef<(() => Promise<void>) | null>(null);
 
   // EAS credentials checklist — tracks which secret names are configured + their IDs + verification status
-  const [configuredSecrets, setConfiguredSecrets] = useState<Map<string, { id: number; verificationStatus: string }>>(new Map());
+  const [configuredSecrets, setConfiguredSecrets] = useState<
+    Map<string, { id: number; verificationStatus: string }>
+  >(new Map());
   const fetchConfiguredSecrets = useCallback(async () => {
     if (!isMobile) return;
     try {
       const res = await fetch(`/api/projects/${projectId}/secrets`);
       if (res.ok) {
-        const data = (await res.json()) as { secrets?: Array<{ name: string; id: number; verificationStatus?: string | null }> };
-        setConfiguredSecrets(new Map(
-          (data.secrets ?? []).map((s) => [s.name, { id: s.id, verificationStatus: s.verificationStatus ?? "unverified" }])
-        ));
+        const data = (await res.json()) as {
+          secrets?: Array<{ name: string; id: number; verificationStatus?: string | null }>;
+        };
+        setConfiguredSecrets(
+          new Map(
+            (data.secrets ?? []).map((s) => [
+              s.name,
+              { id: s.id, verificationStatus: s.verificationStatus ?? "unverified" },
+            ]),
+          ),
+        );
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [projectId, isMobile]);
 
   // Site settings state
@@ -1446,7 +1637,9 @@ export function PublishingTab({
         const data = (await res.json()) as { builds: MobileBuildLog[] };
         setMobileBuilds(data.builds ?? []);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [projectId, isMobile]);
 
   const fetchCreditBalance = useCallback(async () => {
@@ -1457,7 +1650,9 @@ export function PublishingTab({
         const data = (await res.json()) as { balance: number };
         setCreditBalance(data.balance);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [isMobile]);
 
   // Keep a stable ref so the focus listener doesn't need to be recreated
@@ -1517,9 +1712,7 @@ export function PublishingTab({
       void fetchDomain();
       void fetchDeployments();
     } catch (err) {
-      setPublishError(
-        err instanceof Error ? err.message : "Publish failed — please try again.",
-      );
+      setPublishError(err instanceof Error ? err.message : "Publish failed — please try again.");
     } finally {
       setIsPublishing(false);
     }
@@ -1539,8 +1732,11 @@ export function PublishingTab({
     try {
       const res = await fetch(`/api/projects/${projectId}/publish-readiness?env=${webEnv}`);
       if (res.ok) setReadiness((await res.json()) as ReadinessResult);
-    } catch { /* ignore */ }
-    finally { setReadinessLoading(false); }
+    } catch {
+      /* ignore */
+    } finally {
+      setReadinessLoading(false);
+    }
   }, [projectId, webEnv, platform]);
 
   const fetchDeployments = useCallback(async () => {
@@ -1559,7 +1755,9 @@ export function PublishingTab({
         };
         setDeployments(data.deployments ?? []);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [projectId]);
 
   const fetchSiteSettings = useCallback(async () => {
@@ -1575,7 +1773,9 @@ export function PublishingTab({
         setMetaDescription(data.metaDescription ?? "");
         setThemeColor(data.themeColor ?? "");
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [projectId]);
 
   const fetchDomain = useCallback(async () => {
@@ -1586,14 +1786,20 @@ export function PublishingTab({
         setDomainInfo(data);
         setCustomDomainInput(data.customDomain ?? "");
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [projectId]);
 
   const saveDomain = async () => {
     setDomainSaving(true);
     setDomainError(null);
     try {
-      const cleaned = customDomainInput.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const cleaned = customDomainInput
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, "")
+        .replace(/\/.*$/, "");
       const res = await fetch(`/api/projects/${projectId}/domain`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1673,7 +1879,9 @@ export function PublishingTab({
   useEffect(() => {
     void fetchCreditBalance();
     // Refresh on window focus so returning from Stripe checkout shows updated balance
-    const onFocus = () => { void creditFetchRef.current?.(); };
+    const onFocus = () => {
+      void creditFetchRef.current?.();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [fetchCreditBalance]);
@@ -1714,7 +1922,6 @@ export function PublishingTab({
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto p-6 space-y-6">
-
         {/* Header */}
         <div>
           <h2 className="text-2xl font-bold">Publishing</h2>
@@ -1754,7 +1961,6 @@ export function PublishingTab({
         {/* ── WEB ─────────────────────────────────────────────────────────── */}
         {platform === "web" && (
           <div className="space-y-5">
-
             {/* Environment toggle card */}
             <div className="border border-border rounded-xl p-4 bg-card space-y-4">
               <div className="flex items-center justify-between">
@@ -1839,7 +2045,11 @@ export function PublishingTab({
                 {[
                   { label: "Health check", badge: "pending", note: "No active deployment" },
                   { label: "Custom domain", badge: "unconfigured", note: "Configure below" },
-                  { label: "SSL / HTTPS", badge: "partial", note: "Requires manual cert setup — not automated" },
+                  {
+                    label: "SSL / HTTPS",
+                    badge: "partial",
+                    note: "Requires manual cert setup — not automated",
+                  },
                   { label: "Rollback point", badge: "ready", note: "Latest snapshot available" },
                 ].map((row) => (
                   <div key={row.label} className="flex items-center justify-between text-sm">
@@ -1851,8 +2061,8 @@ export function PublishingTab({
                           row.badge === "ready"
                             ? "bg-green-500/15 text-green-600"
                             : row.badge === "unconfigured"
-                            ? "bg-muted text-muted-foreground"
-                            : "bg-yellow-500/15 text-yellow-600",
+                              ? "bg-muted text-muted-foreground"
+                              : "bg-yellow-500/15 text-yellow-600",
                         )}
                       >
                         {row.badge}
@@ -1873,12 +2083,16 @@ export function PublishingTab({
 
               {/* Auto-subdomain */}
               <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Your Subdomain</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Your Subdomain
+                </p>
                 <div className="flex items-center gap-2 bg-muted rounded-lg px-3 py-2.5">
                   <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                   {domainInfo?.subdomain ? (
                     <>
-                      <span className="text-sm font-mono flex-1 truncate">{domainInfo.subdomain}</span>
+                      <span className="text-sm font-mono flex-1 truncate">
+                        {domainInfo.subdomain}
+                      </span>
                       <a
                         href={domainInfo.subdomainUrl ?? "#"}
                         target="_blank"
@@ -1890,7 +2104,9 @@ export function PublishingTab({
                       <CopyUrlButton url={domainInfo.subdomainUrl ?? domainInfo.subdomain} />
                     </>
                   ) : (
-                    <span className="text-sm text-muted-foreground italic">Generated on first publish</span>
+                    <span className="text-sm text-muted-foreground italic">
+                      Generated on first publish
+                    </span>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -1902,13 +2118,17 @@ export function PublishingTab({
 
               {/* Custom domain */}
               <div className="space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Custom Domain</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Custom Domain
+                </p>
 
                 <div className="flex gap-2">
                   <input
                     value={customDomainInput}
                     onChange={(e) => setCustomDomainInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void saveDomain(); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void saveDomain();
+                    }}
                     placeholder="app.yourdomain.com"
                     className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
                   />
@@ -1919,7 +2139,11 @@ export function PublishingTab({
                     disabled={domainSaving}
                     className="shrink-0"
                   >
-                    {domainSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    {domainSaving ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Save className="h-3.5 w-3.5" />
+                    )}
                     <span className="ml-1.5">Save</span>
                   </Button>
                   {domainInfo?.customDomain && (
@@ -1945,35 +2169,50 @@ export function PublishingTab({
                 {domainInfo?.customDomain && (
                   <div className="flex items-center gap-3 flex-wrap">
                     {/* Domain status */}
-                    <span className={cn(
-                      "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium",
-                      domainInfo.domainStatus === "active" && "bg-green-500/15 text-green-400",
-                      domainInfo.domainStatus === "pending_verification" && "bg-yellow-500/15 text-yellow-400",
-                      domainInfo.domainStatus === "error" && "bg-red-500/15 text-red-400",
-                      domainInfo.domainStatus === "unconfigured" && "bg-muted text-muted-foreground",
-                    )}>
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium",
+                        domainInfo.domainStatus === "active" && "bg-green-500/15 text-green-400",
+                        domainInfo.domainStatus === "pending_verification" &&
+                          "bg-yellow-500/15 text-yellow-400",
+                        domainInfo.domainStatus === "error" && "bg-red-500/15 text-red-400",
+                        domainInfo.domainStatus === "unconfigured" &&
+                          "bg-muted text-muted-foreground",
+                      )}
+                    >
                       {domainInfo.domainStatus === "active" && <CheckCircle2 className="h-3 w-3" />}
-                      {domainInfo.domainStatus === "pending_verification" && <RefreshCw className="h-3 w-3" />}
+                      {domainInfo.domainStatus === "pending_verification" && (
+                        <RefreshCw className="h-3 w-3" />
+                      )}
                       {domainInfo.domainStatus === "error" && <XCircle className="h-3 w-3" />}
                       {domainInfo.domainStatus === "unconfigured" && <Circle className="h-3 w-3" />}
-                      DNS {domainInfo.domainStatus === "active" ? "verified" : domainInfo.domainStatus === "error" ? "error" : "pending"}
+                      DNS{" "}
+                      {domainInfo.domainStatus === "active"
+                        ? "verified"
+                        : domainInfo.domainStatus === "error"
+                          ? "error"
+                          : "pending"}
                     </span>
 
                     {/* SSL status badge */}
-                    <span className={cn(
-                      "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium",
-                      domainInfo.sslStatus === "active" && "bg-green-500/15 text-green-400",
-                      (domainInfo.sslStatus === "provisioning" || domainInfo.sslStatus === "pending") && "bg-yellow-500/15 text-yellow-400",
-                      domainInfo.sslStatus === "failed" && "bg-red-500/15 text-red-400",
-                    )}>
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium",
+                        domainInfo.sslStatus === "active" && "bg-green-500/15 text-green-400",
+                        (domainInfo.sslStatus === "provisioning" ||
+                          domainInfo.sslStatus === "pending") &&
+                          "bg-yellow-500/15 text-yellow-400",
+                        domainInfo.sslStatus === "failed" && "bg-red-500/15 text-red-400",
+                      )}
+                    >
                       <Lock className="h-3 w-3" />
                       {domainInfo.sslStatus === "active"
                         ? "SSL active"
                         : domainInfo.sslStatus === "failed"
-                        ? "SSL failed"
-                        : domainInfo.domainStatus === "active"
-                        ? "SSL manual setup required"
-                        : "SSL pending"}
+                          ? "SSL failed"
+                          : domainInfo.domainStatus === "active"
+                            ? "SSL manual setup required"
+                            : "SSL pending"}
                     </span>
 
                     {/* Verify / Re-check button */}
@@ -1985,23 +2224,35 @@ export function PublishingTab({
                         disabled={domainVerifying}
                         className="h-7 text-xs"
                       >
-                        {domainVerifying
-                          ? <><Loader2 className="h-3 w-3 animate-spin mr-1" />Checking…</>
-                          : <><RefreshCw className="h-3 w-3 mr-1" />Check DNS</>}
+                        {domainVerifying ? (
+                          <>
+                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            Checking…
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-3 w-3 mr-1" />
+                            Check DNS
+                          </>
+                        )}
                       </Button>
                     )}
                   </div>
                 )}
 
                 {/* SSL gate warning — DNS verified but SSL is not yet active */}
-                {domainInfo?.customDomain && domainInfo.domainStatus === "active" && domainInfo.sslStatus !== "active" && (
-                  <div className="flex items-start gap-2 text-xs bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2.5">
-                    <AlertTriangle className="h-3.5 w-3.5 text-yellow-400 shrink-0 mt-0.5" />
-                    <span className="text-yellow-300/90">
-                      DNS is verified, but SSL certificate automation is not connected yet. This domain may not be safely available over HTTPS until SSL is configured manually.
-                    </span>
-                  </div>
-                )}
+                {domainInfo?.customDomain &&
+                  domainInfo.domainStatus === "active" &&
+                  domainInfo.sslStatus !== "active" && (
+                    <div className="flex items-start gap-2 text-xs bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2.5">
+                      <AlertTriangle className="h-3.5 w-3.5 text-yellow-400 shrink-0 mt-0.5" />
+                      <span className="text-yellow-300/90">
+                        DNS is verified, but SSL certificate automation is not connected yet. This
+                        domain may not be safely available over HTTPS until SSL is configured
+                        manually.
+                      </span>
+                    </div>
+                  )}
 
                 {/* DNS instructions — shown when a custom domain is saved but not yet verified */}
                 {domainInfo?.customDomain && domainInfo.domainStatus !== "active" && (
@@ -2013,19 +2264,30 @@ export function PublishingTab({
 
                     {/* CNAME option */}
                     <div className="space-y-1.5">
-                      <p className="text-xs text-muted-foreground font-medium">Option A — CNAME record</p>
+                      <p className="text-xs text-muted-foreground font-medium">
+                        Option A — CNAME record
+                      </p>
                       <p className="text-xs text-muted-foreground">
-                        Add this CNAME record in your DNS provider (Cloudflare, Route53, Namecheap, etc.):
+                        Add this CNAME record in your DNS provider (Cloudflare, Route53, Namecheap,
+                        etc.):
                       </p>
                       <div className="rounded-md bg-background border border-border overflow-hidden text-xs font-mono">
                         <div className="grid grid-cols-3 gap-px bg-border">
-                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Type</div>
-                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Name</div>
-                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Value</div>
+                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
+                            Type
+                          </div>
+                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
+                            Name
+                          </div>
+                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
+                            Value
+                          </div>
                         </div>
                         <div className="grid grid-cols-3 gap-px bg-border">
                           <div className="bg-card px-2 py-1.5">CNAME</div>
-                          <div className="bg-card px-2 py-1.5 truncate">{domainInfo.customDomain}</div>
+                          <div className="bg-card px-2 py-1.5 truncate">
+                            {domainInfo.customDomain}
+                          </div>
                           <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
                             <span className="truncate">{domainInfo.cnameTarget}</span>
                             <CopyUrlButton url={domainInfo.cnameTarget} />
@@ -2037,15 +2299,23 @@ export function PublishingTab({
                     {/* TXT option */}
                     {domainInfo.verificationToken && domainInfo.txtName && (
                       <div className="space-y-1.5">
-                        <p className="text-xs text-muted-foreground font-medium">Option B — TXT ownership record (preferred for security)</p>
+                        <p className="text-xs text-muted-foreground font-medium">
+                          Option B — TXT ownership record (preferred for security)
+                        </p>
                         <p className="text-xs text-muted-foreground">
                           Add a TXT record to prove domain ownership without changing your routing:
                         </p>
                         <div className="rounded-md bg-background border border-border overflow-hidden text-xs font-mono">
                           <div className="grid grid-cols-3 gap-px bg-border">
-                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Type</div>
-                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Name</div>
-                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">Value</div>
+                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
+                              Type
+                            </div>
+                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
+                              Name
+                            </div>
+                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
+                              Value
+                            </div>
                           </div>
                           <div className="grid grid-cols-3 gap-px bg-border">
                             <div className="bg-card px-2 py-1.5">TXT</div>
@@ -2063,37 +2333,42 @@ export function PublishingTab({
                     )}
 
                     <p className="text-xs text-muted-foreground">
-                      DNS changes can take up to 48 hours to propagate. Click "Check DNS" once you've added either record.
+                      DNS changes can take up to 48 hours to propagate. Click "Check DNS" once
+                      you've added either record.
                     </p>
                   </div>
                 )}
 
                 {/* Active domain link — shown in green only when both DNS and SSL are confirmed */}
-                {domainInfo?.customDomain && domainInfo.domainStatus === "active" && domainInfo.sslStatus === "active" && (
-                  <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2.5">
-                    <CheckCircle2 className="h-4 w-4 text-green-400 shrink-0" />
-                    <a
-                      href={`https://${domainInfo.customDomain}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm font-mono text-green-400 hover:underline flex-1 truncate"
-                    >
-                      https://{domainInfo.customDomain}
-                    </a>
-                    <CopyUrlButton url={`https://${domainInfo.customDomain}`} />
-                  </div>
-                )}
+                {domainInfo?.customDomain &&
+                  domainInfo.domainStatus === "active" &&
+                  domainInfo.sslStatus === "active" && (
+                    <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2.5">
+                      <CheckCircle2 className="h-4 w-4 text-green-400 shrink-0" />
+                      <a
+                        href={`https://${domainInfo.customDomain}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-mono text-green-400 hover:underline flex-1 truncate"
+                      >
+                        https://{domainInfo.customDomain}
+                      </a>
+                      <CopyUrlButton url={`https://${domainInfo.customDomain}`} />
+                    </div>
+                  )}
 
                 {/* Active domain link (DNS ok, SSL not yet confirmed) */}
-                {domainInfo?.customDomain && domainInfo.domainStatus === "active" && domainInfo.sslStatus !== "active" && (
-                  <div className="flex items-center gap-2 bg-muted border border-border rounded-lg px-3 py-2.5">
-                    <Lock className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span className="text-sm font-mono text-muted-foreground flex-1 truncate">
-                      https://{domainInfo.customDomain}
-                    </span>
-                    <CopyUrlButton url={`https://${domainInfo.customDomain}`} />
-                  </div>
-                )}
+                {domainInfo?.customDomain &&
+                  domainInfo.domainStatus === "active" &&
+                  domainInfo.sslStatus !== "active" && (
+                    <div className="flex items-center gap-2 bg-muted border border-border rounded-lg px-3 py-2.5">
+                      <Lock className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm font-mono text-muted-foreground flex-1 truncate">
+                        https://{domainInfo.customDomain}
+                      </span>
+                      <CopyUrlButton url={`https://${domainInfo.customDomain}`} />
+                    </div>
+                  )}
               </div>
             </div>
 
@@ -2176,8 +2451,8 @@ export function PublishingTab({
                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 )}
               </button>
-              {logsOpen && (
-                deployments.length === 0 ? (
+              {logsOpen &&
+                (deployments.length === 0 ? (
                   <div className="bg-zinc-950 font-mono text-xs text-zinc-500 p-4 border-t border-border min-h-[80px] flex items-center justify-center">
                     No deployments yet. Logs will appear here after your first publish or EAS build.
                   </div>
@@ -2189,7 +2464,10 @@ export function PublishingTab({
                         ? d.env.replace("eas-ios", "EAS iOS").replace("eas-android", "EAS Android")
                         : d.env;
                       return (
-                        <div key={d.id} className="flex items-center gap-3 px-4 py-2.5 text-xs flex-wrap">
+                        <div
+                          key={d.id}
+                          className="flex items-center gap-3 px-4 py-2.5 text-xs flex-wrap"
+                        >
                           {/* Status badge */}
                           <span
                             className={cn(
@@ -2234,8 +2512,7 @@ export function PublishingTab({
                       );
                     })}
                   </div>
-                )
-              )}
+                ))}
             </div>
 
             {/* Readiness gate */}
@@ -2264,7 +2541,9 @@ export function PublishingTab({
                 {!webReadyToPublish && (
                   <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>Complete all required checklist items before publishing to production.</span>
+                    <span>
+                      Complete all required checklist items before publishing to production.
+                    </span>
                   </div>
                 )}
                 {!showConfirm ? (
@@ -2279,14 +2558,15 @@ export function PublishingTab({
                 ) : (
                   <div className="space-y-3">
                     <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 text-sm space-y-1">
-                      <p className="font-semibold text-destructive text-xs">Confirm production publish</p>
+                      <p className="font-semibold text-destructive text-xs">
+                        Confirm production publish
+                      </p>
                       <p className="text-muted-foreground text-xs">
-                        This will make your app publicly accessible. A rollback point has been saved automatically.
+                        This will make your app publicly accessible. A rollback point has been saved
+                        automatically.
                       </p>
                     </div>
-                    {publishError && (
-                      <p className="text-xs text-destructive">{publishError}</p>
-                    )}
+                    {publishError && <p className="text-xs text-destructive">{publishError}</p>}
                     <div className="flex gap-2">
                       <Button
                         variant="destructive"
@@ -2294,9 +2574,7 @@ export function PublishingTab({
                         onClick={handlePublish}
                         disabled={isPublishing}
                       >
-                        {isPublishing && (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        )}
+                        {isPublishing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                         {isPublishing ? "Publishing…" : "Confirm Publish"}
                       </Button>
                       <Button
@@ -2332,7 +2610,13 @@ export function PublishingTab({
                 </div>
                 <p className="text-[11px] text-muted-foreground">
                   Slug: <span className="font-mono">{publishResult.publicSlug}</span>
-                  {publishResult.filesPublished != null && <span>{" · "}{publishResult.filesPublished} file{publishResult.filesPublished !== 1 ? "s" : ""}</span>}
+                  {publishResult.filesPublished != null && (
+                    <span>
+                      {" · "}
+                      {publishResult.filesPublished} file
+                      {publishResult.filesPublished !== 1 ? "s" : ""}
+                    </span>
+                  )}
                   {" · "}Published {new Date(publishResult.publishedAt).toLocaleString()}
                 </p>
                 <p className="text-[11px] text-muted-foreground">
@@ -2355,9 +2639,7 @@ export function PublishingTab({
 
             {webEnv === "testing" && (
               <div className="space-y-2">
-                {publishError && (
-                  <p className="text-xs text-destructive">{publishError}</p>
-                )}
+                {publishError && <p className="text-xs text-destructive">{publishError}</p>}
                 <Button
                   variant="outline"
                   className="w-full"
@@ -2385,12 +2667,22 @@ export function PublishingTab({
             {/* App Store links */}
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" asChild>
-                <a href="https://developer.apple.com/account" target="_blank" rel="noreferrer" className="flex items-center gap-1">
+                <a
+                  href="https://developer.apple.com/account"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1"
+                >
                   Apple Developer <ArrowUpRight className="h-3 w-3" />
                 </a>
               </Button>
               <Button variant="outline" size="sm" asChild>
-                <a href="https://appstoreconnect.apple.com" target="_blank" rel="noreferrer" className="flex items-center gap-1">
+                <a
+                  href="https://appstoreconnect.apple.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1"
+                >
                   App Store Connect <ArrowUpRight className="h-3 w-3" />
                 </a>
               </Button>
@@ -2464,13 +2756,48 @@ export function PublishingTab({
                   {iosCredsOpen && (
                     <div className="divide-y divide-border/50">
                       {[
-                        { name: "EAS_ACCESS_TOKEN", label: "EAS Access Token", required: true, hint: "From expo.dev → Access Tokens" },
-                        { name: "EXPO_ACCOUNT_NAME", label: "Expo Account Name", required: true, hint: "Your Expo username or org slug" },
-                        { name: "EXPO_APP_SLUG", label: "Expo App Slug", required: false, hint: "Defaults to project name if not set" },
-                        { name: "APPLE_TEAM_ID", label: "Apple Developer Team ID", required: true, hint: "10-character ID from developer.apple.com" },
-                        { name: "APPLE_ASC_KEY_ID", label: "ASC API Key ID", required: true, hint: "From App Store Connect → Users → Keys" },
-                        { name: "APPLE_ASC_ISSUER_ID", label: "ASC Issuer ID", required: true, hint: "Shown alongside the API key" },
-                        { name: "APPLE_ASC_PRIVATE_KEY", label: "ASC Private Key (.p8)", required: true, hint: "Paste the full .p8 file contents" },
+                        {
+                          name: "EAS_ACCESS_TOKEN",
+                          label: "EAS Access Token",
+                          required: true,
+                          hint: "From expo.dev → Access Tokens",
+                        },
+                        {
+                          name: "EXPO_ACCOUNT_NAME",
+                          label: "Expo Account Name",
+                          required: true,
+                          hint: "Your Expo username or org slug",
+                        },
+                        {
+                          name: "EXPO_APP_SLUG",
+                          label: "Expo App Slug",
+                          required: false,
+                          hint: "Defaults to project name if not set",
+                        },
+                        {
+                          name: "APPLE_TEAM_ID",
+                          label: "Apple Developer Team ID",
+                          required: true,
+                          hint: "10-character ID from developer.apple.com",
+                        },
+                        {
+                          name: "APPLE_ASC_KEY_ID",
+                          label: "ASC API Key ID",
+                          required: true,
+                          hint: "From App Store Connect → Users → Keys",
+                        },
+                        {
+                          name: "APPLE_ASC_ISSUER_ID",
+                          label: "ASC Issuer ID",
+                          required: true,
+                          hint: "Shown alongside the API key",
+                        },
+                        {
+                          name: "APPLE_ASC_PRIVATE_KEY",
+                          label: "ASC Private Key (.p8)",
+                          required: true,
+                          hint: "Paste the full .p8 file contents",
+                        },
                       ].map(({ name, label, required, hint }) => {
                         const isSet = configuredSecrets.has(name);
                         const secretEntry = configuredSecrets.get(name);
@@ -2479,22 +2806,44 @@ export function PublishingTab({
                             {isSet ? (
                               <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" />
                             ) : (
-                              <Circle className={cn("h-3.5 w-3.5 shrink-0 mt-0.5", required ? "text-yellow-500" : "text-muted-foreground/60")} />
+                              <Circle
+                                className={cn(
+                                  "h-3.5 w-3.5 shrink-0 mt-0.5",
+                                  required ? "text-yellow-500" : "text-muted-foreground/60",
+                                )}
+                              />
                             )}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className={cn("font-medium", isSet ? "text-foreground" : required ? "text-foreground" : "text-muted-foreground")}>
+                                <span
+                                  className={cn(
+                                    "font-medium",
+                                    isSet
+                                      ? "text-foreground"
+                                      : required
+                                        ? "text-foreground"
+                                        : "text-muted-foreground",
+                                  )}
+                                >
                                   {label}
                                 </span>
                                 {required && !isSet && (
-                                  <span className="text-[9px] bg-yellow-500/15 text-yellow-600 px-1 py-0.5 rounded font-semibold">required</span>
+                                  <span className="text-[9px] bg-yellow-500/15 text-yellow-600 px-1 py-0.5 rounded font-semibold">
+                                    required
+                                  </span>
                                 )}
                                 {!required && (
-                                  <span className="text-[9px] bg-muted text-muted-foreground px-1 py-0.5 rounded">optional</span>
+                                  <span className="text-[9px] bg-muted text-muted-foreground px-1 py-0.5 rounded">
+                                    optional
+                                  </span>
                                 )}
                               </div>
-                              <code className="font-mono text-[9px] text-muted-foreground">{name}</code>
-                              {hint && <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>}
+                              <code className="font-mono text-[9px] text-muted-foreground">
+                                {name}
+                              </code>
+                              {hint && (
+                                <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>
+                              )}
                             </div>
                             {!isSet && onNavigateToSecret && (
                               <button
@@ -2514,7 +2863,8 @@ export function PublishingTab({
                                   setConfiguredSecrets((prev) => {
                                     const next = new Map(prev);
                                     const entry = next.get(name);
-                                    if (entry) next.set(name, { ...entry, verificationStatus: status });
+                                    if (entry)
+                                      next.set(name, { ...entry, verificationStatus: status });
                                     return next;
                                   });
                                 }}
@@ -2557,9 +2907,14 @@ export function PublishingTab({
                       <div className="flex items-start gap-2 text-xs bg-muted border border-border rounded-lg px-3 py-2.5">
                         <Key className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
                         <span className="text-muted-foreground">
-                          <span className="font-semibold text-foreground">EAS_ACCESS_TOKEN</span> is required before you can trigger a build.
-                          Get yours at{" "}
-                          <a href="https://expo.dev/accounts" target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                          <span className="font-semibold text-foreground">EAS_ACCESS_TOKEN</span> is
+                          required before you can trigger a build. Get yours at{" "}
+                          <a
+                            href="https://expo.dev/accounts"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline"
+                          >
                             expo.dev
                           </a>
                           .
@@ -2580,7 +2935,10 @@ export function PublishingTab({
                     <Button
                       className="w-full"
                       onClick={() => void triggerBuild("ios")}
-                      disabled={triggeringBuild !== null || (creditBalance !== null && creditBalance < EAS_BUILD_COST)}
+                      disabled={
+                        triggeringBuild !== null ||
+                        (creditBalance !== null && creditBalance < EAS_BUILD_COST)
+                      }
                     >
                       {triggeringBuild === "ios" ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -2597,47 +2955,62 @@ export function PublishingTab({
             {/* Build history for iOS */}
             {isMobile && mobileBuilds.filter((b) => b.platform === "ios").length > 0 && (
               <div className="border border-border rounded-xl overflow-hidden bg-card">
-                <div className="px-4 py-3 border-b border-border text-sm font-semibold">iOS Build History</div>
+                <div className="px-4 py-3 border-b border-border text-sm font-semibold">
+                  iOS Build History
+                </div>
                 <div className="divide-y divide-border">
-                  {mobileBuilds.filter((b) => b.platform === "ios").slice(0, 10).map((b) => {
-                    const isOpen = openLogBuildId === b.id;
-                    return (
-                      <div key={b.id}>
-                        <div className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-muted/30 transition-colors">
-                          <MobileBuildStatusBadge status={b.status} />
-                          {b.buildId && <span className="font-mono text-muted-foreground truncate">{b.buildId.slice(0, 8)}…</span>}
-                          {b.testflightUrl && (
-                            <a
-                              href={b.testflightUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-green-500 hover:underline flex items-center gap-0.5"
+                  {mobileBuilds
+                    .filter((b) => b.platform === "ios")
+                    .slice(0, 10)
+                    .map((b) => {
+                      const isOpen = openLogBuildId === b.id;
+                      return (
+                        <div key={b.id}>
+                          <div className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-muted/30 transition-colors">
+                            <MobileBuildStatusBadge status={b.status} />
+                            {b.buildId && (
+                              <span className="font-mono text-muted-foreground truncate">
+                                {b.buildId.slice(0, 8)}…
+                              </span>
+                            )}
+                            {b.testflightUrl && (
+                              <a
+                                href={b.testflightUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-green-500 hover:underline flex items-center gap-0.5"
+                              >
+                                TestFlight <ArrowUpRight className="h-2.5 w-2.5" />
+                              </a>
+                            )}
+                            <span className="ml-auto text-muted-foreground shrink-0">
+                              {new Date(b.createdAt).toLocaleDateString()}
+                            </span>
+                            <button
+                              type="button"
+                              aria-expanded={isOpen}
+                              title={isOpen ? "Hide build logs" : "View build logs"}
+                              onClick={() => setOpenLogBuildId(isOpen ? null : b.id)}
+                              className="shrink-0 flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors rounded px-1 py-0.5 hover:bg-muted"
                             >
-                              TestFlight <ArrowUpRight className="h-2.5 w-2.5" />
-                            </a>
+                              <Terminal className="h-3 w-3" />
+                              {isOpen ? (
+                                <ChevronUp className="h-3 w-3" />
+                              ) : (
+                                <ChevronDown className="h-3 w-3" />
+                              )}
+                            </button>
+                          </div>
+                          {isOpen && (
+                            <BuildLogViewer
+                              projectId={projectId}
+                              buildLogId={b.id}
+                              buildStatus={b.status}
+                            />
                           )}
-                          <span className="ml-auto text-muted-foreground shrink-0">{new Date(b.createdAt).toLocaleDateString()}</span>
-                          <button
-                            type="button"
-                            aria-expanded={isOpen}
-                            title={isOpen ? "Hide build logs" : "View build logs"}
-                            onClick={() => setOpenLogBuildId(isOpen ? null : b.id)}
-                            className="shrink-0 flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors rounded px-1 py-0.5 hover:bg-muted"
-                          >
-                            <Terminal className="h-3 w-3" />
-                            {isOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                          </button>
                         </div>
-                        {isOpen && (
-                          <BuildLogViewer
-                            projectId={projectId}
-                            buildLogId={b.id}
-                            buildStatus={b.status}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               </div>
             )}
@@ -2663,7 +3036,9 @@ export function PublishingTab({
               <Button className="w-full" disabled>
                 <Smartphone className="h-4 w-4 mr-2" />
                 Submit to TestFlight
-                <span className="ml-2 text-[11px] opacity-60">(App Store submission — separate flow)</span>
+                <span className="ml-2 text-[11px] opacity-60">
+                  (App Store submission — separate flow)
+                </span>
               </Button>
             </div>
           </div>
@@ -2678,7 +3053,12 @@ export function PublishingTab({
             {/* Play Console link */}
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" asChild>
-                <a href="https://play.google.com/console" target="_blank" rel="noreferrer" className="flex items-center gap-1">
+                <a
+                  href="https://play.google.com/console"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1"
+                >
                   Play Console <ArrowUpRight className="h-3 w-3" />
                 </a>
               </Button>
@@ -2749,10 +3129,30 @@ export function PublishingTab({
                   {androidCredsOpen && (
                     <div className="divide-y divide-border/50">
                       {[
-                        { name: "EAS_ACCESS_TOKEN", label: "EAS Access Token", required: true, hint: "From expo.dev → Access Tokens" },
-                        { name: "EXPO_ACCOUNT_NAME", label: "Expo Account Name", required: true, hint: "Your Expo username or org slug" },
-                        { name: "EXPO_APP_SLUG", label: "Expo App Slug", required: false, hint: "Defaults to project name if not set" },
-                        { name: "GOOGLE_SERVICE_ACCOUNT_JSON", label: "Google Play Service Account JSON", required: true, hint: "Service account JSON with releasemanager role from Google Play Console" },
+                        {
+                          name: "EAS_ACCESS_TOKEN",
+                          label: "EAS Access Token",
+                          required: true,
+                          hint: "From expo.dev → Access Tokens",
+                        },
+                        {
+                          name: "EXPO_ACCOUNT_NAME",
+                          label: "Expo Account Name",
+                          required: true,
+                          hint: "Your Expo username or org slug",
+                        },
+                        {
+                          name: "EXPO_APP_SLUG",
+                          label: "Expo App Slug",
+                          required: false,
+                          hint: "Defaults to project name if not set",
+                        },
+                        {
+                          name: "GOOGLE_SERVICE_ACCOUNT_JSON",
+                          label: "Google Play Service Account JSON",
+                          required: true,
+                          hint: "Service account JSON with releasemanager role from Google Play Console",
+                        },
                       ].map(({ name, label, required, hint }) => {
                         const isSet = configuredSecrets.has(name);
                         const secretEntry = configuredSecrets.get(name);
@@ -2761,22 +3161,44 @@ export function PublishingTab({
                             {isSet ? (
                               <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" />
                             ) : (
-                              <Circle className={cn("h-3.5 w-3.5 shrink-0 mt-0.5", required ? "text-yellow-500" : "text-muted-foreground/60")} />
+                              <Circle
+                                className={cn(
+                                  "h-3.5 w-3.5 shrink-0 mt-0.5",
+                                  required ? "text-yellow-500" : "text-muted-foreground/60",
+                                )}
+                              />
                             )}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className={cn("font-medium", isSet ? "text-foreground" : required ? "text-foreground" : "text-muted-foreground")}>
+                                <span
+                                  className={cn(
+                                    "font-medium",
+                                    isSet
+                                      ? "text-foreground"
+                                      : required
+                                        ? "text-foreground"
+                                        : "text-muted-foreground",
+                                  )}
+                                >
                                   {label}
                                 </span>
                                 {required && !isSet && (
-                                  <span className="text-[9px] bg-yellow-500/15 text-yellow-600 px-1 py-0.5 rounded font-semibold">required</span>
+                                  <span className="text-[9px] bg-yellow-500/15 text-yellow-600 px-1 py-0.5 rounded font-semibold">
+                                    required
+                                  </span>
                                 )}
                                 {!required && (
-                                  <span className="text-[9px] bg-muted text-muted-foreground px-1 py-0.5 rounded">optional</span>
+                                  <span className="text-[9px] bg-muted text-muted-foreground px-1 py-0.5 rounded">
+                                    optional
+                                  </span>
                                 )}
                               </div>
-                              <code className="font-mono text-[9px] text-muted-foreground">{name}</code>
-                              {hint && <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>}
+                              <code className="font-mono text-[9px] text-muted-foreground">
+                                {name}
+                              </code>
+                              {hint && (
+                                <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>
+                              )}
                             </div>
                             {!isSet && onNavigateToSecret && (
                               <button
@@ -2796,7 +3218,8 @@ export function PublishingTab({
                                   setConfiguredSecrets((prev) => {
                                     const next = new Map(prev);
                                     const entry = next.get(name);
-                                    if (entry) next.set(name, { ...entry, verificationStatus: status });
+                                    if (entry)
+                                      next.set(name, { ...entry, verificationStatus: status });
                                     return next;
                                   });
                                 }}
@@ -2839,9 +3262,14 @@ export function PublishingTab({
                       <div className="flex items-start gap-2 text-xs bg-muted border border-border rounded-lg px-3 py-2.5">
                         <Key className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
                         <span className="text-muted-foreground">
-                          <span className="font-semibold text-foreground">EAS_ACCESS_TOKEN</span> is required before you can trigger a build.
-                          Get yours at{" "}
-                          <a href="https://expo.dev/accounts" target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                          <span className="font-semibold text-foreground">EAS_ACCESS_TOKEN</span> is
+                          required before you can trigger a build. Get yours at{" "}
+                          <a
+                            href="https://expo.dev/accounts"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline"
+                          >
                             expo.dev
                           </a>
                           .
@@ -2862,14 +3290,19 @@ export function PublishingTab({
                     <Button
                       className="w-full bg-green-600 hover:bg-green-700 text-white"
                       onClick={() => void triggerBuild("android")}
-                      disabled={triggeringBuild !== null || (creditBalance !== null && creditBalance < EAS_BUILD_COST)}
+                      disabled={
+                        triggeringBuild !== null ||
+                        (creditBalance !== null && creditBalance < EAS_BUILD_COST)
+                      }
                     >
                       {triggeringBuild === "android" ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       ) : (
                         <PlaySquare className="h-4 w-4 mr-2" />
                       )}
-                      {triggeringBuild === "android" ? "Queuing build…" : "Build for Android (Play Store)"}
+                      {triggeringBuild === "android"
+                        ? "Queuing build…"
+                        : "Build for Android (Play Store)"}
                     </Button>
                   )}
                 </div>
@@ -2879,47 +3312,62 @@ export function PublishingTab({
             {/* Build history for Android */}
             {isMobile && mobileBuilds.filter((b) => b.platform === "android").length > 0 && (
               <div className="border border-border rounded-xl overflow-hidden bg-card">
-                <div className="px-4 py-3 border-b border-border text-sm font-semibold">Android Build History</div>
+                <div className="px-4 py-3 border-b border-border text-sm font-semibold">
+                  Android Build History
+                </div>
                 <div className="divide-y divide-border">
-                  {mobileBuilds.filter((b) => b.platform === "android").slice(0, 10).map((b) => {
-                    const isOpen = openLogBuildId === b.id;
-                    return (
-                      <div key={b.id}>
-                        <div className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-muted/30 transition-colors">
-                          <MobileBuildStatusBadge status={b.status} />
-                          {b.buildId && <span className="font-mono text-muted-foreground truncate">{b.buildId.slice(0, 8)}…</span>}
-                          {b.testflightUrl && (
-                            <a
-                              href={b.testflightUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-green-500 hover:underline flex items-center gap-0.5"
+                  {mobileBuilds
+                    .filter((b) => b.platform === "android")
+                    .slice(0, 10)
+                    .map((b) => {
+                      const isOpen = openLogBuildId === b.id;
+                      return (
+                        <div key={b.id}>
+                          <div className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-muted/30 transition-colors">
+                            <MobileBuildStatusBadge status={b.status} />
+                            {b.buildId && (
+                              <span className="font-mono text-muted-foreground truncate">
+                                {b.buildId.slice(0, 8)}…
+                              </span>
+                            )}
+                            {b.testflightUrl && (
+                              <a
+                                href={b.testflightUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-green-500 hover:underline flex items-center gap-0.5"
+                              >
+                                Play Console <ArrowUpRight className="h-2.5 w-2.5" />
+                              </a>
+                            )}
+                            <span className="ml-auto text-muted-foreground shrink-0">
+                              {new Date(b.createdAt).toLocaleDateString()}
+                            </span>
+                            <button
+                              type="button"
+                              aria-expanded={isOpen}
+                              title={isOpen ? "Hide build logs" : "View build logs"}
+                              onClick={() => setOpenLogBuildId(isOpen ? null : b.id)}
+                              className="shrink-0 flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors rounded px-1 py-0.5 hover:bg-muted"
                             >
-                              Play Console <ArrowUpRight className="h-2.5 w-2.5" />
-                            </a>
+                              <Terminal className="h-3 w-3" />
+                              {isOpen ? (
+                                <ChevronUp className="h-3 w-3" />
+                              ) : (
+                                <ChevronDown className="h-3 w-3" />
+                              )}
+                            </button>
+                          </div>
+                          {isOpen && (
+                            <BuildLogViewer
+                              projectId={projectId}
+                              buildLogId={b.id}
+                              buildStatus={b.status}
+                            />
                           )}
-                          <span className="ml-auto text-muted-foreground shrink-0">{new Date(b.createdAt).toLocaleDateString()}</span>
-                          <button
-                            type="button"
-                            aria-expanded={isOpen}
-                            title={isOpen ? "Hide build logs" : "View build logs"}
-                            onClick={() => setOpenLogBuildId(isOpen ? null : b.id)}
-                            className="shrink-0 flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors rounded px-1 py-0.5 hover:bg-muted"
-                          >
-                            <Terminal className="h-3 w-3" />
-                            {isOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                          </button>
                         </div>
-                        {isOpen && (
-                          <BuildLogViewer
-                            projectId={projectId}
-                            buildLogId={b.id}
-                            buildStatus={b.status}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               </div>
             )}
@@ -2947,12 +3395,13 @@ export function PublishingTab({
               <Button className="w-full" disabled>
                 <PlaySquare className="h-4 w-4 mr-2" />
                 Upload to Google Play
-                <span className="ml-2 text-[11px] opacity-60">(Play Store submission — separate flow)</span>
+                <span className="ml-2 text-[11px] opacity-60">
+                  (Play Store submission — separate flow)
+                </span>
               </Button>
             </div>
           </div>
         )}
-
       </div>
     </div>
   );

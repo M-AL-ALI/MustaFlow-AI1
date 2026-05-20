@@ -137,13 +137,7 @@ function relativeTime(dateStr: string): string {
   return `${days}d ago`;
 }
 
-function SecretAuditTimeline({
-  secretId,
-  projectId,
-}: {
-  secretId: number;
-  projectId: number;
-}) {
+function SecretAuditTimeline({ secretId, projectId }: { secretId: number; projectId: number }) {
   const [expanded, setExpanded] = useState(false);
 
   const { data: entries, isLoading } = useGetSecretAuditLog(projectId, secretId, undefined, {
@@ -234,8 +228,11 @@ function SecretVerifyButton({
         const data = (await res.json()) as { status: string };
         setStatus(data.status);
       }
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
   }, [projectId, secretId]);
 
   const icon =
@@ -289,7 +286,9 @@ function ModuleLibrary({
   const createSecret = useCreateSecret();
   const queryClient = useQueryClient();
 
-  const getModuleStatus = (mod: typeof MOBILE_MODULES[0]): "active" | "inactive" | "needs-secret" => {
+  const getModuleStatus = (
+    mod: (typeof MOBILE_MODULES)[0],
+  ): "active" | "inactive" | "needs-secret" => {
     if (!activeModules.has(mod.id)) {
       if (mod.requiredSecrets.length > 0 && !mod.requiredSecrets.every((s) => secretNames.has(s))) {
         return "needs-secret";
@@ -299,7 +298,7 @@ function ModuleLibrary({
     return "active";
   };
 
-  const handleToggle = (mod: typeof MOBILE_MODULES[0]) => {
+  const handleToggle = (mod: (typeof MOBILE_MODULES)[0]) => {
     const status = getModuleStatus(mod);
 
     if (status === "needs-secret") {
@@ -315,15 +314,20 @@ function ModuleLibrary({
         return next;
       });
       if (onSendMessage) {
-        onSendMessage(`Remove the ${mod.name} (${mod.provider}) integration cleanly. Remove all related imports, initialization code, and screens added for this module.`);
+        onSendMessage(
+          `Remove the ${mod.name} (${mod.provider}) integration cleanly. Remove all related imports, initialization code, and screens added for this module.`,
+        );
       }
     } else {
       setActiveModules((prev) => new Set([...prev, mod.id]));
-      const secretsList = mod.requiredSecrets.length > 0
-        ? ` using the API key stored in ${mod.requiredSecrets.join(", ")}`
-        : "";
+      const secretsList =
+        mod.requiredSecrets.length > 0
+          ? ` using the API key stored in ${mod.requiredSecrets.join(", ")}`
+          : "";
       if (onSendMessage) {
-        onSendMessage(`Wire in ${mod.name} (${mod.provider}) for this app${secretsList}. Follow the official ${mod.provider} Expo SDK patterns: correct imports, initialization in app/_layout.tsx, typed hooks, error boundaries, and loading states. Add all required packages to package.json.`);
+        onSendMessage(
+          `Wire in ${mod.name} (${mod.provider}) for this app${secretsList}. Follow the official ${mod.provider} Expo SDK patterns: correct imports, initialization in app/_layout.tsx, typed hooks, error boundaries, and loading states. Add all required packages to package.json.`,
+        );
       }
     }
   };
@@ -331,7 +335,10 @@ function ModuleLibrary({
   const handleAddSecret = (modId: string) => {
     if (!newSecretName || !newSecretValue) return;
     createSecret.mutate(
-      { id: projectId, data: { name: newSecretName, value: newSecretValue, environment: "development" } },
+      {
+        id: projectId,
+        data: { name: newSecretName, value: newSecretValue, environment: "development" },
+      },
       {
         onSuccess: () => {
           setNewSecretName("");
@@ -341,7 +348,9 @@ function ModuleLibrary({
           const mod = MOBILE_MODULES.find((m) => m.id === modId);
           if (mod && onSendMessage) {
             const secretsList = mod.requiredSecrets.join(", ");
-            onSendMessage(`Wire in ${mod.name} (${mod.provider}) for this app using the API key stored in ${secretsList}. Follow the official ${mod.provider} Expo SDK patterns.`);
+            onSendMessage(
+              `Wire in ${mod.name} (${mod.provider}) for this app using the API key stored in ${secretsList}. Follow the official ${mod.provider} Expo SDK patterns.`,
+            );
           }
           setActiveModules((prev) => new Set([...prev, modId]));
         },
@@ -352,7 +361,8 @@ function ModuleLibrary({
   return (
     <div className="space-y-3">
       <div className="text-xs text-muted-foreground">
-        Toggle modules to auto-wire them into your app. The AI builder will add the correct SDK code, imports, and initialization.
+        Toggle modules to auto-wire them into your app. The AI builder will add the correct SDK
+        code, imports, and initialization.
       </div>
 
       {MOBILE_MODULES.map((mod) => {
@@ -380,17 +390,26 @@ function ModuleLibrary({
                     {mod.provider}
                   </span>
                   {isActive && (
-                    <Badge variant="default" className="text-[10px] h-4 px-1.5 bg-primary/20 text-primary border-primary/30">
+                    <Badge
+                      variant="default"
+                      className="text-[10px] h-4 px-1.5 bg-primary/20 text-primary border-primary/30"
+                    >
                       Active
                     </Badge>
                   )}
                   {!isActive && !needsSecret && (
-                    <Badge variant="outline" className="text-[10px] h-4 px-1.5 text-muted-foreground border-border">
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] h-4 px-1.5 text-muted-foreground border-border"
+                    >
                       Inactive
                     </Badge>
                   )}
                   {needsSecret && (
-                    <Badge variant="outline" className="text-[10px] h-4 px-1.5 text-yellow-500 border-yellow-500/30">
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] h-4 px-1.5 text-yellow-500 border-yellow-500/30"
+                    >
                       Needs secret
                     </Badge>
                   )}
@@ -422,7 +441,9 @@ function ModuleLibrary({
                       </span>
                     ))}
                     {mod.packageDependencies.length > 2 && (
-                      <span className="text-[10px] text-muted-foreground">+{mod.packageDependencies.length - 2} more</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        +{mod.packageDependencies.length - 2} more
+                      </span>
                     )}
                   </div>
                 )}
@@ -432,7 +453,13 @@ function ModuleLibrary({
                 className={`shrink-0 mt-0.5 transition-colors ${
                   isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
                 }`}
-                title={isActive ? "Remove module" : needsSecret ? "Add required secret first" : "Wire in module"}
+                title={
+                  isActive
+                    ? "Remove module"
+                    : needsSecret
+                      ? "Add required secret first"
+                      : "Wire in module"
+                }
               >
                 {isActive ? (
                   <ToggleRight className="h-6 w-6" />
@@ -545,7 +572,10 @@ export function ToolsTab({
   onSendMessage?: (text: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const isMobile = projectKind === "mobile-cross" || projectKind === "mobile-ios" || projectKind === "mobile-android";
+  const isMobile =
+    projectKind === "mobile-cross" ||
+    projectKind === "mobile-ios" ||
+    projectKind === "mobile-android";
 
   const [innerTab, setInnerTab] = useState<string>(
     prefillSecretName ? "secrets" : (defaultTab ?? "files"),
@@ -556,10 +586,7 @@ export function ToolsTab({
   });
   const [selectedFileId, setSelectedFileId] = useState<number | null>(null);
   const activeFileId =
-    selectedFileId ??
-    files?.find((f) => f.path === "index.html")?.id ??
-    files?.[0]?.id ??
-    null;
+    selectedFileId ?? files?.find((f) => f.path === "index.html")?.id ?? files?.[0]?.id ?? null;
   const { data: fileContent } = useGetProjectFile(projectId, activeFileId ?? 0, {
     query: {
       enabled: !!projectId && !!activeFileId,
@@ -578,7 +605,9 @@ export function ToolsTab({
 
   const [newSecretName, setNewSecretName] = useState(prefillSecretName ?? "");
   const [newSecretValue, setNewSecretValue] = useState("");
-  const [secretEnv, setSecretEnv] = useState<"development" | "testing" | "staging" | "production">("development");
+  const [secretEnv, setSecretEnv] = useState<"development" | "testing" | "staging" | "production">(
+    "development",
+  );
 
   useEffect(() => {
     if (prefillSecretName) {
@@ -689,8 +718,8 @@ export function ToolsTab({
               className="h-full m-0 border border-border rounded-md bg-black p-4 text-green-400 font-mono text-sm"
             >
               <div className="text-gray-400">
-                Shell access is not exposed in this prototype. The AI Builder runs generation server-side; check
-                Versions for change history and Logs for activity.
+                Shell access is not exposed in this prototype. The AI Builder runs generation
+                server-side; check Versions for change history and Logs for activity.
               </div>
             </TabsContent>
 
@@ -711,7 +740,11 @@ export function ToolsTab({
                 <select
                   className="bg-background border border-border rounded-md px-2 text-sm"
                   value={secretEnv}
-                  onChange={(e) => setSecretEnv(e.target.value as "development" | "testing" | "staging" | "production")}
+                  onChange={(e) =>
+                    setSecretEnv(
+                      e.target.value as "development" | "testing" | "staging" | "production",
+                    )
+                  }
                 >
                   <option value="development">Development</option>
                   <option value="testing">Testing</option>
@@ -725,12 +758,12 @@ export function ToolsTab({
                   {createSecret.isPending ? "Adding..." : "Add secret"}
                 </Button>
                 <div className="col-span-4 text-xs text-muted-foreground">
-                  Values are never returned by the API — only a masked preview. Separate test and production
-                  secrets so the AI Builder can target the right environment.
+                  Values are never returned by the API — only a masked preview. Separate test and
+                  production secrets so the AI Builder can target the right environment.
                 </div>
               </div>
 
-              {(!secrets || secrets.length === 0) ? (
+              {!secrets || secrets.length === 0 ? (
                 <div className="border border-border rounded-lg p-8 text-center text-muted-foreground bg-card">
                   No secrets configured yet. Add your first key above.
                 </div>
@@ -740,24 +773,47 @@ export function ToolsTab({
                     const envSecrets = secrets.filter((s) => s.environment === env);
                     if (envSecrets.length === 0) return null;
                     const envConfig = {
-                      development: { label: "Development", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
-                      testing: { label: "Testing", color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20" },
-                      staging: { label: "Staging", color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/20" },
-                      production: { label: "Production", color: "text-green-400", bg: "bg-green-500/10 border-green-500/20" },
+                      development: {
+                        label: "Development",
+                        color: "text-blue-400",
+                        bg: "bg-blue-500/10 border-blue-500/20",
+                      },
+                      testing: {
+                        label: "Testing",
+                        color: "text-yellow-400",
+                        bg: "bg-yellow-500/10 border-yellow-500/20",
+                      },
+                      staging: {
+                        label: "Staging",
+                        color: "text-orange-400",
+                        bg: "bg-orange-500/10 border-orange-500/20",
+                      },
+                      production: {
+                        label: "Production",
+                        color: "text-green-400",
+                        bg: "bg-green-500/10 border-green-500/20",
+                      },
                     }[env];
                     return (
-                      <div key={env} className="border border-border rounded-lg overflow-hidden bg-card">
-                        <div className={`px-4 py-2 border-b border-border flex items-center gap-2 ${envConfig.bg}`}>
-                          <span className={`text-xs font-semibold uppercase tracking-wider ${envConfig.color}`}>{envConfig.label} Keys</span>
-                          <span className="text-xs text-muted-foreground ml-auto">{envSecrets.length} secret{envSecrets.length !== 1 ? "s" : ""}</span>
+                      <div
+                        key={env}
+                        className="border border-border rounded-lg overflow-hidden bg-card"
+                      >
+                        <div
+                          className={`px-4 py-2 border-b border-border flex items-center gap-2 ${envConfig.bg}`}
+                        >
+                          <span
+                            className={`text-xs font-semibold uppercase tracking-wider ${envConfig.color}`}
+                          >
+                            {envConfig.label} Keys
+                          </span>
+                          <span className="text-xs text-muted-foreground ml-auto">
+                            {envSecrets.length} secret{envSecrets.length !== 1 ? "s" : ""}
+                          </span>
                         </div>
                         <div className="divide-y divide-border">
                           {envSecrets.map((s) => (
-                            <SecretRowWithAudit
-                              key={s.id}
-                              secret={s}
-                              projectId={projectId}
-                            />
+                            <SecretRowWithAudit key={s.id} secret={s} projectId={projectId} />
                           ))}
                         </div>
                       </div>
@@ -767,7 +823,8 @@ export function ToolsTab({
               )}
               <div className="flex items-start gap-2 text-xs text-muted-foreground mt-2">
                 <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                Secret values are never returned by the API. Use Development keys for local testing, Test keys for staging, and Production keys for your live app.
+                Secret values are never returned by the API. Use Development keys for local testing,
+                Test keys for staging, and Production keys for your live app.
               </div>
             </TabsContent>
 

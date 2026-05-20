@@ -1375,7 +1375,21 @@ components:
         description: { type: ["string", "null"] }
         kind:
           type: string
-          enum: [web, mobile-ios, mobile-android, mobile-cross, fullstack, dashboard, api, design, automation, marketplace, chatbot, spreadsheet]
+          enum:
+            [
+              web,
+              mobile-ios,
+              mobile-android,
+              mobile-cross,
+              fullstack,
+              dashboard,
+              api,
+              design,
+              automation,
+              marketplace,
+              chatbot,
+              spreadsheet,
+            ]
         platform:
           type: string
           enum: [web, ios, android, cross]
@@ -1404,7 +1418,21 @@ components:
         workspaceId: { type: integer }
         kind:
           type: string
-          enum: [web, mobile-ios, mobile-android, mobile-cross, fullstack, dashboard, api, design, automation, marketplace, chatbot, spreadsheet]
+          enum:
+            [
+              web,
+              mobile-ios,
+              mobile-android,
+              mobile-cross,
+              fullstack,
+              dashboard,
+              api,
+              design,
+              automation,
+              marketplace,
+              chatbot,
+              spreadsheet,
+            ]
         initialPrompt: { type: string }
 
     ProjectUpdate:
@@ -1430,7 +1458,11 @@ components:
         packageName: { type: string }
         version: { type: string }
         splashBackgroundColor: { type: string }
-        iconBase64: { type: string, description: "Base64-encoded PNG for the app icon (1024×1024 recommended). Stored as assets/icon.png." }
+        iconBase64:
+          {
+            type: string,
+            description: "Base64-encoded PNG for the app icon (1024×1024 recommended). Stored as assets/icon.png.",
+          }
 
     MobileAppSettings:
       type: object
@@ -1441,8 +1473,16 @@ components:
         packageName: { type: string }
         version: { type: string }
         splashBackgroundColor: { type: string }
-        iconUrl: { type: ["string", "null"], description: "Preview URL for the current icon, or null if not yet uploaded." }
-        taskId: { type: ["integer", "null"], description: "ID of the AgentTask created for this save (for event polling)." }
+        iconUrl:
+          {
+            type: ["string", "null"],
+            description: "Preview URL for the current icon, or null if not yet uploaded.",
+          }
+        taskId:
+          {
+            type: ["integer", "null"],
+            description: "ID of the AgentTask created for this save (for event polling).",
+          }
 
     ProjectsSummary:
       type: object
@@ -1914,7 +1954,22 @@ components:
         label: { type: string }
         pageType:
           type: string
-          enum: [landing, auth, form, dashboard, modal, settings, "404", tab-bar, drawer, sheet, list, detail, other]
+          enum:
+            [
+              landing,
+              auth,
+              form,
+              dashboard,
+              modal,
+              settings,
+              "404",
+              tab-bar,
+              drawer,
+              sheet,
+              list,
+              detail,
+              other,
+            ]
         filePath: { type: string }
         position:
           type: object

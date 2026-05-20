@@ -12,7 +12,9 @@ import { db, userCreditsTable, creditTransactionsTable } from "@workspace/db";
 const router: IRouter = Router();
 
 // Upsert user credit row, returning current balance.
-export async function getOrCreateCredits(userId: string): Promise<{ id: number; userId: string; balance: number; updatedAt: Date }> {
+export async function getOrCreateCredits(
+  userId: string,
+): Promise<{ id: number; userId: string; balance: number; updatedAt: Date }> {
   const [existing] = await db
     .select()
     .from(userCreditsTable)
@@ -20,10 +22,7 @@ export async function getOrCreateCredits(userId: string): Promise<{ id: number; 
 
   if (existing) return existing;
 
-  const [created] = await db
-    .insert(userCreditsTable)
-    .values({ userId, balance: 100 })
-    .returning();
+  const [created] = await db.insert(userCreditsTable).values({ userId, balance: 100 }).returning();
 
   return created!;
 }
@@ -58,11 +57,15 @@ router.get("/credits/transactions", async (req, res): Promise<void> => {
 
 // Internal helper used by the builder to deduct credits.
 // Returns the new balance after deduction, or null if insufficient.
-export async function deductCredits(userId: string, amount: number, opts: {
-  projectId?: number;
-  type: "build" | "refine" | "plan";
-  description: string;
-}): Promise<{ newBalance: number } | { insufficient: true; balance: number }> {
+export async function deductCredits(
+  userId: string,
+  amount: number,
+  opts: {
+    projectId?: number;
+    type: "build" | "refine" | "plan";
+    description: string;
+  },
+): Promise<{ newBalance: number } | { insufficient: true; balance: number }> {
   const credits = await getOrCreateCredits(userId);
 
   if (credits.balance < amount) {
@@ -89,7 +92,11 @@ export async function deductCredits(userId: string, amount: number, opts: {
 }
 
 // Internal helper to grant credits (starter grant, admin adjustment, etc.)
-export async function grantCredits(userId: string, amount: number, description: string): Promise<number> {
+export async function grantCredits(
+  userId: string,
+  amount: number,
+  description: string,
+): Promise<number> {
   const credits = await getOrCreateCredits(userId);
   const newBalance = credits.balance + amount;
 

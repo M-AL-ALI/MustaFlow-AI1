@@ -13,10 +13,7 @@ import { writeKnowledge } from "../lib/knowledge";
 
 // Environment mismatch: warn if a key labelled for one env is being used in another.
 // This is informational only — we surface a warning flag in the response so the UI can show it.
-function detectEnvMismatch(
-  secretEnv: string,
-  requestedEnv: string | undefined,
-): string | null {
+function detectEnvMismatch(secretEnv: string, requestedEnv: string | undefined): string | null {
   if (!requestedEnv) return null;
   if (secretEnv === requestedEnv) return null;
   if (secretEnv === "production" && requestedEnv !== "production") {
@@ -72,79 +69,71 @@ async function writeAuditLog(opts: {
 
 const router: IRouter = Router();
 
-router.get(
-  "/projects/:id/secrets",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const params = ListSecretsParams.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: params.error.message });
-      return;
-    }
-    const contextEnv = typeof req.query.env === "string" ? req.query.env : undefined;
-    const rows = await db
-      .select()
-      .from(secretsTable)
-      .where(eq(secretsTable.projectId, params.data.id))
-      .orderBy(desc(secretsTable.createdAt));
-    res.json(ListSecretsResponse.parse(rows.map((r) => toEntry(r, contextEnv))));
-  },
-);
+router.get("/projects/:id/secrets", requireProjectOwnership, async (req, res): Promise<void> => {
+  const params = ListSecretsParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const contextEnv = typeof req.query.env === "string" ? req.query.env : undefined;
+  const rows = await db
+    .select()
+    .from(secretsTable)
+    .where(eq(secretsTable.projectId, params.data.id))
+    .orderBy(desc(secretsTable.createdAt));
+  res.json(ListSecretsResponse.parse(rows.map((r) => toEntry(r, contextEnv))));
+});
 
-router.post(
-  "/projects/:id/secrets",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const params = CreateSecretParams.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: params.error.message });
-      return;
-    }
-    const parsed = CreateSecretBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.message });
-      return;
-    }
+router.post("/projects/:id/secrets", requireProjectOwnership, async (req, res): Promise<void> => {
+  const params = CreateSecretParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const parsed = CreateSecretBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
 
-    const encrypted = encryptionService.encrypt(parsed.data.value);
+  const encrypted = encryptionService.encrypt(parsed.data.value);
 
-    const [row] = await db
-      .insert(secretsTable)
-      .values({
-        projectId: params.data.id,
-        name: parsed.data.name,
-        valueEncrypted: encrypted,
-        environment: parsed.data.environment ?? "development",
-        category: (parsed.data as { category?: string }).category ?? "other",
-      })
-      .returning();
-    if (!row) {
-      res.status(500).json({ error: "Failed to save secret" });
-      return;
-    }
-
-    void writeAuditLog({
+  const [row] = await db
+    .insert(secretsTable)
+    .values({
       projectId: params.data.id,
-      secretId: row.id,
-      secretName: parsed.data.name,
-      action: "created",
-      actorId: req.userId ?? "unknown",
-      metadata: { environment: row.environment, category: row.category },
-    });
+      name: parsed.data.name,
+      valueEncrypted: encrypted,
+      environment: parsed.data.environment ?? "development",
+      category: (parsed.data as { category?: string }).category ?? "other",
+    })
+    .returning();
+  if (!row) {
+    res.status(500).json({ error: "Failed to save secret" });
+    return;
+  }
 
-    void writeKnowledge({
-      title: `Secret ${parsed.data.name} added`,
-      content: `Secret "${parsed.data.name}" was added to the ${row.environment} environment.`,
-      type: "secret_change",
-      category: "diagnostic",
-      severity: "info",
-      projectId: params.data.id,
-      userId: req.userId,
-    });
+  void writeAuditLog({
+    projectId: params.data.id,
+    secretId: row.id,
+    secretName: parsed.data.name,
+    action: "created",
+    actorId: req.userId ?? "unknown",
+    metadata: { environment: row.environment, category: row.category },
+  });
 
-    res.status(201).json(toEntry(row));
-  },
-);
+  void writeKnowledge({
+    title: `Secret ${parsed.data.name} added`,
+    content: `Secret "${parsed.data.name}" was added to the ${row.environment} environment.`,
+    type: "secret_change",
+    category: "diagnostic",
+    severity: "info",
+    projectId: params.data.id,
+    userId: req.userId,
+  });
+
+  res.status(201).json(toEntry(row));
+});
 
 router.delete(
   "/projects/:id/secrets/:secretId",
@@ -156,10 +145,7 @@ router.delete(
       res.status(400).json({ error: "Invalid secret id" });
       return;
     }
-    const [row] = await db
-      .select()
-      .from(secretsTable)
-      .where(eq(secretsTable.id, secretId));
+    const [row] = await db.select().from(secretsTable).where(eq(secretsTable.id, secretId));
     if (!row || row.projectId !== projectId) {
       res.status(404).json({ error: "Secret not found" });
       return;
@@ -200,10 +186,7 @@ router.patch(
       res.status(400).json({ error: "Invalid secret id" });
       return;
     }
-    const [existing] = await db
-      .select()
-      .from(secretsTable)
-      .where(eq(secretsTable.id, secretId));
+    const [existing] = await db.select().from(secretsTable).where(eq(secretsTable.id, secretId));
     if (!existing || existing.projectId !== projectId) {
       res.status(404).json({ error: "Secret not found" });
       return;
@@ -247,7 +230,9 @@ router.patch(
       metadata: { fields: Object.keys(body) },
     });
 
-    const changedFields = Object.keys(body).filter((k) => k !== "value").join(", ");
+    const changedFields = Object.keys(body)
+      .filter((k) => k !== "value")
+      .join(", ");
     void writeKnowledge({
       title: `Secret ${row.name} updated`,
       content: `Secret "${row.name}" in the ${row.environment} environment was updated${changedFields ? ` (${changedFields} changed)` : ""}.`,
@@ -275,10 +260,7 @@ router.post(
       return;
     }
 
-    const [row] = await db
-      .select()
-      .from(secretsTable)
-      .where(eq(secretsTable.id, secretId));
+    const [row] = await db.select().from(secretsTable).where(eq(secretsTable.id, secretId));
 
     if (!row || row.projectId !== projectId) {
       res.status(404).json({ error: "Secret not found" });
@@ -294,7 +276,8 @@ router.post(
     }
 
     let status: "verified" | "verification_failed" | "manual_required" = "manual_required";
-    let message = "Automatic verification is not supported for this secret type. Please verify manually.";
+    let message =
+      "Automatic verification is not supported for this secret type. Please verify manually.";
 
     const nameLower = row.name.toLowerCase();
 
@@ -353,7 +336,8 @@ router.post(
         message = "Stripe key format is valid. (Live API call not performed.)";
       } else {
         status = "verification_failed";
-        message = "This does not match the expected Stripe key format (sk_live_... or sk_test_...).";
+        message =
+          "This does not match the expected Stripe key format (sk_live_... or sk_test_...).";
       }
     }
 
@@ -367,7 +351,12 @@ router.post(
       projectId,
       secretId,
       secretName: row.name,
-      action: status === "verified" ? "verified" : (status === "verification_failed" ? "verification_failed" : "accessed"),
+      action:
+        status === "verified"
+          ? "verified"
+          : status === "verification_failed"
+            ? "verification_failed"
+            : "accessed",
       actorId: req.userId ?? "unknown",
       metadata: { status, message },
     });
@@ -430,7 +419,12 @@ router.get(
     const rows = await db
       .select()
       .from(secretAuditLogTable)
-      .where(and(eq(secretAuditLogTable.secretId, secretId), eq(secretAuditLogTable.projectId, projectId)))
+      .where(
+        and(
+          eq(secretAuditLogTable.secretId, secretId),
+          eq(secretAuditLogTable.projectId, projectId),
+        ),
+      )
       .orderBy(desc(secretAuditLogTable.createdAt))
       .limit(limit);
 

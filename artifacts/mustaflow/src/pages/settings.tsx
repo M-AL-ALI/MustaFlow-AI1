@@ -48,7 +48,7 @@ export default function SettingsPage() {
   const { toast } = useToast();
 
   const searchParams = new URLSearchParams(
-    typeof window !== "undefined" ? window.location.search : ""
+    typeof window !== "undefined" ? window.location.search : "",
   );
   const tabParam = searchParams.get("tab");
   const paymentParam = searchParams.get("payment");
@@ -219,11 +219,15 @@ function AccountTab() {
           <div className="px-3 py-2 rounded-md border border-border bg-muted/40 text-sm text-muted-foreground select-none">
             {user?.primaryEmailAddress?.emailAddress ?? "—"}
           </div>
-          <p className="text-xs text-muted-foreground">Email is managed through your sign-in provider.</p>
+          <p className="text-xs text-muted-foreground">
+            Email is managed through your sign-in provider.
+          </p>
         </div>
 
         <div className="space-y-1">
-          <label htmlFor="display-name" className="text-sm font-medium">Display Name</label>
+          <label htmlFor="display-name" className="text-sm font-medium">
+            Display Name
+          </label>
           <input
             id="display-name"
             type="text"
@@ -279,7 +283,9 @@ function AccountTab() {
             />
             <div>
               <div className="text-sm font-medium">Build complete</div>
-              <div className="text-xs text-muted-foreground">Notify me when a build or refine finishes</div>
+              <div className="text-xs text-muted-foreground">
+                Notify me when a build or refine finishes
+              </div>
             </div>
           </label>
 
@@ -292,7 +298,9 @@ function AccountTab() {
             />
             <div>
               <div className="text-sm font-medium">Weekly digest</div>
-              <div className="text-xs text-muted-foreground">A weekly summary of your project activity</div>
+              <div className="text-xs text-muted-foreground">
+                A weekly summary of your project activity
+              </div>
             </div>
           </label>
         </div>
@@ -381,11 +389,19 @@ function CreditsTab() {
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
 
-  const { data: creditsData, refetch: refetchCredits, isLoading: creditsLoading } = useGetUserCredits({
+  const {
+    data: creditsData,
+    refetch: refetchCredits,
+    isLoading: creditsLoading,
+  } = useGetUserCredits({
     query: { queryKey: ["/api/credits"] },
   });
 
-  const { data: txData, refetch: refetchTx, isLoading: txLoading } = useListCreditTransactions({
+  const {
+    data: txData,
+    refetch: refetchTx,
+    isLoading: txLoading,
+  } = useListCreditTransactions({
     query: { queryKey: ["/api/credits/transactions"] },
   });
 
@@ -465,23 +481,23 @@ function CreditsTab() {
         <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-yellow-600">
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
-            <span className="font-semibold">Credit purchases not yet available.</span>
-            {" "}Stripe is not configured on this platform. Check back soon.
+            <span className="font-semibold">Credit purchases not yet available.</span> Stripe is not
+            configured on this platform. Check back soon.
           </div>
         </div>
       )}
 
       {/* Balance card */}
-      <div className={`border rounded-xl bg-card p-6 flex items-center justify-between ${
-        isLowBalance ? "border-yellow-500/30 bg-yellow-500/5" : "border-border"
-      }`}>
+      <div
+        className={`border rounded-xl bg-card p-6 flex items-center justify-between ${
+          isLowBalance ? "border-yellow-500/30 bg-yellow-500/5" : "border-border"
+        }`}
+      >
         <div className="space-y-1">
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
             Current balance
           </p>
-          <p className="text-4xl font-bold">
-            {creditsLoading ? "…" : balance.toLocaleString()}
-          </p>
+          <p className="text-4xl font-bold">{creditsLoading ? "…" : balance.toLocaleString()}</p>
           <p className="text-xs text-muted-foreground">build credits</p>
           {isLowBalance && !creditsLoading && (
             <p className="text-xs text-yellow-600 font-medium mt-1">
@@ -587,20 +603,14 @@ function CreditsTab() {
         {!txLoading && txData?.transactions && txData.transactions.length > 0 && (
           <div className="divide-y divide-border">
             {txData.transactions.map((tx) => (
-              <div
-                key={tx.id}
-                className="flex items-center justify-between px-4 py-2.5 text-sm"
-              >
+              <div key={tx.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
                 <div>
                   <p className="font-medium flex items-center gap-1.5">
-                    {tx.type === "purchase" && (
-                      <ArrowUpRight className="h-3 w-3 text-green-500" />
-                    )}
+                    {tx.type === "purchase" && <ArrowUpRight className="h-3 w-3 text-green-500" />}
                     {tx.description ?? tx.type}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {new Date(tx.createdAt).toLocaleString()} · balance after:{" "}
-                    {tx.balanceAfter}
+                    {new Date(tx.createdAt).toLocaleString()} · balance after: {tx.balanceAfter}
                   </p>
                 </div>
                 <span
@@ -633,9 +643,11 @@ function PackageCard({
 }) {
   const isBuilder = pkg.id === "builder";
   return (
-    <div className={`border rounded-xl p-4 flex flex-col gap-3 ${
-      isBuilder ? "border-primary/40 bg-primary/5" : "border-border bg-background"
-    }`}>
+    <div
+      className={`border rounded-xl p-4 flex flex-col gap-3 ${
+        isBuilder ? "border-primary/40 bg-primary/5" : "border-border bg-background"
+      }`}
+    >
       <div>
         <div className="flex items-center gap-1.5">
           <p className="font-semibold text-sm">{pkg.label}</p>
@@ -653,7 +665,7 @@ function PackageCard({
         <span className="ml-auto text-sm font-semibold">${pkg.priceUsd}</span>
       </div>
       <p className="text-[11px] text-muted-foreground">
-        ${(pkg.priceUsd / pkg.credits * 100).toFixed(1)}¢ per credit
+        ${((pkg.priceUsd / pkg.credits) * 100).toFixed(1)}¢ per credit
       </p>
       <button
         onClick={onCheckout}

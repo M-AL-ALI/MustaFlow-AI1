@@ -31,65 +31,57 @@ function parseMapData(raw: unknown): PageMapData {
   };
 }
 
-router.get(
-  "/projects/:id/page-map",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
+router.get("/projects/:id/page-map", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
 
-    const [project] = await db
-      .select({ pageMapData: projectsTable.pageMapData })
-      .from(projectsTable)
-      .where(and(eq(projectsTable.id, projectId), activeProjects));
+  const [project] = await db
+    .select({ pageMapData: projectsTable.pageMapData })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), activeProjects));
 
-    if (!project) {
-      res.status(404).json({ error: "Project not found" });
-      return;
-    }
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
 
-    const mapData = parseMapData(project.pageMapData);
-    res.json({ pageMapData: mapData });
-  },
-);
+  const mapData = parseMapData(project.pageMapData);
+  res.json({ pageMapData: mapData });
+});
 
-router.put(
-  "/projects/:id/page-map",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
+router.put("/projects/:id/page-map", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
 
-    const body = req.body as Partial<PageMapData>;
-    if (!body || typeof body !== "object") {
-      res.status(400).json({ error: "Invalid page map payload" });
-      return;
-    }
+  const body = req.body as Partial<PageMapData>;
+  if (!body || typeof body !== "object") {
+    res.status(400).json({ error: "Invalid page map payload" });
+    return;
+  }
 
-    const [existing] = await db
-      .select({ pageMapData: projectsTable.pageMapData })
-      .from(projectsTable)
-      .where(and(eq(projectsTable.id, projectId), activeProjects));
+  const [existing] = await db
+    .select({ pageMapData: projectsTable.pageMapData })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), activeProjects));
 
-    if (!existing) {
-      res.status(404).json({ error: "Project not found" });
-      return;
-    }
+  if (!existing) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
 
-    const current = parseMapData(existing.pageMapData);
-    const merged: PageMapData = {
-      web: body.web ?? current.web,
-      ios: body.ios ?? current.ios,
-      android: body.android ?? current.android,
-    };
+  const current = parseMapData(existing.pageMapData);
+  const merged: PageMapData = {
+    web: body.web ?? current.web,
+    ios: body.ios ?? current.ios,
+    android: body.android ?? current.android,
+  };
 
-    await db
-      .update(projectsTable)
-      .set({ pageMapData: merged as unknown as Record<string, unknown>, updatedAt: sql`now()` })
-      .where(and(eq(projectsTable.id, projectId), activeProjects));
+  await db
+    .update(projectsTable)
+    .set({ pageMapData: merged as unknown as Record<string, unknown>, updatedAt: sql`now()` })
+    .where(and(eq(projectsTable.id, projectId), activeProjects));
 
-    req.log.info({ projectId }, "Page map updated");
-    res.json({ pageMapData: merged });
-  },
-);
+  req.log.info({ projectId }, "Page map updated");
+  res.json({ pageMapData: merged });
+});
 
 router.post(
   "/projects/:id/page-map/analyze",
@@ -145,7 +137,10 @@ router.post(
       .set({ pageMapData: newMapData as unknown as Record<string, unknown>, updatedAt: sql`now()` })
       .where(and(eq(projectsTable.id, projectId), activeProjects));
 
-    req.log.info({ projectId, platform, nodeCount: updatedPlatform.nodes.length }, "Page map analyzed");
+    req.log.info(
+      { projectId, platform, nodeCount: updatedPlatform.nodes.length },
+      "Page map analyzed",
+    );
     res.json({ pageMapData: newMapData });
   },
 );

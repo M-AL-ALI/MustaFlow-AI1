@@ -6,12 +6,7 @@ import { useRef, useCallback, useState } from "react";
 
 export type RecordingState = "idle" | "recording" | "stopped";
 
-const PREFERRED_MIME_TYPES = [
-  "audio/webm;codecs=opus",
-  "audio/webm",
-  "audio/mp4",
-  "audio/aac",
-];
+const PREFERRED_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/aac"];
 
 function getSupportedMimeType(): string | undefined {
   for (const mimeType of PREFERRED_MIME_TYPES) {
@@ -33,9 +28,7 @@ export function useVoiceRecorder() {
     const mimeType = getSupportedMimeType();
     mimeTypeRef.current = mimeType;
 
-    const recorder = mimeType
-      ? new MediaRecorder(stream, { mimeType })
-      : new MediaRecorder(stream);
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
 
     mediaRecorderRef.current = recorder;
     chunksRef.current = [];

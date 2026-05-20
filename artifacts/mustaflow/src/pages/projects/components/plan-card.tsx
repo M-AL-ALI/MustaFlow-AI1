@@ -23,10 +23,7 @@ import {
   Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  useListSecrets,
-  getListSecretsQueryKey,
-} from "@workspace/api-client-react";
+import { useListSecrets, getListSecretsQueryKey } from "@workspace/api-client-react";
 
 export type StructuredPlan = {
   summary?: string;
@@ -67,9 +64,16 @@ const MODE_COLORS: Record<AgentMode, string> = {
 };
 
 const COMPLEXITY_LABEL: Record<number, string> = {
-  1: "trivial", 2: "trivial", 3: "simple", 4: "simple",
-  5: "moderate", 6: "moderate", 7: "complex", 8: "complex",
-  9: "very complex", 10: "very complex",
+  1: "trivial",
+  2: "trivial",
+  3: "simple",
+  4: "simple",
+  5: "moderate",
+  6: "moderate",
+  7: "complex",
+  8: "complex",
+  9: "very complex",
+  10: "very complex",
 };
 
 function complexityColor(score: number): string {
@@ -153,18 +157,17 @@ function InlineTextEdit({
       className:
         "w-full bg-background border border-primary/40 rounded px-1.5 py-1 text-[11px] text-foreground focus:outline-none focus:border-primary resize-none",
     };
-    return multiline ? (
-      <textarea {...sharedProps} rows={3} />
-    ) : (
-      <input {...sharedProps} />
-    );
+    return multiline ? <textarea {...sharedProps} rows={3} /> : <input {...sharedProps} />;
   }
 
   return (
     <div className="group relative">
       <span
         onClick={() => {
-          if (!readOnly) { setEditing(true); setDraft(value); }
+          if (!readOnly) {
+            setEditing(true);
+            setDraft(value);
+          }
         }}
         title={readOnly ? undefined : "Click to edit"}
         className={cn(
@@ -173,9 +176,7 @@ function InlineTextEdit({
           className,
         )}
       >
-        {value || (
-          <span className="text-muted-foreground/50 italic">{placeholder}</span>
-        )}
+        {value || <span className="text-muted-foreground/50 italic">{placeholder}</span>}
       </span>
       {!readOnly && (
         <Pencil className="absolute right-0 top-0.5 h-2.5 w-2.5 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
@@ -201,9 +202,7 @@ function EditableList({
   const [editValue, setEditValue] = useState("");
 
   if (items.length === 0) {
-    return (
-      <div className="text-[10px] text-muted-foreground/50 italic">{emptyText}</div>
-    );
+    return <div className="text-[10px] text-muted-foreground/50 italic">{emptyText}</div>;
   }
 
   return (
@@ -245,11 +244,15 @@ function EditableList({
               <span
                 className={cn(
                   "flex-1 text-[11px] leading-snug",
-                  !readOnly && "cursor-pointer hover:underline decoration-dashed underline-offset-2",
+                  !readOnly &&
+                    "cursor-pointer hover:underline decoration-dashed underline-offset-2",
                   color,
                 )}
                 onClick={() => {
-                  if (!readOnly) { setEditingIdx(i); setEditValue(item); }
+                  if (!readOnly) {
+                    setEditingIdx(i);
+                    setEditValue(item);
+                  }
                 }}
                 title={readOnly ? undefined : "Click to edit"}
               >
@@ -265,7 +268,10 @@ function EditableList({
                     <X className="h-2.5 w-2.5" />
                   </button>
                   <button
-                    onClick={() => { setEditingIdx(i); setEditValue(item); }}
+                    onClick={() => {
+                      setEditingIdx(i);
+                      setEditValue(item);
+                    }}
                     className="shrink-0 opacity-0 group-hover:opacity-50 hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
                     title="Edit"
                   >
@@ -297,9 +303,7 @@ function EditableSitemapList({
   const [editPurpose, setEditPurpose] = useState("");
 
   if (items.length === 0) {
-    return (
-      <div className="text-[10px] text-muted-foreground/50 italic">No pages defined.</div>
-    );
+    return <div className="text-[10px] text-muted-foreground/50 italic">No pages defined.</div>;
   }
 
   return (
@@ -316,7 +320,9 @@ function EditableSitemapList({
                   placeholder="Page name"
                   className="flex-1 bg-background border border-border rounded px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary"
                 />
-                <span className="text-[10px] text-muted-foreground self-center font-mono shrink-0">{page.route}</span>
+                <span className="text-[10px] text-muted-foreground self-center font-mono shrink-0">
+                  {page.route}
+                </span>
               </div>
               <input
                 value={editPurpose}
@@ -328,7 +334,11 @@ function EditableSitemapList({
                 <button
                   onClick={() => {
                     const next = [...items];
-                    next[i] = { ...next[i], name: editName.trim() || page.name, purpose: editPurpose.trim() || page.purpose };
+                    next[i] = {
+                      ...next[i],
+                      name: editName.trim() || page.name,
+                      purpose: editPurpose.trim() || page.purpose,
+                    };
                     onChange(next);
                     setEditingIdx(null);
                   }}
@@ -358,7 +368,11 @@ function EditableSitemapList({
               {!readOnly && (
                 <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                   <button
-                    onClick={() => { setEditingIdx(i); setEditName(page.name); setEditPurpose(page.purpose); }}
+                    onClick={() => {
+                      setEditingIdx(i);
+                      setEditName(page.name);
+                      setEditPurpose(page.purpose);
+                    }}
                     className="text-muted-foreground hover:text-foreground"
                     title="Edit"
                   >
@@ -494,13 +508,16 @@ export function PlanCard({
 
   // Debounced localStorage write whenever editState changes
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const persistEdits = useCallback((state: EditState) => {
-    if (readOnly) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      savePersistedEdits(messageId, state);
-    }, 400);
-  }, [messageId, readOnly]);
+  const persistEdits = useCallback(
+    (state: EditState) => {
+      if (readOnly) return;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        savePersistedEdits(messageId, state);
+      }, 400);
+    },
+    [messageId, readOnly],
+  );
 
   useEffect(() => {
     persistEdits(editState);
@@ -528,25 +545,19 @@ export function PlanCard({
     query: { queryKey: getListSecretsQueryKey(projectId), enabled: !!projectId },
   });
 
-  const secretNames = useMemo(
-    () => new Set(secrets.map((s) => s.name.toLowerCase())),
-    [secrets],
-  );
+  const secretNames = useMemo(() => new Set(secrets.map((s) => s.name.toLowerCase())), [secrets]);
 
   const score = plan?.complexityScore ?? 0;
   const recommendedMode = (plan?.recommendedMode as AgentMode | undefined) ?? "power";
   const estimatedSeconds = plan?.estimatedBuildSeconds ?? 0;
-  const creditCost = score > 0
-    ? Math.max(1, Math.round(score * CREDIT_MULTIPLIER[localMode]))
-    : CREDIT_MULTIPLIER[localMode];
+  const creditCost =
+    score > 0
+      ? Math.max(1, Math.round(score * CREDIT_MULTIPLIER[localMode]))
+      : CREDIT_MULTIPLIER[localMode];
 
   const keysNeeded = plan?.keysNeeded ?? [];
-  const missingKeys = keysNeeded.filter(
-    (k) => !secretNames.has(k.toLowerCase()),
-  );
-  const configuredKeys = keysNeeded.filter((k) =>
-    secretNames.has(k.toLowerCase()),
-  );
+  const missingKeys = keysNeeded.filter((k) => !secretNames.has(k.toLowerCase()));
+  const configuredKeys = keysNeeded.filter((k) => secretNames.has(k.toLowerCase()));
   void configuredKeys;
 
   function toggleCollapse(key: string) {
@@ -572,20 +583,14 @@ export function PlanCard({
           .join("\n")}`,
       );
     } else if (editState.pages.length > 0) {
-      parts.push(
-        `Pages/Screens:\n${editState.pages.map((p) => `- ${p}`).join("\n")}`,
-      );
+      parts.push(`Pages/Screens:\n${editState.pages.map((p) => `- ${p}`).join("\n")}`);
     }
 
     if (editState.backend.length > 0) {
-      parts.push(
-        `Backend/API:\n${editState.backend.map((b) => `- ${b}`).join("\n")}`,
-      );
+      parts.push(`Backend/API:\n${editState.backend.map((b) => `- ${b}`).join("\n")}`);
     }
     if (editState.database.length > 0) {
-      parts.push(
-        `Database:\n${editState.database.map((d) => `- ${d}`).join("\n")}`,
-      );
+      parts.push(`Database:\n${editState.database.map((d) => `- ${d}`).join("\n")}`);
     }
     if (editState.integrations.length > 0) {
       parts.push(`Integrations: ${editState.integrations.join(", ")}`);
@@ -621,9 +626,7 @@ export function PlanCard({
       );
     }
     if (editState.removedIntegrations.length > 0) {
-      constraints.push(
-        `Do NOT integrate: ${editState.removedIntegrations.join(", ")}`,
-      );
+      constraints.push(`Do NOT integrate: ${editState.removedIntegrations.join(", ")}`);
     }
     if (editState.removedEndpoints.length > 0) {
       constraints.push(
@@ -715,9 +718,7 @@ export function PlanCard({
                   <span
                     className={cn(
                       "flex-1 text-[11px] font-mono truncate",
-                      configured
-                        ? "text-muted-foreground"
-                        : "text-foreground",
+                      configured ? "text-muted-foreground" : "text-foreground",
                     )}
                   >
                     {key}
@@ -735,9 +736,7 @@ export function PlanCard({
                     </button>
                   )}
                   {configured && (
-                    <span className="shrink-0 text-[9px] text-green-400/70">
-                      configured
-                    </span>
+                    <span className="shrink-0 text-[9px] text-green-400/70">configured</span>
                   )}
                 </div>
               );
@@ -773,16 +772,10 @@ export function PlanCard({
               <div className="space-y-3">
                 {editState.sitemap.length > 0 ? (
                   <div>
-                    <SectionHeader
-                      label="Sitemap"
-                      icon={Map}
-                      count={editState.sitemap.length}
-                    />
+                    <SectionHeader label="Sitemap" icon={Map} count={editState.sitemap.length} />
                     <EditableSitemapList
                       items={editState.sitemap}
-                      onChange={(sitemap) =>
-                        setEditState((s) => ({ ...s, sitemap }))
-                      }
+                      onChange={(sitemap) => setEditState((s) => ({ ...s, sitemap }))}
                       onRemoveRoute={(route) =>
                         setEditState((s) => ({
                           ...s,
@@ -793,7 +786,8 @@ export function PlanCard({
                     />
                     {editState.removedSitemapRoutes.length > 0 && !readOnly && (
                       <div className="mt-1 text-[9px] text-destructive/70 italic">
-                        {editState.removedSitemapRoutes.length} page{editState.removedSitemapRoutes.length !== 1 ? "s" : ""} excluded from build
+                        {editState.removedSitemapRoutes.length} page
+                        {editState.removedSitemapRoutes.length !== 1 ? "s" : ""} excluded from build
                       </div>
                     )}
                   </div>
@@ -806,9 +800,7 @@ export function PlanCard({
                     />
                     <EditableList
                       items={editState.pages}
-                      onChange={(pages) =>
-                        setEditState((s) => ({ ...s, pages }))
-                      }
+                      onChange={(pages) => setEditState((s) => ({ ...s, pages }))}
                       readOnly={readOnly}
                     />
                   </div>
@@ -823,9 +815,7 @@ export function PlanCard({
                     />
                     <EditableList
                       items={editState.backend}
-                      onChange={(backend) =>
-                        setEditState((s) => ({ ...s, backend }))
-                      }
+                      onChange={(backend) => setEditState((s) => ({ ...s, backend }))}
                       readOnly={readOnly}
                     />
                   </div>
@@ -833,11 +823,7 @@ export function PlanCard({
 
                 {plan.filesAffected && plan.filesAffected.length > 0 && (
                   <div>
-                    <SectionHeader
-                      label="Files"
-                      icon={Code2}
-                      count={plan.filesAffected.length}
-                    />
+                    <SectionHeader label="Files" icon={Code2} count={plan.filesAffected.length} />
                     <div className="space-y-0.5">
                       {plan.filesAffected.map((f, i) => (
                         <div
@@ -865,9 +851,7 @@ export function PlanCard({
                     />
                     <EditableList
                       items={editState.database}
-                      onChange={(database) =>
-                        setEditState((s) => ({ ...s, database }))
-                      }
+                      onChange={(database) => setEditState((s) => ({ ...s, database }))}
                       readOnly={readOnly}
                     />
                   </div>
@@ -941,7 +925,8 @@ export function PlanCard({
                     </div>
                     {editState.removedTables.length > 0 && !readOnly && (
                       <div className="mt-1 text-[9px] text-destructive/70 italic">
-                        {editState.removedTables.length} table{editState.removedTables.length !== 1 ? "s" : ""} excluded
+                        {editState.removedTables.length} table
+                        {editState.removedTables.length !== 1 ? "s" : ""} excluded
                       </div>
                     )}
                   </div>
@@ -963,22 +948,18 @@ export function PlanCard({
                               ep.method === "GET"
                                 ? "bg-green-500/10 text-green-400 border-green-500/20"
                                 : ep.method === "POST"
-                                ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                                : ep.method === "DELETE"
-                                ? "bg-red-500/10 text-red-400 border-red-500/20"
-                                : "bg-muted text-muted-foreground border-border",
+                                  ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                                  : ep.method === "DELETE"
+                                    ? "bg-red-500/10 text-red-400 border-red-500/20"
+                                    : "bg-muted text-muted-foreground border-border",
                             )}
                           >
                             {ep.method}
                           </span>
                           <div className="flex-1 min-w-0">
-                            <span className="font-mono text-foreground">
-                              {ep.path}
-                            </span>
+                            <span className="font-mono text-foreground">{ep.path}</span>
                             {ep.purpose && (
-                              <div className="text-[10px] text-muted-foreground">
-                                {ep.purpose}
-                              </div>
+                              <div className="text-[10px] text-muted-foreground">{ep.purpose}</div>
                             )}
                           </div>
                           {!readOnly && (
@@ -1002,7 +983,8 @@ export function PlanCard({
                     </div>
                     {editState.removedEndpoints.length > 0 && !readOnly && (
                       <div className="mt-1 text-[9px] text-destructive/70 italic">
-                        {editState.removedEndpoints.length} endpoint{editState.removedEndpoints.length !== 1 ? "s" : ""} excluded
+                        {editState.removedEndpoints.length} endpoint
+                        {editState.removedEndpoints.length !== 1 ? "s" : ""} excluded
                       </div>
                     )}
                   </div>
@@ -1044,7 +1026,8 @@ export function PlanCard({
                     />
                     {editState.removedIntegrations.length > 0 && !readOnly && (
                       <div className="mt-1 text-[9px] text-destructive/70 italic">
-                        {editState.removedIntegrations.length} integration{editState.removedIntegrations.length !== 1 ? "s" : ""} excluded from build
+                        {editState.removedIntegrations.length} integration
+                        {editState.removedIntegrations.length !== 1 ? "s" : ""} excluded from build
                       </div>
                     )}
                   </div>
@@ -1056,9 +1039,7 @@ export function PlanCard({
                     <div className="bg-muted/30 rounded-lg p-2">
                       <InlineTextEdit
                         value={editState.approach}
-                        onChange={(approach) =>
-                          setEditState((s) => ({ ...s, approach }))
-                        }
+                        onChange={(approach) => setEditState((s) => ({ ...s, approach }))}
                         multiline
                         className="text-[11px] text-muted-foreground leading-relaxed"
                         readOnly={readOnly}
@@ -1084,35 +1065,17 @@ export function PlanCard({
                   <div>
                     <SectionHeader label="UX Notes per page" icon={Sparkles} />
                     <div className="space-y-1.5">
-                      {Object.entries(editState.uxNotes).map(
-                        ([page, note], i) => (
-                          <div key={i} className="text-[11px] group">
-                            <span className="font-medium text-foreground">
-                              {page}:{" "}
-                            </span>
-                            {!readOnly && editingUxKey === page ? (
-                              <span className="inline-flex items-center gap-1">
-                                <input
-                                  autoFocus
-                                  value={editingUxValue}
-                                  onChange={(e) =>
-                                    setEditingUxValue(e.target.value)
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      setEditState((s) => ({
-                                        ...s,
-                                        uxNotes: {
-                                          ...s.uxNotes,
-                                          [page]: editingUxValue.trim() || note,
-                                        },
-                                      }));
-                                      setEditingUxKey(null);
-                                    }
-                                    if (e.key === "Escape")
-                                      setEditingUxKey(null);
-                                  }}
-                                  onBlur={() => {
+                      {Object.entries(editState.uxNotes).map(([page, note], i) => (
+                        <div key={i} className="text-[11px] group">
+                          <span className="font-medium text-foreground">{page}: </span>
+                          {!readOnly && editingUxKey === page ? (
+                            <span className="inline-flex items-center gap-1">
+                              <input
+                                autoFocus
+                                value={editingUxValue}
+                                onChange={(e) => setEditingUxValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
                                     setEditState((s) => ({
                                       ...s,
                                       uxNotes: {
@@ -1121,43 +1084,55 @@ export function PlanCard({
                                       },
                                     }));
                                     setEditingUxKey(null);
-                                  }}
-                                  className="flex-1 bg-background border border-primary/40 rounded px-1 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary"
-                                />
-                                <Check
-                                  className="h-3 w-3 text-green-400 cursor-pointer"
-                                  onClick={() => {
-                                    setEditState((s) => ({
-                                      ...s,
-                                      uxNotes: {
-                                        ...s.uxNotes,
-                                        [page]: editingUxValue.trim() || note,
-                                      },
-                                    }));
-                                    setEditingUxKey(null);
-                                  }}
-                                />
-                              </span>
-                            ) : (
-                              <span
-                                className={cn(
-                                  "text-muted-foreground",
-                                  !readOnly && "cursor-pointer hover:underline decoration-dashed underline-offset-2",
-                                )}
-                                onClick={() => {
-                                  if (!readOnly) {
-                                    setEditingUxKey(page);
-                                    setEditingUxValue(note);
                                   }
+                                  if (e.key === "Escape") setEditingUxKey(null);
                                 }}
-                                title={readOnly ? undefined : "Click to edit"}
-                              >
-                                {note}
-                              </span>
-                            )}
-                          </div>
-                        ),
-                      )}
+                                onBlur={() => {
+                                  setEditState((s) => ({
+                                    ...s,
+                                    uxNotes: {
+                                      ...s.uxNotes,
+                                      [page]: editingUxValue.trim() || note,
+                                    },
+                                  }));
+                                  setEditingUxKey(null);
+                                }}
+                                className="flex-1 bg-background border border-primary/40 rounded px-1 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary"
+                              />
+                              <Check
+                                className="h-3 w-3 text-green-400 cursor-pointer"
+                                onClick={() => {
+                                  setEditState((s) => ({
+                                    ...s,
+                                    uxNotes: {
+                                      ...s.uxNotes,
+                                      [page]: editingUxValue.trim() || note,
+                                    },
+                                  }));
+                                  setEditingUxKey(null);
+                                }}
+                              />
+                            </span>
+                          ) : (
+                            <span
+                              className={cn(
+                                "text-muted-foreground",
+                                !readOnly &&
+                                  "cursor-pointer hover:underline decoration-dashed underline-offset-2",
+                              )}
+                              onClick={() => {
+                                if (!readOnly) {
+                                  setEditingUxKey(page);
+                                  setEditingUxValue(note);
+                                }
+                              }}
+                              title={readOnly ? undefined : "Click to edit"}
+                            >
+                              {note}
+                            </span>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -1180,9 +1155,7 @@ export function PlanCard({
                     />
                     <EditableList
                       items={editState.testPlan}
-                      onChange={(testPlan) =>
-                        setEditState((s) => ({ ...s, testPlan }))
-                      }
+                      onChange={(testPlan) => setEditState((s) => ({ ...s, testPlan }))}
                       readOnly={readOnly}
                     />
                   </div>
@@ -1210,9 +1183,7 @@ export function PlanCard({
                     />
                     <EditableList
                       items={editState.risks}
-                      onChange={(risks) =>
-                        setEditState((s) => ({ ...s, risks }))
-                      }
+                      onChange={(risks) => setEditState((s) => ({ ...s, risks }))}
                       color="text-orange-400"
                       emptyText="No risks identified."
                       readOnly={readOnly}
@@ -1249,11 +1220,8 @@ export function PlanCard({
               <>
                 <span className="text-muted-foreground/30">·</span>
                 <span className="text-[10px] text-muted-foreground">
-                  ~
-                  <span className="font-semibold text-foreground">
-                    {estimatedSeconds}s
-                  </span>{" "}
-                  on {localMode}
+                  ~<span className="font-semibold text-foreground">{estimatedSeconds}s</span> on{" "}
+                  {localMode}
                 </span>
               </>
             )}
@@ -1262,8 +1230,7 @@ export function PlanCard({
                 <span className="text-muted-foreground/30">·</span>
                 <span className="text-[10px] text-yellow-400 flex items-center gap-0.5">
                   <AlertTriangle className="h-2.5 w-2.5" />
-                  {missingKeys.length} key{missingKeys.length !== 1 ? "s" : ""}{" "}
-                  missing
+                  {missingKeys.length} key{missingKeys.length !== 1 ? "s" : ""} missing
                 </span>
               </>
             )}
@@ -1271,9 +1238,7 @@ export function PlanCard({
 
           {/* Mode selector */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground shrink-0">
-              Mode:
-            </span>
+            <span className="text-[10px] text-muted-foreground shrink-0">Mode:</span>
             <div className="flex bg-muted border border-border rounded-lg p-0.5 gap-0.5">
               {(["lite", "eco", "power", "pro"] as const).map((mode) => (
                 <button

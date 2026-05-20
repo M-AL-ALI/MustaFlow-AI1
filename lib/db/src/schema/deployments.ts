@@ -4,7 +4,16 @@ import { projectsTable } from "./projects";
 export const DEPLOYMENT_ENVS = ["testing", "production", "ios", "android"] as const;
 export type DeploymentEnv = (typeof DEPLOYMENT_ENVS)[number];
 
-export const DEPLOYMENT_STATUSES = ["started", "queued", "building", "passed", "failed", "unpublished", "submitting", "submitted"] as const;
+export const DEPLOYMENT_STATUSES = [
+  "started",
+  "queued",
+  "building",
+  "passed",
+  "failed",
+  "unpublished",
+  "submitting",
+  "submitted",
+] as const;
 export type DeploymentStatus = (typeof DEPLOYMENT_STATUSES)[number];
 
 export const deploymentLogsTable = pgTable("deployment_logs", {

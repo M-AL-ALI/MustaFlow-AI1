@@ -94,9 +94,7 @@ export function EdgeDetailPanel({ edge, onClose, onSave, onDelete }: EdgeDetailP
       <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border bg-card/80">
         <div className="flex items-center gap-2 min-w-0">
           <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <span className="text-sm font-semibold text-foreground truncate">
-            Connection
-          </span>
+          <span className="text-sm font-semibold text-foreground truncate">Connection</span>
         </div>
         <button
           onClick={onClose}
@@ -110,9 +108,13 @@ export function EdgeDetailPanel({ edge, onClose, onSave, onDelete }: EdgeDetailP
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {/* Route summary */}
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 border border-border rounded-lg px-3 py-2">
-          <span className="font-medium text-foreground truncate max-w-[90px]">{edge.sourceLabel}</span>
+          <span className="font-medium text-foreground truncate max-w-[90px]">
+            {edge.sourceLabel}
+          </span>
           <ArrowRight className="h-3 w-3 shrink-0" />
-          <span className="font-medium text-foreground truncate max-w-[90px]">{edge.targetLabel}</span>
+          <span className="font-medium text-foreground truncate max-w-[90px]">
+            {edge.targetLabel}
+          </span>
         </div>
 
         {/* Connection type */}
@@ -135,17 +137,26 @@ export function EdgeDetailPanel({ edge, onClose, onSave, onDelete }: EdgeDetailP
                       : "bg-muted/30 border-border hover:bg-muted/60",
                   )}
                 >
-                  <div className={cn("mt-0.5 shrink-0", active ? ct.color : "text-muted-foreground")}>
+                  <div
+                    className={cn("mt-0.5 shrink-0", active ? ct.color : "text-muted-foreground")}
+                  >
                     <Icon className="h-3.5 w-3.5" />
                   </div>
                   <div className="min-w-0">
-                    <div className={cn("text-xs font-semibold", active ? ct.color : "text-foreground")}>
+                    <div
+                      className={cn("text-xs font-semibold", active ? ct.color : "text-foreground")}
+                    >
                       {ct.label}
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">{ct.description}</div>
                   </div>
                   {active && (
-                    <div className={cn("ml-auto mt-0.5 w-1.5 h-1.5 rounded-full shrink-0", ct.color.replace("text-", "bg-"))} />
+                    <div
+                      className={cn(
+                        "ml-auto mt-0.5 w-1.5 h-1.5 rounded-full shrink-0",
+                        ct.color.replace("text-", "bg-"),
+                      )}
+                    />
                   )}
                 </button>
               );
