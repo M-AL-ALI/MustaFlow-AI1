@@ -47,12 +47,11 @@ import {
   X,
   Puzzle,
   ListOrdered,
-<<<<<<< HEAD
   ShieldCheck,
-=======
   ServerCog,
   Bookmark,
->>>>>>> 218a5bf (feat: per-project build lock + post-build AI suggestion engine (#193))
+  Layers2,
+  RotateCcw,
 } from "lucide-react";
 import { SuggestionChips } from "./components/suggestion-chips";
 import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
@@ -403,7 +402,7 @@ export default function ProjectWorkspacePage() {
       refetchInterval: project?.status === "building" || sendMessage.isPending ? 2000 : 15000,
     },
   });
-  const _rollbackVersion = useRollbackVersion();
+  const rollbackVersion = useRollbackVersion();
   const { data: versions } = useListVersions(projectId, {
     query: { enabled: !!projectId, queryKey: getListVersionsQueryKey(projectId) },
   });
@@ -427,6 +426,9 @@ export default function ProjectWorkspacePage() {
   const [agentMode, setAgentMode] = useState<AgentMode>("power");
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
+  const [variantMode, setVariantMode] = useState(false);
+  const [variantBatchPending, setVariantBatchPending] = useState(false);
+  const [variantComparison, setVariantComparison] = useState<{ versionA: { id: number; userRequest: string; changelogEntry?: string | null }; versionB: { id: number; userRequest: string; changelogEntry?: string | null } } | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -771,8 +773,13 @@ export default function ProjectWorkspacePage() {
       localStorage.setItem(`mustaflow_batch_${projectId}`, batchId);
       void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
       void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+      // Track if this batch was started in variant mode
+      if (variantMode) {
+        setVariantBatchPending(true);
+        setVariantComparison(null);
+      }
     },
-    [projectId, queryClient],
+    [projectId, queryClient, variantMode],
   );
 
   const handleBatchComplete = useCallback(() => {
@@ -783,7 +790,27 @@ export default function ProjectWorkspacePage() {
     void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
     void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
     void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
-  }, [projectId, queryClient]);
+    // If this was a variant batch, show comparison of last 2 versions after data refreshes
+    if (variantBatchPending) {
+      setVariantBatchPending(false);
+      // Give the versions query time to refresh, then build comparison
+      setTimeout(() => {
+        void queryClient.fetchQuery({
+          queryKey: getListVersionsQueryKey(projectId),
+          staleTime: 0,
+        }).then((fetchedVersions: unknown) => {
+          const vs = fetchedVersions as Array<{ id: number; userRequest: string; changelogEntry?: string | null }>;
+          if (Array.isArray(vs) && vs.length >= 2) {
+            const [vB, vA] = vs.slice(0, 2);
+            if (vA && vB) {
+              setVariantComparison({ versionA: vA, versionB: vB });
+              setActiveTab("preview");
+            }
+          }
+        }).catch(() => undefined);
+      }, 1500);
+    }
+  }, [projectId, queryClient, variantBatchPending]);
 
   const handleBatchRetry = useCallback(
     async (remainingMessages: string[], retryMode: string) => {
@@ -1531,6 +1558,8 @@ export default function ProjectWorkspacePage() {
                     onPlanModeChange={setPlanMode}
                     runInBackground={runInBackground}
                     onRunInBackgroundChange={setRunInBackground}
+                    variantMode={variantMode}
+                    onVariantModeChange={setVariantMode}
                     disabled={sendMessage.isPending || !!activeBatchId}
                     onSingleSend={(content) => {
                       setPrompt("");
@@ -1736,7 +1765,87 @@ export default function ProjectWorkspacePage() {
           )}
 
           <div className={cn("flex-1 min-h-0 overflow-hidden", isMobileLayout && "pb-14")}>
-            {activeTab === "preview" && (
+            {activeTab === "preview" && variantComparison && (
+              <div className="h-full flex flex-col">
+                <div className="shrink-0 px-4 py-2.5 bg-violet-950/40 border-b border-violet-500/30 flex items-center gap-3">
+                  <Layers2 className="h-4 w-4 text-violet-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs font-semibold text-violet-300">Design Variants Ready</span>
+                    <span className="ml-2 text-[11px] text-violet-400/70">Two versions were built — keep one to continue</span>
+                  </div>
+                  <button
+                    onClick={() => setVariantComparison(null)}
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    title="Dismiss"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="flex-1 min-h-0 flex">
+                  {/* Variant A */}
+                  <div className="flex-1 min-w-0 flex flex-col border-r border-border">
+                    <div className="shrink-0 px-3 py-1.5 bg-muted/40 border-b border-border flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">A</span>
+                      <span className="text-[11px] text-muted-foreground truncate flex-1">Minimalist · Light palette</span>
+                      <button
+                        onClick={() => {
+                          rollbackVersion.mutate(
+                            { id: projectId, versionId: variantComparison.versionA.id },
+                            { onSuccess: () => { setVariantComparison(null); void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) }); } },
+                          );
+                        }}
+                        disabled={rollbackVersion.isPending}
+                        className="shrink-0 px-2 py-1 text-[10px] font-semibold bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+                      >
+                        Keep A
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-3 text-[11px] text-muted-foreground space-y-1">
+                      {variantComparison.versionA.changelogEntry ? (
+                        variantComparison.versionA.changelogEntry.split("\n").map((line, i) => (
+                          <p key={i} className={line.startsWith("•") ? "pl-2" : "font-medium text-foreground"}>{line}</p>
+                        ))
+                      ) : (
+                        <p className="text-muted-foreground/60 italic">No changelog available</p>
+                      )}
+                    </div>
+                  </div>
+                  {/* Variant B */}
+                  <div className="flex-1 min-w-0 flex flex-col">
+                    <div className="shrink-0 px-3 py-1.5 bg-muted/40 border-b border-border flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">B</span>
+                      <span className="text-[11px] text-muted-foreground truncate flex-1">Bold · Dark palette</span>
+                      <button
+                        onClick={() => {
+                          rollbackVersion.mutate(
+                            { id: projectId, versionId: variantComparison.versionB.id },
+                            { onSuccess: () => { setVariantComparison(null); void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) }); } },
+                          );
+                        }}
+                        disabled={rollbackVersion.isPending}
+                        className="shrink-0 px-2 py-1 text-[10px] font-semibold bg-violet-600 text-white rounded hover:bg-violet-700 transition-colors disabled:opacity-50"
+                      >
+                        Keep B
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-3 text-[11px] text-muted-foreground space-y-1">
+                      {variantComparison.versionB.changelogEntry ? (
+                        variantComparison.versionB.changelogEntry.split("\n").map((line, i) => (
+                          <p key={i} className={line.startsWith("•") ? "pl-2" : "font-medium text-foreground"}>{line}</p>
+                        ))
+                      ) : (
+                        <p className="text-muted-foreground/60 italic">No changelog available</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="shrink-0 px-4 py-2 bg-muted/30 border-t border-border text-[11px] text-muted-foreground flex items-center gap-2">
+                  <RotateCcw className="h-3 w-3 shrink-0" />
+                  Clicking Keep A or Keep B will restore that version as your active preview. The other version remains in Build History.
+                </div>
+              </div>
+            )}
+            {activeTab === "preview" && !variantComparison && (
               <PreviewTab
                 project={{ ...project, kind: project.kind }}
                 focusMode={focusMode}
@@ -1777,6 +1886,7 @@ export default function ProjectWorkspacePage() {
                 projectId={projectId}
                 initialFileId={selectedCodeFileId}
                 onHtmlFileSaved={handleHtmlFileSaved}
+                onSnippetInsert={(prompt) => { switchLeftPanel("chat"); if (isMobileLayout) setChatDrawerOpen(true); send(prompt); }}
               />
             )}
             {activeTab === "canvas" && <CanvasTab projectId={projectId} />}

@@ -1321,6 +1321,207 @@ async function runCorrectionPass(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// API Mock Auto-Generation
+// Scans generated files for fetch/axios calls, creates _mocks/ JSON stubs,
+// and injects a lightweight service-worker interceptor into index.html.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Extract URL paths from fetch()/axios calls in file content */
+function extractApiUrlPaths(content: string): string[] {
+  const patterns = [
+    // fetch('...') / fetch("...")
+    /fetch\(\s*['"`]([^'"`\s]{2,}?)['"`]/g,
+    // axios.get/post/put/delete/patch('...')
+    /axios\s*\.\s*(?:get|post|put|delete|patch|request)\s*\(\s*['"`]([^'"`\s]{2,}?)['"`]/g,
+    // fetch(`${base}/path`) / template literals with fixed suffix
+    /fetch\(\s*`[^`]*?([/][a-z][a-zA-Z0-9/_-]{2,})`\s*\)/g,
+  ];
+
+  const paths: string[] = [];
+  for (const re of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(content)) !== null) {
+      const raw = match[1];
+      if (!raw) continue;
+      // Skip absolute URLs, data URIs, and very short strings
+      if (/^https?:\/\//i.test(raw) || raw.startsWith("data:") || raw.length < 2) continue;
+      // Only relative paths (starting with / or a meaningful segment)
+      const path = raw.startsWith("/") ? raw : `/${raw}`;
+      paths.push(path);
+    }
+  }
+  return [...new Set(paths)];
+}
+
+/** Generate representative sample JSON for a given API path */
+function generateMockData(apiPath: string): unknown {
+  const seg = apiPath.toLowerCase();
+  if (seg.includes("user") || seg.includes("profile") || seg.includes("me")) {
+    return { id: 1, name: "Jane Doe", email: "jane@example.com", avatar: null, role: "user" };
+  }
+  if (seg.includes("product") || seg.includes("item") || seg.includes("catalog")) {
+    return [
+      { id: 1, name: "Product Alpha", price: 29.99, stock: 42, category: "general" },
+      { id: 2, name: "Product Beta", price: 49.99, stock: 15, category: "general" },
+      { id: 3, name: "Product Gamma", price: 9.99, stock: 100, category: "general" },
+    ];
+  }
+  if (seg.includes("post") || seg.includes("article") || seg.includes("blog")) {
+    return [
+      { id: 1, title: "First Post", body: "Sample content here.", author: "Jane Doe", date: "2025-01-01" },
+      { id: 2, title: "Second Post", body: "More sample content.", author: "John Smith", date: "2025-01-15" },
+    ];
+  }
+  if (seg.includes("comment")) {
+    return [
+      { id: 1, text: "Great post!", author: "User A", date: "2025-01-02" },
+      { id: 2, text: "Very helpful.", author: "User B", date: "2025-01-03" },
+    ];
+  }
+  if (seg.includes("order") || seg.includes("purchase") || seg.includes("cart")) {
+    return [
+      { id: "ORD-001", status: "delivered", total: 79.98, items: 2, date: "2025-01-10" },
+      { id: "ORD-002", status: "pending", total: 49.99, items: 1, date: "2025-01-20" },
+    ];
+  }
+  if (seg.includes("stat") || seg.includes("metric") || seg.includes("analytic") || seg.includes("dashboard")) {
+    return { total: 1234, active: 567, revenue: 45678.9, growth: 12.3 };
+  }
+  if (seg.includes("notification") || seg.includes("alert")) {
+    return [
+      { id: 1, message: "Your report is ready.", read: false, type: "info" },
+      { id: 2, message: "Payment received.", read: true, type: "success" },
+    ];
+  }
+  if (seg.includes("search") || seg.includes("query")) {
+    return { results: [], total: 0, query: "", page: 1, perPage: 20 };
+  }
+  if (seg.includes("auth") || seg.includes("login") || seg.includes("token")) {
+    return { token: "mock-jwt-token", expiresIn: 3600, user: { id: 1, name: "Jane Doe" } };
+  }
+  // Generic list or single object
+  const isPlural = !seg.endsWith("s") === false || seg.includes("/list") || seg.endsWith("/");
+  if (isPlural) {
+    return [{ id: 1, name: "Sample Item", status: "active", createdAt: "2025-01-01T00:00:00Z" }];
+  }
+  return { id: 1, status: "ok", data: null, message: "Mock response" };
+}
+
+/** Convert an API path to a safe filename under _mocks/ */
+function pathToMockFilename(apiPath: string): string {
+  // e.g. /api/users/profile → _mocks/api/users/profile.json
+  const clean = apiPath.replace(/^\/+/, "").replace(/\/+$/, "").replace(/[?#].*$/, "");
+  return `_mocks/${clean || "data"}.json`;
+}
+
+/** Service worker that intercepts fetch calls and returns _mocks/ data */
+const MOCK_SW_CONTENT = `// MustaFlow Preview Mock Service Worker
+// Only active when window.__MUSTAFLOW_MOCK__ === true (preview iframe only)
+const MOCK_BASE = '/_mocks';
+
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  const path = url.pathname;
+
+  // Only intercept API paths (not static assets)
+  if (!path.match(/\\.(html|css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/)) {
+    event.respondWith(
+      caches.match(event.request).then(async () => {
+        try {
+          const mockPath = MOCK_BASE + path.replace(/\\/+$/, '') + '.json';
+          const mockRes = await fetch(mockPath);
+          if (mockRes.ok) {
+            const data = await mockRes.json();
+            return new Response(JSON.stringify(data), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'X-Mock': '1' },
+            });
+          }
+        } catch {}
+        return fetch(event.request);
+      })
+    );
+  }
+});
+`;
+
+/** Service worker registration snippet to inject before </body> */
+const SW_REGISTRATION_SNIPPET = `
+<!-- MustaFlow Preview Mocks -->
+<script>
+if (window.__MUSTAFLOW_MOCK__ && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/_mocks/sw.js', { scope: '/' })
+    .catch(function(e) { console.warn('[mock-sw] registration failed', e); });
+}
+</script>`;
+
+/**
+ * Scan generated files for fetch/axios API calls, generate _mocks/ JSON stubs,
+ * inject the mock service-worker registration snippet into index.html, and
+ * add the sw.js file.  Returns the augmented file list.
+ */
+export function injectApiMocks(files: BuilderFile[]): BuilderFile[] {
+  // Collect all API paths referenced in JS/HTML files
+  const allPaths: string[] = [];
+  for (const f of files) {
+    const isCode =
+      f.path.endsWith(".js") ||
+      f.path.endsWith(".ts") ||
+      f.path.endsWith(".html") ||
+      f.path.endsWith(".htm") ||
+      f.mimeType === "text/javascript" ||
+      f.mimeType === "application/javascript" ||
+      f.mimeType === "text/html";
+    if (isCode) {
+      allPaths.push(...extractApiUrlPaths(f.content));
+    }
+  }
+
+  const uniquePaths = [...new Set(allPaths)];
+  if (uniquePaths.length === 0) {
+    return files; // No API calls found, nothing to inject
+  }
+
+  // Build the set of existing mock file paths (don't overwrite hand-crafted ones)
+  const existingPaths = new Set(files.map((f) => f.path));
+
+  const mockFiles: BuilderFile[] = [];
+
+  // Generate stub JSON for each unique API path
+  for (const apiPath of uniquePaths) {
+    const filename = pathToMockFilename(apiPath);
+    if (!existingPaths.has(filename)) {
+      const mockData = generateMockData(apiPath);
+      mockFiles.push({
+        path: filename,
+        content: JSON.stringify(mockData, null, 2),
+        mimeType: "application/json",
+      });
+    }
+  }
+
+  // Add the mock service worker
+  if (!existingPaths.has("_mocks/sw.js")) {
+    mockFiles.push({
+      path: "_mocks/sw.js",
+      content: MOCK_SW_CONTENT,
+      mimeType: "application/javascript",
+    });
+  }
+
+  // Inject SW registration snippet into index.html
+  const result = files.map((f) => {
+    if (f.path === "index.html" && !f.content.includes("__MUSTAFLOW_MOCK__")) {
+      const patched = f.content.replace(/<\/body>/i, `${SW_REGISTRATION_SNIPPET}\n</body>`);
+      return { ...f, content: patched };
+    }
+    return f;
+  });
+
+  return [...result, ...mockFiles];
+}
+
 /** Validate that a plan response contains the required new fields and retry if key ones are missing */
 function validatePlanResponse(parsed: Record<string, unknown>): boolean {
   const hasGoal = typeof parsed.goal === "string" && (parsed.goal as string).length > 0;
@@ -1498,6 +1699,9 @@ export async function runBuildPipeline(args: {
     typeof parsed.summary === "string"
       ? parsed.summary
       : `Generated ${files.length} files for ${projectName}.`;
+
+  // Inject API mocks for any fetch/axios calls found in generated files
+  files = injectApiMocks(files);
 
   const report: TaskReport = {
     userRequest: userPrompt,
@@ -1751,9 +1955,30 @@ export async function runRefinePipeline(args: {
       ? parsed.nextRecommendation
       : "Refresh the Preview tab to see the change.";
 
+  // Inject API mocks for any new fetch/axios calls in changed files
+  const mockAugmented = injectApiMocks(changedFiles);
+  // Only keep mock files that are net-new (not in existingFiles) to avoid bloating refine diffs
+  const existingPathsSet = new Set(existingFiles.map((f) => f.path));
+  const mockOnlyFiles = mockAugmented.filter(
+    (f) => f.path.startsWith("_mocks/") && !existingPathsSet.has(f.path),
+  );
+  // Also keep the patched index.html if SW snippet was added
+  const patchedIndexHtml = mockAugmented.find((f) => f.path === "index.html");
+  const changedIndex = changedFiles.find((f) => f.path === "index.html");
+  if (patchedIndexHtml && changedIndex && patchedIndexHtml.content !== changedIndex.content) {
+    changedIndex.content = patchedIndexHtml.content;
+  }
+  const finalChangedFiles = mockOnlyFiles.length > 0
+    ? [...changedFiles, ...mockOnlyFiles]
+    : changedFiles;
+
   const existingPaths = new Set(existingFiles.map((f) => f.path));
-  const filesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
-  const filesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
+  const filesCreated = finalChangedFiles
+    .filter((f) => !existingPaths.has(f.path))
+    .map((f) => f.path);
+  const filesChanged = finalChangedFiles
+    .filter((f) => existingPaths.has(f.path))
+    .map((f) => f.path);
 
   const report: TaskReport = {
     userRequest: userPrompt,
@@ -1761,14 +1986,14 @@ export async function runRefinePipeline(args: {
     filesCreated,
     filesChanged,
     filesRemoved: removedPaths,
-    previewUpdated: changedFiles.length > 0 || removedPaths.length > 0,
+    previewUpdated: finalChangedFiles.length > 0 || removedPaths.length > 0,
     warnings,
     integrationsNeeded,
     nextRecommendation,
   };
 
   return {
-    changedFiles,
+    changedFiles: finalChangedFiles,
     removedPaths,
     unchangedFiles,
     report,

@@ -34,9 +34,16 @@ import {
   QrCode,
   Package,
   Link2,
+  Github,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  useListSecrets,
+  useCreateSecret,
+  getListSecretsQueryKey,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 
 function CopyUrlButton({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
@@ -1518,6 +1525,226 @@ function MobileBuildStatusBadge({ status }: { status: string }) {
   );
 }
 
+function GithubPushPanel({ projectId }: { projectId: number }) {
+  const [open, setOpen] = useState(false);
+  const [token, setToken] = useState("");
+  const [repo, setRepo] = useState("");
+  const [branch, setBranch] = useState("main");
+  const [isPrivate, setIsPrivate] = useState(true);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [pushing, setPushing] = useState(false);
+  const [saveToken, setSaveToken] = useState(false);
+  const [savingToken, setSavingToken] = useState(false);
+  const [result, setResult] = useState<{ repoUrl: string; commitSha: string; filesCount: number; created: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const queryClient = useQueryClient();
+  const createSecret = useCreateSecret();
+
+  // Check if GITHUB_TOKEN secret is already stored for this project
+  const { data: secrets = [] } = useListSecrets(projectId, {
+    query: { queryKey: getListSecretsQueryKey(projectId), enabled: open },
+  });
+  const hasStoredToken = secrets.some((s) => s.name === "GITHUB_TOKEN");
+
+  const handlePush = async () => {
+    if (!repo.trim()) return;
+    // Require either a typed token or a stored one
+    if (!token.trim() && !hasStoredToken) return;
+    setPushing(true);
+    setError(null);
+    setResult(null);
+    try {
+      const body: Record<string, unknown> = {
+        repo: repo.trim(),
+        branch: branch.trim() || "main",
+        private: isPrivate,
+        commitMessage: commitMessage.trim() || undefined,
+      };
+      // Only include token if the user typed one; omit to use stored secret
+      if (token.trim()) body.token = token.trim();
+
+      const res = await fetch(`/api/projects/${projectId}/github/push`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json()) as { repoUrl?: string; commitSha?: string; filesCount?: number; created?: boolean; error?: string };
+      if (!res.ok) {
+        setError(data.error ?? "Push failed");
+      } else {
+        setResult({ repoUrl: data.repoUrl!, commitSha: data.commitSha!, filesCount: data.filesCount!, created: data.created ?? false });
+
+        // Save token to project secrets if requested
+        if (saveToken && token.trim()) {
+          setSavingToken(true);
+          try {
+            await createSecret.mutateAsync({ id: projectId, data: { name: "GITHUB_TOKEN", value: token.trim(), environment: "production" } });
+            void queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
+          } catch {
+            // Non-fatal: token save failure doesn't block the success result
+          } finally {
+            setSavingToken(false);
+          }
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Push failed");
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  const canPush = repo.trim() && (token.trim() || hasStoredToken) && !pushing;
+
+  return (
+    <div className="border border-border rounded-xl bg-card overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+      >
+        <Github className="h-4 w-4 text-muted-foreground shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold">Push to GitHub</div>
+          <div className="text-xs text-muted-foreground">Export all project files to a GitHub repository</div>
+        </div>
+        {open ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+      </button>
+
+      {open && (
+        <div className="border-t border-border px-4 py-4 space-y-4">
+          {result ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-green-500 text-sm font-semibold">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                {result.created ? "Repository created and pushed" : "Pushed successfully"}
+              </div>
+              {savingToken && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Saving token to project secrets…
+                </div>
+              )}
+              <div className="bg-muted/40 rounded-lg px-3 py-2 space-y-1 text-xs font-mono">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground shrink-0">Repo:</span>
+                  <a href={result.repoUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline truncate flex-1 flex items-center gap-1">
+                    {result.repoUrl} <ArrowUpRight className="h-3 w-3 shrink-0" />
+                  </a>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground shrink-0">Commit:</span>
+                  <span className="text-foreground">{result.commitSha.slice(0, 12)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground shrink-0">Files:</span>
+                  <span className="text-foreground">{result.filesCount}</span>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => { setResult(null); setToken(""); }}>
+                Push again
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-foreground">Personal access token</label>
+                {hasStoredToken && (
+                  <div className="flex items-center gap-2 text-[10px] text-green-500 bg-green-500/10 border border-green-500/20 rounded px-2 py-1 mb-1">
+                    <Key className="h-3 w-3 shrink-0" />
+                    Saved GITHUB_TOKEN found — leave blank to use it
+                  </div>
+                )}
+                <input
+                  type="password"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder={hasStoredToken ? "Using saved token (enter to override)" : "ghp_…"}
+                  className="w-full text-xs bg-background border border-border rounded px-3 py-1.5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                />
+                {token.trim() && !hasStoredToken && (
+                  <label className="flex items-center gap-2 cursor-pointer mt-1">
+                    <input
+                      type="checkbox"
+                      checked={saveToken}
+                      onChange={(e) => setSaveToken(e.target.checked)}
+                      className="accent-primary h-3 w-3"
+                    />
+                    <span className="text-[10px] text-muted-foreground">Save as GITHUB_TOKEN project secret for future pushes</span>
+                  </label>
+                )}
+                {!hasStoredToken && !token.trim() && (
+                  <p className="text-[10px] text-muted-foreground">Needs <span className="font-mono">repo</span> scope.</p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-foreground">Repository name</label>
+                  <input
+                    type="text"
+                    value={repo}
+                    onChange={(e) => setRepo(e.target.value)}
+                    placeholder="my-app"
+                    className="w-full text-xs bg-background border border-border rounded px-3 py-1.5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-foreground">Branch</label>
+                  <input
+                    type="text"
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    placeholder="main"
+                    className="w-full text-xs bg-background border border-border rounded px-3 py-1.5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-foreground">Commit message (optional)</label>
+                <input
+                  type="text"
+                  value={commitMessage}
+                  onChange={(e) => setCommitMessage(e.target.value)}
+                  placeholder="Push from MustaFlow AI"
+                  className="w-full text-xs bg-background border border-border rounded px-3 py-1.5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPrivate((p) => !p)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {isPrivate ? <ToggleRight className="h-4 w-4 text-primary" /> : <ToggleLeft className="h-4 w-4" />}
+                  {isPrivate ? "Private repository" : "Public repository"}
+                </button>
+              </div>
+              {error && (
+                <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  {error}
+                </div>
+              )}
+              <Button
+                className="w-full"
+                disabled={!canPush}
+                onClick={() => void handlePush()}
+              >
+                {pushing ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Pushing…</>
+                ) : (
+                  <><Github className="h-4 w-4 mr-2" /> Push to GitHub</>
+                )}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PublishingTab({
   projectId,
   kind,
@@ -2636,6 +2863,9 @@ export function PublishingTab({
                 </Button>
               </div>
             )}
+
+            {/* GitHub push panel */}
+            <GithubPushPanel projectId={projectId} />
 
             {webEnv === "testing" && (
               <div className="space-y-2">

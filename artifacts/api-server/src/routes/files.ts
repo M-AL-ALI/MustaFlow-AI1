@@ -4,7 +4,7 @@ import { db, projectFilesTable, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { guessMime } from "../lib/builder";
 import { isBinaryMime } from "../lib/binary-mime";
-import { injectBridge } from "../lib/consoleBridge";
+import { injectBridge, MOCK_FLAG_SCRIPT } from "../lib/consoleBridge";
 import { extractPageMap } from "../lib/page-map";
 import { logger } from "../lib/logger";
 
@@ -34,6 +34,45 @@ router.get("/projects/:id/files", requireProjectOwnership, async (req, res): Pro
     })),
   );
 });
+
+router.get(
+  "/projects/:id/files/search",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (!q) {
+      res.status(400).json({ error: "q is required" });
+      return;
+    }
+
+    const files = await db
+      .select({ id: projectFilesTable.id, path: projectFilesTable.path, content: projectFilesTable.content })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId))
+      .orderBy(asc(projectFilesTable.path));
+
+    const results: Array<{ fileId: number; file: string; lineNumber: number; lineContent: string }> = [];
+    const lowerQ = q.toLowerCase();
+
+    for (const file of files) {
+      if (results.length >= 50) break;
+      const lines = file.content.split("\n");
+      for (let i = 0; i < lines.length && results.length < 50; i++) {
+        if (lines[i]!.toLowerCase().includes(lowerQ)) {
+          results.push({
+            fileId: file.id,
+            file: file.path,
+            lineNumber: i + 1,
+            lineContent: lines[i]!.trim().slice(0, 200),
+          });
+        }
+      }
+    }
+
+    res.json(results);
+  },
+);
 
 router.post("/projects/:id/files", requireProjectOwnership, async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
@@ -206,11 +245,7 @@ router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => 
 
   // Resolve the project so we can check its publish status and ownership
   const [project] = await db
-    .select({
-      id: projectsTable.id,
-      status: projectsTable.status,
-      ownerId: projectsTable.ownerId,
-    })
+    .select({ id: projectsTable.id, status: projectsTable.status, ownerId: projectsTable.ownerId })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
 
@@ -251,9 +286,7 @@ router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => 
     const [fallback] = await db
       .select()
       .from(projectFilesTable)
-      .where(
-        and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, "index.html")),
-      );
+      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, "index.html")));
     if (!fallback) {
       res
         .status(404)
@@ -263,20 +296,23 @@ router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => 
         );
       return;
     }
+    // Inject mock flag for owner preview (never for published apps)
+    const isOwnerPreview = project.status !== "published";
     res
       .type("text/html")
       .setHeader("Cache-Control", "no-store, must-revalidate")
-      .send(injectBridge(fallback.content));
+      .send(injectBridge(fallback.content, isOwnerPreview ? MOCK_FLAG_SCRIPT : ""));
     return;
   }
 
   const mime = row.mimeType || guessMime(row.path);
   const isHtml = mime === "text/html" || row.path.endsWith(".html");
+  const isOwnerPreview = project.status !== "published";
   res.type(mime).setHeader("Cache-Control", "no-store, must-revalidate");
   if (isBinaryMime(mime)) {
     res.end(Buffer.from(row.content, "base64"));
   } else {
-    res.send(isHtml ? injectBridge(row.content) : row.content);
+    res.send(isHtml ? injectBridge(row.content, isOwnerPreview ? MOCK_FLAG_SCRIPT : "") : row.content);
   }
 });
 

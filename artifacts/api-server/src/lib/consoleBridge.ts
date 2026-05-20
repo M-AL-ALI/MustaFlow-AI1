@@ -23,12 +23,17 @@ const CONSOLE_BRIDGE_SCRIPT = `<script>(function(){
   });
 })();</script>`;
 
-export function injectBridge(html: string): string {
+export function injectBridge(html: string, extraHead = ""): string {
+  const inject = extraHead ? `${CONSOLE_BRIDGE_SCRIPT}${extraHead}` : CONSOLE_BRIDGE_SCRIPT;
   if (/<head[\s>]/i.test(html)) {
-    return html.replace(/(<head[^>]*>)/i, `$1${CONSOLE_BRIDGE_SCRIPT}`);
+    return html.replace(/(<head[^>]*>)/i, `$1${inject}`);
   }
   if (/<html[\s>]/i.test(html)) {
-    return html.replace(/(<html[^>]*>)/i, `$1<head>${CONSOLE_BRIDGE_SCRIPT}</head>`);
+    return html.replace(/(<html[^>]*>)/i, `$1<head>${inject}</head>`);
   }
-  return `<head>${CONSOLE_BRIDGE_SCRIPT}</head>${html}`;
+  return `<head>${inject}</head>${html}`;
 }
+
+/** Extra script injected for the owner preview (not published apps) so that
+ *  the service-worker mock interceptor is automatically activated. */
+export const MOCK_FLAG_SCRIPT = `<script>window.__MUSTAFLOW_MOCK__=true;<\/script>`;

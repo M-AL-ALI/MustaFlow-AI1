@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sheet,
@@ -526,6 +527,72 @@ function RollbackDrawer({
   );
 }
 
+function ExpandedVersionPanel({
+  projectId,
+  version,
+  currentFiles,
+  onDiff,
+}: {
+  projectId: number;
+  version: ProjectVersion;
+  currentFiles: ProjectFileSummary[];
+  onDiff: (req: DiffRequest) => void;
+}) {
+  const [activeTab, setActiveTab] = useState<"files" | "changelog">("files");
+
+  return (
+    <div>
+      <div className="flex border-b border-border/50 px-3 pt-2 gap-3">
+        <button
+          onClick={() => setActiveTab("files")}
+          className={cn(
+            "text-[11px] pb-1.5 border-b-2 transition-colors",
+            activeTab === "files"
+              ? "border-primary text-primary font-medium"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          Files
+        </button>
+        <button
+          onClick={() => setActiveTab("changelog")}
+          className={cn(
+            "text-[11px] pb-1.5 border-b-2 transition-colors",
+            activeTab === "changelog"
+              ? "border-primary text-primary font-medium"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          Changelog
+        </button>
+      </div>
+
+      {activeTab === "files" && (
+        <SnapshotFileBrowser
+          projectId={projectId}
+          versionId={version.id}
+          currentFiles={currentFiles}
+          onDiff={onDiff}
+        />
+      )}
+
+      {activeTab === "changelog" && (
+        <div className="px-4 pt-3 pb-2">
+          {version.changelogEntry ? (
+            <div className="text-xs text-foreground leading-relaxed whitespace-pre-wrap font-mono bg-muted/30 rounded-lg p-3 border border-border">
+              {version.changelogEntry}
+            </div>
+          ) : (
+            <div className="text-xs text-muted-foreground py-4 text-center">
+              No changelog entry for this version.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function VersionTimeline({
   projectId,
   versions,
@@ -679,9 +746,9 @@ export function VersionTimeline({
 
                 {isExpanded && (
                   <div className="border-t border-border pb-3">
-                    <SnapshotFileBrowser
+                    <ExpandedVersionPanel
                       projectId={projectId}
-                      versionId={v.id}
+                      version={v}
                       currentFiles={currentFiles}
                       onDiff={setDiffState}
                     />

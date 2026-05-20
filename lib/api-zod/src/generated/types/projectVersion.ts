@@ -13,6 +13,8 @@ export interface ProjectVersion {
   label: string;
   /** @nullable */
   note?: string | null;
+  /** @nullable */
+  changelogEntry?: string | null;
   filesCount: number;
   createdAt: Date;
   planSnapshot?: ProjectVersionPlanSnapshot;

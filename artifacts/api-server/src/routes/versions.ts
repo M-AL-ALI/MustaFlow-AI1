@@ -45,6 +45,7 @@ router.get("/projects/:id/versions", requireProjectOwnership, async (req, res): 
       projectId: projectVersionsTable.projectId,
       label: projectVersionsTable.label,
       note: projectVersionsTable.note,
+      changelogEntry: projectVersionsTable.changelogEntry,
       filesCount: sql<number>`COALESCE(jsonb_array_length(${projectVersionsTable.filesSnapshot}), 0)`,
       createdAt: projectVersionsTable.createdAt,
       planSnapshot: projectVersionsTable.planSnapshot,

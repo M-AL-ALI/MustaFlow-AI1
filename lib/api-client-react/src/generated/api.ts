@@ -40,9 +40,12 @@ import type {
   DeleteSecret200,
   DeleteWorkspace200,
   DuplicateProjectResult,
+  FileSearchResult,
   GetAdminAuditLogParams,
   GetPublishReadinessParams,
   GetSecretAuditLogParams,
+  GithubPushInput,
+  GithubPushResult,
   GrantAdminRole200,
   HealthStatus,
   KnowledgeEntry,
@@ -82,6 +85,7 @@ import type {
   ReadinessResult,
   RevokeAdminRole200,
   RollbackResult,
+  SearchProjectFilesParams,
   SecretAuditEntry,
   SecretEntry,
   SecretInput,
@@ -4545,6 +4549,167 @@ export function useGetRecentActivity<TData = Awaited<ReturnType<typeof getRecent
 
 
 
+
+export const getSearchProjectFilesUrl = (id: number,
+    params: SearchProjectFilesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/files/search?${stringifiedParams}` : `/api/projects/${id}/files/search`
+}
+
+/**
+ * @summary Full-text search across all project file contents
+ */
+export const searchProjectFiles = async (id: number,
+    params: SearchProjectFilesParams, options?: RequestInit): Promise<FileSearchResult[]> => {
+
+  return customFetch<FileSearchResult[]>(getSearchProjectFilesUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSearchProjectFilesQueryKey = (id: number,
+    params?: SearchProjectFilesParams,) => {
+    return [
+    `/api/projects/${id}/files/search`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getSearchProjectFilesQueryOptions = <TData = Awaited<ReturnType<typeof searchProjectFiles>>, TError = ErrorType<ApiError>>(id: number,
+    params: SearchProjectFilesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchProjectFiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSearchProjectFilesQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof searchProjectFiles>>> = ({ signal }) => searchProjectFiles(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof searchProjectFiles>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type SearchProjectFilesQueryResult = NonNullable<Awaited<ReturnType<typeof searchProjectFiles>>>
+export type SearchProjectFilesQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Full-text search across all project file contents
+ */
+
+export function useSearchProjectFiles<TData = Awaited<ReturnType<typeof searchProjectFiles>>, TError = ErrorType<ApiError>>(
+ id: number,
+    params: SearchProjectFilesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchProjectFiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getSearchProjectFilesQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getPushToGithubUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/github/push`
+}
+
+/**
+ * @summary Push project files to a GitHub repository
+ */
+export const pushToGithub = async (id: number,
+    githubPushInput: GithubPushInput, options?: RequestInit): Promise<GithubPushResult> => {
+
+  return customFetch<GithubPushResult>(getPushToGithubUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      githubPushInput,)
+  }
+);}
+
+
+
+
+export const getPushToGithubMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushToGithub>>, TError,{id: number;data: BodyType<GithubPushInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof pushToGithub>>, TError,{id: number;data: BodyType<GithubPushInput>}, TContext> => {
+
+const mutationKey = ['pushToGithub'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pushToGithub>>, {id: number;data: BodyType<GithubPushInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  pushToGithub(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PushToGithubMutationResult = NonNullable<Awaited<ReturnType<typeof pushToGithub>>>
+    export type PushToGithubMutationBody = BodyType<GithubPushInput>
+    export type PushToGithubMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Push project files to a GitHub repository
+ */
+export const usePushToGithub = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushToGithub>>, TError,{id: number;data: BodyType<GithubPushInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof pushToGithub>>,
+        TError,
+        {id: number;data: BodyType<GithubPushInput>},
+        TContext
+      > => {
+      return useMutation(getPushToGithubMutationOptions(options));
+    }
 
 export const getGetProjectFileRawUrl = (id: number,
     fileId: number,) => {

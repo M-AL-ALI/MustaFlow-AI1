@@ -414,6 +414,7 @@ export const ListVersionsResponseItem = zod.object({
   "projectId": zod.number(),
   "label": zod.string(),
   "note": zod.string().nullish(),
+  "changelogEntry": zod.string().nullish(),
   "filesCount": zod.number(),
   "createdAt": zod.coerce.date(),
   "planSnapshot": zod.record(zod.string(), zod.unknown()).nullish()
@@ -1503,6 +1504,58 @@ export const GetRecentActivityResponseItem = zod.object({
   "createdAt": zod.coerce.date()
 })
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
+
+
+/**
+ * @summary Full-text search across all project file contents
+ */
+export const SearchProjectFilesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+
+
+export const SearchProjectFilesQueryParams = zod.object({
+  "q": zod.coerce.string().min(1)
+})
+
+export const SearchProjectFilesResponseItem = zod.object({
+  "fileId": zod.number(),
+  "file": zod.string(),
+  "lineNumber": zod.number(),
+  "lineContent": zod.string()
+})
+export const SearchProjectFilesResponse = zod.array(SearchProjectFilesResponseItem)
+
+
+/**
+ * @summary Push project files to a GitHub repository
+ */
+export const PushToGithubParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+
+export const pushToGithubBodyBranchDefault = `main`;
+export const pushToGithubBodyPrivateDefault = true;
+
+export const PushToGithubBody = zod.object({
+  "token": zod.string().min(1).describe('GitHub personal access token'),
+  "repo": zod.string().min(1).describe('Repository name (e.g. my-app)'),
+  "owner": zod.string().optional().describe('GitHub owner\/org (defaults to token owner)'),
+  "branch": zod.string().default(pushToGithubBodyBranchDefault),
+  "private": zod.boolean().default(pushToGithubBodyPrivateDefault),
+  "commitMessage": zod.string().optional()
+})
+
+export const PushToGithubResponse = zod.object({
+  "repoUrl": zod.string(),
+  "commitSha": zod.string(),
+  "filesCount": zod.number(),
+  "created": zod.boolean().optional().describe('true if the repo was newly created')
+})
 
 
 /**

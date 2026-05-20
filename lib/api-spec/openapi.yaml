@@ -1192,6 +1192,66 @@ paths:
                 items:
                   $ref: "#/components/schemas/ActivityItem"
 
+  /projects/{id}/files/search:
+    get:
+      operationId: searchProjectFiles
+      tags: [projects]
+      summary: Full-text search across all project file contents
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Search results (max 50)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FileSearchResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/github/push:
+    post:
+      operationId: pushToGithub
+      tags: [projects]
+      summary: Push project files to a GitHub repository
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GithubPushInput"
+      responses:
+        "200":
+          description: Push result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubPushResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: GitHub token not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/files/{fileId}/raw:
     get:
       operationId: getProjectFileRaw
@@ -1755,6 +1815,7 @@ components:
         projectId: { type: integer }
         label: { type: string }
         note: { type: ["string", "null"] }
+        changelogEntry: { type: ["string", "null"] }
         filesCount: { type: integer }
         createdAt: { type: string, format: date-time }
         planSnapshot:
@@ -2271,6 +2332,35 @@ components:
         role:
           type: string
           enum: [user, admin, owner]
+
+    FileSearchResult:
+      type: object
+      required: [fileId, file, lineNumber, lineContent]
+      properties:
+        fileId: { type: integer }
+        file: { type: string }
+        lineNumber: { type: integer }
+        lineContent: { type: string }
+
+    GithubPushInput:
+      type: object
+      required: [token, repo]
+      properties:
+        token: { type: string, minLength: 1, description: "GitHub personal access token" }
+        repo: { type: string, minLength: 1, description: "Repository name (e.g. my-app)" }
+        owner: { type: string, description: "GitHub owner/org (defaults to token owner)" }
+        branch: { type: string, default: main }
+        private: { type: boolean, default: true }
+        commitMessage: { type: string }
+
+    GithubPushResult:
+      type: object
+      required: [repoUrl, commitSha, filesCount]
+      properties:
+        repoUrl: { type: string }
+        commitSha: { type: string }
+        filesCount: { type: integer }
+        created: { type: boolean, description: "true if the repo was newly created" }
 
     AdminAuditLogEntry:
       type: object

@@ -1140,12 +1140,26 @@ export async function runJob(input: JobInput): Promise<void> {
     // Fetch the most recent plan snapshot to annotate this version
     const planSnapshot = await loadLatestPlanSnapshot(projectId);
 
+    // Build changelog entry: combine action context with diff summary
+    const changelogLines: string[] = [];
+    changelogLines.push(`**${nextVersionLabel}**`);
+    if (kind === "build") {
+      changelogLines.push(`Initial build — ${(report.filesCreated ?? []).length} file(s) generated.`);
+    } else if (diffSummary) {
+      if (diffSummary.filesAdded.length > 0) changelogLines.push(`Added: ${diffSummary.filesAdded.join(", ")}`);
+      if (diffSummary.filesModified.length > 0) changelogLines.push(`Modified: ${diffSummary.filesModified.join(", ")}`);
+      if (diffSummary.filesRemoved.length > 0) changelogLines.push(`Removed: ${diffSummary.filesRemoved.join(", ")}`);
+    }
+    if (assistantSummary) changelogLines.push(assistantSummary.slice(0, 180));
+    const changelogEntry = changelogLines.join("\n");
+
     const [version] = await db
       .insert(projectVersionsTable)
       .values({
         projectId,
         label: nextVersionLabel,
         note: assistantSummary.slice(0, 200),
+        changelogEntry: changelogEntry.slice(0, 500),
         filesSnapshot: snapshot,
         planSnapshot: planSnapshot ?? undefined,
       })

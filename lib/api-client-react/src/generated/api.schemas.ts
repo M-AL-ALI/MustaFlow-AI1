@@ -432,6 +432,8 @@ export interface ProjectVersion {
   label: string;
   /** @nullable */
   note?: string | null;
+  /** @nullable */
+  changelogEntry?: string | null;
   filesCount: number;
   createdAt: string;
   planSnapshot?: ProjectVersionPlanSnapshot;
@@ -995,6 +997,39 @@ export interface AdminRoleInput {
   role: AdminRoleInputRole;
 }
 
+export interface FileSearchResult {
+  fileId: number;
+  file: string;
+  lineNumber: number;
+  lineContent: string;
+}
+
+export interface GithubPushInput {
+  /**
+     * GitHub personal access token
+     * @minLength 1
+     */
+  token: string;
+  /**
+     * Repository name (e.g. my-app)
+     * @minLength 1
+     */
+  repo: string;
+  /** GitHub owner/org (defaults to token owner) */
+  owner?: string;
+  branch?: string;
+  private?: boolean;
+  commitMessage?: string;
+}
+
+export interface GithubPushResult {
+  repoUrl: string;
+  commitSha: string;
+  filesCount: number;
+  /** true if the repo was newly created */
+  created?: boolean;
+}
+
 export interface AdminAuditLogEntry {
   id: number;
   projectId: number;
@@ -1234,6 +1269,13 @@ export type DeleteKnowledge200 = {
 
 export type ListMobileBuilds200 = {
   builds: MobileBuildLog[];
+};
+
+export type SearchProjectFilesParams = {
+/**
+ * @minLength 1
+ */
+q: string;
 };
 
 export type StripeWebhook200 = {

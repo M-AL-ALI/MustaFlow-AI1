@@ -11,6 +11,7 @@ import {
   Paintbrush2,
   CheckSquare,
   ServerCog,
+  Layers2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,8 @@ interface QueueComposerProps {
   onPlanModeChange: (v: boolean) => void;
   runInBackground: boolean;
   onRunInBackgroundChange: (v: boolean) => void;
+  variantMode: boolean;
+  onVariantModeChange: (v: boolean) => void;
   disabled: boolean;
   onSingleSend: (content: string) => void;
   onBatchStarted: (batchId: string, totalCount: number) => void;
@@ -44,6 +47,8 @@ export function QueueComposer({
   onPlanModeChange,
   runInBackground,
   onRunInBackgroundChange,
+  variantMode,
+  onVariantModeChange,
   disabled,
   onSingleSend,
   onBatchStarted,
@@ -96,9 +101,40 @@ export function QueueComposer({
     if (onPromptValueChange) onPromptValueChange("");
   }, [onPromptValueChange]);
 
+  const VARIANT_A_SUFFIX = "\n\n[VARIANT A — Design direction: clean, minimalist, light palette, generous whitespace, subtle typography]";
+  const VARIANT_B_SUFFIX = "\n\n[VARIANT B — Design direction: bold, rich, dark palette, vibrant accent colors, eye-catching visuals]";
+
   const handleSend = useCallback(async () => {
     const messages = rows.map((r) => r.text.trim()).filter(Boolean);
     if (messages.length === 0) return;
+
+    // Variant mode: expand a single prompt into two variant tasks sent as a batch
+    if (variantMode && messages.length === 1) {
+      const text = messages[0]!;
+      const variantMessages = [text + VARIANT_A_SUFFIX, text + VARIANT_B_SUFFIX];
+      setIsSubmitting(true);
+      try {
+        const res = await fetch(`/api/projects/${projectId}/queue`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: variantMessages, agentMode, planMode }),
+          credentials: "include",
+        });
+        if (!res.ok) {
+          const err = (await res.json()) as { error?: string };
+          throw new Error(err.error ?? "Queue submission failed");
+        }
+        const data = (await res.json()) as { batchId: string; totalTasks: number };
+        setRows([{ id: crypto.randomUUID(), text: "" }]);
+        if (onPromptValueChange) onPromptValueChange("");
+        onBatchStarted(data.batchId, data.totalTasks);
+      } catch (err) {
+        console.error("Variant queue submission failed:", err);
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
 
     if (messages.length === 1) {
       const text = messages[0]!;
@@ -130,7 +166,7 @@ export function QueueComposer({
     } finally {
       setIsSubmitting(false);
     }
-  }, [rows, agentMode, planMode, projectId, onSingleSend, onBatchStarted, onPromptValueChange]);
+  }, [rows, agentMode, planMode, variantMode, projectId, onSingleSend, onBatchStarted, onPromptValueChange]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>, _rowId: string) => {
@@ -357,6 +393,18 @@ export function QueueComposer({
             )}
           >
             <ServerCog className="h-3 w-3" /> Background
+          </button>
+          <button
+            onClick={() => onVariantModeChange(!variantMode)}
+            className={cn(
+              "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
+              variantMode
+                ? "bg-violet-500/15 text-violet-400 border-violet-500/30"
+                : "text-muted-foreground border-border hover:text-foreground",
+            )}
+            title="Generate 2 design variants (A: minimalist, B: bold) and pick the best"
+          >
+            <Layers2 className="h-3 w-3" /> 2 Variants
           </button>
           {!isMultiRow && (
             <span className="ml-auto text-[9px] text-muted-foreground/40">

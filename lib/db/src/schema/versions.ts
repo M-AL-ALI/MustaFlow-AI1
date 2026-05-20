@@ -38,6 +38,7 @@ export const projectVersionsTable = pgTable("project_versions", {
     .references(() => projectsTable.id, { onDelete: "cascade" }),
   label: text("label").notNull(),
   note: text("note"),
+  changelogEntry: text("changelog_entry"),
   filesSnapshot: jsonb("files_snapshot").$type<FileSnapshotEntry[]>(),
   planSnapshot: jsonb("plan_snapshot").$type<Record<string, unknown>>(),
   auditReport: jsonb("audit_report").$type<AuditReport>(),

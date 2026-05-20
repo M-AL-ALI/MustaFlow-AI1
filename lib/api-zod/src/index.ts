@@ -6,3 +6,4 @@ export { GetPublishReadinessParams } from "./generated/api";
 export { AnalyzePageMapParams } from "./generated/api";
 export { GetSecretAuditLogParams } from "./generated/api";
 export { ListSuggestionsParams } from "./generated/api";
+export { SearchProjectFilesParams } from "./generated/api";
