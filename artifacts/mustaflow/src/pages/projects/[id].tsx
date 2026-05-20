@@ -1114,13 +1114,13 @@ export default function ProjectWorkspacePage() {
         {/* ── LEFT: AI Chat Panel ── */}
         <div
           className={cn(
-            "flex flex-col min-h-0 border-border bg-card/40 overflow-hidden",
+            "flex flex-col min-h-0 border-border overflow-hidden",
             isMobileLayout
               ? cn(
-                  "fixed inset-x-0 top-0 z-40 shadow-2xl transition-transform duration-300 ease-in-out",
+                  "bg-background fixed inset-x-0 top-12 z-40 shadow-2xl transition-transform duration-300 ease-in-out",
                   chatDrawerOpen ? "translate-y-0" : "-translate-y-full",
                 )
-              : "border-r transition-[width] duration-300 ease-in-out",
+              : "bg-card/40 border-r transition-[width] duration-300 ease-in-out",
           )}
           style={
             isMobileLayout
