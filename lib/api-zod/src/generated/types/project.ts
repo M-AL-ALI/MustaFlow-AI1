@@ -9,7 +9,6 @@ import type { ProjectAgentMode } from './projectAgentMode';
 import type { ProjectDefaultAgent } from './projectDefaultAgent';
 import type { ProjectKind } from './projectKind';
 import type { ProjectPlatform } from './projectPlatform';
-import type { ProjectProjectFormat } from './projectProjectFormat';
 import type { ProjectStatus } from './projectStatus';
 
 export interface Project {
@@ -46,8 +45,6 @@ export interface Project {
   healthScore?: number | null;
   /** User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
   defaultAgent?: ProjectDefaultAgent;
-  /** Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects). */
-  projectFormat?: ProjectProjectFormat;
   createdAt: Date;
   updatedAt: Date;
 }
