@@ -105,9 +105,7 @@ export function SuggestionChips({ projectId, taskId, onAccepted }: SuggestionChi
 
   const visible = (suggestions ?? []).filter(
     (s: ProjectSuggestion) =>
-      s.status !== "dismissed" &&
-      s.status !== "accepted" &&
-      !dismissed.has(s.id),
+      s.status !== "dismissed" && s.status !== "accepted" && !dismissed.has(s.id),
   );
 
   const isGenerating = !generationTimedOut && visible.length === 0;
@@ -152,10 +150,10 @@ export function SuggestionChips({ projectId, taskId, onAccepted }: SuggestionChi
       >
         <Lightbulb className="h-3 w-3" />
         <span>Next steps</span>
-        <span className="ml-auto text-[9px] font-normal bg-muted px-1 rounded">{visible.length}</span>
-        <ChevronDown
-          className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")}
-        />
+        <span className="ml-auto text-[9px] font-normal bg-muted px-1 rounded">
+          {visible.length}
+        </span>
+        <ChevronDown className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")} />
       </button>
 
       {!collapsed && (
