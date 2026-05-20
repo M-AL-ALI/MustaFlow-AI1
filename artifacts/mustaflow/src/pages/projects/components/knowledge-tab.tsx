@@ -31,6 +31,8 @@ import {
   BrainCircuit,
   Loader2,
   CheckCircle2,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 
 function getTypeIcon(type: string) {
@@ -82,15 +84,22 @@ function getTypeLabel(type: string) {
 function KnowledgeEntryCard({
   entry,
   onUpdate,
+  selectionMode,
+  selected,
+  onToggleSelect,
 }: {
   entry: KnowledgeEntry;
   onUpdate: () => void;
+  selectionMode: boolean;
+  selected: boolean;
+  onToggleSelect: (id: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showAnnotationInput, setShowAnnotationInput] = useState(false);
   const [annotationDraft, setAnnotationDraft] = useState(entry.annotation ?? "");
   const [showMenu, setShowMenu] = useState(false);
   const [showConfirmPromote, setShowConfirmPromote] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const updateKnowledge = useUpdateKnowledge();
 
   const TypeIcon = getTypeIcon(entry.type);
@@ -150,14 +159,37 @@ function KnowledgeEntryCard({
       (diffSummary.filesRemoved?.length ?? 0) >
       0;
 
+  const showCheckbox = selectionMode || hovered;
+
   return (
     <div
       className={cn(
-        "border border-border rounded-lg p-3 bg-card space-y-2 transition-opacity",
+        "border rounded-lg p-3 bg-card space-y-2 transition-all",
+        selected
+          ? "border-primary/50 bg-primary/5"
+          : "border-border",
         entry.archivedAt ? "opacity-50" : "",
       )}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <div className="flex items-start gap-2.5">
+        {/* Checkbox */}
+        <button
+          onClick={() => onToggleSelect(entry.id)}
+          className={cn(
+            "shrink-0 mt-1 transition-all",
+            showCheckbox ? "opacity-100 w-5" : "opacity-0 w-0 overflow-hidden",
+          )}
+          title={selected ? "Deselect" : "Select"}
+        >
+          {selected ? (
+            <CheckSquare className="h-4 w-4 text-primary" />
+          ) : (
+            <Square className="h-4 w-4 text-muted-foreground/50 hover:text-muted-foreground" />
+          )}
+        </button>
+
         <div
           className={cn(
             "w-7 h-7 rounded-md border flex items-center justify-center shrink-0 mt-0.5",
@@ -422,7 +454,11 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
   const [showArchived, setShowArchived] = useState(false);
   const [severityFilter, setSeverityFilter] = useState("");
   const [approvedOnly, setApprovedOnly] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkPending, setBulkPending] = useState(false);
   const queryClient = useQueryClient();
+  const updateKnowledge = useUpdateKnowledge();
 
   const params = {
     projectId,
@@ -471,8 +507,55 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
     [entries],
   );
 
+  const toggleSelect = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const allFilteredSelected =
+    filtered.length > 0 && filtered.every((e) => selectedIds.has(e.id));
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((e) => e.id)));
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  };
+
+  const selectedCount = selectedIds.size;
+
+  const runBulkAction = async (action: "approve" | "archive") => {
+    setBulkPending(true);
+    const ids = Array.from(selectedIds);
+    const mutations = ids.map((id) => {
+      const entry = entries.find((e) => e.id === id);
+      if (!entry) return Promise.resolve();
+      const data =
+        action === "approve"
+          ? { approvedForReuse: true }
+          : { archived: !entry.archivedAt };
+      return new Promise<void>((resolve) => {
+        updateKnowledge.mutate({ id, data }, { onSettled: () => resolve() });
+      });
+    });
+    await Promise.all(mutations);
+    setBulkPending(false);
+    setSelectedIds(new Set());
+    invalidate();
+  };
+
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-background">
+    <div className="h-full flex flex-col overflow-hidden bg-background relative">
       {/* Header */}
       <div className="shrink-0 px-4 pt-4 pb-3 border-b border-border space-y-3">
         <div className="flex items-center justify-between">
@@ -487,12 +570,33 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
               </span>
             )}
           </div>
-          {approvedCount > 0 && (
-            <div className="flex items-center gap-1 text-[10px] text-yellow-400">
-              <CheckCircle2 className="h-3 w-3" />
-              {approvedCount} global lesson{approvedCount !== 1 ? "s" : ""}
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {approvedCount > 0 && !selectionMode && (
+              <div className="flex items-center gap-1 text-[10px] text-yellow-400">
+                <CheckCircle2 className="h-3 w-3" />
+                {approvedCount} global lesson{approvedCount !== 1 ? "s" : ""}
+              </div>
+            )}
+            {entries.length > 0 && (
+              <button
+                onClick={() => {
+                  if (selectionMode) {
+                    clearSelection();
+                  } else {
+                    setSelectionMode(true);
+                  }
+                }}
+                className={cn(
+                  "text-[10px] px-2 py-1 rounded border font-medium transition-colors",
+                  selectionMode
+                    ? "border-primary/40 text-primary bg-primary/10"
+                    : "border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {selectionMode ? "Exit select" : "Select"}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Search */}
@@ -577,10 +681,32 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
             {showArchived ? "Hide archived" : "Archived"}
           </button>
         </div>
+
+        {/* Select-all bar */}
+        {selectionMode && filtered.length > 0 && (
+          <div className="flex items-center gap-2 py-0.5">
+            <button
+              onClick={toggleSelectAll}
+              className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {allFilteredSelected ? (
+                <CheckSquare className="h-3.5 w-3.5 text-primary" />
+              ) : (
+                <Square className="h-3.5 w-3.5" />
+              )}
+              {allFilteredSelected ? "Deselect all" : `Select all (${filtered.length})`}
+            </button>
+            {selectedCount > 0 && (
+              <span className="text-[10px] text-muted-foreground/60">
+                — {selectedCount} selected
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Entry list */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+      <div className={cn("flex-1 overflow-y-auto p-4 space-y-2", selectedCount > 0 ? "pb-20" : "")}>
         {isLoading ? (
           <div className="flex items-center justify-center pt-12 gap-2 text-muted-foreground text-xs">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -628,6 +754,9 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
                 key={entry.id}
                 entry={entry}
                 onUpdate={invalidate}
+                selectionMode={selectionMode}
+                selected={selectedIds.has(entry.id)}
+                onToggleSelect={toggleSelect}
               />
             ))}
           </>
@@ -635,11 +764,59 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
       </div>
 
       {/* Footer hint */}
-      {!isLoading && entries.length > 0 && (
+      {!isLoading && entries.length > 0 && selectedCount === 0 && (
         <div className="shrink-0 px-4 py-2 border-t border-border/50 bg-muted/20">
           <p className="text-[10px] text-muted-foreground/50 leading-relaxed">
             Entries marked as <span className="text-yellow-400 font-medium">Global Lessons</span> are injected into every AI build across all projects with a 1.5× priority boost.
           </p>
+        </div>
+      )}
+
+      {/* Floating bulk action bar */}
+      {selectedCount > 0 && (
+        <div className="absolute bottom-0 left-0 right-0 z-20 px-4 py-3 border-t border-border bg-card/95 backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground shrink-0">
+              {selectedCount} selected
+            </span>
+            <div className="flex-1 flex items-center gap-2 justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5 border-yellow-500/40 text-yellow-400 hover:bg-yellow-500/10"
+                disabled={bulkPending}
+                onClick={() => runBulkAction("approve")}
+              >
+                {bulkPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Star className="h-3 w-3" />
+                )}
+                Approve ({selectedCount})
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5"
+                disabled={bulkPending}
+                onClick={() => runBulkAction("archive")}
+              >
+                {bulkPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Archive className="h-3 w-3" />
+                )}
+                Archive ({selectedCount})
+              </Button>
+              <button
+                onClick={clearSelection}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="Clear selection"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
