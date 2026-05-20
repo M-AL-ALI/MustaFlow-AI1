@@ -17,7 +17,7 @@ import {
   getGetPageMapQueryKey,
   getListSuggestionsQueryKey,
 } from "@workspace/api-client-react";
-import { BuildProgressFeed } from "@/components/build-progress-feed";
+import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { CodeEditorTab } from "./components/code-editor-tab";
 import { ChatHistory } from "./components/chat-history";
 import { PageMapTab } from "./components/page-map-tab";
@@ -70,7 +70,6 @@ import { AnalyticsTab } from "./components/analytics-tab";
 import { ResourcesTab } from "./components/resources-tab";
 import { ManageTab } from "./components/manage-tab";
 import { KnowledgeTab } from "./components/knowledge-tab";
-import { InlineLiveActivity } from "./components/activity-stream";
 import { HistoryTab } from "./components/history-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
@@ -1011,7 +1010,7 @@ export default function ProjectWorkspacePage() {
     };
   }, []);
 
-  // Discover the active task ID during sendMessage.isPending so BuildProgressFeed
+  // Discover the active task ID during sendMessage.isPending so AgentThinkingBubble
   // can show real events even before the API call resolves (for synchronous builds).
   const pendingFeedTaskId = sendMessage.isPending
     ? (tasksForFeed
@@ -1467,7 +1466,7 @@ export default function ProjectWorkspacePage() {
 
                     {sendMessage.isPending ? (
                       pendingFeedTaskId !== null ? (
-                        <InlineLiveActivity
+                        <AgentThinkingBubble
                           projectId={projectId}
                           taskId={pendingFeedTaskId}
                           onDismiss={() => {}}
@@ -1490,7 +1489,7 @@ export default function ProjectWorkspacePage() {
                         </div>
                       )
                     ) : activeTaskId !== null ? (
-                      <InlineLiveActivity
+                      <AgentThinkingBubble
                         projectId={projectId}
                         taskId={activeTaskId}
                         onDismiss={() => setActiveTaskId(null)}
@@ -1498,22 +1497,29 @@ export default function ProjectWorkspacePage() {
                     ) : null}
                   </div>
 
-                  {/* Activity ticker / Status bar */}
+                  {/* Status bar */}
                   <div className="shrink-0 border-t border-border/40">
-                    {sendMessage.isPending ? (
-                      <BuildProgressFeed
-                        projectId={projectId}
-                        taskId={pendingFeedTaskId}
-                        taskStartedAt={pendingBuildStartedAt}
-                      />
-                    ) : (
-                      <>
-                        {/* Bottom status bar — shown when idle */}
-                        <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-muted/20">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                          <span className="text-[10px] text-muted-foreground font-medium">
-                            Ready
-                          </span>
+                    <>
+                      {/* Bottom status bar */}
+                      <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-muted/20">
+                        {sendMessage.isPending ? (
+                          <>
+                            <span className="relative flex h-1.5 w-1.5 shrink-0">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
+                            </span>
+                            <span className="text-[10px] text-primary font-medium">
+                              {pendingIsPlan ? "Planning…" : "Building…"}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                            <span className="text-[10px] text-muted-foreground font-medium">
+                              Ready
+                            </span>
+                          </>
+                        )}
                           {files.length > 0 && (
                             <button
                               onClick={() => switchLeftPanel("files")}
@@ -1565,8 +1571,7 @@ export default function ProjectWorkspacePage() {
                             </span>
                           </div>
                         </div>
-                      </>
-                    )}
+                    </>
                   </div>
 
                   {/* Quick action chips */}

@@ -911,6 +911,13 @@ export async function runJob(input: JobInput): Promise<void> {
       }
 
       if (kind === "build") {
+        await emitEvent(
+          taskId,
+          "narration",
+          isMobileProject
+            ? "Let me plan the mobile app structure before writing any code."
+            : "Let me plan the app structure before writing any code.",
+        );
         await emitEvent(taskId, "planning", "Reading project configuration…");
         await emitEvent(
           taskId,
@@ -1003,6 +1010,11 @@ export async function runJob(input: JobInput): Promise<void> {
           `Blueprint created: ${result.files.length} file(s) planned.`,
         );
 
+        await emitEvent(
+          taskId,
+          "narration",
+          `Writing ${result.files.length} file${result.files.length !== 1 ? "s" : ""} to the project now.`,
+        );
         await emitEvent(taskId, "editing_files", "Writing generated files…");
         for (const f of result.files) {
           await emitEvent(taskId, "editing_files", `Writing ${f.path}`, f.path);
@@ -1015,6 +1027,11 @@ export async function runJob(input: JobInput): Promise<void> {
         nextVersionLabel = isMobileProject ? "Initial mobile build" : "Initial build";
         filesToSmellScan = result.files;
       } else {
+        await emitEvent(
+          taskId,
+          "narration",
+          "Let me read the current project files before making any changes.",
+        );
         await emitEvent(taskId, "reading_files", "Reading current project files…");
         const existingFiles = await loadFiles(projectId);
         await emitEvent(
@@ -1052,6 +1069,13 @@ export async function runJob(input: JobInput): Promise<void> {
           );
         }
 
+        await emitEvent(
+          taskId,
+          "narration",
+          isMobileProject
+            ? "Applying your changes to the Expo project now."
+            : "Applying your requested changes to the codebase now.",
+        );
         await emitEvent(
           taskId,
           "generating_code",
@@ -1155,6 +1179,14 @@ export async function runJob(input: JobInput): Promise<void> {
 
         const result = refineResult;
 
+        const changedCount = result.changedFiles.length + result.removedPaths.length;
+        await emitEvent(
+          taskId,
+          "narration",
+          changedCount === 0
+            ? "No files needed changing — your app is already up to date."
+            : `Writing ${changedCount} updated file${changedCount !== 1 ? "s" : ""} to the project.`,
+        );
         await emitEvent(
           taskId,
           "editing_files",
@@ -1197,6 +1229,11 @@ export async function runJob(input: JobInput): Promise<void> {
         report.knowledgeApplied = knowledgeApplied;
       }
 
+      await emitEvent(
+        taskId,
+        "narration",
+        "Saving a rollback checkpoint and refreshing the preview.",
+      );
       await emitEvent(taskId, "saving_version", "Saving version rollback point…");
       const snapshot = await snapshotFilesForVersion(projectId);
 
