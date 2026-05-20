@@ -18,6 +18,7 @@ import {
   runRefinePipeline,
   runMobileBuildPipeline,
   runMobileRefinePipeline,
+  scanCodeSmells,
   type BuilderFile,
   type ConversationTurn,
 } from "./builder";
@@ -323,21 +324,51 @@ async function loadKnowledgeContext(
       return { context: integrationsNote, applied: [] };
     }
 
+    const APPROVED_BOOST = 1.5;
     if (userPrompt && userPrompt.length > 0) {
       const promptTokens = tokenise(userPrompt);
-      const scored = entries.map((e) => {
-        const entryTokens = tokenise(`${e.title} ${e.content} ${e.tags ?? ""}`);
-        let overlap = 0;
-        for (const t of promptTokens) {
-          if (entryTokens.has(t)) overlap++;
+      const N = entries.length;
+
+      // Compute document frequency (df) for each query token across all entries
+      const df = new Map<string, number>();
+      for (const t of promptTokens) {
+        let count = 0;
+        for (const e of entries) {
+          if (tokenise(`${e.title} ${e.content} ${e.tags ?? ""}`).has(t)) count++;
         }
-        const score = promptTokens.size > 0 ? overlap / promptTokens.size : 0;
+        df.set(t, count);
+      }
+
+      const scored = entries.map((e) => {
+        const entryText = `${e.title} ${e.content} ${e.tags ?? ""}`;
+        const entryWords = entryText.toLowerCase().split(/\W+/).filter(Boolean);
+        const termCounts = new Map<string, number>();
+        for (const w of entryWords) {
+          termCounts.set(w, (termCounts.get(w) ?? 0) + 1);
+        }
+        const entryTokens = new Set(termCounts.keys());
+
+        // TF-IDF: sum of tf(t, entry) × idf(t) for each query token present in entry
+        let score = 0;
+        for (const t of promptTokens) {
+          if (entryTokens.has(t)) {
+            const tf = (termCounts.get(t) ?? 0) / Math.max(entryWords.length, 1);
+            const idf = Math.log((N + 1) / ((df.get(t) ?? 0) + 1)) + 1;
+            score += tf * idf;
+          }
+        }
+
+        // Boost entries approved for reuse — higher-quality vetted lessons
+        if (e.approvedForReuse) score *= APPROVED_BOOST;
         return { entry: e, score };
       });
       scored.sort((a, b) => b.score - a.score);
-      topEntries = scored.slice(0, 15).map((s) => s.entry);
+      topEntries = scored.slice(0, 8).map((s) => s.entry);
     } else {
-      topEntries = entries.slice(0, 15);
+      // When no prompt provided, prefer approvedForReuse entries first
+      topEntries = [...entries]
+        .sort((a, b) => (b.approvedForReuse ? 1 : 0) - (a.approvedForReuse ? 1 : 0))
+        .slice(0, 8);
     }
 
     const knowledgePart = topEntries
@@ -606,6 +637,7 @@ export async function runJob(input: JobInput): Promise<void> {
     let assistantSummary: string;
     let nextVersionLabel: string;
     let diffSummary: DiffSummary | undefined;
+    let filesToSmellScan: BuilderFile[] = [];
 
     const isMobileProject = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind);
 
@@ -678,6 +710,7 @@ export async function runJob(input: JobInput): Promise<void> {
       report = result.report;
       assistantSummary = result.assistantSummary;
       nextVersionLabel = isMobileProject ? "Initial mobile build" : "Initial build";
+      filesToSmellScan = result.files;
     } else {
       await emitEvent(taskId, "reading_files", "Reading current project files…");
       const existingFiles = await loadFiles(projectId);
@@ -744,6 +777,7 @@ export async function runJob(input: JobInput): Promise<void> {
       report = result.report;
       assistantSummary = result.assistantSummary;
       nextVersionLabel = userPrompt.slice(0, 40) || "Refinement";
+      filesToSmellScan = result.changedFiles;
     }
 
     // Attach knowledge lessons that influenced this build
@@ -784,6 +818,24 @@ export async function runJob(input: JobInput): Promise<void> {
         completedAt: sql`now()`,
       })
       .where(eq(agentTasksTable.id, taskId));
+
+    // Fire-and-forget code-smell scan — runs after task is already "completed"
+    // so it never delays pipeline completion or the user-facing response.
+    if (filesToSmellScan.length > 0) {
+      setImmediate(() => {
+        try {
+          const smells = scanCodeSmells(filesToSmellScan);
+          if (smells.length > 0) {
+            db.update(agentTasksTable)
+              .set({ report: { ...report, codeSmells: smells } })
+              .where(eq(agentTasksTable.id, taskId))
+              .catch((err: unknown) => logger.warn({ err, taskId }, "Failed to persist code-smell scan results (non-fatal)"));
+          }
+        } catch (err) {
+          logger.warn({ err, taskId }, "Code-smell scan error (non-fatal)");
+        }
+      });
+    }
 
     // Update project status and persist the latest summary as the project-level description
     await db

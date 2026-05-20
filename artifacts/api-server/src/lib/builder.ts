@@ -88,6 +88,41 @@ export type ValidationResult = {
   warnings: string[];
 };
 
+const CODE_QUALITY_RULES = `CODE QUALITY RULES — apply unconditionally to every file you generate:
+
+SEMANTIC HTML:
+- Use correct heading hierarchy (h1→h2→h3). One h1 per page.
+- Use semantic landmarks: <header>, <nav>, <main>, <footer>, <section>, <article>.
+- Every <img> must have a meaningful alt attribute (empty alt="" for purely decorative images).
+- Use <button> for clickable actions, <a href> for navigation only.
+- Use <label> elements associated with every form input via for/id or wrapping.
+
+SECURITY:
+- NEVER use eval(), new Function(), or document.write().
+- NEVER assign innerHTML to a value derived from user input — use textContent for user-provided strings.
+- NEVER use synchronous XMLHttpRequest (open(..., false)).
+- NEVER hardcode API keys, secrets, or credentials. Use placeholder comments: /* API_KEY from project secrets */
+
+ACCESSIBILITY:
+- Add aria-label to icon-only buttons and interactive elements without visible text.
+- Use role="alert" or aria-live="polite" for dynamic status messages.
+- Aim for colour contrast ≥ 4.5:1 for body text, ≥ 3:1 for large text.
+- All focusable elements must have a visible :focus-visible outline.
+
+MAINTAINABILITY:
+- Use descriptive variable and function names (no single-letter names except loop counters i/j/k).
+- Avoid magic numbers — store meaningful constants in named variables.
+- Add a short comment on non-obvious logic.
+- No empty catch blocks — at minimum display or log the error.
+
+REQUIRED META TAGS (every HTML file, no exceptions):
+- <meta charset="UTF-8"> in <head>
+- <meta name="viewport" content="width=device-width, initial-scale=1.0"> in <head>
+- <meta name="description" content="..."> summarising the page in <head>
+- <title> derived from the project name in <head>`;
+
+const SELF_REVIEW_CLAUSE = `SELF-REVIEW REQUIREMENT: Before finalising your JSON response, silently review every generated file against the CODE QUALITY RULES. Fix any violations before writing the final response. Do not mention this review step in the output.`;
+
 const PREVIEW_NOTE = `IMPORTANT preview-runtime constraints:
 - This is a static preview. Generate only safe, self-contained files: HTML, CSS, vanilla JS (or React via CDN inside <script type="text/babel">), images via public CDNs.
 - ALWAYS produce an index.html. Multi-page apps use additional .html files with relative links (e.g. <a href="./about.html">).
@@ -129,6 +164,8 @@ const BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate comp
 
 ${PREVIEW_NOTE}
 
+${CODE_QUALITY_RULES}
+
 OUTPUT STRICT JSON matching this exact shape:
 {
   "blueprint": {
@@ -151,9 +188,11 @@ The "files" array must contain every file needed. Always include "index.html" as
 
 const REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE. You receive the current project files and a change request. You modify the affected files and return the FULL updated file contents.
 
-For files larger than 3KB, you MAY also return a "patches" array to surgically update specific sections. Each patch has: { "path": string, "find": string, "replace": string } where "find" is a unique excerpt from the file and "replace" is the new content that should replace it.
+For files larger than 3KB, you MAY also return a "patches" array to surgically update specific sections. Each patch has: { "path": string, "find": string, "replace": string } where "find" is a unique excerpt from the file and "replace" is the new content that should replace it. Prefer patches over full-file rewrites for large files with localised changes — smaller payloads, fewer regressions.
 
 ${PREVIEW_NOTE}
+
+${CODE_QUALITY_RULES}
 
 OUTPUT STRICT JSON matching this exact shape:
 {
@@ -209,6 +248,41 @@ function modelFor(mode: AgentMode): string {
 }
 
 /**
+ * Pro-mode two-stage generation: lightweight planning micro-call (gpt-5-mini, max 300 tokens)
+ * that outputs the intended file list and each file's responsibility.
+ * Inject this outline as a constraint into the main generation prompt to reduce
+ * hallucinated or redundant file splits.
+ */
+async function runProPlanMicroCall(
+  projectName: string,
+  userPrompt: string,
+): Promise<string> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-5-mini",
+      max_completion_tokens: 300,
+      messages: [
+        {
+          role: "system",
+          content: 'You are a web app file planner. Output ONLY valid JSON with no prose: {"files": [{"path": string, "responsibility": string}]}. List every file the app needs with one sentence explaining its responsibility.',
+        },
+        { role: "user", content: `Project: "${projectName}". Request: ${userPrompt}` },
+      ],
+      response_format: { type: "json_object" },
+    });
+    const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
+    const parsed = JSON.parse(raw) as { files?: Array<{ path: string; responsibility: string }> };
+    if (!Array.isArray(parsed.files) || parsed.files.length === 0) return "";
+    const outline = parsed.files
+      .map((f) => `- ${f.path}: ${f.responsibility}`)
+      .join("\n");
+    return `## Planned File Structure (follow this exactly — do not add or remove files without good reason)\n${outline}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Extract structural summary of a file — function/class names, IDs, key patterns.
  * Used for "related but not directly referenced" files in the tiered manifest.
  */
@@ -220,11 +294,34 @@ function extractStructuralSummary(content: string, mimeType: string): string {
     const tagMatches = content.match(/<(h[1-6]|nav|main|section|article|form|table)[^>]*>/g) ?? [];
     if (tagMatches.length > 0) lines.push(`Structural tags: ${tagMatches.slice(0, 8).join(", ")}`);
     if (idMatches.length > 0) lines.push(`IDs: ${idMatches.slice(0, 10).join(", ")}`);
-  } else if (mimeType === "application/javascript" || mimeType === "text/javascript") {
-    const fnMatches = content.match(/(?:function\s+(\w+)|const\s+(\w+)\s*=\s*(?:async\s+)?(?:function|\())/g) ?? [];
+  } else if (
+    mimeType === "application/javascript" ||
+    mimeType === "text/javascript" ||
+    mimeType === "application/typescript"
+  ) {
+    // Extract function signatures with parameter names
+    const fnWithParams = [...content.matchAll(
+      /(?:(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)|const\s+(\w+)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*=>)/g,
+    )].slice(0, 10).map((m) => {
+      const name = m[1] ?? m[3] ?? "?";
+      const params = (m[2] ?? m[4] ?? "").replace(/\s+/g, " ").trim();
+      return params ? `${name}(${params})` : `${name}()`;
+    });
+    // Extract module-scope const/let declarations
+    const constLetMatches = [...content.matchAll(/^(?:export\s+)?(?:const|let)\s+([\w$]+)/gm)]
+      .slice(0, 8)
+      .map((m) => m[1]!);
+    // Extract first JSDoc comment if present
+    const jsdocMatch = content.match(/\/\*\*\s*([\s\S]*?)\*\//);
+    const jsdocLine = jsdocMatch
+      ? jsdocMatch[1]?.split("\n").find((l) => l.trim().replace(/^\*\s*/, "").length > 0)
+          ?.trim().replace(/^\*\s*/, "").slice(0, 80)
+      : null;
     const classMatches = content.match(/class\s+\w+/g) ?? [];
-    if (fnMatches.length > 0) lines.push(`Functions: ${fnMatches.slice(0, 10).join(", ")}`);
+    if (fnWithParams.length > 0) lines.push(`Functions: ${fnWithParams.join(", ")}`);
+    if (constLetMatches.length > 0) lines.push(`Exports: ${constLetMatches.join(", ")}`);
     if (classMatches.length > 0) lines.push(`Classes: ${classMatches.slice(0, 5).join(", ")}`);
+    if (jsdocLine) lines.push(`Desc: ${jsdocLine}`);
   } else if (mimeType === "text/css") {
     const selectorMatches = content.match(/^[.#][\w-]+\s*\{/gm) ?? [];
     const varMatches = content.match(/--[\w-]+:/g) ?? [];
@@ -300,16 +397,59 @@ export type FilePatch = {
 };
 
 /**
+ * Normalise a single line: collapse runs of spaces/tabs to a single space and
+ * trim trailing whitespace. Used for per-line fuzzy comparison in patch matching.
+ */
+function normalizeLine(line: string): string {
+  return line.replace(/[ \t]+/g, " ").trimEnd();
+}
+
+/**
  * Apply a patch to a file's content. Returns the patched content, or null if
  * the find string was not found (caller should fall back to full replacement).
+ *
+ * Attempt 1: exact string match (zero cost, preserves all whitespace).
+ * Attempt 2: line-based fuzzy match — compare each line of the find string against
+ *   a sliding window of the original content lines using per-line whitespace
+ *   normalisation. Only the matched window is replaced; all other original lines
+ *   are preserved verbatim. This avoids the whole-file normalisation side-effects
+ *   of operating on a collapsed copy of the content.
+ * If both fail, returns null so the caller can fall back to full-file replacement.
  */
 export function applyPatch(content: string, patch: FilePatch): string | null {
-  const idx = content.indexOf(patch.find);
-  if (idx === -1) {
-    logger.warn({ path: patch.path, findPreview: patch.find.slice(0, 80) }, "Patch find string not located — falling back to full replacement");
-    return null;
+  const exactIdx = content.indexOf(patch.find);
+  if (exactIdx !== -1) {
+    return (
+      content.slice(0, exactIdx) +
+      patch.replace +
+      content.slice(exactIdx + patch.find.length)
+    );
   }
-  return content.slice(0, idx) + patch.replace + content.slice(idx + patch.find.length);
+
+  // Line-based fuzzy fallback — preserves original text outside the matched window
+  const contentLines = content.split("\n");
+  const findLines = patch.find.split("\n").map(normalizeLine);
+  const findLen = findLines.length;
+  for (let i = 0; i <= contentLines.length - findLen; i++) {
+    const window = contentLines.slice(i, i + findLen).map(normalizeLine);
+    if (window.every((l, j) => l === findLines[j])) {
+      logger.info(
+        { path: patch.path, lineOffset: i, findPreview: patch.find.slice(0, 80) },
+        "Patch applied via line-based fuzzy match",
+      );
+      return [
+        ...contentLines.slice(0, i),
+        patch.replace,
+        ...contentLines.slice(i + findLen),
+      ].join("\n");
+    }
+  }
+
+  logger.warn(
+    { path: patch.path, findPreview: patch.find.slice(0, 80) },
+    "Patch find string not located — falling back to full replacement",
+  );
+  return null;
 }
 
 /**
@@ -497,98 +637,363 @@ export function validateMobileFiles(files: BuilderFile[]): ValidationResult {
 }
 
 /**
- * Lightweight self-validation of generated/changed files.
- * Validates ALL file types in the given array:
- * - HTML: structure check + inline <script> acorn parse + CDN URL reachability
- * - JS/MJS standalone files: full acorn parse
- * Async because CDN reachability requires network calls.
+ * Validate required meta tags in an HTML file.
+ * Returns warnings (not critical errors) so builds are never blocked.
  */
-export async function validateFiles(files: BuilderFile[]): Promise<ValidationResult> {
+function validateRequiredMeta(f: BuilderFile): string[] {
+  const warnings: string[] = [];
+  const c = f.content;
+  if (!/<meta\s[^>]*charset/i.test(c)) {
+    warnings.push(`${f.path}: Missing <meta charset> — should be <meta charset="UTF-8">`);
+  }
+  if (!/<meta\s[^>]*name=["']viewport["']/i.test(c)) {
+    warnings.push(`${f.path}: Missing <meta name="viewport"> — required for mobile responsiveness`);
+  }
+  if (!/<title>/i.test(c)) {
+    warnings.push(`${f.path}: Missing <title> — every HTML page must have a descriptive title`);
+  }
+  if (!/<meta\s[^>]*name=["']description["']/i.test(c)) {
+    warnings.push(`${f.path}: Missing <meta name="description"> — improves SEO and link previews`);
+  }
+  // CSP: detect absence of Content-Security-Policy meta tag
+  if (!/<meta\s[^>]*http-equiv=["']Content-Security-Policy["']/i.test(c)) {
+    warnings.push(
+      `${f.path}: Missing Content-Security-Policy <meta> tag — consider adding a CSP to restrict resource origins`,
+    );
+  }
+  // CSP: detect unsafe-inline/unsafe-eval in any existing CSP meta
+  const cspMeta = c.match(/<meta\s[^>]*http-equiv=["']Content-Security-Policy["'][^>]*content=["']([^"']+)["']/i);
+  if (cspMeta?.[1] && /(unsafe-inline|unsafe-eval)/i.test(cspMeta[1])) {
+    warnings.push(
+      `${f.path}: CSP contains 'unsafe-inline' or 'unsafe-eval' — these undermine injection protection`,
+    );
+  }
+  return warnings;
+}
+
+/**
+ * Scan for dangerous patterns in HTML/JS files.
+ * Violations are appended as warnings (not critical errors) — builds are not blocked.
+ */
+function validateNoDangerousPatterns(f: BuilderFile): string[] {
+  const warnings: string[] = [];
+  const c = f.content;
+  const patterns: Array<{ re: RegExp; label: string }> = [
+    { re: /\beval\s*\(/, label: "eval() — potential code injection vulnerability" },
+    { re: /document\.write\s*\(/, label: "document.write() — deprecated and unsafe" },
+    {
+      re: /\.innerHTML\s*=\s*(?![`"'](?:[^`"'\\]|\\.)*[`"']\s*[;,)])/,
+      label: "innerHTML with potentially dynamic value — use textContent or sanitise",
+    },
+    {
+      re: /new\s+XMLHttpRequest[\s\S]{0,100}\.open\s*\([^,]+,[^,]+,\s*false\s*\)/,
+      label: "synchronous XMLHttpRequest — blocks the UI thread",
+    },
+  ];
+  for (const { re, label } of patterns) {
+    if (re.test(c)) {
+      warnings.push(`${f.path}: Security/quality warning — ${label}`);
+    }
+  }
+  return warnings;
+}
+
+/**
+ * Validate a single file and return its critical errors + warnings.
+ * Async because CDN reachability requires network I/O.
+ */
+async function validateSingleFile(f: BuilderFile): Promise<{ criticalErrors: string[]; warnings: string[] }> {
   const criticalErrors: string[] = [];
   const warnings: string[] = [];
-  const cdnUrlsToCheck: string[] = [];
 
-  for (const f of files) {
-    const isHtml = f.mimeType === "text/html" || f.path.endsWith(".html") || f.path.endsWith(".htm");
-    const isJs = f.mimeType === "application/javascript" ||
-      f.mimeType === "text/javascript" ||
-      f.path.endsWith(".js") ||
-      f.path.endsWith(".mjs");
+  const isHtml =
+    f.mimeType === "text/html" || f.path.endsWith(".html") || f.path.endsWith(".htm");
+  const isJs =
+    f.mimeType === "application/javascript" ||
+    f.mimeType === "text/javascript" ||
+    f.path.endsWith(".js") ||
+    f.path.endsWith(".mjs");
 
-    if (isHtml) {
-      const c = f.content;
+  if (isHtml) {
+    const c = f.content;
 
-      // Check for basic HTML structure
-      if (!c.includes("<html") && !c.includes("<!DOCTYPE")) {
-        warnings.push(`${f.path}: Missing <!DOCTYPE> or <html> — may render incorrectly`);
-      }
-      if (!c.includes("<head") && !c.includes("<body")) {
-        criticalErrors.push(`${f.path}: Missing <head> and <body> — incomplete HTML structure`);
-      }
+    if (!c.includes("<html") && !c.includes("<!DOCTYPE")) {
+      warnings.push(`${f.path}: Missing <!DOCTYPE> or <html> — may render incorrectly`);
+    }
+    if (!c.includes("<head") && !c.includes("<body")) {
+      criticalErrors.push(`${f.path}: Missing <head> and <body> — incomplete HTML structure`);
+    }
 
-      // Check for unbalanced common tags (heuristic)
-      const openCount = (tag: string) => (c.match(new RegExp(`<${tag}[\\s>]`, "gi")) ?? []).length;
-      const closeCount = (tag: string) => (c.match(new RegExp(`</${tag}>`, "gi")) ?? []).length;
-      for (const tag of ["div", "ul", "ol", "table", "form", "script", "style"]) {
-        const opens = openCount(tag);
-        const closes = closeCount(tag);
-        if (opens > 0 && Math.abs(opens - closes) > opens * 0.3) {
-          warnings.push(`${f.path}: Possibly unbalanced <${tag}> tags (${opens} open, ${closes} close)`);
-        }
-      }
-
-      // Collect CDN URLs for reachability check
-      const scriptSrcs = [...c.matchAll(/src="(https?:\/\/[^"]+)"/g)].map((m) => m[1]!);
-      const linkHrefs = [...c.matchAll(/href="(https?:\/\/[^"]+)"/g)].map((m) => m[1]!);
-      for (const url of [...scriptSrcs, ...linkHrefs]) {
-        try {
-          const hostname = new URL(url).hostname;
-          if (!APPROVED_CDN_HOSTNAMES.has(hostname)) {
-            warnings.push(`${f.path}: External URL from unrecognised host may not load in preview: ${url.slice(0, 100)}`);
-          } else {
-            cdnUrlsToCheck.push(url);
-          }
-        } catch {
-          warnings.push(`${f.path}: Malformed URL detected: ${url.slice(0, 100)}`);
-        }
-      }
-
-      // Parse inline <script> blocks (non-babel, non-src) with acorn
-      const scriptBlocks = [
-        ...c.matchAll(/<script(?![^>]*type=["']text\/babel["'])(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/gi),
-      ];
-      for (const match of scriptBlocks) {
-        const code = (match[1] ?? "").trim();
-        if (code.length === 0) continue;
-        const syntaxError = parseJsSyntax(code);
-        if (syntaxError) {
-          criticalErrors.push(`${f.path}: JavaScript syntax error in inline <script>: ${syntaxError}`);
-        }
+    const openCount = (tag: string) =>
+      (c.match(new RegExp(`<${tag}[\\s>]`, "gi")) ?? []).length;
+    const closeCount = (tag: string) =>
+      (c.match(new RegExp(`</${tag}>`, "gi")) ?? []).length;
+    for (const tag of ["div", "ul", "ol", "table", "form", "script", "style"]) {
+      const opens = openCount(tag);
+      const closes = closeCount(tag);
+      if (opens > 0 && Math.abs(opens - closes) > opens * 0.3) {
+        warnings.push(
+          `${f.path}: Possibly unbalanced <${tag}> tags (${opens} open, ${closes} close)`,
+        );
       }
     }
 
-    if (isJs) {
-      // Parse standalone JS files with acorn
-      const code = f.content.trim();
-      if (code.length > 0) {
-        const syntaxError = parseJsSyntax(code);
-        if (syntaxError) {
-          criticalErrors.push(`${f.path}: JavaScript syntax error: ${syntaxError}`);
+    // Required meta tags check
+    warnings.push(...validateRequiredMeta(f));
+
+    // Dangerous-pattern scan
+    warnings.push(...validateNoDangerousPatterns(f));
+
+    // Duplicate id="..." attributes — each id must be unique within the document
+    const allIds = [...c.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]!);
+    const seenIds = new Set<string>();
+    for (const id of allIds) {
+      if (seenIds.has(id)) {
+        criticalErrors.push(
+          `${f.path}: Duplicate element id="${id}" — id values must be unique per document`,
+        );
+      }
+      seenIds.add(id);
+    }
+
+    // Shadow DOM / encapsulation conflict: attachShadow() alongside document.getElementById
+    // suggests the developer is querying the light DOM from within a shadow root, which fails.
+    if (c.includes("attachShadow") && /document\.(getElementById|querySelector)\b/.test(c)) {
+      warnings.push(
+        `${f.path}: Shadow DOM detected alongside document.getElementById/querySelector — light-DOM queries won't reach elements inside a shadow root`,
+      );
+    }
+
+    // CDN allowlist + reachability — collect unique approved URLs and check up to 3
+    const scriptSrcs = [...c.matchAll(/src="(https?:\/\/[^"]+)"/g)].map((m) => m[1]!);
+    const linkHrefs = [...c.matchAll(/href="(https?:\/\/[^"]+)"/g)].map((m) => m[1]!);
+    const cdnUrlsToCheck: string[] = [];
+    for (const url of [...scriptSrcs, ...linkHrefs]) {
+      try {
+        const hostname = new URL(url).hostname;
+        if (!APPROVED_CDN_HOSTNAMES.has(hostname)) {
+          warnings.push(
+            `${f.path}: External URL from unrecognised host may not load in preview: ${url.slice(0, 100)}`,
+          );
+        } else {
+          cdnUrlsToCheck.push(url);
         }
+      } catch {
+        warnings.push(`${f.path}: Malformed URL detected: ${url.slice(0, 100)}`);
+      }
+    }
+    const uniqueCdnUrls = [...new Set(cdnUrlsToCheck)].slice(0, 3);
+    const reachabilityResults = await Promise.all(
+      uniqueCdnUrls.map((url) =>
+        checkUrlReachable(url).then((ok) => ({ url, ok })),
+      ),
+    );
+    for (const { url, ok } of reachabilityResults) {
+      if (!ok) {
+        // Approved CDN URL is unreachable — escalate to critical so correction pass fires
+        criticalErrors.push(`${f.path}: CDN URL is unreachable in preview (replace with working alternative): ${url.slice(0, 100)}`);
+      }
+    }
+
+    // Parse inline <script> blocks (non-babel, non-src) with acorn
+    const scriptBlocks = [
+      ...c.matchAll(
+        /<script(?![^>]*type=["']text\/babel["'])(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/gi,
+      ),
+    ];
+    for (const match of scriptBlocks) {
+      const code = (match[1] ?? "").trim();
+      if (code.length === 0) continue;
+      const syntaxError = parseJsSyntax(code);
+      if (syntaxError) {
+        criticalErrors.push(
+          `${f.path}: JavaScript syntax error in inline <script>: ${syntaxError}`,
+        );
       }
     }
   }
 
-  // CDN reachability — check up to 3 unique CDN URLs (bounded to keep validation fast)
-  const uniqueCdnUrls = [...new Set(cdnUrlsToCheck)].slice(0, 3);
-  for (const url of uniqueCdnUrls) {
-    const reachable = await checkUrlReachable(url);
-    if (!reachable) {
-      warnings.push(`CDN URL may not be reachable in preview: ${url.slice(0, 100)}`);
+  if (isJs) {
+    const code = f.content.trim();
+    if (code.length > 0) {
+      const syntaxError = parseJsSyntax(code);
+      if (syntaxError) {
+        criticalErrors.push(`${f.path}: JavaScript syntax error: ${syntaxError}`);
+      }
     }
+    // Dangerous-pattern scan for standalone JS files too
+    warnings.push(...validateNoDangerousPatterns(f));
   }
 
+  return { criticalErrors, warnings };
+}
+
+/**
+ * Lightweight self-validation of generated/changed files.
+ * Validates ALL file types in the given array — runs all per-file validators
+ * concurrently via Promise.all so CDN network I/O doesn't block sequentially.
+ */
+export async function validateFiles(files: BuilderFile[]): Promise<ValidationResult> {
+  const results = await Promise.all(files.map(validateSingleFile));
+  const criticalErrors: string[] = [];
+  const warnings: string[] = [];
+  for (const r of results) {
+    criticalErrors.push(...r.criticalErrors);
+    warnings.push(...r.warnings);
+  }
   return { passed: criticalErrors.length === 0, criticalErrors, warnings };
+}
+
+/**
+ * Classify validation critical errors by type to route targeted correction prompts.
+ */
+type CorrectionType = "js-syntax" | "html-structure" | "cdn-substitution" | "generic";
+
+function classifyCriticalErrors(criticalErrors: string[]): CorrectionType {
+  const hasJsErrors = criticalErrors.some(
+    (e) => e.includes("JavaScript syntax error") || e.includes("SyntaxError"),
+  );
+  const hasHtmlErrors = criticalErrors.some(
+    (e) =>
+      e.includes("<head>") ||
+      e.includes("<body>") ||
+      e.includes("DOCTYPE") ||
+      e.includes("HTML structure"),
+  );
+  const hasCdnErrors = criticalErrors.some(
+    (e) => e.includes("CDN") || e.includes("reachable"),
+  );
+  if (hasJsErrors) return "js-syntax";
+  if (hasHtmlErrors) return "html-structure";
+  if (hasCdnErrors) return "cdn-substitution";
+  return "generic";
+}
+
+/**
+ * Return a targeted correction instruction based on the error type.
+ * Targeted prompts reduce the chance of the correction introducing unrelated regressions.
+ */
+function getCorrectionInstruction(
+  type: CorrectionType,
+  criticalErrors: string[],
+): string {
+  const errorList = criticalErrors.join("\n");
+  switch (type) {
+    case "js-syntax":
+      return `Your generated JavaScript has syntax errors that must be fixed:\n${errorList}\n\nFocus exclusively on the JavaScript syntax. Check for: unclosed brackets/braces/parentheses, missing commas in arrays/objects, invalid arrow function syntax, and stray characters. Return ONLY the files that need corrections with their full corrected content. Do NOT change any HTML or CSS.`;
+    case "html-structure":
+      return `Your generated HTML has structural problems:\n${errorList}\n\nFocus only on fixing the HTML document structure: ensure proper <!DOCTYPE html>, <html lang="en">, <head>, and <body> elements are present and properly nested. Check for unbalanced tags. Return ONLY the files that need corrections with their full corrected content.`;
+    case "cdn-substitution":
+      return `Some CDN URLs in your generated code may not be reachable:\n${errorList}\n\nReplace any unreachable or unrecognised CDN URLs with working alternatives from the approved list:\n- Tailwind CSS: https://cdn.tailwindcss.com\n- Lucide icons: https://unpkg.com/lucide@latest\n- Leaflet maps: https://unpkg.com/leaflet@1.9.4\n- Chart.js: https://cdn.jsdelivr.net/npm/chart.js\n- Alpine.js: https://cdn.jsdelivr.net/npm/alpinejs@3\nReturn ONLY the files that need corrections with their full corrected content.`;
+    default:
+      return `Your generated files have the following critical errors that must be fixed:\n${errorList}\n\nReturn ONLY the files that need corrections (with full corrected content). Other files are unchanged.`;
+  }
+}
+
+/**
+ * Inject any missing required meta tags into an HTML file.
+ * Acts as a safety net after AI generation — ensures every HTML file has
+ * charset, viewport, and title even if the model missed them.
+ */
+function injectRequiredMetaTags(file: BuilderFile, projectName: string): BuilderFile {
+  if (file.mimeType !== "text/html" && !file.path.endsWith(".html") && !file.path.endsWith(".htm")) {
+    return file;
+  }
+  let content = file.content;
+
+  if (!/<meta\s[^>]*charset/i.test(content)) {
+    content = content.replace(/(<head[^>]*>)/i, '$1\n<meta charset="UTF-8">');
+  }
+  if (!/<meta\s[^>]*name=["']viewport["']/i.test(content)) {
+    content = content.replace(
+      /(<head[^>]*>)/i,
+      '$1\n<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+    );
+  }
+  if (!/<title>/i.test(content)) {
+    const safeTitle = projectName.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    content = content.replace(/(<\/head>)/i, `<title>${safeTitle}</title>\n$1`);
+    if (!/<title>/i.test(content)) {
+      content = content.replace(/(<head[^>]*>)/i, `$1\n<title>${safeTitle}</title>`);
+    }
+  }
+  if (!/<meta\s[^>]*name=["']description["']/i.test(content)) {
+    const safeDesc = projectName.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const descTag = `<meta name="description" content="Built with MustaFlow — ${safeDesc}">`;
+    content = content.replace(/(<\/head>)/i, `${descTag}\n$1`);
+    if (!/<meta\s[^>]*name=["']description["']/i.test(content)) {
+      content = content.replace(/(<head[^>]*>)/i, `$1\n${descTag}`);
+    }
+  }
+
+  return content === file.content ? file : { ...file, content };
+}
+
+/**
+ * Non-blocking post-build code-smell scanner.
+ * Returns a list of smell descriptions to append to the task report.
+ * Never throws — fully best-effort.
+ */
+export function scanCodeSmells(files: BuilderFile[]): string[] {
+  const smells: string[] = [];
+  try {
+    for (const f of files) {
+      const isHtml =
+        f.mimeType === "text/html" || f.path.endsWith(".html") || f.path.endsWith(".htm");
+      const isJs =
+        f.mimeType === "application/javascript" ||
+        f.mimeType === "text/javascript" ||
+        f.path.endsWith(".js") ||
+        f.path.endsWith(".mjs");
+
+      if (isHtml || isJs) {
+        const c = f.content;
+
+        // Check for excessive setTimeout chains (>2 occurrences suggests chained timeouts)
+        const setTimeoutCount = (c.match(/setTimeout\s*\(/g) ?? []).length;
+        if (setTimeoutCount > 2) {
+          smells.push(
+            `${f.path}: ${setTimeoutCount} setTimeout calls detected — consider requestAnimationFrame or event-driven patterns for animation/polling`,
+          );
+        }
+
+        if (isHtml) {
+          // Heuristic DOM nesting depth check
+          let maxDepth = 0;
+          let depth = 0;
+          const VOID_TAGS = /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/i;
+          for (const match of c.matchAll(/<\/?([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g)) {
+            const tag = match[1] ?? "";
+            const full = match[0]!;
+            if (full.startsWith("</")) {
+              depth = Math.max(0, depth - 1);
+            } else if (!VOID_TAGS.test(tag) && !full.endsWith("/>")) {
+              depth++;
+              if (depth > maxDepth) maxDepth = depth;
+            }
+          }
+          if (maxDepth > 8) {
+            smells.push(
+              `${f.path}: DOM nesting depth of ${maxDepth} detected — consider flattening the structure for readability and performance`,
+            );
+          }
+
+          // Event listeners on document without apparent cleanup
+          if (
+            c.includes("document.addEventListener") &&
+            !c.includes("document.removeEventListener")
+          ) {
+            smells.push(
+              `${f.path}: document.addEventListener used without a matching removeEventListener — may cause memory leaks in long-lived apps`,
+            );
+          }
+        }
+      }
+    }
+  } catch {
+    // best-effort — never let a smell scanner crash the build
+  }
+  return smells;
 }
 
 async function callWithRetry(
@@ -652,6 +1057,9 @@ async function callWithRetry(
  * may return only the fixed file(s), so we merge into the originals rather than
  * replacing them. The merged set is then re-validated.
  *
+ * Uses targeted correction instructions based on the error type to reduce
+ * the chance of the correction pass introducing unrelated regressions.
+ *
  * Returns the merged+corrected file set if re-validation passes, otherwise null
  * (caller persists originals and flags validation_failed).
  */
@@ -665,12 +1073,14 @@ async function runCorrectionPass(
   requireIndexHtml = false,
 ): Promise<BuilderFile[] | null> {
   try {
+    const correctionType = classifyCriticalErrors(criticalErrors);
+    const correctionInstruction = getCorrectionInstruction(correctionType, criticalErrors);
     const correctionMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
       ...messages,
       { role: "assistant", content: JSON.stringify(parsed) },
       {
         role: "user",
-        content: `Your generated files have the following critical errors that must be fixed:\n${criticalErrors.join("\n")}\n\nReturn ONLY the files that need corrections (with full corrected content). Other files are unchanged.`,
+        content: correctionInstruction,
       },
     ];
     const corrected = await callWithRetry(correctionMessages, modelFor(mode), 32000, label);
@@ -776,6 +1186,20 @@ export async function runBuildPipeline(args: {
     content: MODE_QUALITY_STANDARDS[agentMode],
   });
 
+  // Power/Pro: append mandatory self-review clause
+  if (agentMode === "power" || agentMode === "pro") {
+    messages.push({ role: "system", content: SELF_REVIEW_CLAUSE });
+  }
+
+  // Pro: run a lightweight planning micro-call first to constrain the file structure
+  if (agentMode === "pro") {
+    await onEvent?.("planning", "Planning file structure (Pro mode)…");
+    const outline = await runProPlanMicroCall(projectName, userPrompt);
+    if (outline) {
+      messages.push({ role: "system", content: outline });
+    }
+  }
+
   if (conversationHistory && conversationHistory.length > 0) {
     for (const turn of conversationHistory.slice(-6)) {
       messages.push({ role: turn.role, content: turn.content });
@@ -815,6 +1239,9 @@ export async function runBuildPipeline(args: {
     throw new Error("AI builder did not produce an index.html file.");
   }
 
+  // Post-processing: inject required meta tags into every HTML file as a safety net
+  files = files.map((f) => injectRequiredMetaTags(f, projectName));
+
   // Self-validation pass
   await onEvent?.("validating_output", "Validating generated files…");
   const validation = await validateFiles(files);
@@ -828,6 +1255,8 @@ export async function runBuildPipeline(args: {
     const corrected = await runCorrectionPass(messages, parsed, validation.criticalErrors, files, agentMode, "build-correction", true);
     if (corrected !== null) {
       files = corrected;
+      // Re-inject meta tags into corrected files too
+      files = files.map((f) => injectRequiredMetaTags(f, projectName));
     } else {
       correctionFailed = true;
       postCorrectionWarnings = validation.criticalErrors.map((e) => `[validation_failed] ${e}`);
@@ -915,6 +1344,11 @@ export async function runRefinePipeline(args: {
     role: "system",
     content: MODE_QUALITY_STANDARDS[agentMode],
   });
+
+  // Power/Pro: append mandatory self-review clause
+  if (agentMode === "power" || agentMode === "pro") {
+    messages.push({ role: "system", content: SELF_REVIEW_CLAUSE });
+  }
 
   if (conversationHistory && conversationHistory.length > 0) {
     for (const turn of conversationHistory.slice(-6)) {
@@ -1016,6 +1450,11 @@ export async function runRefinePipeline(args: {
       // Passed — surface non-critical warnings (CDN reachability, tag balance, etc.)
       validationWarnings = validation.warnings;
     }
+  }
+
+  // Post-processing: inject required meta tags into any changed HTML files
+  for (let i = 0; i < changedFiles.length; i++) {
+    changedFiles[i] = injectRequiredMetaTags(changedFiles[i]!, projectName);
   }
 
   const removedPaths = Array.isArray(parsed.filesRemoved)

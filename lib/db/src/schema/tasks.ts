@@ -29,6 +29,7 @@ export type TaskReport = {
   knowledgeApplied?: Array<{ title: string; category: string }>;
   nativeFeatures?: string[];
   modulesWired?: Array<{ id: string; name: string; secretsConsumed: string[] }>;
+  codeSmells?: string[];
 };
 
 export const agentTasksTable = pgTable("agent_tasks", {
