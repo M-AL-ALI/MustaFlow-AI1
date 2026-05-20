@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Database,
   GraduationCap,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -306,6 +307,97 @@ export function ActivityStream({ projectId, taskId, onDismiss }: Props) {
           Task failed. Check the chat for details.
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Inline live activity feed — renders build events as sequential chat-style
+ * rows directly inside the messages scroll area, giving a Replit-agent-style
+ * live progress view. Shows the last four events with the current one
+ * highlighted and animated. Auto-dismisses 1.5 s after completion so the
+ * real assistant message can take its place.
+ */
+export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
+  const { data: events = [] } = useListTaskEvents(projectId, taskId, {
+    query: {
+      queryKey: getListTaskEventsQueryKey(projectId, taskId),
+      refetchInterval: (query) => {
+        const data = query.state.data;
+        if (!data || !Array.isArray(data)) return 1000;
+        const last = (data as Array<{ eventType: string }>)[data.length - 1];
+        if (last && TERMINAL_STATUSES.has(last.eventType)) return false;
+        return 1000;
+      },
+    },
+  });
+
+  const lastEvent = events[events.length - 1];
+  const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
+  const isDone = lastEvent?.eventType === "completed";
+  const isFailed = lastEvent?.eventType === "failed";
+
+  useEffect(() => {
+    if (!isTerminal) return;
+    const t = setTimeout(onDismiss, 1500);
+    return () => clearTimeout(t);
+  }, [isTerminal, onDismiss]);
+
+  if (events.length === 0) {
+    return (
+      <div className="flex justify-start">
+        <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2 max-w-[92%]">
+          <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />
+          <span className="text-muted-foreground">Starting up…</span>
+        </div>
+      </div>
+    );
+  }
+
+  const visibleEvents = events.slice(-4);
+
+  return (
+    <div className="flex flex-col gap-1">
+      {visibleEvents.map((event, idx) => {
+        const meta = EVENT_META[event.eventType as EventType] ?? EVENT_META.queued;
+        const Icon = meta.icon;
+        const isLast = idx === visibleEvents.length - 1;
+        const isActive = isLast && !isTerminal;
+        const opacity =
+          visibleEvents.length > 1 && !isLast
+            ? idx === visibleEvents.length - 2
+              ? "opacity-50"
+              : idx === visibleEvents.length - 3
+                ? "opacity-30"
+                : "opacity-20"
+            : "";
+
+        return (
+          <div key={event.id} className={cn("flex justify-start", opacity)}>
+            <div
+              className={cn(
+                "flex items-center gap-2 px-3 py-1.5 rounded-xl rounded-bl-sm text-xs max-w-[92%] transition-all duration-300",
+                isActive && !isFailed
+                  ? "bg-muted border border-border text-foreground"
+                  : isFailed && isLast
+                    ? "bg-destructive/10 border border-destructive/20 text-destructive"
+                    : "text-muted-foreground",
+              )}
+            >
+              {isActive && !isTerminal ? (
+                <Loader2 className={cn("h-3 w-3 shrink-0 animate-spin", meta.color)} />
+              ) : isDone && isLast ? (
+                <CheckCircle2 className="h-3 w-3 shrink-0 text-green-400" />
+              ) : isFailed && isLast ? (
+                <XCircle className="h-3 w-3 shrink-0 text-destructive" />
+              ) : (
+                <Icon className={cn("h-3 w-3 shrink-0", meta.color, "opacity-60")} />
+              )}
+              <span>{event.message}</span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

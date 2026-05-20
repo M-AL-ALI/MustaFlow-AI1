@@ -6,6 +6,29 @@ import type { TaskReport } from "@workspace/db";
 import { scanCdnUrls, autoUpgradeCdnUrl } from "./cdn-allowlist";
 import type { CdnUpgrade } from "./cdn-allowlist";
 
+/**
+ * Sanitises an AI-generated summary so the chat always shows human-readable
+ * prose rather than raw code. If the returned string looks like source code,
+ * the fallback message is used instead.
+ */
+function cleanSummary(raw: string | undefined | null, fallback: string): string {
+  if (!raw || raw.trim().length < 5) return fallback;
+  const codeSignals = [
+    /\bfunction\s*\w*\s*\(/, // function declarations
+    /\b(const|let|var)\s+\w+\s*=/, // variable declarations
+    /document\.\w+\(/, // DOM calls
+    /getElementById|querySelector/, // DOM selectors
+    /addEventListener\s*\(/, // event listeners
+    /;\s*\n/, // statement-ending semicolons
+    /\}\s*\n\s*\{/, // back-to-back code blocks
+    /import\s+[\w{].*from\s+['"]/, // ES import statements
+    /^\s*(<!DOCTYPE|<html|<head|<body)/m, // raw HTML tags
+    /\\n\s{2,}/, // literally-escaped newlines (AI double-escaped JSON)
+  ];
+  if (codeSignals.some((pattern) => pattern.test(raw))) return fallback;
+  return raw.trim();
+}
+
 const MODEL_FOR_MODE: Record<AgentMode, string> = {
   lite: "gpt-5-mini",
   eco: "gpt-5-mini",
@@ -190,7 +213,7 @@ OUTPUT STRICT JSON matching this exact shape:
     "theme": string
   },
   "files": [{ "path": string, "content": string, "mimeType": string }],
-  "summary": string,
+  "summary": "One or two plain-English sentences describing what was built — e.g. 'Built a recipe tracker with a home page, ingredient search, and a recipe detail view.' No code, no file names — write what the user will see when they open the preview.",
   "warnings": string[],
   "nextRecommendation": string
 }
@@ -211,7 +234,7 @@ OUTPUT STRICT JSON matching this exact shape:
   "patches": [{ "path": string, "find": string, "replace": string }],
   "filesRemoved": string[],
   "unchangedFiles": string[],
-  "summary": string,
+  "summary": "One or two plain-English sentences describing what changed — e.g. 'Added a mobile-friendly hamburger menu and improved button contrast throughout the app.' No code, no file names.",
   "warnings": string[],
   "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
   "nextRecommendation": string
@@ -1872,10 +1895,10 @@ export async function runBuildPipeline(args: {
       ? parsed.nextRecommendation
       : "Open the Preview tab to see your app, then tell me what to change.";
 
-  const summary =
-    typeof parsed.summary === "string"
-      ? parsed.summary
-      : `Generated ${files.length} files for ${projectName}.`;
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Generated ${files.length} files for ${projectName}.`,
+  );
 
   // Inject API mocks for any fetch/axios calls found in generated files
   files = injectApiMocks(files);
@@ -2126,8 +2149,10 @@ export async function runRefinePipeline(args: {
     ? parsed.unchangedFiles.filter((p): p is string => typeof p === "string")
     : [];
 
-  const summary =
-    typeof parsed.summary === "string" ? parsed.summary : `Updated ${changedFiles.length} file(s).`;
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Updated ${changedFiles.length} file(s).`,
+  );
 
   const aiWarnings = Array.isArray(parsed.warnings)
     ? parsed.warnings.filter((w): w is string => typeof w === "string")
@@ -2826,7 +2851,7 @@ OUTPUT STRICT JSON matching this exact shape:
     "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }]
   },
   "files": [{ "path": string, "content": string, "mimeType": string }],
-  "summary": string,
+  "summary": "One or two plain-English sentences describing what was built — e.g. 'Built a social feed app with a home screen, post creation flow, and user profile view.' No code, no file paths — describe what the user will see.",
   "warnings": string[],
   "nextRecommendation": string
 }
@@ -2842,7 +2867,7 @@ OUTPUT STRICT JSON matching this exact shape:
 {
   "files": [{ "path": string, "content": string, "mimeType": string }],
   "filesRemoved": string[],
-  "summary": string,
+  "summary": "One or two plain-English sentences describing what changed — e.g. 'Added a dark mode toggle and improved navigation transitions between screens.' No code, no file paths.",
   "warnings": string[],
   "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
   "nativeFeatures": string[],
@@ -3060,10 +3085,10 @@ export async function runMobileBuildPipeline(args: {
     : [];
   const warnings = [...aiWarnings, ...mobileValidation.warnings];
 
-  const summary =
-    typeof parsed.summary === "string"
-      ? parsed.summary
-      : `Generated Expo/React Native app with ${files.length} files for ${projectName}.`;
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Generated Expo/React Native app with ${files.length} files for ${projectName}.`,
+  );
 
   const nextRecommendation =
     typeof parsed.nextRecommendation === "string"
@@ -3193,10 +3218,10 @@ export async function runMobileRefinePipeline(args: {
     ? parsed.filesRemoved.filter((p): p is string => typeof p === "string").map(normalizePath)
     : [];
 
-  const summary =
-    typeof parsed.summary === "string"
-      ? parsed.summary
-      : `Updated ${changedFiles.length} file(s) in the Expo project.`;
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Updated ${changedFiles.length} file(s) in the Expo project.`,
+  );
 
   const aiWarnings = Array.isArray(parsed.warnings)
     ? parsed.warnings.filter((w): w is string => typeof w === "string")

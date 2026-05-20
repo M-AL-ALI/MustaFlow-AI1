@@ -69,7 +69,7 @@ import { AnalyticsTab } from "./components/analytics-tab";
 import { ResourcesTab } from "./components/resources-tab";
 import { ManageTab } from "./components/manage-tab";
 import { KnowledgeTab } from "./components/knowledge-tab";
-import { ActivityStream } from "./components/activity-stream";
+import { InlineLiveActivity } from "./components/activity-stream";
 import { HistoryTab } from "./components/history-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
@@ -1415,7 +1415,7 @@ export default function ProjectWorkspacePage() {
                       });
                     })()}
 
-                    {sendMessage.isPending && !activeTaskId && (
+                    {sendMessage.isPending && activeTaskId === null && (
                       <div className="flex justify-start">
                         <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
                           <div
@@ -1430,14 +1430,14 @@ export default function ProjectWorkspacePage() {
                         </div>
                       </div>
                     )}
+                    {activeTaskId !== null && (
+                      <InlineLiveActivity
+                        projectId={projectId}
+                        taskId={activeTaskId}
+                        onDismiss={() => setActiveTaskId(null)}
+                      />
+                    )}
                   </div>
-                  {activeTaskId !== null && (
-                    <ActivityStream
-                      projectId={projectId}
-                      taskId={activeTaskId}
-                      onDismiss={() => setActiveTaskId(null)}
-                    />
-                  )}
 
                   {/* Activity ticker / Status bar */}
                   <div className="shrink-0 border-t border-border/40">
