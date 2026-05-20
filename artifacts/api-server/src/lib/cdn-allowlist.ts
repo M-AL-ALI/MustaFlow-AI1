@@ -191,8 +191,61 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
       /cdnjs\.cloudflare\.com\/ajax\/libs\/animejs/,
     ],
     versionPattern: /animejs@([\d.]+)|animejs\/([\d.]+)/,
-    blockedVersions: [],
+    blockedVersions: [
+      {
+        match: (v) => semverLt(v, "3.2.0"),
+        description:
+          "Anime.js versions before 3.2.0 have incomplete sanitisation of SVG morphing targets, which can allow script injection. Upgrade to 3.2.0 or later.",
+        upgradeTo: "3.2.0",
+        severity: "warning",
+      },
+    ],
     minimumRecommendedVersion: "3.2.0",
+  },
+  {
+    name: "threejs",
+    displayName: "Three.js",
+    urlPatterns: [
+      /unpkg\.com\/three(?:@|\/)/,
+      /cdn\.jsdelivr\.net\/npm\/three(?:@|\/)/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/three\.js\//,
+    ],
+    // Captures semver (e.g. "0.139.2") from unpkg/jsdelivr, or the raw revision
+    // number (e.g. "139") from cdnjs r-prefix paths like /three.js/r139/
+    versionPattern: /three@([\d.]+)|three\.js\/r(\d+)/,
+    blockedVersions: [
+      {
+        match: (v) => {
+          // v is either a semver string like "0.139.2" or a raw revision like "139"
+          const rev = v.includes(".") ? Number(v.split(".")[1] ?? "0") : Number(v);
+          return !isNaN(rev) && rev < 140;
+        },
+        description:
+          "Three.js revisions before r140 had a known XSS vulnerability in TextGeometry where crafted font JSON could execute arbitrary scripts. Upgrade to r170+ (0.170.0).",
+        upgradeTo: "r170+ (0.170.0)",
+        severity: "warning",
+      },
+    ],
+  },
+  {
+    name: "svelte",
+    displayName: "Svelte",
+    urlPatterns: [
+      /unpkg\.com\/svelte(?:@|\/)/,
+      /cdn\.jsdelivr\.net\/npm\/svelte(?:@|\/)/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/svelte\//,
+    ],
+    versionPattern: /svelte@([\d.]+)|svelte\/([\d.]+)/,
+    blockedVersions: [
+      {
+        match: (v) => v.startsWith("3."),
+        description:
+          "Svelte v3.x is End of Life and no longer receives security patches. Migrate to Svelte 5.",
+        upgradeTo: "5.x",
+        severity: "warning",
+      },
+    ],
+    minimumRecommendedVersion: "4.0.0",
   },
   {
     name: "gsap",
@@ -337,14 +390,14 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
  * Values are the latest stable patch at the time of this build.
  */
 export const CANONICAL_SAFE_VERSIONS: Record<string, string> = {
-  "jQuery": "3.7.1",
-  "Bootstrap": "5.3.3",
+  jQuery: "3.7.1",
+  Bootstrap: "5.3.3",
   "Vue.js": "3.4.21",
   "Leaflet.js": "1.9.4",
   "Alpine.js": "3.14.1",
-  "htmx": "2.0.4",
-  "Axios": "1.7.9",
-  "Lodash": "4.17.21",
+  htmx: "2.0.4",
+  Axios: "1.7.9",
+  Lodash: "4.17.21",
   "Chart.js": "4.4.4",
 };
 
@@ -387,7 +440,7 @@ export function autoUpgradeCdnUrl(url: string, finding: CdnFinding): CdnUpgrade 
   const isExactSemver = /^\d+\.\d+\.\d+$/.test(finding.upgradeTo);
   const targetVersion = isExactSemver
     ? finding.upgradeTo
-    : CANONICAL_SAFE_VERSIONS[finding.packageName] ?? null;
+    : (CANONICAL_SAFE_VERSIONS[finding.packageName] ?? null);
 
   if (!targetVersion) return null;
   if (targetVersion === finding.version) return null;

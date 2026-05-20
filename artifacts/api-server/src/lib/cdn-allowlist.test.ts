@@ -140,9 +140,7 @@ describe("scanCdnUrls — Vue.js (EOL warning)", () => {
 
 describe("scanCdnUrls — React (legacy version warning)", () => {
   it("flags React 15.x from unpkg as a warning", () => {
-    const findings = scanCdnUrls([
-      "https://unpkg.com/react@15.7.0/umd/react.production.min.js",
-    ]);
+    const findings = scanCdnUrls(["https://unpkg.com/react@15.7.0/umd/react.production.min.js"]);
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe("warning");
     expect(findings[0].packageName).toBe("React");
@@ -169,9 +167,7 @@ describe("scanCdnUrls — React (legacy version warning)", () => {
   });
 
   it("does not flag React 16.14.0 (safe threshold)", () => {
-    const findings = scanCdnUrls([
-      "https://unpkg.com/react@16.14.0/umd/react.production.min.js",
-    ]);
+    const findings = scanCdnUrls(["https://unpkg.com/react@16.14.0/umd/react.production.min.js"]);
     expect(findings).toHaveLength(0);
   });
 
@@ -185,9 +181,7 @@ describe("scanCdnUrls — React (legacy version warning)", () => {
 
 describe("scanCdnUrls — D3.js (prototype pollution warning)", () => {
   it("flags D3 v5 from unpkg as a warning", () => {
-    const findings = scanCdnUrls([
-      "https://unpkg.com/d3@5.16.0/dist/d3.min.js",
-    ]);
+    const findings = scanCdnUrls(["https://unpkg.com/d3@5.16.0/dist/d3.min.js"]);
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe("warning");
     expect(findings[0].packageName).toBe("D3.js");
@@ -196,18 +190,14 @@ describe("scanCdnUrls — D3.js (prototype pollution warning)", () => {
   });
 
   it("flags D3 v6 from jsdelivr as a warning", () => {
-    const findings = scanCdnUrls([
-      "https://cdn.jsdelivr.net/npm/d3@6.7.0/dist/d3.min.js",
-    ]);
+    const findings = scanCdnUrls(["https://cdn.jsdelivr.net/npm/d3@6.7.0/dist/d3.min.js"]);
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe("warning");
     expect(findings[0].version).toBe("6.7.0");
   });
 
   it("flags D3 v4 from cdnjs as a warning", () => {
-    const findings = scanCdnUrls([
-      "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.min.js",
-    ]);
+    const findings = scanCdnUrls(["https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.min.js"]);
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe("warning");
     expect(findings[0].version).toBe("4.13.0");
@@ -221,25 +211,19 @@ describe("scanCdnUrls — D3.js (prototype pollution warning)", () => {
   });
 
   it("does not flag D3 v7 (safe threshold)", () => {
-    const findings = scanCdnUrls([
-      "https://unpkg.com/d3@7.0.0/dist/d3.min.js",
-    ]);
+    const findings = scanCdnUrls(["https://unpkg.com/d3@7.0.0/dist/d3.min.js"]);
     expect(findings).toHaveLength(0);
   });
 
   it("does not flag D3 7.9.x (current recommended)", () => {
-    const findings = scanCdnUrls([
-      "https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js",
-    ]);
+    const findings = scanCdnUrls(["https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"]);
     expect(findings).toHaveLength(0);
   });
 });
 
 describe("scanCdnUrls — Moment.js (EOL warning)", () => {
   it("flags any Moment.js version from unpkg as a warning", () => {
-    const findings = scanCdnUrls([
-      "https://unpkg.com/moment@2.30.1/moment.min.js",
-    ]);
+    const findings = scanCdnUrls(["https://unpkg.com/moment@2.30.1/moment.min.js"]);
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe("warning");
     expect(findings[0].packageName).toBe("Moment.js");
@@ -248,9 +232,7 @@ describe("scanCdnUrls — Moment.js (EOL warning)", () => {
   });
 
   it("flags Moment.js from jsdelivr as a warning", () => {
-    const findings = scanCdnUrls([
-      "https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js",
-    ]);
+    const findings = scanCdnUrls(["https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js"]);
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe("warning");
     expect(findings[0].version).toBe("2.29.4");
@@ -266,11 +248,148 @@ describe("scanCdnUrls — Moment.js (EOL warning)", () => {
   });
 
   it("flags the latest Moment.js version (EOL applies to all releases)", () => {
+    const findings = scanCdnUrls(["https://unpkg.com/moment@2.30.1/moment.js"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+  });
+});
+
+describe("scanCdnUrls — Anime.js (versions < 3.2.0)", () => {
+  it("flags Anime.js 3.0.0 from unpkg as a warning", () => {
+    const findings = scanCdnUrls(["https://unpkg.com/animejs@3.0.0/lib/anime.min.js"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].packageName).toBe("Anime.js");
+    expect(findings[0].version).toBe("3.0.0");
+    expect(findings[0].upgradeTo).toBe("3.2.0");
+  });
+
+  it("flags Anime.js 3.1.0 from jsdelivr as a warning", () => {
+    const findings = scanCdnUrls(["https://cdn.jsdelivr.net/npm/animejs@3.1.0/lib/anime.min.js"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("3.1.0");
+  });
+
+  it("flags Anime.js 2.2.0 from cdnjs as a warning", () => {
     const findings = scanCdnUrls([
-      "https://unpkg.com/moment@2.30.1/moment.js",
+      "https://cdnjs.cloudflare.com/ajax/libs/animejs/2.2.0/anime.min.js",
     ]);
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("2.2.0");
+  });
+
+  it("does not flag Anime.js 3.2.0 (safe threshold)", () => {
+    const findings = scanCdnUrls(["https://unpkg.com/animejs@3.2.0/lib/anime.min.js"]);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("does not flag Anime.js 3.2.2 (current recommended)", () => {
+    const findings = scanCdnUrls(["https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"]);
+    expect(findings).toHaveLength(0);
+  });
+});
+
+describe("scanCdnUrls — Three.js (XSS in TextGeometry, revisions < r140)", () => {
+  it("flags Three.js 0.139.2 from unpkg as a warning", () => {
+    const findings = scanCdnUrls(["https://unpkg.com/three@0.139.2/build/three.min.js"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].packageName).toBe("Three.js");
+    expect(findings[0].version).toBe("0.139.2");
+    expect(findings[0].upgradeTo).toBe("r170+ (0.170.0)");
+  });
+
+  it("flags Three.js 0.100.0 from jsdelivr as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://cdn.jsdelivr.net/npm/three@0.100.0/build/three.module.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("0.100.0");
+  });
+
+  it("flags Three.js r139 from cdnjs as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://cdnjs.cloudflare.com/ajax/libs/three.js/r139/three.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("139");
+    expect(findings[0].upgradeTo).toBe("r170+ (0.170.0)");
+  });
+
+  it("flags Three.js r100 from cdnjs as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://cdnjs.cloudflare.com/ajax/libs/three.js/r100/three.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("100");
+  });
+
+  it("does not flag Three.js 0.140.0 (safe threshold, semver)", () => {
+    const findings = scanCdnUrls(["https://unpkg.com/three@0.140.0/build/three.min.js"]);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("does not flag Three.js r140 from cdnjs (safe threshold, revision)", () => {
+    const findings = scanCdnUrls([
+      "https://cdnjs.cloudflare.com/ajax/libs/three.js/r140/three.min.js",
+    ]);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("does not flag Three.js 0.170.0 (recommended)", () => {
+    const findings = scanCdnUrls([
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    ]);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("does not flag Three.js r175 from cdnjs (recommended)", () => {
+    const findings = scanCdnUrls([
+      "https://cdnjs.cloudflare.com/ajax/libs/three.js/r175/three.min.js",
+    ]);
+    expect(findings).toHaveLength(0);
+  });
+});
+
+describe("scanCdnUrls — Svelte (v3.x EOL warning)", () => {
+  it("flags Svelte 3.59.2 from unpkg as a warning (EOL)", () => {
+    const findings = scanCdnUrls(["https://unpkg.com/svelte@3.59.2/dist/svelte.js"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].packageName).toBe("Svelte");
+    expect(findings[0].version).toBe("3.59.2");
+    expect(findings[0].upgradeTo).toBe("5.x");
+  });
+
+  it("flags Svelte 3.0.0 from jsdelivr as a warning (EOL)", () => {
+    const findings = scanCdnUrls(["https://cdn.jsdelivr.net/npm/svelte@3.0.0/dist/svelte.js"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("3.0.0");
+  });
+
+  it("flags Svelte 3.55.0 from cdnjs as a warning (EOL)", () => {
+    const findings = scanCdnUrls([
+      "https://cdnjs.cloudflare.com/ajax/libs/svelte/3.55.0/svelte.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("3.55.0");
+  });
+
+  it("does not flag Svelte 4.x", () => {
+    const findings = scanCdnUrls(["https://unpkg.com/svelte@4.2.18/dist/svelte.js"]);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("does not flag Svelte 5.x (current recommended)", () => {
+    const findings = scanCdnUrls(["https://cdn.jsdelivr.net/npm/svelte@5.7.0/dist/svelte.js"]);
+    expect(findings).toHaveLength(0);
   });
 });
 
