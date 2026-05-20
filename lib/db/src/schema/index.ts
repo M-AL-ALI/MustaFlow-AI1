@@ -12,3 +12,4 @@ export * from "./deployments";
 export * from "./credits";
 export * from "./userRoles";
 export * from "./analytics";
+export * from "./suggestions";

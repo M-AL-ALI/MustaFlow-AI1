@@ -1102,6 +1102,47 @@ export interface ProjectAuditResult {
   fileCount: number;
 }
 
+export type ProjectSuggestionCategory = typeof ProjectSuggestionCategory[keyof typeof ProjectSuggestionCategory];
+
+
+export const ProjectSuggestionCategory = {
+  feature: 'feature',
+  fix: 'fix',
+  improvement: 'improvement',
+  idea: 'idea',
+} as const;
+
+export type ProjectSuggestionStatus = typeof ProjectSuggestionStatus[keyof typeof ProjectSuggestionStatus];
+
+
+export const ProjectSuggestionStatus = {
+  pending: 'pending',
+  accepted: 'accepted',
+  dismissed: 'dismissed',
+  saved: 'saved',
+} as const;
+
+export interface ProjectSuggestion {
+  id: number;
+  projectId: number;
+  /** @nullable */
+  taskId?: number | null;
+  title: string;
+  description: string;
+  category: ProjectSuggestionCategory;
+  prompt: string;
+  status: ProjectSuggestionStatus;
+  createdAt: string;
+}
+
+export interface SuggestionAcceptResult {
+  ok: boolean;
+  taskId: number;
+  /** @nullable */
+  userMessageId?: number | null;
+  suggestion?: ProjectSuggestion;
+}
+
 export type DeleteWorkspace200 = {
   deleted: boolean;
 };
@@ -1150,6 +1191,13 @@ export type GetSecretAuditLogParams = {
  * @maximum 100
  */
 limit?: number;
+};
+
+export type ListSuggestionsParams = {
+/**
+ * Filter suggestions by the build task that generated them
+ */
+taskId?: number;
 };
 
 export type ListDeployments200 = {

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, and, eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -178,6 +178,19 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     const hasFiles = (existing?.c ?? 0) > 0;
     const kind = hasFiles ? "refine" : "build";
 
+    // Check for an active build/refine — prevent concurrent runs for the same project
+    const [activeTask] = await db
+      .select({ id: agentTasksTable.id })
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.projectId, project.id),
+          inArray(agentTasksTable.status, ["building", "planning"]),
+        ),
+      )
+      .limit(1);
+    const hasActiveTask = activeTask !== undefined;
+
     // Create a task row to track the work
     const [task] = await db
       .insert(agentTasksTable)
@@ -186,7 +199,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         title:
           kind === "build" ? `Build: ${content.slice(0, 60)}` : `Change: ${content.slice(0, 60)}`,
         kind: runInBackground ? "background" : "main",
-        status: "planning",
+        status: hasActiveTask ? "queued" : "planning",
         prompt: content,
       })
       .returning();
@@ -195,7 +208,10 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       return;
     }
 
-    if (runInBackground) {
+    if (hasActiveTask) {
+      assistantContent = `Your request has been queued as Task #${task.id}. It will run automatically when the current build finishes.`;
+      plan = { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>;
+    } else if (runInBackground) {
       enqueueJob({
         taskId: task.id,
         projectId: project.id,
@@ -215,7 +231,6 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         agentMode: mode,
         conversationHistory,
       });
-
       const [refreshed] = await db
         .select()
         .from(agentTasksTable)
@@ -226,11 +241,10 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
           ? "I generated your app. Open the Preview tab to see it."
           : "I applied your changes. Refresh the Preview tab.");
       plan = refreshed?.report
-        ? ({
-            kind: "report",
-            report: refreshed.report,
-            taskId: task.id,
-          } as unknown as Record<string, unknown>)
+        ? ({ kind: "report", report: refreshed.report, taskId: task.id } as unknown as Record<
+            string,
+            unknown
+          >)
         : ({ kind: "task-done", taskId: task.id } as unknown as Record<string, unknown>);
     }
   }

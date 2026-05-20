@@ -1,6 +1,7 @@
-import { eq, sql, and, inArray, desc, or, asc } from "drizzle-orm";
+import { eq, sql, and, inArray, desc, or, asc, isNull } from "drizzle-orm";
 import {
   db,
+  pool,
   projectsTable,
   agentTasksTable,
   projectFilesTable,
@@ -11,6 +12,7 @@ import {
   secretsTable,
   deploymentLogsTable,
   buildAnalyticsTable,
+  projectSuggestionsTable,
   type TaskReport,
   type FileSnapshotEntry,
 } from "@workspace/db";
@@ -68,6 +70,13 @@ const ESCALATION_MAP: Partial<Record<AgentMode, AgentMode>> = {
   lite: "eco",
   eco: "power",
 };
+
+/**
+ * In-memory per-project advisory lock.
+ * Prevents concurrent runJob calls for the same project within this Node.js process.
+ * The route-level conflict check is the primary guard; this is a safety net.
+ */
+const activeProjectJobs = new Set<number>();
 
 export type JobKind = "build" | "refine";
 
@@ -534,6 +543,115 @@ async function maybeEscalateWarnings(projectId: number, currentWarnings: string[
   }
 }
 
+type PostBuildSuggestion = {
+  title: string;
+  description: string;
+  category: "feature" | "fix" | "improvement" | "idea";
+  prompt: string;
+};
+
+/**
+ * Generate 3-5 contextual AI suggestions after a successful or failed build.
+ * Uses gpt-5-mini (free background work — no credit deduction).
+ * Persists results to project_suggestions so the frontend can poll for them.
+ *
+ * Called via setImmediate so it never blocks the visible pipeline completion.
+ */
+async function generatePostBuildSuggestions(
+  projectId: number,
+  taskId: number,
+  projectName: string,
+  projectKind: string,
+  userPrompt: string,
+  assistantSummary: string,
+  filePaths: string[],
+  activeIntegrations: string,
+): Promise<void> {
+  try {
+    const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(projectKind);
+    const platformHint = isMobile ? "React Native / Expo mobile app" : "static web app (HTML/CSS/JS + Tailwind)";
+
+    const systemPrompt = `You are a senior product/engineering advisor reviewing a just-completed AI-generated ${platformHint} build.
+Based on the build context, generate 3-5 specific, actionable next-step suggestions the user could build or improve next.
+Each suggestion must be concrete and directly relevant to this project — not generic advice.
+
+Categories:
+- feature: a new capability or page to add
+- fix: a bug, UX issue, or missing piece to address  
+- improvement: make existing functionality better, faster, or more polished
+- idea: an experimental or innovative enhancement
+
+OUTPUT STRICT JSON:
+{
+  "suggestions": [
+    { "title": "...", "description": "...", "category": "feature|fix|improvement|idea", "prompt": "..." }
+  ]
+}
+
+Rules:
+- title: 3-6 words max, action-oriented
+- description: one sentence (max 15 words) explaining the value
+- prompt: exact text to feed the refine pipeline — specific and self-contained (30-80 words)
+- Mix categories — don't return all features
+- Vary difficulty — include at least one quick win and one more ambitious idea
+- If active integrations exist, suggest at least one integration-specific improvement`;
+
+    const userContent = `Project: "${projectName}" (${platformHint})
+Last build request: "${userPrompt.slice(0, 200)}"
+Build summary: "${assistantSummary.slice(0, 300)}"
+Files in project: ${filePaths.slice(0, 20).join(", ")}
+${activeIntegrations ? `Active integrations: ${activeIntegrations}` : ""}`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-5-mini",
+      max_completion_tokens: 1200,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContent },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const raw = response.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(raw) as { suggestions?: PostBuildSuggestion[] };
+
+    if (!Array.isArray(parsed.suggestions) || parsed.suggestions.length === 0) {
+      logger.warn({ taskId, projectId }, "Post-build suggestion generation returned empty array");
+      return;
+    }
+
+    const validCategories = new Set(["feature", "fix", "improvement", "idea"]);
+    const valid = parsed.suggestions
+      .filter(
+        (s) =>
+          typeof s.title === "string" &&
+          typeof s.description === "string" &&
+          typeof s.category === "string" &&
+          typeof s.prompt === "string" &&
+          validCategories.has(s.category),
+      )
+      .slice(0, 5);
+
+    if (valid.length === 0) return;
+
+    await db.insert(projectSuggestionsTable).values(
+      valid.map((s) => ({
+        projectId,
+        taskId,
+        title: s.title.slice(0, 120),
+        description: s.description.slice(0, 300),
+        category: s.category,
+        prompt: s.prompt.slice(0, 1000),
+        status: "pending" as const,
+      })),
+    );
+
+    logger.info({ taskId, projectId, count: valid.length }, "Post-build suggestions generated");
+  } catch (err) {
+    logger.warn({ err, taskId, projectId }, "Post-build suggestion generation failed (non-fatal)");
+  }
+}
+
 async function drainNextBatchTask(completedTaskId: number): Promise<void> {
   const [completedTask] = await db
     .select()
@@ -590,6 +708,49 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
   });
 }
 
+/**
+ * After a job completes, drain the next orphaned queued task for the project that has
+ * no queueBatchId (i.e. tasks created by the per-project conflict detection in
+ * routes/messages.ts and routes/tasks.ts). These never belong to a batch, so
+ * drainNextBatchTask won't find them.
+ */
+async function drainNextProjectTask(projectId: number): Promise<void> {
+  const [nextTask] = await db
+    .select()
+    .from(agentTasksTable)
+    .where(
+      and(
+        eq(agentTasksTable.projectId, projectId),
+        eq(agentTasksTable.status, "queued"),
+        isNull(agentTasksTable.queueBatchId),
+      ),
+    )
+    .orderBy(asc(agentTasksTable.createdAt))
+    .limit(1);
+
+  if (!nextTask) return;
+
+  const [project] = await db
+    .select()
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId));
+  if (!project) return;
+
+  const [fileRow] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(sql`(select 1 from project_files where project_id = ${projectId} limit 1) as f`);
+  const hasFiles = (fileRow?.c ?? 0) > 0;
+
+  enqueueJob({
+    taskId: nextTask.id,
+    projectId,
+    kind: hasFiles ? "refine" : "build",
+    userPrompt: nextTask.prompt ?? "",
+    agentMode: (project.agentMode as AgentMode) ?? "power",
+  });
+  logger.info({ projectId, nextTaskId: nextTask.id }, "Drained next project-level queued task");
+}
+
 async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
   const [failedTask] = await db
     .select({ queueBatchId: agentTasksTable.queueBatchId, projectId: agentTasksTable.projectId })
@@ -633,46 +794,62 @@ export async function runJob(input: JobInput): Promise<void> {
     userPrompt = sanitisedPrompt;
   }
 
-  await emitEvent(taskId, "queued", "Task received, starting pipeline…");
+  // Per-project in-memory lock — fast in-process guard to prevent duplicate enqueue.
+  activeProjectJobs.add(projectId);
 
-  await db
-    .update(agentTasksTable)
-    .set({ status: kind === "build" ? "building" : "planning" })
-    .where(eq(agentTasksTable.id, taskId));
+  // Acquire a Postgres session-level advisory lock keyed by projectId.
+  // pg_advisory_lock blocks until the lock is free, serializing same-project jobs
+  // across all Node processes / replicas. Released in the finally block.
+  const lockClient = await pool.connect();
+  let lockAcquired = false;
 
-  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
-  if (!project) {
-    await emitEvent(taskId, "failed", "Project not found.");
+  try {
+    await lockClient.query("SELECT pg_advisory_lock($1::bigint)", [projectId]);
+    lockAcquired = true;
+
+    await emitEvent(taskId, "queued", "Task received, starting pipeline…");
+
     await db
       .update(agentTasksTable)
-      .set({
-        status: "failed",
-        result: "Project not found",
-        completedAt: sql`now()`,
-      })
+      .set({ status: kind === "build" ? "building" : "planning" })
       .where(eq(agentTasksTable.id, taskId));
-    return;
-  }
 
-  const { context: knowledgeContext, applied: knowledgeApplied } = await loadKnowledgeContext(
-    projectId,
-    userPrompt,
-  );
-
-  // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
-  const creditCost = CREDIT_COST[agentMode] ?? 1;
-  if (project.ownerId) {
-    const credits = await getOrCreateCredits(project.ownerId);
-    if (credits.balance < creditCost) {
-      const msg = `Insufficient credits. This ${agentMode} build costs ${creditCost} credit(s) but your balance is ${credits.balance}. Top up in Billing to continue.`;
-      await emitEvent(taskId, "failed", msg);
+    const [project] = await db
+      .select()
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+    if (!project) {
+      await emitEvent(taskId, "failed", "Project not found.");
       await db
         .update(agentTasksTable)
-        .set({ status: "failed", result: msg, completedAt: sql`now()` })
+        .set({
+          status: "failed",
+          result: "Project not found",
+          completedAt: sql`now()`,
+        })
         .where(eq(agentTasksTable.id, taskId));
       return;
     }
-  }
+
+    const { context: knowledgeContext, applied: knowledgeApplied } = await loadKnowledgeContext(
+      projectId,
+      userPrompt,
+    );
+
+    // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
+    const creditCost = CREDIT_COST[agentMode] ?? 1;
+    if (project.ownerId) {
+      const credits = await getOrCreateCredits(project.ownerId);
+      if (credits.balance < creditCost) {
+        const msg = `Insufficient credits. This ${agentMode} build costs ${creditCost} credit(s) but your balance is ${credits.balance}. Top up in Billing to continue.`;
+        await emitEvent(taskId, "failed", msg);
+        await db
+          .update(agentTasksTable)
+          .set({ status: "failed", result: msg, completedAt: sql`now()` })
+          .where(eq(agentTasksTable.id, taskId));
+        return;
+      }
+    }
 
   try {
     let report: TaskReport;
@@ -1087,10 +1264,29 @@ export async function runJob(input: JobInput): Promise<void> {
 
     await emitEvent(taskId, "completed", "Task completed.");
 
-    // Drain next queued task in the same batch (if any)
+    // Drain batch tasks, then any orphaned project-level queued tasks
     void drainNextBatchTask(taskId).catch((err) =>
       logger.warn({ err, taskId }, "Failed to drain next batch task"),
     );
+    void drainNextProjectTask(projectId).catch((err) =>
+      logger.warn({ err, projectId }, "Failed to drain next project task"),
+    );
+
+    // Generate post-build suggestions in the background (non-blocking)
+    setImmediate(() => {
+      void generatePostBuildSuggestions(
+        projectId,
+        taskId,
+        project.name,
+        project.kind,
+        userPrompt,
+        assistantSummary,
+        snapshot.map((f) => f.path),
+        knowledgeContext,
+      ).catch((err) =>
+        logger.warn({ err, taskId }, "Background suggestion generation failed"),
+      );
+    });
 
     // --- Deduct credits after a successful AI build/refine ---
     if (project.ownerId) {
@@ -1152,7 +1348,7 @@ export async function runJob(input: JobInput): Promise<void> {
       content: assistantSummary,
       agentMode,
       planMode: false,
-      plan: { kind: "report", report, ...batchMeta } as unknown as Record<string, unknown>,
+      plan: { kind: "report", report, taskId, ...batchMeta } as unknown as Record<string, unknown>,
     });
     analyticsOutcome = "success";
     void db
@@ -1232,6 +1428,20 @@ export async function runJob(input: JobInput): Promise<void> {
       logger.warn({ err, taskId }, "Failed to cancel remaining batch tasks"),
     );
 
+    // Generate post-build suggestions even on failure — gives the user recovery ideas
+    setImmediate(() => {
+      void generatePostBuildSuggestions(
+        projectId,
+        taskId,
+        project.name,
+        project.kind,
+        userPrompt,
+        `Build failed: ${message.slice(0, 200)}`,
+        [],
+        "",
+      ).catch((err) => logger.warn({ err, taskId }, "Failure-path suggestion generation failed"));
+    });
+
     // Post a rich error message with suggestions into the chat
     try {
       const errBatchMeta = queueBatchId
@@ -1251,6 +1461,18 @@ export async function runJob(input: JobInput): Promise<void> {
     } catch {
       // best-effort
     }
+  }
+  } finally {
+    // Always release the advisory lock and pool client, and clear the in-memory guard.
+    if (lockAcquired) {
+      try {
+        await lockClient.query("SELECT pg_advisory_unlock($1::bigint)", [projectId]);
+      } catch (unlockErr) {
+        logger.warn({ unlockErr, projectId }, "Failed to release advisory lock (non-fatal)");
+      }
+    }
+    lockClient.release();
+    activeProjectJobs.delete(projectId);
   }
 }
 

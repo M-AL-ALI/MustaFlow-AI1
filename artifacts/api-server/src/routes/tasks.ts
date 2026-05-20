@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, projectsTable, agentTasksTable } from "@workspace/db";
 import {
   ListTasksParams,
@@ -50,13 +50,29 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
   }
 
   const prompt = parsed.data.prompt ?? parsed.data.title;
+
+  // Conflict detection: check if any task is currently building or planning for this project.
+  // If so, queue the new task instead of launching it immediately.
+  const activeTasks = await db
+    .select({ id: agentTasksTable.id, status: agentTasksTable.status })
+    .from(agentTasksTable)
+    .where(
+      and(
+        eq(agentTasksTable.projectId, project.id),
+        inArray(agentTasksTable.status, ["building", "planning"]),
+      ),
+    )
+    .limit(1);
+
+  const hasActiveBuild = activeTasks.length > 0;
+
   const [task] = await db
     .insert(agentTasksTable)
     .values({
       projectId: project.id,
       title: parsed.data.title,
       kind: parsed.data.kind,
-      status: "planning",
+      status: hasActiveBuild ? "queued" : "planning",
       prompt,
     })
     .returning();
@@ -68,11 +84,18 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
   await db
     .update(projectsTable)
     .set({
-      status: "building",
+      status: hasActiveBuild ? project.status : "building",
       lastTaskSummary: parsed.data.title.slice(0, 140),
       updatedAt: sql`now()`,
     })
     .where(eq(projectsTable.id, project.id));
+
+  if (hasActiveBuild) {
+    // A build is already in progress — return the task in queued state.
+    // The frontend can poll GET /tasks to find out when it eventually runs.
+    res.status(201).json({ ...task, queued: true });
+    return;
+  }
 
   const [fileExists] = await db
     .select({ c: sql<number>`count(*)::int` })
@@ -87,7 +110,7 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
     agentMode: project.agentMode as "lite" | "eco" | "power" | "pro",
   });
 
-  res.status(201).json(task);
+  res.status(201).json({ ...task, queued: false });
 });
 
 router.patch(

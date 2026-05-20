@@ -34,6 +34,8 @@ tags:
     description: Admin-only platform management endpoints
   - name: billing
     description: Billing aliases and Stripe webhook
+  - name: suggestions
+    description: AI-generated post-build next-step suggestions
 paths:
   /healthz:
     get:
@@ -800,6 +802,94 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SecretAuditEntry"
+
+  /projects/{id}/suggestions:
+    get:
+      operationId: listSuggestions
+      tags: [suggestions]
+      summary: List pending and saved AI suggestions for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - name: taskId
+          in: query
+          required: false
+          schema: { type: integer }
+          description: Filter suggestions by the build task that generated them
+      responses:
+        "200":
+          description: List of suggestions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectSuggestion"
+
+  /projects/{id}/suggestions/{suggestionId}/accept:
+    post:
+      operationId: acceptSuggestion
+      tags: [suggestions]
+      summary: Accept a suggestion — enqueues a background refine build
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: suggestionId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Accepted and task enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuggestionAcceptResult"
+        "404":
+          description: Suggestion not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/suggestions/{suggestionId}/save:
+    post:
+      operationId: saveSuggestion
+      tags: [suggestions]
+      summary: Save a suggestion for later review
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: suggestionId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Suggestion saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectSuggestion"
+        "404":
+          description: Suggestion not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/suggestions/{suggestionId}/dismiss:
+    post:
+      operationId: dismissSuggestion
+      tags: [suggestions]
+      summary: Dismiss a suggestion so it does not reappear
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: suggestionId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Suggestion dismissed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectSuggestion"
+        "404":
+          description: Suggestion not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /projects/{id}/deployments:
     get:
@@ -2287,3 +2377,31 @@ components:
             $ref: "#/components/schemas/AuditScore"
         auditedAt: { type: string, format: date-time }
         fileCount: { type: integer }
+
+    ProjectSuggestion:
+      type: object
+      required: [id, projectId, title, description, category, prompt, status, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        taskId: { type: ["integer", "null"] }
+        title: { type: string }
+        description: { type: string }
+        category:
+          type: string
+          enum: [feature, fix, improvement, idea]
+        prompt: { type: string }
+        status:
+          type: string
+          enum: [pending, accepted, dismissed, saved]
+        createdAt: { type: string, format: date-time }
+
+    SuggestionAcceptResult:
+      type: object
+      required: [ok, taskId]
+      properties:
+        ok: { type: boolean }
+        taskId: { type: integer }
+        userMessageId: { type: ["integer", "null"] }
+        suggestion:
+          $ref: "#/components/schemas/ProjectSuggestion"

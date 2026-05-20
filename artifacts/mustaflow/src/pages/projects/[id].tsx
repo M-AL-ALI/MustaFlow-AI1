@@ -14,6 +14,7 @@ import {
   getListVersionsQueryKey,
   getListTasksQueryKey,
   getGetPageMapQueryKey,
+  getListSuggestionsQueryKey,
 } from "@workspace/api-client-react";
 import { BuildProgressFeed } from "@/components/build-progress-feed";
 import { CodeEditorTab } from "./components/code-editor-tab";
@@ -46,8 +47,15 @@ import {
   X,
   Puzzle,
   ListOrdered,
+<<<<<<< HEAD
   ShieldCheck,
+=======
+  ServerCog,
+  Bookmark,
+>>>>>>> 218a5bf (feat: per-project build lock + post-build AI suggestion engine (#193))
 } from "lucide-react";
+import { SuggestionChips } from "./components/suggestion-chips";
+import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
 import { QueueComposer } from "./components/queue-composer";
 import { QueueProgressStrip } from "./components/queue-progress-strip";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
@@ -110,7 +118,7 @@ type TaskReport = {
 };
 
 type ChatPlanPayload =
-  | { kind: "report"; report: TaskReport; taskId?: number }
+  | { kind: "report"; report: TaskReport; taskId?: number; queueBatchId?: string; queueIndex?: number | null; queueTotalCount?: number | null }
   | { kind: "task-queued"; taskId: number }
   | { kind: "task-done"; taskId: number }
   | { kind: "error"; message: string; suggestions?: string[] }
@@ -429,10 +437,10 @@ export default function ProjectWorkspacePage() {
   const [prefillSecretName, setPrefillSecretName] = useState<string | null>(null);
   const [viewingHistoryPlan, setViewingHistoryPlan] = useState<StructuredPlan | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
-  const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history">(() => {
+  const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history" | "saved">(() => {
     try {
       const stored = localStorage.getItem(`mustaflow_lpanel_${projectId}`);
-      if (stored === "files" || stored === "history") return stored;
+      if (stored === "files" || stored === "history" || stored === "saved") return stored;
     } catch {
       // ignore
     }
@@ -481,7 +489,7 @@ export default function ProjectWorkspacePage() {
   const chatAtBottomRef = useRef(true);
   // Mirror of leftPanelTab as a ref so pagehide/unmount callbacks can read the current
   // value synchronously without depending on React state (which may be stale in closures).
-  const leftPanelTabRef = useRef<"chat" | "files" | "history">("chat");
+  const leftPanelTabRef = useRef<"chat" | "files" | "history" | "saved">("chat");
 
   // Track window width for responsive layout
   useEffect(() => {
@@ -505,7 +513,7 @@ export default function ProjectWorkspacePage() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(`mustaflow_lpanel_${projectId}`);
-      if (stored === "files" || stored === "history") {
+      if (stored === "files" || stored === "history" || stored === "saved") {
         setLeftPanelTab(stored);
       } else {
         setLeftPanelTab("chat");
@@ -519,14 +527,11 @@ export default function ProjectWorkspacePage() {
   // Called on tab switch, component unmount, and page hide so the position
   // survives both navigation and full-page refresh.
   const saveCurrentScroll = useCallback(
-    (tab: "chat" | "files" | "history") => {
+    (tab: "chat" | "files" | "history" | "saved") => {
       const ref = tab === "chat" ? scrollRef : tab === "files" ? filesScrollRef : null;
       if (ref?.current) {
         try {
-          localStorage.setItem(
-            `mustaflow_scroll_${projectId}_${tab}`,
-            String(ref.current.scrollTop),
-          );
+          localStorage.setItem(`mustaflow_scroll_${projectId}_${tab}`, String(ref.current.scrollTop));
         } catch {
           /* ignore */
         }
@@ -536,7 +541,7 @@ export default function ProjectWorkspacePage() {
   );
 
   const switchLeftPanel = useCallback(
-    (newTab: "chat" | "files" | "history") => {
+    (newTab: "chat" | "files" | "history" | "saved") => {
       setLeftPanelTab((currentTab) => {
         saveCurrentScroll(currentTab);
         leftPanelTabRef.current = newTab;
@@ -720,6 +725,9 @@ export default function ProjectWorkspacePage() {
               void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
               void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
               void queryClient.invalidateQueries({ queryKey: getGetPageMapQueryKey(projectId) });
+              void queryClient.invalidateQueries({
+                queryKey: getListSuggestionsQueryKey(projectId, {}),
+              });
             }, 3000);
             const plan = data?.assistantMessage?.plan as Record<string, unknown> | null | undefined;
             const tid =
@@ -1024,10 +1032,17 @@ export default function ProjectWorkspacePage() {
                 : { width: `${splitPct}%`, minWidth: 260, maxWidth: "72%" }
           }
         >
-          {/* Left panel tab bar: Chat | Files | History */}
+          {/* Left panel tab bar: Chat | Files | History | Saved */}
           <div className="shrink-0 flex border-b border-border bg-card/60">
-            {(["chat", "files", "history"] as const).map((t) => {
-              const Icon = t === "chat" ? MessageSquare : t === "files" ? FileCode2 : History;
+            {(["chat", "files", "history", "saved"] as const).map((t) => {
+              const Icon =
+                t === "chat"
+                  ? MessageSquare
+                  : t === "files"
+                    ? FileCode2
+                    : t === "history"
+                      ? History
+                      : Bookmark;
               const badge = t === "files" && files.length > 0 ? files.length : null;
               return (
                 <button
@@ -1041,7 +1056,7 @@ export default function ProjectWorkspacePage() {
                   )}
                 >
                   <Icon className="h-3 w-3" />
-                  {t === "chat" ? "Chat" : t === "files" ? "Files" : "History"}
+                  {t === "chat" ? "Chat" : t === "files" ? "Files" : t === "history" ? "History" : "Saved"}
                   {badge !== null && (
                     <span className="ml-0.5 px-1 py-0.5 rounded-full bg-muted text-[9px] font-semibold leading-none">
                       {badge}
@@ -1097,74 +1112,207 @@ export default function ProjectWorkspacePage() {
 
           {/* ── CHAT TAB ── */}
           {leftPanelTab === "chat" && (
-            <>
-              {/* Chat panel header */}
-              <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
-                <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
-                  <Sparkles style={{ width: 10, height: 10 }} className="text-white" />
-                </div>
-                <span className="text-xs font-semibold text-foreground">AI Builder</span>
-                <span
-                  className={cn(
-                    "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-                    sendMessage.isPending
-                      ? pendingIsPlan
-                        ? "bg-secondary/15 text-secondary"
-                        : "bg-primary/15 text-primary"
-                      : "bg-green-500/15 text-green-400",
-                  )}
-                >
-                  {sendMessage.isPending ? (pendingIsPlan ? "Planning…" : "Working…") : "Ready"}
-                </span>
-                <button
-                  onClick={() => setShowChatHistory((v) => !v)}
-                  title={showChatHistory ? "Back to live chat" : "View chat history"}
-                  className={cn(
-                    "ml-1.5 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
-                    showChatHistory
-                      ? "bg-primary/10 text-primary border-primary/20"
-                      : "text-muted-foreground border-border hover:text-foreground hover:bg-muted",
-                  )}
-                >
-                  <History className="h-3 w-3" />
-                  {showChatHistory ? "Live" : "History"}
-                </button>
+          <>
+            {/* Chat panel header */}
+            <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
+              <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
+                <Sparkles style={{ width: 10, height: 10 }} className="text-white" />
               </div>
+              <span className="text-xs font-semibold text-foreground">AI Builder</span>
+              <span
+                className={cn(
+                  "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                  sendMessage.isPending
+                    ? pendingIsPlan
+                      ? "bg-secondary/15 text-secondary"
+                      : "bg-primary/15 text-primary"
+                    : "bg-green-500/15 text-green-400",
+                )}
+              >
+                {sendMessage.isPending ? (pendingIsPlan ? "Planning…" : "Working…") : "Ready"}
+              </span>
+              <button
+                onClick={() => setShowChatHistory((v) => !v)}
+                title={showChatHistory ? "Back to live chat" : "View chat history"}
+                className={cn(
+                  "ml-1.5 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
+                  showChatHistory
+                    ? "bg-primary/10 text-primary border-primary/20"
+                    : "text-muted-foreground border-border hover:text-foreground hover:bg-muted",
+                )}
+              >
+                <History className="h-3 w-3" />
+                {showChatHistory ? "Live" : "History"}
+              </button>
+            </div>
 
-              {/* Chat History overlay */}
-              {showChatHistory && (
-                <div className="flex-1 min-h-0 relative">
-                  <ChatHistory
-                    messages={messages}
-                    isLoading={messages === undefined}
-                    onViewFile={(path) => {
-                      const f = files.find((x) => x.path === path);
-                      if (f) {
-                        setSelectedCodeFileId(f.id);
-                        setActiveTab("code");
-                      }
-                    }}
-                    onClose={() => setShowChatHistory(false)}
-                  />
-                </div>
-              )}
+            {/* Chat History overlay */}
+            {showChatHistory && (
+              <div className="flex-1 min-h-0 relative">
+                <ChatHistory
+                  messages={messages}
+                  isLoading={messages === undefined}
+                  onViewFile={(path) => {
+                    const f = files.find((x) => x.path === path);
+                    if (f) {
+                      setSelectedCodeFileId(f.id);
+                      setActiveTab("code");
+                    }
+                  }}
+                  onClose={() => setShowChatHistory(false)}
+                />
+              </div>
+            )}
 
-              {/* Messages + controls (hidden in history mode) */}
-              {!showChatHistory && (
-                <>
-                  <div
-                    ref={scrollRef}
-                    onScroll={() => {
-                      const el = scrollRef.current;
-                      if (!el) return;
-                      chatAtBottomRef.current =
-                        el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                    }}
-                    className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
-                  >
-                    {creditsSuccess && (
-                      <div className="sticky top-0 z-10 pb-1">
-                        <CreditsSuccessBanner onDismiss={() => setCreditsSuccess(false)} />
+            {/* Messages + controls (hidden in history mode) */}
+            {!showChatHistory && (
+              <>
+                <div
+                  ref={scrollRef}
+                  onScroll={() => {
+                    const el = scrollRef.current;
+                    if (!el) return;
+                    chatAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                  }}
+                  className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
+                >
+                  {creditsSuccess && (
+                    <div className="sticky top-0 z-10 pb-1">
+                      <CreditsSuccessBanner onDismiss={() => setCreditsSuccess(false)} />
+                    </div>
+                  )}
+                  {(() => {
+                    const visibleMsgs = messages?.slice(-20) ?? [];
+                    const lastReportIdx = visibleMsgs.reduce<number>((acc, msg, idx) => {
+                      const p = msg.plan as ChatPlanPayload | null | undefined;
+                      const k = p && typeof p === "object" ? (p as { kind?: string }).kind : undefined;
+                      return k === "report" ? idx : acc;
+                    }, -1);
+                    return visibleMsgs.map((msg, msgIdx) => {
+                      const planPayload = msg.plan as ChatPlanPayload | null | undefined;
+                      const payloadKind =
+                        planPayload && typeof planPayload === "object"
+                          ? (planPayload as { kind?: string }).kind
+                          : undefined;
+                      const isReport = payloadKind === "report";
+                      const isQueued = payloadKind === "task-queued";
+                      const isError = payloadKind === "error";
+                      const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
+                      const structuredPlan =
+                        isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
+                      return (
+                        <div
+                          key={msg.id}
+                          className={cn(
+                            "flex",
+                            msg.role === "user" ? "justify-end" : "justify-start",
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "max-w-[90%] px-3 py-2 rounded-xl text-xs",
+                              msg.role === "user"
+                                ? "bg-primary text-primary-foreground rounded-br-sm"
+                                : isError
+                                  ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
+                                  : "bg-muted text-foreground rounded-bl-sm border border-border",
+                            )}
+                          >
+                            <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                            {isReport &&
+                              (() => {
+                                const rp = planPayload as {
+                                  kind: "report";
+                                  report: TaskReport;
+                                  taskId?: number;
+                                  queueBatchId?: string;
+                                  queueIndex?: number | null;
+                                  queueTotalCount?: number | null;
+                                };
+                                const hasBatch =
+                                  rp.queueBatchId && rp.queueTotalCount && rp.queueTotalCount > 1;
+                                const isLastReport = msgIdx === lastReportIdx;
+                                return (
+                                  <>
+                                    {hasBatch && (
+                                      <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
+                                        <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
+                                        <span className="text-[10px] text-muted-foreground/70 font-medium">
+                                          Task {(rp.queueIndex ?? 0) + 1} of {rp.queueTotalCount}
+                                        </span>
+                                      </div>
+                                    )}
+                                    <ReportCard
+                                      report={rp.report}
+                                      onViewFile={(path) => {
+                                        const f = files.find((x) => x.path === path);
+                                        if (f) {
+                                          setSelectedCodeFileId(f.id);
+                                          setActiveTab("code");
+                                        }
+                                      }}
+                                    />
+                                    {isLastReport && rp.taskId && !sendMessage.isPending && (
+                                      <SuggestionChips
+                                        projectId={projectId}
+                                        taskId={rp.taskId}
+                                        onAccepted={(tid) => setActiveTaskId(tid)}
+                                      />
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            {isQueued && (
+                              <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
+                                <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary" />
+                                Background task #{(planPayload as { taskId: number }).taskId}{" "}
+                                running…
+                              </div>
+                            )}
+                            {isError && (
+                              <ErrorCard
+                                message={(planPayload as { message: string }).message}
+                                suggestions={
+                                  (planPayload as { suggestions?: string[] }).suggestions
+                                }
+                                onTryFix={(text) => {
+                                  setPrompt(text);
+                                }}
+                                onBuyCredits={() => setBuyCreditsOpen(true)}
+                              />
+                            )}
+                            {isPlanCard && (
+                              <PlanCard
+                                plan={structuredPlan}
+                                projectId={projectId}
+                                initialAgentMode={agentMode}
+                                onBuild={runPlanned}
+                                onAddKey={handleAddKey}
+                                disabled={sendMessage.isPending}
+                                messageId={msg.id}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+
+                  {sendMessage.isPending && !activeTaskId && (
+                    <div className="flex justify-start">
+                      <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
+                        <div
+                          className={cn(
+                            "animate-pulse w-1.5 h-1.5 rounded-full",
+                            pendingIsPlan ? "bg-secondary" : "bg-primary",
+                          )}
+                        />
+                        <span className="text-muted-foreground">
+                          {pendingIsPlan ? "Thinking through the plan…" : "MustaFlow is working…"}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                       </div>
                     )}
                     {messages?.slice(-20).map((msg) => {
@@ -1291,6 +1439,9 @@ export default function ProjectWorkspacePage() {
                       />
                     )}
                   </div>
+                </div>
+              );
+            })()}
 
                   {/* Activity ticker / Status bar */}
                   <div className="shrink-0 border-t border-border/40">
@@ -1447,6 +1598,26 @@ export default function ProjectWorkspacePage() {
                 switchLeftPanel("chat");
               }}
             />
+          )}
+
+          {/* ── SAVED SUGGESTIONS TAB ── */}
+          {leftPanelTab === "saved" && (
+            <div className="flex flex-col flex-1 min-h-0">
+              <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2">
+                <Bookmark className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Saved Ideas
+                </span>
+                <span className="ml-auto text-[10px] text-muted-foreground/60">Build any time</span>
+              </div>
+              <SavedSuggestionsTab
+                projectId={projectId}
+                onAccepted={(tid) => {
+                  setActiveTaskId(tid);
+                  switchLeftPanel("chat");
+                }}
+              />
+            </div>
           )}
         </div>
 

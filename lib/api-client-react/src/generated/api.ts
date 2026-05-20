@@ -55,6 +55,7 @@ import type {
   ListKnowledgeParams,
   ListMobileBuilds200,
   ListProjectsParams,
+  ListSuggestionsParams,
   MobileAppSettings,
   MobileAppSettingsInput,
   MobileBuildInput,
@@ -71,6 +72,7 @@ import type {
   ProjectFileSummary,
   ProjectFileUpdate,
   ProjectInput,
+  ProjectSuggestion,
   ProjectUpdate,
   ProjectVersion,
   ProjectVersionDetail,
@@ -85,6 +87,7 @@ import type {
   SecretInput,
   SecretVerifyResult,
   StripeWebhook200,
+  SuggestionAcceptResult,
   TaskEvent,
   TaskFeedbackInput,
   UnpublishProject200,
@@ -3189,6 +3192,311 @@ export function useGetSecretAuditLog<TData = Awaited<ReturnType<typeof getSecret
 
 
 
+
+export const getListSuggestionsUrl = (id: number,
+    params?: ListSuggestionsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/suggestions?${stringifiedParams}` : `/api/projects/${id}/suggestions`
+}
+
+/**
+ * @summary List pending and saved AI suggestions for a project
+ */
+export const listSuggestions = async (id: number,
+    params?: ListSuggestionsParams, options?: RequestInit): Promise<ProjectSuggestion[]> => {
+
+  return customFetch<ProjectSuggestion[]>(getListSuggestionsUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSuggestionsQueryKey = (id: number,
+    params?: ListSuggestionsParams,) => {
+    return [
+    `/api/projects/${id}/suggestions`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListSuggestionsQueryOptions = <TData = Awaited<ReturnType<typeof listSuggestions>>, TError = ErrorType<unknown>>(id: number,
+    params?: ListSuggestionsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSuggestions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSuggestionsQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSuggestions>>> = ({ signal }) => listSuggestions(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSuggestions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSuggestionsQueryResult = NonNullable<Awaited<ReturnType<typeof listSuggestions>>>
+export type ListSuggestionsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List pending and saved AI suggestions for a project
+ */
+
+export function useListSuggestions<TData = Awaited<ReturnType<typeof listSuggestions>>, TError = ErrorType<unknown>>(
+ id: number,
+    params?: ListSuggestionsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSuggestions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSuggestionsQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getAcceptSuggestionUrl = (id: number,
+    suggestionId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/suggestions/${suggestionId}/accept`
+}
+
+/**
+ * @summary Accept a suggestion — enqueues a background refine build
+ */
+export const acceptSuggestion = async (id: number,
+    suggestionId: number, options?: RequestInit): Promise<SuggestionAcceptResult> => {
+
+  return customFetch<SuggestionAcceptResult>(getAcceptSuggestionUrl(id,suggestionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getAcceptSuggestionMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptSuggestion>>, TError,{id: number;suggestionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof acceptSuggestion>>, TError,{id: number;suggestionId: number}, TContext> => {
+
+const mutationKey = ['acceptSuggestion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acceptSuggestion>>, {id: number;suggestionId: number}> = (props) => {
+          const {id,suggestionId} = props ?? {};
+
+          return  acceptSuggestion(id,suggestionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AcceptSuggestionMutationResult = NonNullable<Awaited<ReturnType<typeof acceptSuggestion>>>
+
+    export type AcceptSuggestionMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Accept a suggestion — enqueues a background refine build
+ */
+export const useAcceptSuggestion = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptSuggestion>>, TError,{id: number;suggestionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof acceptSuggestion>>,
+        TError,
+        {id: number;suggestionId: number},
+        TContext
+      > => {
+      return useMutation(getAcceptSuggestionMutationOptions(options));
+    }
+
+export const getSaveSuggestionUrl = (id: number,
+    suggestionId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/suggestions/${suggestionId}/save`
+}
+
+/**
+ * @summary Save a suggestion for later review
+ */
+export const saveSuggestion = async (id: number,
+    suggestionId: number, options?: RequestInit): Promise<ProjectSuggestion> => {
+
+  return customFetch<ProjectSuggestion>(getSaveSuggestionUrl(id,suggestionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getSaveSuggestionMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSuggestion>>, TError,{id: number;suggestionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveSuggestion>>, TError,{id: number;suggestionId: number}, TContext> => {
+
+const mutationKey = ['saveSuggestion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveSuggestion>>, {id: number;suggestionId: number}> = (props) => {
+          const {id,suggestionId} = props ?? {};
+
+          return  saveSuggestion(id,suggestionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveSuggestionMutationResult = NonNullable<Awaited<ReturnType<typeof saveSuggestion>>>
+
+    export type SaveSuggestionMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Save a suggestion for later review
+ */
+export const useSaveSuggestion = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSuggestion>>, TError,{id: number;suggestionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveSuggestion>>,
+        TError,
+        {id: number;suggestionId: number},
+        TContext
+      > => {
+      return useMutation(getSaveSuggestionMutationOptions(options));
+    }
+
+export const getDismissSuggestionUrl = (id: number,
+    suggestionId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/suggestions/${suggestionId}/dismiss`
+}
+
+/**
+ * @summary Dismiss a suggestion so it does not reappear
+ */
+export const dismissSuggestion = async (id: number,
+    suggestionId: number, options?: RequestInit): Promise<ProjectSuggestion> => {
+
+  return customFetch<ProjectSuggestion>(getDismissSuggestionUrl(id,suggestionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getDismissSuggestionMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissSuggestion>>, TError,{id: number;suggestionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof dismissSuggestion>>, TError,{id: number;suggestionId: number}, TContext> => {
+
+const mutationKey = ['dismissSuggestion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof dismissSuggestion>>, {id: number;suggestionId: number}> = (props) => {
+          const {id,suggestionId} = props ?? {};
+
+          return  dismissSuggestion(id,suggestionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DismissSuggestionMutationResult = NonNullable<Awaited<ReturnType<typeof dismissSuggestion>>>
+
+    export type DismissSuggestionMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Dismiss a suggestion so it does not reappear
+ */
+export const useDismissSuggestion = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissSuggestion>>, TError,{id: number;suggestionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof dismissSuggestion>>,
+        TError,
+        {id: number;suggestionId: number},
+        TContext
+      > => {
+      return useMutation(getDismissSuggestionMutationOptions(options));
+    }
 
 export const getListDeploymentsUrl = (id: number,) => {
 

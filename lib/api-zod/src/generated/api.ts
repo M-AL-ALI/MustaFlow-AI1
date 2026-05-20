@@ -1133,6 +1133,99 @@ export const GetSecretAuditLogResponse = zod.array(GetSecretAuditLogResponseItem
 
 
 /**
+ * @summary List pending and saved AI suggestions for a project
+ */
+export const ListSuggestionsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListSuggestionsQueryParams = zod.object({
+  "taskId": zod.coerce.number().optional().describe('Filter suggestions by the build task that generated them')
+})
+
+export const ListSuggestionsResponseItem = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "taskId": zod.number().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "category": zod.enum(['feature', 'fix', 'improvement', 'idea']),
+  "prompt": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'dismissed', 'saved']),
+  "createdAt": zod.coerce.date()
+})
+export const ListSuggestionsResponse = zod.array(ListSuggestionsResponseItem)
+
+
+/**
+ * @summary Accept a suggestion — enqueues a background refine build
+ */
+export const AcceptSuggestionParams = zod.object({
+  "id": zod.coerce.number(),
+  "suggestionId": zod.coerce.number()
+})
+
+export const AcceptSuggestionResponse = zod.object({
+  "ok": zod.boolean(),
+  "taskId": zod.number(),
+  "userMessageId": zod.number().nullish(),
+  "suggestion": zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "taskId": zod.number().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "category": zod.enum(['feature', 'fix', 'improvement', 'idea']),
+  "prompt": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'dismissed', 'saved']),
+  "createdAt": zod.coerce.date()
+}).optional()
+})
+
+
+/**
+ * @summary Save a suggestion for later review
+ */
+export const SaveSuggestionParams = zod.object({
+  "id": zod.coerce.number(),
+  "suggestionId": zod.coerce.number()
+})
+
+export const SaveSuggestionResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "taskId": zod.number().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "category": zod.enum(['feature', 'fix', 'improvement', 'idea']),
+  "prompt": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'dismissed', 'saved']),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Dismiss a suggestion so it does not reappear
+ */
+export const DismissSuggestionParams = zod.object({
+  "id": zod.coerce.number(),
+  "suggestionId": zod.coerce.number()
+})
+
+export const DismissSuggestionResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "taskId": zod.number().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "category": zod.enum(['feature', 'fix', 'improvement', 'idea']),
+  "prompt": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'dismissed', 'saved']),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Deployment history for a project
  */
 export const ListDeploymentsParams = zod.object({
