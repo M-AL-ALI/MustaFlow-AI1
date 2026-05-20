@@ -6,6 +6,7 @@ import { enqueueJob } from "../lib/jobs";
 import { logger } from "../lib/logger";
 import { z } from "zod";
 import type { AgentMode } from "../lib/ai";
+import type { AgentIdentity } from "../lib/jobs";
 
 const router: IRouter = Router();
 
@@ -13,6 +14,8 @@ const SubmitQueueBody = z.object({
   messages: z.array(z.string().min(1)).min(1).max(20),
   agentMode: z.enum(["lite", "eco", "power", "pro"]),
   planMode: z.boolean().optional().default(false),
+  /** Explicit agent identity for all tasks in this batch. Defaults to "task" since batch jobs always go through the staging gate. */
+  agentIdentity: z.enum(["planning", "task", "main"]).optional().default("task"),
 });
 
 const CREDIT_COST: Record<string, number> = {
@@ -41,8 +44,9 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
     return;
   }
 
-  const { messages, agentMode, planMode } = parsed.data;
+  const { messages, agentMode, planMode, agentIdentity } = parsed.data;
   const mode = agentMode as AgentMode;
+  const batchAgentIdentity = (agentIdentity ?? "task") as AgentIdentity;
 
   const batchId = crypto.randomUUID();
   const taskIds: number[] = [];
@@ -83,6 +87,7 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
         prompt: content,
         queueBatchId: batchId,
         queueIndex: i,
+        agentIdentity: batchAgentIdentity,
       })
       .returning();
 
@@ -117,6 +122,7 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
         kind,
         userPrompt: content,
         agentMode: mode,
+        agentIdentity: batchAgentIdentity,
         conversationHistory,
       });
     }

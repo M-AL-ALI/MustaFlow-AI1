@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProjectAgentMode } from './projectAgentMode';
+import type { ProjectDefaultAgent } from './projectDefaultAgent';
 import type { ProjectKind } from './projectKind';
 import type { ProjectPlatform } from './projectPlatform';
 import type { ProjectStatus } from './projectStatus';
@@ -42,6 +43,8 @@ export interface Project {
      * @nullable
      */
   healthScore?: number | null;
+  /** User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
+  defaultAgent?: ProjectDefaultAgent;
   createdAt: Date;
   updatedAt: Date;
 }

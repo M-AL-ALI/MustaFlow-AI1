@@ -527,6 +527,10 @@ export default function ProjectWorkspacePage() {
     }
     return "chat";
   });
+  const [agentIdentity, setAgentIdentity] = useState<"planning" | "task" | "main">(() => {
+    const stored = localStorage.getItem(`mustaflow_agent_type_${projectId}`);
+    return (stored as "planning" | "task" | "main" | null) ?? "main";
+  });
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
   const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
@@ -795,6 +799,7 @@ export default function ProjectWorkspacePage() {
             agentMode: effectiveMode,
             planMode: effectivePlanMode,
             background: opts?.background ?? runInBackground,
+            agentIdentity,
           },
         },
         {
@@ -828,7 +833,7 @@ export default function ProjectWorkspacePage() {
         },
       );
     },
-    [projectId, agentMode, planMode, runInBackground, sendMessage, queryClient],
+    [projectId, agentMode, planMode, runInBackground, sendMessage, queryClient, agentIdentity],
   );
 
   const handleAddKey = useCallback((keyName: string) => {
@@ -1608,6 +1613,7 @@ export default function ProjectWorkspacePage() {
                     onBatchStarted={handleBatchStarted}
                     promptValue={prompt}
                     onPromptValueChange={setPrompt}
+                    onAgentIdentityChange={setAgentIdentity}
                   />
                 </>
               )}

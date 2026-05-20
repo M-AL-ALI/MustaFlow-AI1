@@ -9,9 +9,11 @@ import {
   SubmitTaskFeedbackParams,
   SubmitTaskFeedbackBody,
   CancelTaskParams,
+  ApplyTaskStagingParams,
+  DiscardTaskStagingParams,
 } from "@workspace/api-zod";
 import { requireProjectOwnership } from "../lib/auth";
-import { enqueueJob } from "../lib/jobs";
+import { enqueueJob, applyTaskAgentStaging, discardTaskAgentStaging } from "../lib/jobs";
 
 const router: IRouter = Router();
 
@@ -188,6 +190,80 @@ router.patch(
       return;
     }
     res.json(task);
+  },
+);
+
+router.post(
+  "/projects/:id/tasks/:taskId/apply",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = ApplyTaskStagingParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    try {
+      await applyTaskAgentStaging(params.data.taskId, params.data.id);
+      const [task] = await db
+        .select()
+        .from(agentTasksTable)
+        .where(eq(agentTasksTable.id, params.data.taskId))
+        .limit(1);
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+      res.json(task);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Apply failed";
+      req.log.error({ err, taskId: params.data.taskId }, "Apply task staging failed");
+      if (message.includes("not found")) {
+        res.status(404).json({ error: message });
+        return;
+      }
+      if (message.includes("not needs_review")) {
+        res.status(409).json({ error: message });
+        return;
+      }
+      res.status(500).json({ error: message });
+    }
+  },
+);
+
+router.post(
+  "/projects/:id/tasks/:taskId/discard",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = DiscardTaskStagingParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    try {
+      await discardTaskAgentStaging(params.data.taskId, params.data.id);
+      const [task] = await db
+        .select()
+        .from(agentTasksTable)
+        .where(eq(agentTasksTable.id, params.data.taskId))
+        .limit(1);
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+      res.json(task);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Discard failed";
+      req.log.error({ err, taskId: params.data.taskId }, "Discard task staging failed");
+      if (message.includes("not found")) {
+        res.status(404).json({ error: message });
+        return;
+      }
+      if (message.includes("not needs_review")) {
+        res.status(409).json({ error: message });
+        return;
+      }
+      res.status(500).json({ error: message });
+    }
   },
 );
 

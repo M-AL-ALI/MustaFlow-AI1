@@ -21,6 +21,8 @@ import {
   X,
   Pencil,
   Check,
+  Zap,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useListSecrets, getListSecretsQueryKey } from "@workspace/api-client-react";
@@ -42,9 +44,17 @@ export type StructuredPlan = {
   accessibilityNotes?: string;
   complexityScore?: number;
   recommendedMode?: string;
+  recommendedAgent?: "planning" | "task" | "main";
   estimatedBuildSeconds?: number;
   risks?: string[];
   testPlan?: string[];
+  currentState?: {
+    fileCount: number;
+    detectedPages: string[];
+    detectedLibraries: string[];
+    detectedPlatform: string;
+    summary: string;
+  };
 };
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -648,6 +658,21 @@ export function PlanCard({
     return prompt;
   }
 
+  const recommendedAgent = plan?.recommendedAgent;
+  const currentState = plan?.currentState;
+  const [currentStateOpen, setCurrentStateOpen] = useState(false);
+
+  const AGENT_COLORS: Record<string, string> = {
+    planning: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    task: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    main: "bg-green-500/10 text-green-400 border-green-500/20",
+  };
+  const AGENT_LABELS: Record<string, string> = {
+    planning: "Planning Agent",
+    task: "Task Agent",
+    main: "Main Agent",
+  };
+
   return (
     <div className="mt-2 bg-background border border-border rounded-xl text-xs overflow-hidden">
       {/* Header */}
@@ -678,6 +703,16 @@ export function PlanCard({
                 {recommendedMode} recommended
               </span>
             )}
+            {recommendedAgent && (
+              <span
+                className={cn(
+                  "text-[9px] px-1.5 py-0.5 rounded-full border font-medium",
+                  AGENT_COLORS[recommendedAgent] ?? AGENT_COLORS.main,
+                )}
+              >
+                {AGENT_LABELS[recommendedAgent] ?? recommendedAgent}
+              </span>
+            )}
           </div>
           <div className="mt-1">
             <InlineTextEdit
@@ -690,6 +725,77 @@ export function PlanCard({
           </div>
         </div>
       </div>
+
+      {/* Current State — from Planning Agent investigation */}
+      {currentState && (
+        <div className="border-b border-border">
+          <button
+            className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted/30 transition-colors"
+            onClick={() => setCurrentStateOpen((o) => !o)}
+          >
+            <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide flex-1">
+              Current state · {currentState.fileCount} file{currentState.fileCount !== 1 ? "s" : ""}
+            </span>
+            {currentStateOpen ? (
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3 w-3 text-muted-foreground" />
+            )}
+          </button>
+          {currentStateOpen && (
+            <div className="px-3 pb-2.5 space-y-1.5">
+              {currentState.summary && (
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {currentState.summary}
+                </p>
+              )}
+              {currentState.detectedPages.length > 0 && (
+                <div>
+                  <span className="text-[9px] font-semibold text-muted-foreground/60 uppercase tracking-wide">
+                    Pages detected
+                  </span>
+                  <div className="flex flex-wrap gap-1 mt-0.5">
+                    {currentState.detectedPages.map((p) => (
+                      <span
+                        key={p}
+                        className="text-[9px] px-1.5 py-0.5 bg-muted rounded font-mono text-muted-foreground"
+                      >
+                        {p}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {currentState.detectedLibraries.length > 0 && (
+                <div>
+                  <span className="text-[9px] font-semibold text-muted-foreground/60 uppercase tracking-wide">
+                    Libraries
+                  </span>
+                  <div className="flex flex-wrap gap-1 mt-0.5">
+                    {currentState.detectedLibraries.map((lib) => (
+                      <span
+                        key={lib}
+                        className="text-[9px] px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded text-blue-400"
+                      >
+                        {lib}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {currentState.detectedPlatform && (
+                <div className="text-[10px] text-muted-foreground">
+                  Platform:{" "}
+                  <span className="text-foreground font-medium">
+                    {currentState.detectedPlatform}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Requirements Check */}
       {keysNeeded.length > 0 && (
@@ -1276,7 +1382,15 @@ export function PlanCard({
               }}
               disabled={disabled}
             >
-              Build now
+              {recommendedAgent === "task" ? (
+                <>
+                  <Cpu className="h-3 w-3 mr-1" /> Build with Task Agent
+                </>
+              ) : (
+                <>
+                  <Zap className="h-3 w-3 mr-1" /> Build now
+                </>
+              )}
             </Button>
             <Button
               size="sm"

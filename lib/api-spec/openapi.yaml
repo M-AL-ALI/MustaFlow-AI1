@@ -346,6 +346,85 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/tasks/{taskId}/apply:
+    post:
+      operationId: applyTaskStaging
+      tags: [tasks]
+      summary: Apply Task Agent staging snapshot to live project files
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Staging snapshot applied — files are now live
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTask"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Task is not in needs_review state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/tasks/{taskId}/discard:
+    post:
+      operationId: discardTaskStaging
+      tags: [tasks]
+      summary: Discard Task Agent staging snapshot — no files changed
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Staging snapshot discarded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTask"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Task is not in needs_review state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/agent-routing:
+    get:
+      operationId: getAgentRouting
+      tags: [projects]
+      summary: Get recommended agent identity for a prompt
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: prompt, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Recommended agent and reason
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agentIdentity, reason]
+                properties:
+                  agentIdentity:
+                    type: string
+                    enum: [planning, task, main]
+                  reason:
+                    type: string
+
   /projects/{id}/tasks/{taskId}/feedback:
     patch:
       operationId: submitTaskFeedback
@@ -1706,6 +1785,10 @@ components:
           minimum: 0
           maximum: 100
           description: "0–100 score derived from generated file quality: accessibility (alt/ARIA/semantic), SEO (title/description/h1), performance (script count/lazy), security (no eval/document.write). Null if no files built yet."
+        defaultAgent:
+          type: string
+          enum: [planning, task, main]
+          description: "User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit)."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -1746,6 +1829,10 @@ components:
         agentMode:
           type: string
           enum: [lite, eco, power, pro]
+        defaultAgent:
+          type: string
+          enum: [planning, task, main]
+          description: "User's preferred agent for this project."
         siteTitle: { type: string }
         metaDescription: { type: string }
         themeColor: { type: string }
@@ -1828,6 +1915,10 @@ components:
           enum: [lite, eco, power, pro]
         planMode: { type: boolean }
         background: { type: boolean }
+        agentIdentity:
+          type: string
+          enum: [planning, task, main]
+          description: "Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically."
 
     ChatExchange:
       type: object
@@ -1874,7 +1965,27 @@ components:
           enum: [main, background]
         status:
           type: string
-          enum: [queued, planning, building, testing, needs_approval, completed, failed, canceled]
+          enum:
+            [
+              queued,
+              planning,
+              building,
+              testing,
+              needs_approval,
+              needs_review,
+              completed,
+              failed,
+              canceled,
+              discarded,
+            ]
+        agentIdentity:
+          type: string
+          enum: [planning, task, main]
+          description: "Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit)."
+        stagingSnapshot:
+          type: ["object", "null"]
+          additionalProperties: true
+          description: "Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard."
         prompt: { type: ["string", "null"] }
         result: { type: ["string", "null"] }
         queueBatchId: { type: ["string", "null"] }

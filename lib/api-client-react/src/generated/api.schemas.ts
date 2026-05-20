@@ -118,6 +118,18 @@ export const ProjectAgentMode = {
   pro: 'pro',
 } as const;
 
+/**
+ * User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).
+ */
+export type ProjectDefaultAgent = typeof ProjectDefaultAgent[keyof typeof ProjectDefaultAgent];
+
+
+export const ProjectDefaultAgent = {
+  planning: 'planning',
+  task: 'task',
+  main: 'main',
+} as const;
+
 export interface Project {
   id: number;
   /** @nullable */
@@ -150,6 +162,8 @@ export interface Project {
      * @nullable
      */
   healthScore?: number | null;
+  /** User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
+  defaultAgent?: ProjectDefaultAgent;
   createdAt: string;
   updatedAt: string;
 }
@@ -202,11 +216,25 @@ export const ProjectUpdateAgentMode = {
   pro: 'pro',
 } as const;
 
+/**
+ * User's preferred agent for this project.
+ */
+export type ProjectUpdateDefaultAgent = typeof ProjectUpdateDefaultAgent[keyof typeof ProjectUpdateDefaultAgent];
+
+
+export const ProjectUpdateDefaultAgent = {
+  planning: 'planning',
+  task: 'task',
+  main: 'main',
+} as const;
+
 export interface ProjectUpdate {
   name?: string;
   description?: string;
   status?: ProjectUpdateStatus;
   agentMode?: ProjectUpdateAgentMode;
+  /** User's preferred agent for this project. */
+  defaultAgent?: ProjectUpdateDefaultAgent;
   siteTitle?: string;
   metaDescription?: string;
   themeColor?: string;
@@ -298,12 +326,26 @@ export const ChatMessageInputAgentMode = {
   pro: 'pro',
 } as const;
 
+/**
+ * Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.
+ */
+export type ChatMessageInputAgentIdentity = typeof ChatMessageInputAgentIdentity[keyof typeof ChatMessageInputAgentIdentity];
+
+
+export const ChatMessageInputAgentIdentity = {
+  planning: 'planning',
+  task: 'task',
+  main: 'main',
+} as const;
+
 export interface ChatMessageInput {
   /** @minLength 1 */
   content: string;
   agentMode: ChatMessageInputAgentMode;
   planMode: boolean;
   background?: boolean;
+  /** Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically. */
+  agentIdentity?: ChatMessageInputAgentIdentity;
 }
 
 export interface ChatExchange {
@@ -355,10 +397,30 @@ export const AgentTaskStatus = {
   building: 'building',
   testing: 'testing',
   needs_approval: 'needs_approval',
+  needs_review: 'needs_review',
   completed: 'completed',
   failed: 'failed',
   canceled: 'canceled',
+  discarded: 'discarded',
 } as const;
+
+/**
+ * Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).
+ */
+export type AgentTaskAgentIdentity = typeof AgentTaskAgentIdentity[keyof typeof AgentTaskAgentIdentity];
+
+
+export const AgentTaskAgentIdentity = {
+  planning: 'planning',
+  task: 'task',
+  main: 'main',
+} as const;
+
+/**
+ * Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.
+ * @nullable
+ */
+export type AgentTaskStagingSnapshot = { [key: string]: unknown } | null;
 
 /**
  * @nullable
@@ -398,6 +460,13 @@ export interface AgentTask {
   title: string;
   kind: AgentTaskKind;
   status: AgentTaskStatus;
+  /** Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
+  agentIdentity?: AgentTaskAgentIdentity;
+  /**
+     * Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.
+     * @nullable
+     */
+  stagingSnapshot?: AgentTaskStagingSnapshot;
   /** @nullable */
   prompt?: string | null;
   /** @nullable */
@@ -1228,6 +1297,24 @@ export type DeleteWorkspace200 = {
 
 export type ListProjectsParams = {
 workspaceId?: number;
+};
+
+export type GetAgentRoutingParams = {
+prompt?: string;
+};
+
+export type GetAgentRouting200AgentIdentity = typeof GetAgentRouting200AgentIdentity[keyof typeof GetAgentRouting200AgentIdentity];
+
+
+export const GetAgentRouting200AgentIdentity = {
+  planning: 'planning',
+  task: 'task',
+  main: 'main',
+} as const;
+
+export type GetAgentRouting200 = {
+  agentIdentity: GetAgentRouting200AgentIdentity;
+  reason: string;
 };
 
 export type AnalyzePageMapParams = {

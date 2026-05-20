@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProjectUpdateAgentMode } from './projectUpdateAgentMode';
+import type { ProjectUpdateDefaultAgent } from './projectUpdateDefaultAgent';
 import type { ProjectUpdateStatus } from './projectUpdateStatus';
 
 export interface ProjectUpdate {
@@ -13,6 +14,8 @@ export interface ProjectUpdate {
   description?: string;
   status?: ProjectUpdateStatus;
   agentMode?: ProjectUpdateAgentMode;
+  /** User's preferred agent for this project. */
+  defaultAgent?: ProjectUpdateDefaultAgent;
   siteTitle?: string;
   metaDescription?: string;
   themeColor?: string;

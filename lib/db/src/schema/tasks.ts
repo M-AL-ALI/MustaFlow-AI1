@@ -72,6 +72,15 @@ export const agentTasksTable = pgTable(
     title: text("title").notNull(),
     kind: text("kind").notNull().default("main"),
     status: text("status").notNull().default("queued"),
+    // agentIdentity: which of the three agents handled this task.
+    // "planning" = Planning Agent (plan mode), "task" = Task Agent (staging gate),
+    // "main" = Main Agent (direct fast edit). Default "main" for backward compat.
+    agentIdentity: text("agent_identity").notNull().default("main"),
+    // stagingSnapshot: Task Agent stores generated files here before the user
+    // approves. Null for Main Agent (files are written directly). Promoted to
+    // project_files on Apply; discarded on Discard.
+    stagingSnapshot:
+      jsonb("staging_snapshot").$type<Array<{ path: string; content: string; mimeType: string }>>(),
     prompt: text("prompt"),
     result: text("result"),
     report: jsonb("report").$type<TaskReport>(),

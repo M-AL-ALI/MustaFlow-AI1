@@ -18,8 +18,12 @@ import {
   UpdateProjectResponse,
   DeleteProjectParams,
   GetProjectsSummaryResponse,
+  GetAgentRoutingParams,
+  GetAgentRoutingQueryParams,
+  GetAgentRoutingResponse,
 } from "@workspace/api-zod";
 import { buildInitialAssistantMessage } from "../lib/ai";
+import { resolveAgentIdentity } from "../lib/jobs";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -295,6 +299,53 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
 
   res.status(200).json({ deleted: true, projectId: project.id });
 });
+
+// ── Agent routing hint ─────────────────────────────────────────────────────────
+// Returns the recommended agentIdentity for a given prompt + project state.
+// Used by the frontend composer to show a live "Recommended: X Agent" badge.
+router.get(
+  "/projects/:id/agent-routing",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = GetAgentRoutingParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    const queryParams = GetAgentRoutingQueryParams.safeParse(req.query);
+    if (!queryParams.success) {
+      res.status(400).json({ error: queryParams.error.message });
+      return;
+    }
+
+    const [fileCount] = await db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, params.data.id));
+    const hasFiles = (fileCount?.c ?? 0) > 0;
+
+    const prompt = queryParams.data.prompt ?? "";
+    const agentIdentity = resolveAgentIdentity(prompt, hasFiles, false, false, false);
+
+    const reasonMap: Record<string, string> = {
+      planning: "Plan mode — Planning Agent investigates first then builds a structured plan",
+      task:
+        prompt.length > 120
+          ? "Long prompt — Task Agent will stage changes for your review before applying"
+          : !hasFiles
+            ? "New project — Task Agent will stage the initial build for review"
+            : "Task Agent will stage changes for your review before applying",
+      main: "Short edit on existing project — Main Agent applies changes directly",
+    };
+
+    res.json(
+      GetAgentRoutingResponse.parse({
+        agentIdentity,
+        reason: reasonMap[agentIdentity] ?? "",
+      }),
+    );
+  },
+);
 
 // Used by activity feed - keep references so unused-import linter doesn't trip
 void agentTasksTable;

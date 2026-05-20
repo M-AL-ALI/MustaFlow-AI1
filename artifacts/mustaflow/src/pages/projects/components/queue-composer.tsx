@@ -9,13 +9,46 @@ import {
   Paperclip,
   Mic,
   Paintbrush2,
-  CheckSquare,
-  ServerCog,
   Layers2,
+  Navigation,
+  Cpu,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useGetAgentRouting, useUpdateProject } from "@workspace/api-client-react";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
+type AgentType = "planning" | "task" | "main";
+
+const AGENT_OPTIONS: {
+  value: AgentType;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+  className: string;
+}[] = [
+  {
+    value: "planning",
+    label: "Planning",
+    description: "Investigate then plan — no files changed",
+    icon: Navigation,
+    className: "text-blue-400 border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/15",
+  },
+  {
+    value: "task",
+    label: "Task",
+    description: "Stage changes for your review before applying",
+    icon: Cpu,
+    className: "text-amber-400 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/15",
+  },
+  {
+    value: "main",
+    label: "Main",
+    description: "Direct edit — changes apply immediately",
+    icon: Zap,
+    className: "text-green-400 border-green-500/30 bg-green-500/10 hover:bg-green-500/15",
+  },
+];
 
 interface QueueRow {
   id: string;
@@ -37,6 +70,7 @@ interface QueueComposerProps {
   onBatchStarted: (batchId: string, totalCount: number) => void;
   promptValue?: string;
   onPromptValueChange?: (v: string) => void;
+  onAgentIdentityChange?: (identity: AgentType) => void;
 }
 
 export function QueueComposer({
@@ -45,7 +79,7 @@ export function QueueComposer({
   onAgentModeChange,
   planMode,
   onPlanModeChange,
-  runInBackground,
+  runInBackground: _runInBackground,
   onRunInBackgroundChange,
   variantMode,
   onVariantModeChange,
@@ -54,7 +88,57 @@ export function QueueComposer({
   onBatchStarted,
   promptValue,
   onPromptValueChange,
+  onAgentIdentityChange,
 }: QueueComposerProps) {
+  const lsKey = `mustaflow_agent_type_${projectId}`;
+  const [agentType, setAgentTypeRaw] = useState<AgentType>(() => {
+    const stored = localStorage.getItem(lsKey);
+    return (stored as AgentType | null) ?? "main";
+  });
+
+  const { mutate: updateProject } = useUpdateProject();
+
+  const setAgentType = useCallback(
+    (type: AgentType) => {
+      setAgentTypeRaw(type);
+      localStorage.setItem(lsKey, type);
+      onPlanModeChange(type === "planning");
+      onRunInBackgroundChange(type === "task");
+      onAgentIdentityChange?.(type);
+      // Persist to server so the preference survives across devices/sessions
+      updateProject({ id: projectId, data: { defaultAgent: type } });
+    },
+    [
+      lsKey,
+      onPlanModeChange,
+      onRunInBackgroundChange,
+      onAgentIdentityChange,
+      updateProject,
+      projectId,
+    ],
+  );
+
+  // Debounced prompt for routing hint
+  const [debouncedPrompt, setDebouncedPrompt] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const onPromptForRouting = useCallback((text: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedPrompt(text), 600);
+  }, []);
+
+  const { data: routingHint } = useGetAgentRouting(
+    projectId,
+    { prompt: debouncedPrompt },
+    {
+      query: {
+        queryKey: ["agent-routing", projectId, debouncedPrompt],
+        enabled: debouncedPrompt.length >= 10,
+        staleTime: 30_000,
+      },
+    },
+  );
+
   const [rows, setRows] = useState<QueueRow[]>([{ id: crypto.randomUUID(), text: "" }]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -78,8 +162,11 @@ export function QueueComposer({
       if (rows.length === 1 && onPromptValueChange) {
         onPromptValueChange(text);
       }
+      if (rows.length === 1) {
+        onPromptForRouting(text);
+      }
     },
-    [rows.length, onPromptValueChange],
+    [rows.length, onPromptValueChange, onPromptForRouting],
   );
 
   const addRow = useCallback(() => {
@@ -383,29 +470,48 @@ export function QueueComposer({
       </div>
 
       {!isBusy && (
-        <div className="mt-1.5 px-9 flex items-center gap-2">
-          <button
-            onClick={() => onPlanModeChange(!planMode)}
-            className={cn(
-              "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
-              planMode
-                ? "bg-secondary/15 text-secondary border-secondary/30"
-                : "text-muted-foreground border-border hover:text-foreground",
-            )}
-          >
-            <CheckSquare className="h-3 w-3" /> Plan
-          </button>
-          <button
-            onClick={() => onRunInBackgroundChange(!runInBackground)}
-            className={cn(
-              "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
-              runInBackground
-                ? "bg-primary/10 text-primary border-primary/30"
-                : "text-muted-foreground border-border hover:text-foreground",
-            )}
-          >
-            <ServerCog className="h-3 w-3" /> Background
-          </button>
+        <div className="mt-1.5 px-9 flex items-center gap-2 flex-wrap">
+          {/* Three-way agent selector */}
+          <div className="flex items-center gap-1 bg-background/60 border border-border rounded-lg p-0.5">
+            {AGENT_OPTIONS.map((opt) => {
+              const Icon = opt.icon;
+              const isActive = agentType === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => setAgentType(opt.value)}
+                  title={opt.description}
+                  className={cn(
+                    "flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border",
+                    isActive
+                      ? opt.className
+                      : "text-muted-foreground border-transparent hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-3 w-3" />
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Routing hint badge — updates as user types */}
+          {routingHint?.agentIdentity && routingHint.agentIdentity !== agentType && (
+            <button
+              onClick={() => setAgentType(routingHint.agentIdentity as AgentType)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 transition-colors"
+              title={routingHint.reason ?? ""}
+            >
+              Switch to{" "}
+              {routingHint.agentIdentity === "planning"
+                ? "Planning"
+                : routingHint.agentIdentity === "task"
+                  ? "Task"
+                  : "Main"}{" "}
+              Agent
+            </button>
+          )}
+
           <button
             onClick={() => onVariantModeChange(!variantMode)}
             className={cn(
@@ -418,6 +524,7 @@ export function QueueComposer({
           >
             <Layers2 className="h-3 w-3" /> 2 Variants
           </button>
+
           {!isMultiRow && (
             <span className="ml-auto text-[9px] text-muted-foreground/40">
               ⌘↩ send · Shift+↩ add task

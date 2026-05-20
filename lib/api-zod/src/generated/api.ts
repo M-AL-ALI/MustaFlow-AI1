@@ -121,6 +121,7 @@ export const ListProjectsResponseItem = zod.object({
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
   "healthScore": zod.number().min(listProjectsResponseHealthScoreMin).max(listProjectsResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -168,6 +169,7 @@ export const GetProjectResponse = zod.object({
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
   "healthScore": zod.number().min(getProjectResponseHealthScoreMin).max(getProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -182,6 +184,7 @@ export const UpdateProjectBody = zod.object({
   "description": zod.string().optional(),
   "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']).optional(),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']).optional(),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project.'),
   "siteTitle": zod.string().optional(),
   "metaDescription": zod.string().optional(),
   "themeColor": zod.string().optional()
@@ -209,6 +212,7 @@ export const UpdateProjectResponse = zod.object({
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
   "healthScore": zod.number().min(updateProjectResponseHealthScoreMin).max(updateProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -248,6 +252,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
   "healthScore": zod.number().min(getProjectsSummaryResponseRecentItemHealthScoreMin).max(getProjectsSummaryResponseRecentItemHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))
@@ -285,7 +290,8 @@ export const SendMessageBody = zod.object({
   "content": zod.string().min(1),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "planMode": zod.boolean(),
-  "background": zod.boolean().optional()
+  "background": zod.boolean().optional(),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.')
 })
 
 export const SendMessageResponse = zod.object({
@@ -340,7 +346,9 @@ export const ListTasksResponseItem = zod.object({
   "projectId": zod.number(),
   "title": zod.string(),
   "kind": zod.enum(['main', 'background']),
-  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'completed', 'failed', 'canceled']),
+  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -398,7 +406,9 @@ export const CancelTaskResponse = zod.object({
   "projectId": zod.number(),
   "title": zod.string(),
   "kind": zod.enum(['main', 'background']),
-  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'completed', 'failed', 'canceled']),
+  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -426,6 +436,107 @@ export const CancelTaskResponse = zod.object({
 
 
 /**
+ * @summary Apply Task Agent staging snapshot to live project files
+ */
+export const ApplyTaskStagingParams = zod.object({
+  "id": zod.coerce.number(),
+  "taskId": zod.coerce.number()
+})
+
+export const ApplyTaskStagingResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "title": zod.string(),
+  "kind": zod.enum(['main', 'background']),
+  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
+  "prompt": zod.string().nullish(),
+  "result": zod.string().nullish(),
+  "queueBatchId": zod.string().nullish(),
+  "queueIndex": zod.number().nullish(),
+  "report": zod.object({
+  "userRequest": zod.string().optional(),
+  "filesCreated": zod.array(zod.string()).optional(),
+  "filesChanged": zod.array(zod.string()).optional(),
+  "filesRemoved": zod.array(zod.string()).optional(),
+  "previewUpdated": zod.boolean().optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "nextRecommendation": zod.string().optional(),
+  "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
+  "knowledgeApplied": zod.array(zod.object({
+  "title": zod.string().optional(),
+  "category": zod.string().optional()
+})).optional()
+}).nullish(),
+  "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "createdAt": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Discard Task Agent staging snapshot — no files changed
+ */
+export const DiscardTaskStagingParams = zod.object({
+  "id": zod.coerce.number(),
+  "taskId": zod.coerce.number()
+})
+
+export const DiscardTaskStagingResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "title": zod.string(),
+  "kind": zod.enum(['main', 'background']),
+  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
+  "prompt": zod.string().nullish(),
+  "result": zod.string().nullish(),
+  "queueBatchId": zod.string().nullish(),
+  "queueIndex": zod.number().nullish(),
+  "report": zod.object({
+  "userRequest": zod.string().optional(),
+  "filesCreated": zod.array(zod.string()).optional(),
+  "filesChanged": zod.array(zod.string()).optional(),
+  "filesRemoved": zod.array(zod.string()).optional(),
+  "previewUpdated": zod.boolean().optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "nextRecommendation": zod.string().optional(),
+  "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
+  "knowledgeApplied": zod.array(zod.object({
+  "title": zod.string().optional(),
+  "category": zod.string().optional()
+})).optional()
+}).nullish(),
+  "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "createdAt": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Get recommended agent identity for a prompt
+ */
+export const GetAgentRoutingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetAgentRoutingQueryParams = zod.object({
+  "prompt": zod.coerce.string().optional()
+})
+
+export const GetAgentRoutingResponse = zod.object({
+  "agentIdentity": zod.enum(['planning', 'task', 'main']),
+  "reason": zod.string()
+})
+
+
+/**
  * @summary Submit thumbs up or down feedback on a task
  */
 export const SubmitTaskFeedbackParams = zod.object({
@@ -442,7 +553,9 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "projectId": zod.number(),
   "title": zod.string(),
   "kind": zod.enum(['main', 'background']),
-  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'completed', 'failed', 'canceled']),
+  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),

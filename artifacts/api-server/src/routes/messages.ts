@@ -3,6 +3,7 @@ import { asc, and, eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,
+  projectFilesTable,
   chatMessagesTable,
   agentTasksTable,
   taskEventsTable,
@@ -18,7 +19,7 @@ import { type AgentMode } from "../lib/ai";
 import { runPlanPipeline } from "../lib/builder";
 import type { ConversationTurn } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
-import { enqueueJob, runJob } from "../lib/jobs";
+import { enqueueJob, runJob, resolveAgentIdentity, type AgentIdentity } from "../lib/jobs";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -66,13 +67,23 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     return;
   }
 
-  const { content, agentMode, planMode } = parsed.data;
+  const { content, agentMode, planMode, agentIdentity: explicitAgentIdentity } = parsed.data;
   const mode = agentMode as AgentMode;
   // Foreground requests that were queued by aiBuilderLimiter physically wait
   // in-line (HTTP connection held open) until a slot frees, then run here
   // synchronously. Only explicit background=true from the client triggers
   // the async background-job path.
   const runInBackground = Boolean(parsed.data.background);
+
+  // Load current project files — needed for Planning Agent investigation phase
+  const currentProjectFiles = await db
+    .select({
+      path: projectFilesTable.path,
+      content: projectFilesTable.content,
+      mimeType: projectFilesTable.mimeType,
+    })
+    .from(projectFilesTable)
+    .where(eq(projectFilesTable.projectId, project.id));
 
   // Load recent conversation history for AI context (last 8 user/assistant turns)
   const recentMessages = await db
@@ -122,6 +133,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         kind: "plan",
         status: "planning",
         prompt: content,
+        agentIdentity: "planning",
       })
       .returning();
 
@@ -138,6 +150,11 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         userPrompt: content,
         agentMode: mode,
         conversationHistory,
+        currentFiles: currentProjectFiles.map((f) => ({
+          path: f.path,
+          content: f.content,
+          mimeType: f.mimeType,
+        })),
       });
 
       const planPageCount = Array.isArray(
@@ -196,6 +213,10 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     const hasActiveTask = activeTask !== undefined;
 
     // Create a task row to track the work
+    const resolvedAgentIdentity: AgentIdentity =
+      (explicitAgentIdentity as AgentIdentity | undefined) ??
+      resolveAgentIdentity(content, hasFiles, runInBackground, hasActiveTask, Boolean(planMode));
+
     const [task] = await db
       .insert(agentTasksTable)
       .values({
@@ -205,6 +226,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         kind: runInBackground ? "background" : "main",
         status: hasActiveTask ? "queued" : "planning",
         prompt: content,
+        agentIdentity: resolvedAgentIdentity,
       })
       .returning();
     if (!task) {
@@ -222,6 +244,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         kind,
         userPrompt: content,
         agentMode: mode,
+        agentIdentity: resolvedAgentIdentity,
         conversationHistory,
       });
       assistantContent = `I've queued this in the Background Agent. Task #${task.id} is running and I'll post the report back here when it's done.`;
@@ -233,6 +256,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         kind,
         userPrompt: content,
         agentMode: mode,
+        agentIdentity: resolvedAgentIdentity,
         conversationHistory,
       });
       const [refreshed] = await db

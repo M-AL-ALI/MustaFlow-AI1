@@ -48,6 +48,10 @@ export const projectsTable = pgTable("projects", {
   // pageMapData: AI-extracted and user-edited page/screen flow map.
   // Structure: { web: { nodes, edges }, ios: { nodes, edges }, android: { nodes, edges } }
   pageMapData: jsonb("page_map_data"),
+  // defaultAgent: user's preferred agent for this project.
+  // "planning" = Planning Agent, "task" = Task Agent (staging gate),
+  // "main" = Main Agent (direct fast edit). Default "main".
+  defaultAgent: text("default_agent").notNull().default("main"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

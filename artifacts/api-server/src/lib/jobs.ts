@@ -80,16 +80,51 @@ const activeProjectJobs = new Set<number>();
 
 export type JobKind = "build" | "refine";
 
+export type AgentIdentity = "planning" | "task" | "main";
+
 export interface JobInput {
   taskId: number;
   projectId: number;
   kind: JobKind;
   userPrompt: string;
   agentMode: AgentMode;
+  /** Which of the three agents handles this task. Default "main". */
+  agentIdentity?: AgentIdentity;
+  /** Structured plan from the Planning Agent (injected into build/refine prompt). */
+  planContext?: Record<string, unknown> | null;
   conversationHistory?: ConversationTurn[];
   queueBatchId?: string | null;
   queueIndex?: number | null;
   queueTotalCount?: number | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent routing — deterministic rules (no AI)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Determine which agent should handle a request based on context signals.
+ * Rules (in priority order):
+ *   1. planMode = true          → planning
+ *   2. background = true        → task  (always staged for batch review)
+ *   3. batchQueued = true       → task  (batch tasks go through staging gate)
+ *   4. long prompt (>120 chars) → task  (complex change, worth reviewing)
+ *   5. projectHasFiles = false  → task  (initial build, always worth reviewing)
+ *   6. otherwise                → main  (short fast direct edit)
+ */
+export function resolveAgentIdentity(
+  prompt: string,
+  projectHasFiles: boolean,
+  isBackground: boolean,
+  isBatchQueued: boolean,
+  planMode: boolean,
+): AgentIdentity {
+  if (planMode) return "planning";
+  if (isBackground) return "task";
+  if (isBatchQueued) return "task";
+  if (prompt.length > 120) return "task";
+  if (!projectHasFiles) return "task";
+  return "main";
 }
 
 async function emitEvent(
@@ -661,6 +696,25 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
     .where(eq(agentTasksTable.id, completedTaskId));
   if (!completedTask?.queueBatchId) return;
 
+  // Staging gate: if any task in this batch is awaiting review, block the queue
+  const [batchBlocked] = await db
+    .select({ id: agentTasksTable.id })
+    .from(agentTasksTable)
+    .where(
+      and(
+        eq(agentTasksTable.queueBatchId, completedTask.queueBatchId),
+        eq(agentTasksTable.status, "needs_review"),
+      ),
+    )
+    .limit(1);
+  if (batchBlocked) {
+    logger.info(
+      { completedTaskId, blockedByTaskId: batchBlocked.id, batchId: completedTask.queueBatchId },
+      "drainNextBatchTask: blocked — Task Agent awaiting review",
+    );
+    return;
+  }
+
   const [nextTask] = await db
     .select()
     .from(agentTasksTable)
@@ -717,6 +771,22 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
  * drainNextBatchTask won't find them.
  */
 async function drainNextProjectTask(projectId: number): Promise<void> {
+  // Staging gate: if any task for this project is awaiting review, block the queue
+  const [blocked] = await db
+    .select({ id: agentTasksTable.id })
+    .from(agentTasksTable)
+    .where(
+      and(eq(agentTasksTable.projectId, projectId), eq(agentTasksTable.status, "needs_review")),
+    )
+    .limit(1);
+  if (blocked) {
+    logger.info(
+      { projectId, blockedByTaskId: blocked.id },
+      "drainNextProjectTask: blocked — Task Agent awaiting review",
+    );
+    return;
+  }
+
   const [nextTask] = await db
     .select()
     .from(agentTasksTable)
@@ -787,6 +857,7 @@ export async function runJob(input: JobInput): Promise<void> {
     queueTotalCount,
   } = input;
   let { userPrompt, agentMode } = input;
+  const agentIdentity: AgentIdentity = input.agentIdentity ?? "main";
 
   const jobStartTime = Date.now();
   let wasEscalated = false;
@@ -838,6 +909,11 @@ export async function runJob(input: JobInput): Promise<void> {
       return;
     }
 
+    // Persist agentIdentity to the task record so queries and the frontend can read it
+    if (agentIdentity !== "main") {
+      await db.update(agentTasksTable).set({ agentIdentity }).where(eq(agentTasksTable.id, taskId));
+    }
+
     const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
     if (!project) {
       await emitEvent(taskId, "failed", "Project not found.");
@@ -878,6 +954,12 @@ export async function runJob(input: JobInput): Promise<void> {
       let nextVersionLabel: string;
       let diffSummary: DiffSummary | undefined;
       let filesToSmellScan: BuilderFile[] = [];
+      // Task Agent: collect files to stage (populated below; not written to project_files)
+      let stagingData: Array<{ path: string; content: string; mimeType: string }> = [];
+      // Task Agent refine: keep a reference to existing files for building the full merged snapshot
+      let existingFilesSnapshot: BuilderFile[] = [];
+      let refineChangedFiles: BuilderFile[] = [];
+      let refineRemovedPaths: string[] = [];
 
       const isMobileProject = ["mobile-ios", "mobile-android", "mobile-cross"].includes(
         project.kind,
@@ -946,6 +1028,7 @@ export async function runJob(input: JobInput): Promise<void> {
               agentMode,
               conversationHistory,
               knowledgeContext: knowledgeContext || undefined,
+              planContext: input.planContext ?? null,
             });
 
         analyticsCorrectionPasses = result.correctionPasses;
@@ -970,6 +1053,7 @@ export async function runJob(input: JobInput): Promise<void> {
             agentMode: buildEscalationMode,
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
+            planContext: input.planContext ?? null,
           });
           wasEscalated = true;
           agentMode = buildEscalationMode;
@@ -1013,13 +1097,32 @@ export async function runJob(input: JobInput): Promise<void> {
         await emitEvent(
           taskId,
           "narration",
-          `Writing ${result.files.length} file${result.files.length !== 1 ? "s" : ""} to the project now.`,
+          `${agentIdentity === "task" ? "Staging" : "Writing"} ${result.files.length} file${result.files.length !== 1 ? "s" : ""} ${agentIdentity === "task" ? "to staging for review" : "to the project now"}.`,
         );
-        await emitEvent(taskId, "editing_files", "Writing generated files…");
+        await emitEvent(
+          taskId,
+          "editing_files",
+          agentIdentity === "task"
+            ? "Staging generated files for review…"
+            : "Writing generated files…",
+        );
         for (const f of result.files) {
-          await emitEvent(taskId, "editing_files", `Writing ${f.path}`, f.path);
+          await emitEvent(
+            taskId,
+            "editing_files",
+            `${agentIdentity === "task" ? "Staging" : "Writing"} ${f.path}`,
+            f.path,
+          );
         }
-        await writeFiles(projectId, result.files, true);
+        if (agentIdentity === "task") {
+          stagingData = result.files.map((f) => ({
+            path: f.path,
+            content: f.content,
+            mimeType: f.mimeType,
+          }));
+        } else {
+          await writeFiles(projectId, result.files, true);
+        }
         diffSummary = computeBuildDiff(result.files);
 
         report = result.report;
@@ -1034,6 +1137,7 @@ export async function runJob(input: JobInput): Promise<void> {
         );
         await emitEvent(taskId, "reading_files", "Reading current project files…");
         const existingFiles = await loadFiles(projectId);
+        if (agentIdentity === "task") existingFilesSnapshot = existingFiles;
         await emitEvent(
           taskId,
           "reading_files",
@@ -1106,6 +1210,7 @@ export async function runJob(input: JobInput): Promise<void> {
               conversationHistory,
               knowledgeContext: knowledgeContext || undefined,
               unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+              planContext: input.planContext ?? null,
             });
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
@@ -1132,6 +1237,7 @@ export async function runJob(input: JobInput): Promise<void> {
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
             unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+            planContext: input.planContext ?? null,
           });
           wasEscalated = true;
           agentMode = refineEscalationMode;
@@ -1195,15 +1301,38 @@ export async function runJob(input: JobInput): Promise<void> {
 
         if (result.changedFiles.length > 0) {
           for (const f of result.changedFiles) {
-            await emitEvent(taskId, "editing_files", `Updating ${f.path}`, f.path);
+            await emitEvent(
+              taskId,
+              "editing_files",
+              agentIdentity === "task" ? `Staging ${f.path}` : `Updating ${f.path}`,
+              f.path,
+            );
           }
-          await writeFiles(projectId, result.changedFiles, false);
+          if (agentIdentity !== "task") {
+            await writeFiles(projectId, result.changedFiles, false);
+          }
         }
         if (result.removedPaths.length > 0) {
           for (const p of result.removedPaths) {
             await emitEvent(taskId, "editing_files", `Removing ${p}`, p);
           }
-          await deleteFiles(projectId, result.removedPaths);
+          if (agentIdentity !== "task") {
+            await deleteFiles(projectId, result.removedPaths);
+          }
+        }
+        if (agentIdentity === "task") {
+          // Build the full merged file set so the staging snapshot is self-contained
+          refineChangedFiles = result.changedFiles;
+          refineRemovedPaths = result.removedPaths;
+          const merged = [...existingFilesSnapshot];
+          for (const cf of result.changedFiles) {
+            const idx = merged.findIndex((f) => f.path === cf.path);
+            if (idx >= 0) merged[idx] = cf;
+            else merged.push(cf);
+          }
+          stagingData = merged
+            .filter((f) => !result.removedPaths.includes(f.path))
+            .map((f) => ({ path: f.path, content: f.content, mimeType: f.mimeType }));
         }
         diffSummary = computeRefineDiff(existingFiles, result.changedFiles, result.removedPaths);
 
@@ -1228,6 +1357,73 @@ export async function runJob(input: JobInput): Promise<void> {
       if (knowledgeApplied.length > 0) {
         report.knowledgeApplied = knowledgeApplied;
       }
+
+      // ── Task Agent staging gate ────────────────────────────────────────────
+      // If this job runs as the Task Agent, write files to stagingSnapshot
+      // instead of committing directly to project_files.
+      // Post-build hooks (version save, knowledge vault, audit) fire at apply time.
+      if (agentIdentity === "task") {
+        await db
+          .update(agentTasksTable)
+          .set({
+            status: "needs_review",
+            result: assistantSummary,
+            report,
+            stagingSnapshot: stagingData,
+            completedAt: sql`now()`,
+          })
+          .where(eq(agentTasksTable.id, taskId));
+
+        await emitEvent(
+          taskId,
+          "completed",
+          `Task Agent: ${stagingData.length} file(s) staged for review — apply or discard.`,
+        );
+
+        // Post a chat system message so the user sees the review card
+        const batchMetaStaging = queueBatchId
+          ? {
+              queueBatchId,
+              queueIndex: queueIndex ?? null,
+              queueTotalCount: queueTotalCount ?? null,
+            }
+          : {};
+        await db.insert(chatMessagesTable).values({
+          projectId,
+          role: "system",
+          content: assistantSummary,
+          agentMode,
+          planMode: false,
+          plan: {
+            kind: "report",
+            report,
+            taskId,
+            agentIdentity: "task",
+            needsReview: true,
+            ...batchMetaStaging,
+          } as unknown as Record<string, unknown>,
+        });
+
+        void writeKnowledge({
+          title: `Task Agent staged: "${userPrompt.slice(0, 60)}"`,
+          content: `Task Agent completed "${userPrompt.slice(0, 100)}" and staged ${stagingData.length} file(s) for review.`,
+          type: kind,
+          category: kind === "build" ? "build" : "refinement",
+          severity: "info",
+          projectId,
+          userId: project.ownerId,
+          relatedTaskId: taskId,
+          tags: ["task-agent", "staged"],
+        });
+
+        // Drain batch tasks but keep project queue blocked until apply/discard
+        void drainNextBatchTask(taskId).catch((err) =>
+          logger.warn({ err, taskId }, "Failed to drain next batch task (task agent staged)"),
+        );
+
+        return;
+      }
+      // ── End Task Agent staging gate ────────────────────────────────────────
 
       await emitEvent(
         taskId,
@@ -1708,6 +1904,238 @@ export async function runJob(input: JobInput): Promise<void> {
     lockClient.release();
     activeProjectJobs.delete(projectId);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task Agent: Apply & Discard staging snapshots
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Apply a Task Agent staging snapshot to the live project files.
+ * Called by POST /projects/:id/tasks/:taskId/apply.
+ * Fires all post-build hooks: version save, quality audit, knowledge vault,
+ * suggestion generation, credit deduction.
+ */
+export async function applyTaskAgentStaging(taskId: number, projectId: number): Promise<void> {
+  const [task] = await db
+    .select()
+    .from(agentTasksTable)
+    .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)))
+    .limit(1);
+  if (!task) throw new Error("Task not found");
+  if (task.status !== "needs_review")
+    throw new Error(`Task is in state "${task.status}", not needs_review`);
+  if (!task.stagingSnapshot || !Array.isArray(task.stagingSnapshot))
+    throw new Error("Task has no staging snapshot to apply");
+
+  const stagingFiles = task.stagingSnapshot as Array<{
+    path: string;
+    content: string;
+    mimeType: string;
+  }>;
+  const builderFiles: BuilderFile[] = stagingFiles.map((f) => ({
+    path: f.path,
+    content: f.content,
+    mimeType: f.mimeType,
+  }));
+
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
+  if (!project) throw new Error("Project not found");
+
+  const report = task.report as TaskReport | null;
+  const assistantSummary = task.result ?? `Task #${taskId} applied`;
+  const userPrompt = task.prompt ?? "";
+  const agentMode = (project.agentMode as AgentMode) ?? "power";
+
+  // Write staging files to project_files (full replace — staging is the intended state)
+  await writeFiles(projectId, builderFiles, true);
+
+  // Save version snapshot
+  const snapshot = await snapshotFilesForVersion(projectId);
+  const planSnapshot = await loadLatestPlanSnapshot(projectId);
+  const changelogEntry = `**Task Agent Apply**\n${assistantSummary.slice(0, 180)}`;
+  const [version] = await db
+    .insert(projectVersionsTable)
+    .values({
+      projectId,
+      label: `Apply Task #${taskId}`,
+      note: assistantSummary.slice(0, 200),
+      changelogEntry: changelogEntry.slice(0, 500),
+      filesSnapshot: snapshot,
+      planSnapshot: planSnapshot ?? undefined,
+    })
+    .returning();
+
+  const finalReport: TaskReport = {
+    ...(report ?? {
+      userRequest: userPrompt,
+      filesCreated: [],
+      filesChanged: [],
+      filesRemoved: [],
+      previewUpdated: true,
+      warnings: [],
+      integrationsNeeded: [],
+    }),
+    versionId: version?.id ?? null,
+  };
+
+  // Mark task completed + clear staging snapshot
+  await db
+    .update(agentTasksTable)
+    .set({
+      status: "completed",
+      report: finalReport,
+      stagingSnapshot: null,
+      completedAt: sql`now()`,
+    })
+    .where(eq(agentTasksTable.id, taskId));
+
+  // Update project status
+  await db
+    .update(projectsTable)
+    .set({
+      status: "testing",
+      lastTaskSummary: assistantSummary.slice(0, 140),
+      summary: assistantSummary,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(projectsTable.id, projectId));
+
+  // Extract page map
+  try {
+    await extractPageMap(projectId);
+  } catch (err) {
+    logger.warn({ err, projectId }, "Page map extraction failed after apply (non-fatal)");
+  }
+
+  // Drain queued tasks (the review gate is now open)
+  void drainNextProjectTask(projectId).catch((err) =>
+    logger.warn({ err, projectId }, "Failed to drain project task after apply"),
+  );
+  // Also drain the batch queue if this task belonged to a batch
+  if (task.queueBatchId) {
+    void drainNextBatchTask(taskId).catch((err) =>
+      logger.warn({ err, taskId }, "Failed to drain next batch task after apply"),
+    );
+  }
+
+  // Post-build hooks — quality audit (fire-and-forget)
+  if (version) {
+    const versionIdForAudit = version.id;
+    const taskIdForAudit = taskId;
+    setImmediate(() => {
+      void (async () => {
+        try {
+          const auditReport = runAudit(builderFiles);
+          await db
+            .update(projectVersionsTable)
+            .set({ auditReport })
+            .where(eq(projectVersionsTable.id, versionIdForAudit));
+          const [latestTask] = await db
+            .select({ report: agentTasksTable.report })
+            .from(agentTasksTable)
+            .where(eq(agentTasksTable.id, taskIdForAudit))
+            .limit(1);
+          const latestReport = latestTask?.report ?? finalReport;
+          await db
+            .update(agentTasksTable)
+            .set({ report: { ...latestReport, auditReport } })
+            .where(eq(agentTasksTable.id, taskIdForAudit));
+        } catch (err) {
+          logger.warn({ err, projectId }, "Quality audit failed after apply (non-fatal)");
+        }
+      })();
+    });
+  }
+
+  // Post-build suggestions
+  setImmediate(() => {
+    void generatePostBuildSuggestions(
+      projectId,
+      taskId,
+      project.name,
+      project.kind,
+      userPrompt,
+      assistantSummary,
+      snapshot.map((f) => f.path),
+      "",
+    ).catch((err) => logger.warn({ err, taskId }, "Post-apply suggestion generation failed"));
+  });
+
+  // Knowledge vault entry
+  void writeKnowledge({
+    title: `Task Agent applied: "${userPrompt.slice(0, 60)}"`,
+    content: `User approved and applied Task Agent staging for "${userPrompt.slice(0, 100)}". ${stagingFiles.length} file(s) promoted to live.`,
+    type: "refine",
+    category: "refinement",
+    severity: "info",
+    projectId,
+    userId: project.ownerId,
+    relatedTaskId: taskId,
+    relatedVersionId: version?.id,
+    tags: ["task-agent", "applied"],
+  });
+
+  // Credit deduction (post-success, non-fatal)
+  if (project.ownerId) {
+    const creditCost = CREDIT_COST[agentMode] ?? 1;
+    void deductCredits(project.ownerId, creditCost, {
+      type: "refine",
+      description: `Task Agent apply — Task #${taskId}, project ${projectId}`,
+      projectId,
+    }).catch((err) => logger.warn({ err }, "Credit deduction failed after apply (non-fatal)"));
+  }
+
+  logger.info({ taskId, projectId, fileCount: stagingFiles.length }, "Task Agent staging applied");
+}
+
+/**
+ * Discard a Task Agent staging snapshot.
+ * No project files are changed; the task moves to "discarded" status.
+ * Called by POST /projects/:id/tasks/:taskId/discard.
+ */
+export async function discardTaskAgentStaging(taskId: number, projectId: number): Promise<void> {
+  const [task] = await db
+    .select({
+      status: agentTasksTable.status,
+      projectId: agentTasksTable.projectId,
+      queueBatchId: agentTasksTable.queueBatchId,
+    })
+    .from(agentTasksTable)
+    .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)))
+    .limit(1);
+  if (!task) throw new Error("Task not found");
+  if (task.status !== "needs_review")
+    throw new Error(`Task is in state "${task.status}", not needs_review`);
+
+  await db
+    .update(agentTasksTable)
+    .set({ status: "discarded", stagingSnapshot: null, completedAt: sql`now()` })
+    .where(eq(agentTasksTable.id, taskId));
+
+  // Drain the project queue (discard opens the gate too)
+  void drainNextProjectTask(projectId).catch((err) =>
+    logger.warn({ err, projectId }, "Failed to drain project task after discard"),
+  );
+  // Also drain the batch queue if this task belonged to a batch
+  if (task.queueBatchId) {
+    void drainNextBatchTask(taskId).catch((err) =>
+      logger.warn({ err, taskId }, "Failed to drain next batch task after discard"),
+    );
+  }
+
+  void writeKnowledge({
+    title: `Task Agent discarded: Task #${taskId}`,
+    content: `User discarded Task Agent staging for Task #${taskId}. No files were changed.`,
+    type: "refine",
+    category: "refinement",
+    severity: "info",
+    projectId,
+    relatedTaskId: taskId,
+    tags: ["task-agent", "discarded"],
+  });
+
+  logger.info({ taskId, projectId }, "Task Agent staging discarded");
 }
 
 // ── Bounded-concurrency background job runner ──────────────────────────────────

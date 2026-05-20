@@ -1749,6 +1749,8 @@ export async function runBuildPipeline(args: {
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
   integrationContext?: string;
+  /** Structured plan from the Planning Agent — injected as a system message so the builder honours the plan exactly. */
+  planContext?: Record<string, unknown> | null;
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<BuilderResult> {
   const {
@@ -1759,6 +1761,7 @@ export async function runBuildPipeline(args: {
     conversationHistory,
     knowledgeContext,
     integrationContext,
+    planContext,
     onEvent,
   } = args;
 
@@ -1782,6 +1785,35 @@ export async function runBuildPipeline(args: {
       role: "system",
       content: integrationContext,
     });
+  }
+
+  if (planContext) {
+    const { sitemap, dataModel, integrations, goal, approach } = planContext as {
+      sitemap?: Array<{ name: string; route: string; purpose: string }>;
+      dataModel?: Array<{ table: string; fields: string[] }>;
+      integrations?: string[];
+      goal?: string;
+      approach?: string;
+    };
+    const planLines: string[] = [
+      "STRUCTURED PLAN from Planning Agent — follow this plan exactly when building:",
+    ];
+    if (goal) planLines.push(`Goal: ${goal}`);
+    if (approach) planLines.push(`Approach: ${approach}`);
+    if (sitemap && sitemap.length > 0) {
+      planLines.push(
+        `Pages/Routes:\n${sitemap.map((p) => `  • ${p.name} (${p.route}): ${p.purpose}`).join("\n")}`,
+      );
+    }
+    if (dataModel && dataModel.length > 0) {
+      planLines.push(
+        `Data model:\n${dataModel.map((m) => `  • ${m.table}: ${m.fields.join(", ")}`).join("\n")}`,
+      );
+    }
+    if (integrations && integrations.length > 0) {
+      planLines.push(`Integrations: ${integrations.join(", ")}`);
+    }
+    messages.push({ role: "system", content: planLines.join("\n") });
   }
 
   messages.push({
@@ -1951,6 +1983,8 @@ export async function runRefinePipeline(args: {
   knowledgeContext?: string;
   integrationContext?: string;
   unchangedFilesHint?: string[];
+  /** Structured plan from the Planning Agent — injected as a system message so the builder honours the plan exactly. */
+  planContext?: Record<string, unknown> | null;
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<{
   changedFiles: BuilderFile[];
@@ -1972,6 +2006,7 @@ export async function runRefinePipeline(args: {
     knowledgeContext,
     integrationContext,
     unchangedFilesHint,
+    planContext,
     onEvent,
   } = args;
 
@@ -1997,6 +2032,35 @@ export async function runRefinePipeline(args: {
       role: "system",
       content: integrationContext,
     });
+  }
+
+  if (planContext) {
+    const { sitemap, dataModel, integrations, goal, approach } = planContext as {
+      sitemap?: Array<{ name: string; route: string; purpose: string }>;
+      dataModel?: Array<{ table: string; fields: string[] }>;
+      integrations?: string[];
+      goal?: string;
+      approach?: string;
+    };
+    const planLines: string[] = [
+      "STRUCTURED PLAN from Planning Agent — follow this plan exactly when applying changes:",
+    ];
+    if (goal) planLines.push(`Goal: ${goal}`);
+    if (approach) planLines.push(`Approach: ${approach}`);
+    if (sitemap && sitemap.length > 0) {
+      planLines.push(
+        `Pages/Routes:\n${sitemap.map((p) => `  • ${p.name} (${p.route}): ${p.purpose}`).join("\n")}`,
+      );
+    }
+    if (dataModel && dataModel.length > 0) {
+      planLines.push(
+        `Data model:\n${dataModel.map((m) => `  • ${m.table}: ${m.fields.join(", ")}`).join("\n")}`,
+      );
+    }
+    if (integrations && integrations.length > 0) {
+      planLines.push(`Integrations: ${integrations.join(", ")}`);
+    }
+    messages.push({ role: "system", content: planLines.join("\n") });
   }
 
   messages.push({
@@ -3349,14 +3413,119 @@ function generateMobileFallbackPreview(
 </html>`;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Planning Agent — project investigation (deterministic, no AI)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ProjectInvestigationResult {
+  fileCount: number;
+  detectedPages: string[];
+  detectedLibraries: string[];
+  detectedPlatform: string;
+  summary: string;
+}
+
+/**
+ * Deterministically analyses the current project files and returns a brief
+ * structured summary. Called at the start of runPlanPipeline so the Planning
+ * Agent can describe what already exists in the project. No AI call — derived
+ * from file content alone.
+ */
+export function runProjectInvestigation(files: BuilderFile[]): ProjectInvestigationResult {
+  const fileCount = files.length;
+
+  // Detect platform from file extensions / presence of known config files
+  const paths = files.map((f) => f.path);
+  const isMobile =
+    paths.some((p) => p === "app.json" || p === "app/_layout.tsx" || p === "app/index.tsx") ||
+    paths.some((p) => p.endsWith(".tsx") || p.endsWith(".ts"));
+  const detectedPlatform = isMobile ? "mobile (Expo)" : "web (HTML/CSS/JS)";
+
+  // Detect pages: look for HTML <a href> tags and file names that look like pages
+  const detectedPages: string[] = [];
+  const pagePathRe = /^(pages?\/|screens?\/|views?\/|routes?\/)/i;
+  const htmlFileRe = /\.html?$/i;
+  for (const f of files) {
+    if (htmlFileRe.test(f.path)) {
+      // Extract page name from filename
+      const name =
+        f.path
+          .split("/")
+          .pop()
+          ?.replace(/\.html?$/i, "") ?? f.path;
+      if (name && name !== "index") detectedPages.push(name);
+    } else if (pagePathRe.test(f.path)) {
+      const name =
+        f.path
+          .split("/")
+          .pop()
+          ?.replace(/\.[^.]+$/, "") ?? f.path;
+      if (name && name !== "index" && name !== "_layout" && !detectedPages.includes(name)) {
+        detectedPages.push(name);
+      }
+    }
+  }
+  // Also scan HTML content for <a href> nav links
+  for (const f of files) {
+    if (!htmlFileRe.test(f.path) && !f.path.endsWith(".html")) continue;
+    const linkRe = /href=["']([^"'#?]+\.html?)['"]/gi;
+    let m: RegExpExecArray | null;
+    while ((m = linkRe.exec(f.content)) !== null) {
+      const page = m[1]?.replace(/\.html?$/i, "") ?? "";
+      if (page && !detectedPages.includes(page)) detectedPages.push(page);
+    }
+  }
+
+  // Detect libraries: scan CDN script src attributes
+  const cdnRe = /src=["']https?:\/\/(?:cdn\.|unpkg\.|esm\.sh\/|jspm\.dev\/)?[^"']*\/([^/"'@]+)/gi;
+  const libSet = new Set<string>();
+  for (const f of files) {
+    let m: RegExpExecArray | null;
+    while ((m = cdnRe.exec(f.content)) !== null) {
+      const lib = m[1]?.toLowerCase().split("@")[0]?.split(".")[0];
+      if (lib && lib.length > 1 && !["cdn", "js", "min", "umd", "esm", "www"].includes(lib)) {
+        libSet.add(lib);
+      }
+    }
+    // Also scan import statements for well-known libraries
+    const importRe = /from ["']([a-z@][a-z0-9-/@.]+)["']/g;
+    while ((m = importRe.exec(f.content)) !== null) {
+      const lib = m[1]?.split("/")[0] ?? "";
+      if (lib && !lib.startsWith(".")) libSet.add(lib);
+    }
+  }
+  const detectedLibraries = [...libSet].slice(0, 12);
+
+  // Build human-readable summary
+  const parts: string[] = [`${fileCount} file${fileCount !== 1 ? "s" : ""}`];
+  if (detectedPages.length > 0) {
+    parts.push(
+      `${detectedPages.length} page${detectedPages.length !== 1 ? "s" : ""} (${detectedPages.slice(0, 4).join(", ")}${detectedPages.length > 4 ? "…" : ""})`,
+    );
+  }
+  if (detectedLibraries.length > 0) {
+    parts.push(`libraries: ${detectedLibraries.slice(0, 5).join(", ")}`);
+  }
+  const summary = fileCount === 0 ? "No files yet — this is a fresh project." : parts.join(" · ");
+
+  return { fileCount, detectedPages, detectedLibraries, detectedPlatform, summary };
+}
+
 export async function runPlanPipeline(args: {
   projectName: string;
   projectKind: string;
   userPrompt: string;
   agentMode: AgentMode;
   conversationHistory?: ConversationTurn[];
-}): Promise<{ summary: string; plan: Record<string, unknown> | null }> {
-  const { projectName, projectKind, userPrompt, agentMode, conversationHistory } = args;
+  currentFiles?: BuilderFile[];
+}): Promise<{
+  summary: string;
+  plan: Record<string, unknown> | null;
+  currentState: ProjectInvestigationResult | null;
+  recommendedAgent: "planning" | "task" | "main";
+}> {
+  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, currentFiles } =
+    args;
 
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(projectKind);
   const planPrompt = isMobile ? MOBILE_PLAN_SYSTEM_PROMPT : PLAN_SYSTEM_PROMPT;
@@ -3405,11 +3574,33 @@ export async function runPlanPipeline(args: {
     plan.pages = (plan.sitemap as Array<{ name: string }>).map((s) => s.name);
   }
 
+  // Run project investigation (deterministic — no AI call)
+  const currentState =
+    currentFiles && currentFiles.length > 0 ? runProjectInvestigation(currentFiles) : null;
+
+  // Attach currentState to the plan object so the frontend plan card can render it
+  if (plan && currentState) {
+    plan.currentState = currentState as unknown as Record<string, unknown>;
+  }
+
+  // Derive recommended agent from plan complexity score:
+  //   score 1-4 → main (fast direct edit)
+  //   score 5-7 → task (staging gate — worth reviewing)
+  //   score 8-10 or no score → task (complex, definitely stage it)
+  const complexityScore =
+    typeof plan?.complexityScore === "number" ? plan.complexityScore : (currentFiles?.length ?? 0);
+  const recommendedAgent: "planning" | "task" | "main" = complexityScore <= 4 ? "main" : "task";
+
+  // Attach recommended agent to plan so frontend can render the badge
+  if (plan) {
+    plan.recommendedAgent = recommendedAgent;
+  }
+
   const summary =
     typeof plan?.summary === "string"
       ? plan.summary
-      : "Here's a plan. Tell me to build it in the Main Agent or run it in the Background Agent.";
-  return { summary, plan };
+      : "Here's a plan. Tell me to build it with the recommended agent.";
+  return { summary, plan, currentState, recommendedAgent };
 }
 
 export function normalizePath(p: string): string {

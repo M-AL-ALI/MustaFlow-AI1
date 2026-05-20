@@ -5,6 +5,7 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { ChatMessageInputAgentIdentity } from './chatMessageInputAgentIdentity';
 import type { ChatMessageInputAgentMode } from './chatMessageInputAgentMode';
 
 export interface ChatMessageInput {
@@ -13,4 +14,6 @@ export interface ChatMessageInput {
   agentMode: ChatMessageInputAgentMode;
   planMode: boolean;
   background?: boolean;
+  /** Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically. */
+  agentIdentity?: ChatMessageInputAgentIdentity;
 }

@@ -15,7 +15,9 @@ export const AgentTaskStatus = {
   building: 'building',
   testing: 'testing',
   needs_approval: 'needs_approval',
+  needs_review: 'needs_review',
   completed: 'completed',
   failed: 'failed',
   canceled: 'canceled',
+  discarded: 'discarded',
 } as const;

@@ -16,10 +16,23 @@ import {
   Check,
   Ban,
   RotateCcw,
+  Cpu,
+  Zap,
+  Navigation,
+  Loader2,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
-import { useCancelTask, getListTasksQueryKey } from "@workspace/api-client-react";
+import {
+  useCancelTask,
+  getListTasksQueryKey,
+  useApplyTaskStaging,
+  useDiscardTaskStaging,
+  getListMessagesQueryKey,
+  getGetProjectQueryKey,
+  getListProjectFilesQueryKey,
+  getListVersionsQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 type TaskReport = {
@@ -27,6 +40,12 @@ type TaskReport = {
   filesCreated: string[];
   filesChanged: string[];
   filesRemoved: string[];
+  /** Alias used by Task Agent staging gate */
+  filesModified?: string[];
+  /** Alias used by Task Agent staging gate */
+  filesDeleted?: string[];
+  /** Summary of what changed (Task Agent staging gate) */
+  summary?: string;
   filesUnchanged?: string[];
   previewUpdated: boolean;
   warnings: string[];
@@ -46,6 +65,7 @@ type TaskReport = {
     severity: "error" | "warning";
     cve?: string;
   }>;
+  modulesWired?: Array<{ id: string }>;
 };
 
 type StructuredPlan = {
@@ -63,7 +83,13 @@ type StructuredPlan = {
 };
 
 type ChatPlanPayload =
-  | { kind: "report"; report: TaskReport; taskId?: number }
+  | {
+      kind: "report";
+      report: TaskReport;
+      taskId?: number;
+      agentIdentity?: string;
+      needsReview?: boolean;
+    }
   | { kind: "task-queued"; taskId: number }
   | { kind: "task-done"; taskId: number }
   | { kind: "error"; message: string; suggestions?: string[] }
@@ -77,6 +103,7 @@ type Message = {
   planMode: boolean;
   plan?: ChatPlanPayload | null | Record<string, unknown>;
   createdAt: string;
+  agentIdentity?: string | null;
 };
 
 function getDateLabel(dateStr: string): string {
@@ -102,6 +129,28 @@ function highlightText(text: string, query: string): React.ReactNode {
     ) : (
       part
     ),
+  );
+}
+
+function AgentBadge({ identity }: { identity: string }) {
+  if (identity === "planning") {
+    return (
+      <span className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium shrink-0">
+        <Navigation className="h-2.5 w-2.5" /> Planning
+      </span>
+    );
+  }
+  if (identity === "task") {
+    return (
+      <span className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium shrink-0">
+        <Cpu className="h-2.5 w-2.5" /> Task
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 font-medium shrink-0">
+      <Zap className="h-2.5 w-2.5" /> Main
+    </span>
   );
 }
 
@@ -414,6 +463,16 @@ function MessageRow({
           {isUser ? "You" : "AI"}
         </span>
         <AgentModePill mode={msg.agentMode} />
+        {!isUser && msg.agentIdentity && <AgentBadge identity={msg.agentIdentity} />}
+        {!isUser &&
+          !msg.agentIdentity &&
+          (() => {
+            const payloadAgentIdentity =
+              planPayload && typeof planPayload === "object"
+                ? (planPayload as { agentIdentity?: string }).agentIdentity
+                : undefined;
+            return payloadAgentIdentity ? <AgentBadge identity={payloadAgentIdentity} /> : null;
+          })()}
         {msg.planMode && (
           <span className="text-[9px] px-1 py-0.5 rounded bg-secondary/10 text-secondary border border-secondary/20 font-medium">
             Plan
@@ -440,23 +499,34 @@ function MessageRow({
         {/* Expandable report chip */}
         {isReport && (
           <div className="mt-2">
-            <button
-              onClick={() => setReportExpanded((v) => !v)}
-              className="flex items-center gap-1.5 text-[10px] font-medium px-2 py-1 rounded-md bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/15 transition-colors"
-            >
-              <CheckCircle2 className="h-3 w-3" />
-              View build report
-              {reportExpanded ? (
-                <ChevronDown className="h-3 w-3 ml-0.5" />
-              ) : (
-                <ChevronRight className="h-3 w-3 ml-0.5" />
-              )}
-            </button>
-            {reportExpanded && (
-              <InlineReportCard
-                report={(planPayload as { kind: "report"; report: TaskReport }).report}
+            {(planPayload as { needsReview?: boolean }).needsReview ? (
+              <TaskReviewCard
+                projectId={projectId}
+                taskId={(planPayload as { taskId?: number }).taskId ?? 0}
+                report={(planPayload as { report: TaskReport }).report}
                 onViewFile={onViewFile}
               />
+            ) : (
+              <>
+                <button
+                  onClick={() => setReportExpanded((v) => !v)}
+                  className="flex items-center gap-1.5 text-[10px] font-medium px-2 py-1 rounded-md bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/15 transition-colors"
+                >
+                  <CheckCircle2 className="h-3 w-3" />
+                  View build report
+                  {reportExpanded ? (
+                    <ChevronDown className="h-3 w-3 ml-0.5" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3 ml-0.5" />
+                  )}
+                </button>
+                {reportExpanded && (
+                  <InlineReportCard
+                    report={(planPayload as { kind: "report"; report: TaskReport }).report}
+                    onViewFile={onViewFile}
+                  />
+                )}
+              </>
             )}
           </div>
         )}
@@ -542,6 +612,199 @@ function MessageRow({
               </div>
             );
           })()}
+      </div>
+    </div>
+  );
+}
+
+function TaskReviewCard({
+  projectId,
+  taskId,
+  report,
+  onViewFile,
+}: {
+  projectId: number;
+  taskId: number;
+  report: TaskReport;
+  onViewFile?: (path: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const applyStaging = useApplyTaskStaging();
+  const discardStaging = useDiscardTaskStaging();
+  const [applied, setApplied] = useState(false);
+  const [discarded, setDiscarded] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+
+  const allChanged = [
+    ...(report.filesCreated ?? []),
+    ...(report.filesModified ?? []),
+    ...(report.filesDeleted ?? []),
+  ];
+
+  if (applied) {
+    return (
+      <div className="mt-2 bg-green-500/10 border border-green-500/20 rounded-lg p-2.5 text-[11px] flex items-center gap-2 text-green-400">
+        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+        Changes applied — project updated
+      </div>
+    );
+  }
+  if (discarded) {
+    return (
+      <div className="mt-2 bg-muted border border-border/40 rounded-lg p-2.5 text-[11px] flex items-center gap-2 text-muted-foreground">
+        <Ban className="h-3.5 w-3.5 shrink-0" />
+        Changes discarded — no files were modified
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 bg-background border border-amber-500/30 rounded-xl text-[11px] overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-2.5 py-2 bg-amber-500/10 border-b border-amber-500/20">
+        <Cpu className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+        <span className="font-semibold text-amber-400 flex-1">Task Agent — Review Required</span>
+        <span className="text-[9px] text-amber-400/60 font-medium">Staged · not applied</span>
+      </div>
+      {/* File summary */}
+      <div className="px-2.5 py-2 space-y-1">
+        {(report.filesCreated ?? []).length > 0 && (
+          <div>
+            <span className="text-[9px] font-semibold text-muted-foreground/60 uppercase tracking-wide">
+              Created
+            </span>
+            <div className="flex flex-wrap gap-1 mt-0.5">
+              {(report.filesCreated ?? []).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => onViewFile?.(f)}
+                  className="text-[9px] px-1.5 py-0.5 bg-green-500/10 border border-green-500/20 rounded font-mono text-green-400 hover:bg-green-500/20 transition-colors"
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {(report.filesModified ?? []).length > 0 && (
+          <div>
+            <span className="text-[9px] font-semibold text-muted-foreground/60 uppercase tracking-wide">
+              Modified
+            </span>
+            <div className="flex flex-wrap gap-1 mt-0.5">
+              {(report.filesModified ?? []).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => onViewFile?.(f)}
+                  className="text-[9px] px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded font-mono text-yellow-400 hover:bg-yellow-500/20 transition-colors"
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {(report.filesDeleted ?? []).length > 0 && (
+          <div>
+            <span className="text-[9px] font-semibold text-muted-foreground/60 uppercase tracking-wide">
+              Deleted
+            </span>
+            <div className="flex flex-wrap gap-1 mt-0.5">
+              {(report.filesDeleted ?? []).map((f) => (
+                <span
+                  key={f}
+                  className="text-[9px] px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 rounded font-mono text-red-400 line-through"
+                >
+                  {f}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {allChanged.length === 0 && (
+          <p className="text-muted-foreground">No file changes in staging snapshot.</p>
+        )}
+      </div>
+      {/* Toggle report */}
+      {report.summary && (
+        <div className="border-t border-border/40">
+          <button
+            onClick={() => setReportOpen((v) => !v)}
+            className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {reportOpen ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
+            What changed
+          </button>
+          {reportOpen && (
+            <div className="px-2.5 pb-2 text-[11px] text-muted-foreground leading-relaxed">
+              {report.summary}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Actions */}
+      <div className="flex items-center gap-2 px-2.5 py-2 border-t border-border/40 bg-muted/20">
+        <button
+          onClick={() => {
+            applyStaging.mutate(
+              { id: projectId, taskId },
+              {
+                onSuccess: () => {
+                  setApplied(true);
+                  void queryClient.invalidateQueries({
+                    queryKey: getListMessagesQueryKey(projectId),
+                  });
+                  void queryClient.invalidateQueries({
+                    queryKey: getGetProjectQueryKey(projectId),
+                  });
+                  void queryClient.invalidateQueries({
+                    queryKey: getListProjectFilesQueryKey(projectId),
+                  });
+                  void queryClient.invalidateQueries({
+                    queryKey: getListVersionsQueryKey(projectId),
+                  });
+                },
+              },
+            );
+          }}
+          disabled={applyStaging.isPending || discardStaging.isPending}
+          className="flex-1 flex items-center justify-center gap-1.5 h-7 rounded-lg bg-primary text-primary-foreground text-[11px] font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+        >
+          {applyStaging.isPending ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Check className="h-3 w-3" />
+          )}
+          Apply changes
+        </button>
+        <button
+          onClick={() => {
+            discardStaging.mutate(
+              { id: projectId, taskId },
+              {
+                onSuccess: () => {
+                  setDiscarded(true);
+                  void queryClient.invalidateQueries({
+                    queryKey: getListMessagesQueryKey(projectId),
+                  });
+                },
+              },
+            );
+          }}
+          disabled={applyStaging.isPending || discardStaging.isPending}
+          className="flex items-center gap-1.5 h-7 px-3 rounded-lg border border-border text-muted-foreground text-[11px] font-medium hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50"
+        >
+          {discardStaging.isPending ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <RotateCcw className="h-3 w-3" />
+          )}
+          Discard
+        </button>
       </div>
     </div>
   );

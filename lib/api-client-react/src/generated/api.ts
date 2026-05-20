@@ -45,6 +45,8 @@ import type {
   DuplicateProjectResult,
   FileSearchResult,
   GetAdminAuditLogParams,
+  GetAgentRouting200,
+  GetAgentRoutingParams,
   GetPublishReadinessParams,
   GetSecretAuditLogParams,
   GithubPushInput,
@@ -1417,6 +1419,239 @@ export const useCancelTask = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getCancelTaskMutationOptions(options));
     }
+
+export const getApplyTaskStagingUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}/apply`
+}
+
+/**
+ * @summary Apply Task Agent staging snapshot to live project files
+ */
+export const applyTaskStaging = async (id: number,
+    taskId: number, options?: RequestInit): Promise<AgentTask> => {
+
+  return customFetch<AgentTask>(getApplyTaskStagingUrl(id,taskId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApplyTaskStagingMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyTaskStaging>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyTaskStaging>>, TError,{id: number;taskId: number}, TContext> => {
+
+const mutationKey = ['applyTaskStaging'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyTaskStaging>>, {id: number;taskId: number}> = (props) => {
+          const {id,taskId} = props ?? {};
+
+          return  applyTaskStaging(id,taskId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyTaskStagingMutationResult = NonNullable<Awaited<ReturnType<typeof applyTaskStaging>>>
+
+    export type ApplyTaskStagingMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Apply Task Agent staging snapshot to live project files
+ */
+export const useApplyTaskStaging = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyTaskStaging>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof applyTaskStaging>>,
+        TError,
+        {id: number;taskId: number},
+        TContext
+      > => {
+      return useMutation(getApplyTaskStagingMutationOptions(options));
+    }
+
+export const getDiscardTaskStagingUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}/discard`
+}
+
+/**
+ * @summary Discard Task Agent staging snapshot — no files changed
+ */
+export const discardTaskStaging = async (id: number,
+    taskId: number, options?: RequestInit): Promise<AgentTask> => {
+
+  return customFetch<AgentTask>(getDiscardTaskStagingUrl(id,taskId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getDiscardTaskStagingMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardTaskStaging>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof discardTaskStaging>>, TError,{id: number;taskId: number}, TContext> => {
+
+const mutationKey = ['discardTaskStaging'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof discardTaskStaging>>, {id: number;taskId: number}> = (props) => {
+          const {id,taskId} = props ?? {};
+
+          return  discardTaskStaging(id,taskId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DiscardTaskStagingMutationResult = NonNullable<Awaited<ReturnType<typeof discardTaskStaging>>>
+
+    export type DiscardTaskStagingMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Discard Task Agent staging snapshot — no files changed
+ */
+export const useDiscardTaskStaging = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardTaskStaging>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof discardTaskStaging>>,
+        TError,
+        {id: number;taskId: number},
+        TContext
+      > => {
+      return useMutation(getDiscardTaskStagingMutationOptions(options));
+    }
+
+export const getGetAgentRoutingUrl = (id: number,
+    params?: GetAgentRoutingParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/agent-routing?${stringifiedParams}` : `/api/projects/${id}/agent-routing`
+}
+
+/**
+ * @summary Get recommended agent identity for a prompt
+ */
+export const getAgentRouting = async (id: number,
+    params?: GetAgentRoutingParams, options?: RequestInit): Promise<GetAgentRouting200> => {
+
+  return customFetch<GetAgentRouting200>(getGetAgentRoutingUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAgentRoutingQueryKey = (id: number,
+    params?: GetAgentRoutingParams,) => {
+    return [
+    `/api/projects/${id}/agent-routing`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAgentRoutingQueryOptions = <TData = Awaited<ReturnType<typeof getAgentRouting>>, TError = ErrorType<unknown>>(id: number,
+    params?: GetAgentRoutingParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAgentRouting>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAgentRoutingQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAgentRouting>>> = ({ signal }) => getAgentRouting(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAgentRouting>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAgentRoutingQueryResult = NonNullable<Awaited<ReturnType<typeof getAgentRouting>>>
+export type GetAgentRoutingQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get recommended agent identity for a prompt
+ */
+
+export function useGetAgentRouting<TData = Awaited<ReturnType<typeof getAgentRouting>>, TError = ErrorType<unknown>>(
+ id: number,
+    params?: GetAgentRoutingParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAgentRouting>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAgentRoutingQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getSubmitTaskFeedbackUrl = (id: number,
     taskId: number,) => {

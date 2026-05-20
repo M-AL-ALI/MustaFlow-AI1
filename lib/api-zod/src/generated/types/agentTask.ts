@@ -5,8 +5,10 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { AgentTaskAgentIdentity } from './agentTaskAgentIdentity';
 import type { AgentTaskKind } from './agentTaskKind';
 import type { AgentTaskReport } from './agentTaskReport';
+import type { AgentTaskStagingSnapshot } from './agentTaskStagingSnapshot';
 import type { AgentTaskStatus } from './agentTaskStatus';
 import type { AgentTaskUserFeedback } from './agentTaskUserFeedback';
 
@@ -16,6 +18,13 @@ export interface AgentTask {
   title: string;
   kind: AgentTaskKind;
   status: AgentTaskStatus;
+  /** Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
+  agentIdentity?: AgentTaskAgentIdentity;
+  /**
+     * Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.
+     * @nullable
+     */
+  stagingSnapshot?: AgentTaskStagingSnapshot;
   /** @nullable */
   prompt?: string | null;
   /** @nullable */
