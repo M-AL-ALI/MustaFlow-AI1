@@ -12,6 +12,7 @@ import {
   ArrowDown,
   ExternalLink,
   Lightbulb,
+  ShieldAlert,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -32,6 +33,13 @@ type TaskReport = {
   }>;
   nextRecommendation?: string;
   codeSmells?: string[];
+  securityNotices?: Array<{
+    packageName: string;
+    description: string;
+    upgradeTo: string;
+    severity: "error" | "warning";
+    cve?: string;
+  }>;
 };
 
 type StructuredPlan = {
@@ -118,6 +126,7 @@ function InlineReportCard({
   onViewFile?: (path: string) => void;
 }) {
   const [smellsOpen, setSmellsOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
   return (
     <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
       <div className="flex items-center gap-2 font-semibold text-foreground">
@@ -203,6 +212,50 @@ function InlineReportCard({
           <div className="font-semibold text-yellow-500 flex items-center gap-1 text-[10px]">
             <AlertTriangle className="h-3 w-3" /> {report.warnings.length} warning(s)
           </div>
+        </div>
+      )}
+      {report.securityNotices && report.securityNotices.length > 0 && (
+        <div className="pt-1.5 border-t border-orange-500/20">
+          <button
+            className="w-full flex items-center gap-1.5 text-[10px] font-semibold text-orange-400 hover:text-orange-300 transition-colors"
+            onClick={() => setSecurityOpen((o) => !o)}
+          >
+            <ShieldAlert className="h-3 w-3 shrink-0" />
+            <span>Security notices ({report.securityNotices.length})</span>
+            {securityOpen ? (
+              <ChevronDown className="h-3 w-3 ml-auto shrink-0" />
+            ) : (
+              <ChevronRight className="h-3 w-3 ml-auto shrink-0" />
+            )}
+          </button>
+          {securityOpen && (
+            <ul className="mt-1.5 space-y-2 pl-1">
+              {report.securityNotices.map((notice, i) => (
+                <li key={i} className="text-[10px] leading-relaxed">
+                  <div className="flex items-center gap-1 font-semibold text-orange-400/90">
+                    <span
+                      className={cn(
+                        "inline-block px-1 rounded text-[9px] font-bold uppercase",
+                        notice.severity === "error"
+                          ? "bg-red-500/15 text-red-400"
+                          : "bg-orange-500/15 text-orange-400",
+                      )}
+                    >
+                      {notice.severity}
+                    </span>
+                    {notice.packageName}
+                    {notice.cve && (
+                      <span className="text-muted-foreground font-normal">({notice.cve})</span>
+                    )}
+                  </div>
+                  <p className="text-muted-foreground mt-0.5">{notice.description}</p>
+                  <p className="text-muted-foreground/70 mt-0.5">
+                    Replace with: <span className="font-mono">{notice.upgradeTo}</span>
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {report.codeSmells && report.codeSmells.length > 0 && (

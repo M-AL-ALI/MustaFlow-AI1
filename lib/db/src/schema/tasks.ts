@@ -23,6 +23,13 @@ export type TaskReport = {
   modulesWired?: Array<{ id: string; name: string; secretsConsumed: string[] }>;
   codeSmells?: string[];
   cdnUpgrades?: string[];
+  securityNotices?: Array<{
+    packageName: string;
+    description: string;
+    upgradeTo: string;
+    severity: "error" | "warning";
+    cve?: string;
+  }>;
   auditReport?: {
     findings: Array<{
       category: "accessibility" | "seo" | "performance" | "security";

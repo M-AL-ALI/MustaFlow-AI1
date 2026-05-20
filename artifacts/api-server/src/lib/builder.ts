@@ -254,6 +254,47 @@ function modelFor(mode: AgentMode): string {
 }
 
 /**
+ * Extract all external CDN URLs referenced via src or href attributes in a file's content.
+ * Only returns absolute https:// URLs.
+ */
+function extractCdnUrls(content: string): string[] {
+  const urls: string[] = [];
+  const pattern = /(?:src|href)=["'](https?:\/\/[^"']+)["']/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(content)) !== null) {
+    if (match[1]) urls.push(match[1]);
+  }
+  return urls;
+}
+
+/**
+ * Scan all HTML/JS files in a file list for CDN vulnerabilities and return structured notices.
+ */
+function scanFilesForCdnIssues(
+  files: BuilderFile[],
+): NonNullable<TaskReport["securityNotices"]> {
+  const allUrls: string[] = [];
+  for (const f of files) {
+    if (
+      f.mimeType === "text/html" ||
+      f.mimeType === "text/javascript" ||
+      f.mimeType === "application/javascript"
+    ) {
+      allUrls.push(...extractCdnUrls(f.content));
+    }
+  }
+  const unique = [...new Set(allUrls)];
+  const findings = scanCdnUrls(unique);
+  return findings.map((f) => ({
+    packageName: f.packageName,
+    description: f.description,
+    upgradeTo: f.upgradeTo,
+    severity: f.severity,
+    ...(f.cve ? { cve: f.cve } : {}),
+  }));
+}
+
+/**
  * Pro-mode two-stage generation: lightweight planning micro-call (gpt-5-mini, max 300 tokens)
  * that outputs the intended file list and each file's responsibility.
  * Inject this outline as a constraint into the main generation prompt to reduce
@@ -1822,6 +1863,7 @@ export async function runBuildPipeline(args: {
   const cdnUpgrades = cdnUpgradesRaw.map(
     (u) => `Auto-upgraded ${u.packageName} CDN from v${u.fromVersion} to v${u.toVersion}`,
   );
+  const securityNotices = scanFilesForCdnIssues(files);
 
   const report: TaskReport = {
     userRequest: userPrompt,
@@ -1834,6 +1876,7 @@ export async function runBuildPipeline(args: {
     integrationsNeeded: blueprint.integrationsNeeded ?? [],
     nextRecommendation,
     ...(cdnUpgrades.length > 0 ? { cdnUpgrades } : {}),
+    ...(securityNotices.length > 0 ? { securityNotices } : {}),
   };
 
   const correctionPasses = !validation.passed ? 1 : 0;
@@ -2108,6 +2151,15 @@ export async function runRefinePipeline(args: {
     .filter((f) => existingPaths.has(f.path))
     .map((f) => f.path);
 
+  // Scan the full merged project state (existing + changed, minus removed) for CDN issues
+  const removedSet = new Set(removedPaths);
+  const changedPathSet = new Set(finalChangedFiles.map((f) => f.path));
+  const mergedFiles = [
+    ...existingFiles.filter((f) => !removedSet.has(f.path) && !changedPathSet.has(f.path)),
+    ...finalChangedFiles,
+  ];
+  const securityNotices = scanFilesForCdnIssues(mergedFiles);
+
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: null,
@@ -2119,6 +2171,7 @@ export async function runRefinePipeline(args: {
     integrationsNeeded,
     nextRecommendation,
     ...(refineCdnUpgrades.length > 0 ? { cdnUpgrades: refineCdnUpgrades } : {}),
+    ...(securityNotices.length > 0 ? { securityNotices } : {}),
   };
 
   return {
