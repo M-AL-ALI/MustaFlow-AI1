@@ -138,6 +138,142 @@ describe("scanCdnUrls — Vue.js (EOL warning)", () => {
   });
 });
 
+describe("scanCdnUrls — React (legacy version warning)", () => {
+  it("flags React 15.x from unpkg as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://unpkg.com/react@15.7.0/umd/react.production.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].packageName).toBe("React");
+    expect(findings[0].version).toBe("15.7.0");
+    expect(findings[0].upgradeTo).toBe("18.x");
+  });
+
+  it("flags React 16.13.1 (< 16.14.0) from jsdelivr as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://cdn.jsdelivr.net/npm/react@16.13.1/umd/react.production.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("16.13.1");
+  });
+
+  it("flags React 16.8.0 from cdnjs as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://cdnjs.cloudflare.com/ajax/libs/react/16.8.0/umd/react.production.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("16.8.0");
+  });
+
+  it("does not flag React 16.14.0 (safe threshold)", () => {
+    const findings = scanCdnUrls([
+      "https://unpkg.com/react@16.14.0/umd/react.production.min.js",
+    ]);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("does not flag React 18.x (current recommended)", () => {
+    const findings = scanCdnUrls([
+      "https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js",
+    ]);
+    expect(findings).toHaveLength(0);
+  });
+});
+
+describe("scanCdnUrls — D3.js (prototype pollution warning)", () => {
+  it("flags D3 v5 from unpkg as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://unpkg.com/d3@5.16.0/dist/d3.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].packageName).toBe("D3.js");
+    expect(findings[0].version).toBe("5.16.0");
+    expect(findings[0].upgradeTo).toBe("7.x");
+  });
+
+  it("flags D3 v6 from jsdelivr as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://cdn.jsdelivr.net/npm/d3@6.7.0/dist/d3.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("6.7.0");
+  });
+
+  it("flags D3 v4 from cdnjs as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("4.13.0");
+  });
+
+  it("flags D3 from d3js.org CDN as a warning", () => {
+    const findings = scanCdnUrls(["https://d3js.org/d3.v5.min.js"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("5");
+  });
+
+  it("does not flag D3 v7 (safe threshold)", () => {
+    const findings = scanCdnUrls([
+      "https://unpkg.com/d3@7.0.0/dist/d3.min.js",
+    ]);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("does not flag D3 7.9.x (current recommended)", () => {
+    const findings = scanCdnUrls([
+      "https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js",
+    ]);
+    expect(findings).toHaveLength(0);
+  });
+});
+
+describe("scanCdnUrls — Moment.js (EOL warning)", () => {
+  it("flags any Moment.js version from unpkg as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://unpkg.com/moment@2.30.1/moment.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].packageName).toBe("Moment.js");
+    expect(findings[0].version).toBe("2.30.1");
+    expect(findings[0].upgradeTo).toBe("Luxon or date-fns");
+  });
+
+  it("flags Moment.js from jsdelivr as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("2.29.4");
+  });
+
+  it("flags Moment.js from cdnjs as a warning", () => {
+    const findings = scanCdnUrls([
+      "https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].version).toBe("2.29.4");
+  });
+
+  it("flags the latest Moment.js version (EOL applies to all releases)", () => {
+    const findings = scanCdnUrls([
+      "https://unpkg.com/moment@2.30.1/moment.js",
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warning");
+  });
+});
+
 describe("scanCdnUrls — no false positives for unrelated URLs", () => {
   it("returns no findings for a safe Tailwind URL", () => {
     const findings = scanCdnUrls(["https://cdn.tailwindcss.com"]);

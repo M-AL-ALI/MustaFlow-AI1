@@ -251,6 +251,66 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
     minimumRecommendedVersion: "4.3.1",
   },
   {
+    name: "react",
+    displayName: "React",
+    urlPatterns: [
+      /unpkg\.com\/react(?:@|\/)/,
+      /cdn\.jsdelivr\.net\/npm\/react(?:@|\/)/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/react\//,
+    ],
+    versionPattern: /react@([\d.]+)|react\/([\d.]+)/,
+    blockedVersions: [
+      {
+        match: (v) => semverLt(v, "16.14.0"),
+        description:
+          "React versions before 16.14.0 are legacy and no longer receive security patches. Upgrade to React 18.x for continued support.",
+        upgradeTo: "18.x",
+        severity: "warning",
+      },
+    ],
+    minimumRecommendedVersion: "16.14.0",
+  },
+  {
+    name: "d3",
+    displayName: "D3.js",
+    urlPatterns: [
+      /unpkg\.com\/d3(?:@|\/)/,
+      /cdn\.jsdelivr\.net\/npm\/d3(?:@|\/)/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/d3\//,
+      /d3js\.org\/d3\./,
+    ],
+    versionPattern: /d3@([\d.]+)|d3\/([\d.]+)|d3\.v([\d]+)/,
+    blockedVersions: [
+      {
+        match: (v) => semverLt(v, "7.0.0"),
+        description:
+          "D3 v5 and v6 contained prototype pollution risk in dependency resolution. Upgrade to D3 7.x.",
+        upgradeTo: "7.x",
+        severity: "warning",
+      },
+    ],
+    minimumRecommendedVersion: "7.0.0",
+  },
+  {
+    name: "moment",
+    displayName: "Moment.js",
+    urlPatterns: [
+      /unpkg\.com\/moment(?:@|\/)/,
+      /cdn\.jsdelivr\.net\/npm\/moment(?:@|\/)/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/moment\.js\//,
+    ],
+    versionPattern: /moment@([\d.]+)|moment\/([\d.]+)|moment\.js\/([\d.]+)/,
+    blockedVersions: [
+      {
+        match: () => true,
+        description:
+          "Moment.js is End of Life and will not receive security fixes. Replace with Luxon or date-fns.",
+        upgradeTo: "Luxon or date-fns",
+        severity: "warning",
+      },
+    ],
+  },
+  {
     name: "vue",
     displayName: "Vue.js",
     urlPatterns: [
