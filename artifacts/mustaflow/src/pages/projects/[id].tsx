@@ -9,7 +9,6 @@ import {
   useListTasks,
   useRollbackVersion,
   useListSuggestions,
-  useCancelTask,
   getGetProjectQueryKey,
   getListMessagesQueryKey,
   getListProjectFilesQueryKey,
@@ -53,8 +52,6 @@ import {
   Bookmark,
   Layers2,
   RotateCcw,
-  Check,
-  Ban,
 } from "lucide-react";
 import { SuggestionChips } from "./components/suggestion-chips";
 import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
@@ -393,71 +390,6 @@ const WORKSPACE_TABS = [
   { label: "Analytics", value: "analytics", icon: Activity },
   { label: "Manage", value: "manage", icon: Settings },
 ];
-
-function AutoFixCard({ projectId, queuedTaskId }: { projectId: number; queuedTaskId: number }) {
-  const [dismissed, setDismissed] = useState(false);
-  const [accepted, setAccepted] = useState(false);
-  const cancelTask = useCancelTask();
-  const queryClient = useQueryClient();
-
-  if (dismissed) {
-    return (
-      <div className="mt-2 bg-background border border-border/40 rounded-lg p-2 text-[11px] flex items-center gap-1.5 text-muted-foreground">
-        <Ban className="h-3 w-3 shrink-0" />
-        Auto-fix dismissed
-      </div>
-    );
-  }
-  if (accepted) {
-    return (
-      <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
-        <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary shrink-0" />
-        <span>Background task running…</span>
-      </div>
-    );
-  }
-  return (
-    <div className="mt-2 bg-background border border-orange-500/20 rounded-lg p-2.5 text-[11px] space-y-2">
-      <div className="flex items-center gap-2 text-orange-400">
-        <div className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
-        <span className="font-medium">Auto-fix queued</span>
-      </div>
-      <p className="text-muted-foreground leading-relaxed">
-        Task #{queuedTaskId} will replace Moment.js with Luxon in the background. Accept to let it
-        run or dismiss to skip it.
-      </p>
-      <div className="flex items-center gap-1.5 pt-0.5">
-        <button
-          onClick={() => setAccepted(true)}
-          className="flex items-center gap-1 px-2 py-1 rounded-md bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20 transition-colors text-[10px] font-medium"
-        >
-          <Check className="h-3 w-3" />
-          Accept
-        </button>
-        <button
-          onClick={() => {
-            cancelTask.mutate(
-              { id: projectId, taskId: queuedTaskId },
-              {
-                onSuccess: () => {
-                  setDismissed(true);
-                  void queryClient.invalidateQueries({
-                    queryKey: getListTasksQueryKey(projectId),
-                  });
-                },
-              },
-            );
-          }}
-          disabled={cancelTask.isPending}
-          className="flex items-center gap-1 px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors text-[10px] font-medium disabled:opacity-50"
-        >
-          <Ban className="h-3 w-3" />
-          Dismiss
-        </button>
-      </div>
-    </div>
-  );
-}
 
 const QUICK_ACTIONS = [
   "Add a login page",
@@ -1386,7 +1318,6 @@ export default function ProjectWorkspacePage() {
                             ? (planPayload as { kind?: string }).kind
                             : undefined;
                         const isReport = payloadKind === "report";
-                        const isQueued = payloadKind === "task-queued";
                         const isError = payloadKind === "error";
                         const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
                         const structuredPlan =
@@ -1455,12 +1386,6 @@ export default function ProjectWorkspacePage() {
                                     </>
                                   );
                                 })()}
-                              {isQueued && (
-                                <AutoFixCard
-                                  projectId={projectId}
-                                  queuedTaskId={(planPayload as { taskId: number }).taskId}
-                                />
-                              )}
                               {isError && (
                                 <ErrorCard
                                   message={(planPayload as { message: string }).message}
