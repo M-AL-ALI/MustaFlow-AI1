@@ -2069,6 +2069,46 @@ export const DestroyContainerResponse = zod.object({
 
 
 /**
+ * @summary Install an npm package into the project (runs npm install in container if running, updates package.json in DB)
+ */
+export const InstallPackageParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const InstallPackageBody = zod.object({
+  "name": zod.string().describe('Package name (e.g. lodash or @types\/node)'),
+  "version": zod.string().optional().describe('Optional version constraint (e.g. ^4.0.0 or latest)'),
+  "dev": zod.boolean().optional().describe('Install as devDependency (default false)')
+})
+
+export const InstallPackageResponse = zod.object({
+  "ok": zod.boolean(),
+  "output": zod.string().optional().describe('npm output from the container exec (empty when container is not running)'),
+  "dependencies": zod.record(zod.string(), zod.string()),
+  "devDependencies": zod.record(zod.string(), zod.string())
+})
+
+
+/**
+ * @summary Uninstall an npm package from the project (runs npm uninstall in container if running, updates package.json in DB)
+ */
+export const UninstallPackageParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UninstallPackageBody = zod.object({
+  "name": zod.string().describe('Package name to remove')
+})
+
+export const UninstallPackageResponse = zod.object({
+  "ok": zod.boolean(),
+  "output": zod.string().optional().describe('npm output from the container exec (empty when container is not running)'),
+  "dependencies": zod.record(zod.string(), zod.string()),
+  "devDependencies": zod.record(zod.string(), zod.string())
+})
+
+
+/**
  * @summary Stripe webhook endpoint (public — called by Stripe)
  */
 export const StripeWebhookResponse = zod.object({

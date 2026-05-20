@@ -145,7 +145,10 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         prodContainerStatus = prodResult.status;
       }
     } catch (err) {
-      req.log.error({ err, projectId }, "Prod container deployment failed — falling back to snapshot");
+      req.log.error(
+        { err, projectId },
+        "Prod container deployment failed — falling back to snapshot",
+      );
     }
   }
 

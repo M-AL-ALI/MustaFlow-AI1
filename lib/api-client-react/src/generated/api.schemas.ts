@@ -1446,6 +1446,32 @@ export interface SuggestionAcceptResult {
   suggestion?: ProjectSuggestion;
 }
 
+export interface PackageInstallInput {
+  /** Package name (e.g. lodash or @types/node) */
+  name: string;
+  /** Optional version constraint (e.g. ^4.0.0 or latest) */
+  version?: string;
+  /** Install as devDependency (default false) */
+  dev?: boolean;
+}
+
+export interface PackageUninstallInput {
+  /** Package name to remove */
+  name: string;
+}
+
+export type PackageManagerResultDependencies = {[key: string]: string};
+
+export type PackageManagerResultDevDependencies = {[key: string]: string};
+
+export interface PackageManagerResult {
+  ok: boolean;
+  /** npm output from the container exec (empty when container is not running) */
+  output?: string;
+  dependencies: PackageManagerResultDependencies;
+  devDependencies: PackageManagerResultDevDependencies;
+}
+
 export type DeleteWorkspace200 = {
   deleted: boolean;
 };

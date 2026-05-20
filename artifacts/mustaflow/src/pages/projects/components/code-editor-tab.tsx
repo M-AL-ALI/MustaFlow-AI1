@@ -8,6 +8,8 @@ import {
   useCreateProjectFile,
   useDeleteProjectFile,
   useRenameProjectFile,
+  useInstallPackage,
+  useUninstallPackage,
   getListProjectFilesQueryKey,
   getGetProjectFileQueryKey,
 } from "@workspace/api-client-react";
@@ -284,19 +286,32 @@ function PackageManagerPanel({
   const [devDeps, setDevDeps] = useState<PackageDep[]>([]);
   const [parsed, setParsed] = useState(false);
   const [expanded, setExpanded] = useState<"deps" | "devDeps" | null>("deps");
-  const { data: pkgFile } = useGetProjectFile(
-    projectId,
-    files.find((f) => f.path === "package.json")?.id ?? 0,
-    {
-      query: {
-        enabled: !!files.find((f) => f.path === "package.json"),
-        queryKey: getGetProjectFileQueryKey(
-          projectId,
-          files.find((f) => f.path === "package.json")?.id ?? 0,
-        ),
-      },
+  const [installName, setInstallName] = useState("");
+  const [installVersion, setInstallVersion] = useState("");
+  const [installDev, setInstallDev] = useState(false);
+  const [removingPkg, setRemovingPkg] = useState<string | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const pkgFileEntry = files.find((f) => f.path === "package.json");
+  const { data: pkgFile } = useGetProjectFile(projectId, pkgFileEntry?.id ?? 0, {
+    query: {
+      enabled: !!pkgFileEntry,
+      queryKey: getGetProjectFileQueryKey(projectId, pkgFileEntry?.id ?? 0),
     },
-  );
+  });
+
+  const installMutation = useInstallPackage();
+  const uninstallMutation = useUninstallPackage();
+
+  /** Refresh the package.json file query so the panel re-reads the updated content. */
+  const refreshPkg = () => {
+    if (pkgFileEntry) {
+      void queryClient.invalidateQueries({
+        queryKey: getGetProjectFileQueryKey(projectId, pkgFileEntry.id),
+      });
+    }
+  };
 
   useEffect(() => {
     if (!pkgFile?.content) return;
@@ -319,7 +334,63 @@ function PackageManagerPanel({
     }
   }, [pkgFile?.content]);
 
-  const hasPkgJson = !!files.find((f) => f.path === "package.json");
+  const hasPkgJson = !!pkgFileEntry;
+
+  const handleInstall = () => {
+    const name = installName.trim();
+    if (!name) return;
+    installMutation.mutate(
+      {
+        id: projectId,
+        data: { name, version: installVersion.trim() || undefined, dev: installDev },
+      },
+      {
+        onSuccess: (result) => {
+          toast({ title: `Installed ${name}` });
+          setInstallName("");
+          setInstallVersion("");
+          // Update local state immediately from API result
+          setDeps(Object.entries(result.dependencies).map(([n, v]) => ({ name: n, version: v })));
+          setDevDeps(
+            Object.entries(result.devDependencies).map(([n, v]) => ({
+              name: n,
+              version: v,
+              dev: true,
+            })),
+          );
+          refreshPkg();
+        },
+        onError: () => {
+          toast({ title: `Failed to install ${name}`, variant: "destructive" });
+        },
+      },
+    );
+  };
+
+  const handleUninstall = (pkgName: string) => {
+    setRemovingPkg(pkgName);
+    uninstallMutation.mutate(
+      { id: projectId, data: { name: pkgName } },
+      {
+        onSuccess: (result) => {
+          toast({ title: `Removed ${pkgName}` });
+          setDeps(Object.entries(result.dependencies).map(([n, v]) => ({ name: n, version: v })));
+          setDevDeps(
+            Object.entries(result.devDependencies).map(([n, v]) => ({
+              name: n,
+              version: v,
+              dev: true,
+            })),
+          );
+          refreshPkg();
+        },
+        onError: () => {
+          toast({ title: `Failed to remove ${pkgName}`, variant: "destructive" });
+        },
+        onSettled: () => setRemovingPkg(null),
+      },
+    );
+  };
 
   if (!hasPkgJson) {
     return (
@@ -350,6 +421,7 @@ function PackageManagerPanel({
   }
 
   const totalCount = deps.length + devDeps.length;
+  const isInstalling = installMutation.isPending;
 
   function renderSection(title: string, items: PackageDep[], sectionKey: "deps" | "devDeps") {
     const isOpen = expanded === sectionKey;
@@ -374,20 +446,35 @@ function PackageManagerPanel({
             {items.length === 0 ? (
               <div className="px-3 py-2 text-[10px] text-muted-foreground">None</div>
             ) : (
-              items.map((dep) => (
-                <div
-                  key={dep.name}
-                  className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30 transition-colors"
-                >
-                  <Package className="h-3 w-3 text-muted-foreground shrink-0" />
-                  <span className="text-[11px] font-mono text-foreground flex-1 truncate">
-                    {dep.name}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                    {dep.version}
-                  </span>
-                </div>
-              ))
+              items.map((dep) => {
+                const isRemoving = removingPkg === dep.name;
+                return (
+                  <div
+                    key={dep.name}
+                    className="group flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30 transition-colors"
+                  >
+                    <Package className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="text-[11px] font-mono text-foreground flex-1 truncate">
+                      {dep.name}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-mono shrink-0 group-hover:hidden">
+                      {dep.version}
+                    </span>
+                    <button
+                      onClick={() => handleUninstall(dep.name)}
+                      disabled={isRemoving || uninstallMutation.isPending}
+                      className="hidden group-hover:flex items-center justify-center h-4 w-4 shrink-0 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                      title={`Remove ${dep.name}`}
+                    >
+                      {isRemoving ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <X className="h-3 w-3" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })
             )}
           </div>
         )}
@@ -397,14 +484,54 @@ function PackageManagerPanel({
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="px-3 py-2 border-b border-border/50 bg-muted/20">
-        <div className="text-[10px] text-muted-foreground">
-          {totalCount} package{totalCount !== 1 ? "s" : ""} in package.json
+      {/* Install panel */}
+      <div className="px-3 py-2.5 border-b border-border/50 bg-muted/20 space-y-2">
+        <div className="text-[10px] text-muted-foreground font-medium">
+          {totalCount} package{totalCount !== 1 ? "s" : ""} installed
         </div>
-        <div className="text-[10px] text-muted-foreground/60 mt-0.5">
-          Use the terminal to install new packages
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            value={installName}
+            onChange={(e) => setInstallName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleInstall()}
+            placeholder="Package name"
+            className="flex-1 min-w-0 text-[11px] bg-background border border-border/60 rounded px-2 py-1 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <input
+            type="text"
+            value={installVersion}
+            onChange={(e) => setInstallVersion(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleInstall()}
+            placeholder="Version"
+            className="w-16 text-[11px] bg-background border border-border/60 rounded px-2 py-1 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={installDev}
+              onChange={(e) => setInstallDev(e.target.checked)}
+              className="h-3 w-3 accent-primary"
+            />
+            <span className="text-[10px] text-muted-foreground">Dev dependency</span>
+          </label>
+          <button
+            onClick={handleInstall}
+            disabled={!installName.trim() || isInstalling}
+            className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isInstalling ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Plus className="h-3 w-3" />
+            )}
+            Install
+          </button>
         </div>
       </div>
+      {/* Package list */}
       <div className="flex-1 overflow-y-auto">
         {renderSection("Dependencies", deps, "deps")}
         {renderSection("Dev Dependencies", devDeps, "devDeps")}

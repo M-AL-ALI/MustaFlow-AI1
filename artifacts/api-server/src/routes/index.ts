@@ -33,6 +33,7 @@ import githubRouter from "./github";
 import subdomainRouter from "./subdomain";
 import containersRouter from "./containers";
 import deployRouter from "./deploy";
+import packagesRouter from "./packages";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -130,6 +131,7 @@ router.use(githubRouter);
 router.use(subdomainRouter);
 router.use(containersRouter);
 router.use(deployRouter);
+router.use(packagesRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

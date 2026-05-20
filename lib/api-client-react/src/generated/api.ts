@@ -78,6 +78,9 @@ import type {
   MobileBuildLog,
   MobileBuildLogsResult,
   MobileBuildQueued,
+  PackageInstallInput,
+  PackageManagerResult,
+  PackageUninstallInput,
   PageMapData,
   PageMapResponse,
   PatchVersionBody,
@@ -6300,6 +6303,150 @@ export const useDestroyContainer = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDestroyContainerMutationOptions(options));
+    }
+
+export const getInstallPackageUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/packages/install`
+}
+
+/**
+ * @summary Install an npm package into the project (runs npm install in container if running, updates package.json in DB)
+ */
+export const installPackage = async (id: number,
+    packageInstallInput: PackageInstallInput, options?: RequestInit): Promise<PackageManagerResult> => {
+
+  return customFetch<PackageManagerResult>(getInstallPackageUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      packageInstallInput,)
+  }
+);}
+
+
+
+
+export const getInstallPackageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installPackage>>, TError,{id: number;data: BodyType<PackageInstallInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof installPackage>>, TError,{id: number;data: BodyType<PackageInstallInput>}, TContext> => {
+
+const mutationKey = ['installPackage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof installPackage>>, {id: number;data: BodyType<PackageInstallInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  installPackage(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InstallPackageMutationResult = NonNullable<Awaited<ReturnType<typeof installPackage>>>
+    export type InstallPackageMutationBody = BodyType<PackageInstallInput>
+    export type InstallPackageMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Install an npm package into the project (runs npm install in container if running, updates package.json in DB)
+ */
+export const useInstallPackage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installPackage>>, TError,{id: number;data: BodyType<PackageInstallInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof installPackage>>,
+        TError,
+        {id: number;data: BodyType<PackageInstallInput>},
+        TContext
+      > => {
+      return useMutation(getInstallPackageMutationOptions(options));
+    }
+
+export const getUninstallPackageUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/packages/uninstall`
+}
+
+/**
+ * @summary Uninstall an npm package from the project (runs npm uninstall in container if running, updates package.json in DB)
+ */
+export const uninstallPackage = async (id: number,
+    packageUninstallInput: PackageUninstallInput, options?: RequestInit): Promise<PackageManagerResult> => {
+
+  return customFetch<PackageManagerResult>(getUninstallPackageUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      packageUninstallInput,)
+  }
+);}
+
+
+
+
+export const getUninstallPackageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uninstallPackage>>, TError,{id: number;data: BodyType<PackageUninstallInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uninstallPackage>>, TError,{id: number;data: BodyType<PackageUninstallInput>}, TContext> => {
+
+const mutationKey = ['uninstallPackage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uninstallPackage>>, {id: number;data: BodyType<PackageUninstallInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  uninstallPackage(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UninstallPackageMutationResult = NonNullable<Awaited<ReturnType<typeof uninstallPackage>>>
+    export type UninstallPackageMutationBody = BodyType<PackageUninstallInput>
+    export type UninstallPackageMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Uninstall an npm package from the project (runs npm uninstall in container if running, updates package.json in DB)
+ */
+export const useUninstallPackage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uninstallPackage>>, TError,{id: number;data: BodyType<PackageUninstallInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uninstallPackage>>,
+        TError,
+        {id: number;data: BodyType<PackageUninstallInput>},
+        TContext
+      > => {
+      return useMutation(getUninstallPackageMutationOptions(options));
     }
 
 export const getStripeWebhookUrl = () => {

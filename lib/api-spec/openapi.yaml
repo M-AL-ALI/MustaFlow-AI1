@@ -1763,6 +1763,72 @@ paths:
                 properties:
                   destroyed: { type: boolean }
 
+  /projects/{id}/packages/install:
+    post:
+      operationId: installPackage
+      tags: [projects]
+      summary: Install an npm package into the project (runs npm install in container if running, updates package.json in DB)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PackageInstallInput"
+      responses:
+        "200":
+          description: Package installed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageManagerResult"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Project or package.json not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/packages/uninstall:
+    post:
+      operationId: uninstallPackage
+      tags: [projects]
+      summary: Uninstall an npm package from the project (runs npm uninstall in container if running, updates package.json in DB)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PackageUninstallInput"
+      responses:
+        "200":
+          description: Package uninstalled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageManagerResult"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Project or package.json not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /billing/webhook:
     post:
       operationId: stripeWebhook
@@ -3175,3 +3241,35 @@ components:
         userMessageId: { type: ["integer", "null"] }
         suggestion:
           $ref: "#/components/schemas/ProjectSuggestion"
+
+    PackageInstallInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: "Package name (e.g. lodash or @types/node)" }
+        version:
+          { type: string, description: "Optional version constraint (e.g. ^4.0.0 or latest)" }
+        dev: { type: boolean, description: "Install as devDependency (default false)" }
+
+    PackageUninstallInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: "Package name to remove" }
+
+    PackageManagerResult:
+      type: object
+      required: [ok, dependencies, devDependencies]
+      properties:
+        ok: { type: boolean }
+        output:
+          {
+            type: string,
+            description: "npm output from the container exec (empty when container is not running)",
+          }
+        dependencies:
+          type: object
+          additionalProperties: { type: string }
+        devDependencies:
+          type: object
+          additionalProperties: { type: string }

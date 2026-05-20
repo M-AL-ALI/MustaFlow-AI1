@@ -557,7 +557,6 @@ async function waitForMachineReady(machineId: string, timeoutSeconds: number): P
   }
 }
 
-
 /**
  * Hibernate a container (stop it to save resources).
  * Called automatically after IDLE_SECONDS of inactivity via Fly's autostop,
