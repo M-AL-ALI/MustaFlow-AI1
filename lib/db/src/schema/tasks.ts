@@ -22,6 +22,7 @@ export type TaskReport = {
   nativeFeatures?: string[];
   modulesWired?: Array<{ id: string; name: string; secretsConsumed: string[] }>;
   codeSmells?: string[];
+  cdnUpgrades?: string[];
   auditReport?: {
     findings: Array<{
       category: "accessibility" | "seo" | "performance" | "security";

@@ -3,6 +3,8 @@ import { parse as acornParse } from "acorn";
 import { logger } from "./logger";
 import type { AgentMode } from "./ai";
 import type { TaskReport } from "@workspace/db";
+import { scanCdnUrls, autoUpgradeCdnUrl } from "./cdn-allowlist";
+import type { CdnUpgrade } from "./cdn-allowlist";
 
 const MODEL_FOR_MODE: Record<AgentMode, string> = {
   lite: "gpt-5-mini",
@@ -1553,6 +1555,86 @@ export function injectApiMocks(files: BuilderFile[]): BuilderFile[] {
   return [...result, ...mockFiles];
 }
 
+const CDN_HOSTS_FOR_UPGRADE = [
+  "unpkg.com",
+  "cdn.jsdelivr.net",
+  "cdnjs.cloudflare.com",
+  "cdn.tailwindcss.com",
+  "cdn.skypack.dev",
+  "code.jquery.com",
+  "stackpath.bootstrapcdn.com",
+  "maxcdn.bootstrapcdn.com",
+];
+
+/**
+ * Scan generated HTML files for vulnerable CDN URLs and rewrite them to safe versions.
+ * Returns the updated file list and a human-readable list of upgrade messages for the task report.
+ * Never throws — best-effort; any error leaves the original files untouched.
+ */
+export function applyCdnAutoUpgrades(files: BuilderFile[]): {
+  files: BuilderFile[];
+  upgrades: CdnUpgrade[];
+} {
+  const allUpgrades: CdnUpgrade[] = [];
+
+  const updatedFiles = files.map((f) => {
+    const isHtml = f.mimeType === "text/html" || f.path.endsWith(".html");
+    if (!isHtml) return f;
+
+    try {
+      const isCdn = (s: string) => CDN_HOSTS_FOR_UPGRADE.some((h) => s.includes(h));
+
+      // Extract all src/href attribute values that point to a known CDN host
+      const extractAttr = (html: string, attr: string): string[] => {
+        const re = new RegExp(`${attr}\\s*=\\s*["']([^"']*)["']`, "gi");
+        const results: string[] = [];
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(html)) !== null) {
+          if (m[1] !== undefined) results.push(m[1]);
+        }
+        return results;
+      };
+
+      const cdnUrls = [
+        ...extractAttr(f.content, "src"),
+        ...extractAttr(f.content, "href"),
+      ].filter(isCdn);
+
+      if (cdnUrls.length === 0) return f;
+
+      const findings = scanCdnUrls(cdnUrls);
+      if (findings.length === 0) return f;
+
+      let content = f.content;
+      const fileUpgrades: CdnUpgrade[] = [];
+
+      for (const finding of findings) {
+        const upgrade = autoUpgradeCdnUrl(finding.url, finding);
+        if (!upgrade) continue;
+        // Only replace exact URL occurrences to avoid accidental substring matches
+        if (content.includes(finding.url)) {
+          content = content.split(finding.url).join(upgrade.upgradedUrl);
+          fileUpgrades.push(upgrade);
+        }
+      }
+
+      if (fileUpgrades.length === 0) return f;
+
+      logger.info(
+        { file: f.path, count: fileUpgrades.length },
+        "Auto-upgraded vulnerable CDN URLs",
+      );
+      allUpgrades.push(...fileUpgrades);
+      return { ...f, content };
+    } catch (err) {
+      logger.warn({ err, file: f.path }, "CDN auto-upgrade failed for file — skipping");
+      return f;
+    }
+  });
+
+  return { files: updatedFiles, upgrades: allUpgrades };
+}
+
 /** Validate that a plan response contains the required new fields and retry if key ones are missing */
 function validatePlanResponse(parsed: Record<string, unknown>): boolean {
   const hasGoal = typeof parsed.goal === "string" && (parsed.goal as string).length > 0;
@@ -1734,6 +1816,13 @@ export async function runBuildPipeline(args: {
   // Inject API mocks for any fetch/axios calls found in generated files
   files = injectApiMocks(files);
 
+  // Auto-upgrade any vulnerable CDN URLs to safe versions
+  const { files: upgradedFiles, upgrades: cdnUpgradesRaw } = applyCdnAutoUpgrades(files);
+  files = upgradedFiles;
+  const cdnUpgrades = cdnUpgradesRaw.map(
+    (u) => `Auto-upgraded ${u.packageName} CDN from v${u.fromVersion} to v${u.toVersion}`,
+  );
+
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: blueprint as unknown as Record<string, unknown>,
@@ -1744,6 +1833,7 @@ export async function runBuildPipeline(args: {
     warnings,
     integrationsNeeded: blueprint.integrationsNeeded ?? [],
     nextRecommendation,
+    ...(cdnUpgrades.length > 0 ? { cdnUpgrades } : {}),
   };
 
   const correctionPasses = !validation.passed ? 1 : 0;
@@ -2003,11 +2093,18 @@ export async function runRefinePipeline(args: {
     ? [...changedFiles, ...mockOnlyFiles]
     : changedFiles;
 
+  // Auto-upgrade any vulnerable CDN URLs in changed files to safe versions
+  const { files: cdnUpgradedFiles, upgrades: cdnUpgradesRaw } =
+    applyCdnAutoUpgrades(finalChangedFiles);
+  const refineCdnUpgrades = cdnUpgradesRaw.map(
+    (u) => `Auto-upgraded ${u.packageName} CDN from v${u.fromVersion} to v${u.toVersion}`,
+  );
+
   const existingPaths = new Set(existingFiles.map((f) => f.path));
-  const filesCreated = finalChangedFiles
+  const filesCreated = cdnUpgradedFiles
     .filter((f) => !existingPaths.has(f.path))
     .map((f) => f.path);
-  const filesChanged = finalChangedFiles
+  const filesChanged = cdnUpgradedFiles
     .filter((f) => existingPaths.has(f.path))
     .map((f) => f.path);
 
@@ -2017,14 +2114,15 @@ export async function runRefinePipeline(args: {
     filesCreated,
     filesChanged,
     filesRemoved: removedPaths,
-    previewUpdated: finalChangedFiles.length > 0 || removedPaths.length > 0,
+    previewUpdated: cdnUpgradedFiles.length > 0 || removedPaths.length > 0,
     warnings,
     integrationsNeeded,
     nextRecommendation,
+    ...(refineCdnUpgrades.length > 0 ? { cdnUpgrades: refineCdnUpgrades } : {}),
   };
 
   return {
-    changedFiles: finalChangedFiles,
+    changedFiles: cdnUpgradedFiles,
     removedPaths,
     unchangedFiles,
     report,

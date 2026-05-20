@@ -333,6 +333,22 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
 ];
 
 /**
+ * Concrete pinnable versions used when upgradeTo contains a wildcard like "3.x" or "5.3.x".
+ * Values are the latest stable patch at the time of this build.
+ */
+export const CANONICAL_SAFE_VERSIONS: Record<string, string> = {
+  "jQuery": "3.7.1",
+  "Bootstrap": "5.3.3",
+  "Vue.js": "3.4.21",
+  "Leaflet.js": "1.9.4",
+  "Alpine.js": "3.14.1",
+  "htmx": "2.0.4",
+  "Axios": "1.7.9",
+  "Lodash": "4.17.21",
+  "Chart.js": "4.4.4",
+};
+
+/**
  * Scan a list of CDN URLs and return any vulnerability findings.
  */
 export interface CdnFinding {
@@ -343,6 +359,49 @@ export interface CdnFinding {
   description: string;
   upgradeTo: string;
   severity: "error" | "warning";
+}
+
+export interface CdnUpgrade {
+  url: string;
+  upgradedUrl: string;
+  packageName: string;
+  fromVersion: string;
+  toVersion: string;
+}
+
+/**
+ * Rewrite a single CDN URL to a safe version.
+ *
+ * Resolution order for the target version:
+ *   1. If `finding.upgradeTo` is a concrete semver (e.g. "1.9.4"), use it directly.
+ *   2. Otherwise look up `CANONICAL_SAFE_VERSIONS` by `finding.packageName`.
+ *   3. If neither resolves, return null (no-op).
+ *
+ * The replacement is a simple string replace of the version segment in the URL.
+ * This is safe because version strings like "1.7.0" are unique within a CDN URL.
+ */
+export function autoUpgradeCdnUrl(url: string, finding: CdnFinding): CdnUpgrade | null {
+  if (!finding.version) return null;
+
+  // Prefer an exact semver from upgradeTo, fall back to the canonical safe version map
+  const isExactSemver = /^\d+\.\d+\.\d+$/.test(finding.upgradeTo);
+  const targetVersion = isExactSemver
+    ? finding.upgradeTo
+    : CANONICAL_SAFE_VERSIONS[finding.packageName] ?? null;
+
+  if (!targetVersion) return null;
+  if (targetVersion === finding.version) return null;
+
+  const upgradedUrl = url.replace(finding.version, targetVersion);
+  if (upgradedUrl === url) return null;
+
+  return {
+    url,
+    upgradedUrl,
+    packageName: finding.packageName,
+    fromVersion: finding.version,
+    toVersion: targetVersion,
+  };
 }
 
 export function scanCdnUrls(urls: string[]): CdnFinding[] {

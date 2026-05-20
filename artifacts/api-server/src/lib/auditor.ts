@@ -141,7 +141,6 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
       if (["hidden", "submit", "button", "reset", "image"].includes(type)) return false;
       const idMatch = tag.match(/\bid\s*=\s*["']([^"']*)["']/i)?.[1];
       if (!idMatch) {
-        // Check if wrapped in a <label> — heuristic: look for the input inside a label block
         return true;
       }
       return !labelFors.includes(idMatch);
