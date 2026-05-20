@@ -19,6 +19,8 @@ import {
 import {
   runBuildPipeline,
   runRefinePipeline,
+  runReactViteBuildPipeline,
+  runReactViteRefinePipeline,
   runMobileBuildPipeline,
   runMobileRefinePipeline,
   scanCodeSmells,
@@ -597,6 +599,7 @@ async function generatePostBuildSuggestions(
   taskId: number,
   projectName: string,
   projectKind: string,
+  projectFormat: string,
   userPrompt: string,
   assistantSummary: string,
   filePaths: string[],
@@ -606,7 +609,9 @@ async function generatePostBuildSuggestions(
     const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(projectKind);
     const platformHint = isMobile
       ? "React Native / Expo mobile app"
-      : "static web app (HTML/CSS/JS + Tailwind)";
+      : projectFormat === "react-vite"
+        ? "React + Vite web app (TypeScript + Tailwind CSS)"
+        : "static web app (HTML/CSS/JS + Tailwind)";
 
     const systemPrompt = `You are a senior product/engineering advisor reviewing a just-completed AI-generated ${platformHint} build.
 Based on the build context, generate 3-5 specific, actionable next-step suggestions the user could build or improve next.
@@ -964,6 +969,7 @@ export async function runJob(input: JobInput): Promise<void> {
       const isMobileProject = ["mobile-ios", "mobile-android", "mobile-cross"].includes(
         project.kind,
       );
+      const isReactViteProject = !isMobileProject && project.projectFormat === "react-vite";
 
       // For mobile projects: load last successful task's wired modules + project secret names once,
       // so both build and refine pipelines have durable module context.
@@ -998,7 +1004,9 @@ export async function runJob(input: JobInput): Promise<void> {
           "narration",
           isMobileProject
             ? "Let me plan the mobile app structure before writing any code."
-            : "Let me plan the app structure before writing any code.",
+            : isReactViteProject
+              ? "Let me plan the React + Vite project structure before writing any code."
+              : "Let me plan the app structure before writing any code.",
         );
         await emitEvent(taskId, "planning", "Reading project configuration…");
         await emitEvent(
@@ -1006,7 +1014,9 @@ export async function runJob(input: JobInput): Promise<void> {
           "generating_code",
           isMobileProject
             ? "Generating Expo/React Native app with AI…"
-            : "Generating app blueprint and code with AI…",
+            : isReactViteProject
+              ? "Generating React + Vite project with AI…"
+              : "Generating app blueprint and code with AI…",
         );
 
         let result = isMobileProject
@@ -1021,15 +1031,26 @@ export async function runJob(input: JobInput): Promise<void> {
               configuredSecretNames,
               onEvent: async (type, message) => emitEvent(taskId, type, message),
             })
-          : await runBuildPipeline({
-              projectName: project.name,
-              projectKind: project.kind,
-              userPrompt,
-              agentMode,
-              conversationHistory,
-              knowledgeContext: knowledgeContext || undefined,
-              planContext: input.planContext ?? null,
-            });
+          : isReactViteProject
+            ? await runReactViteBuildPipeline({
+                projectName: project.name,
+                projectKind: project.kind,
+                userPrompt,
+                agentMode,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                planContext: input.planContext ?? null,
+                onEvent: async (type, message) => emitEvent(taskId, type, message),
+              })
+            : await runBuildPipeline({
+                projectName: project.name,
+                projectKind: project.kind,
+                userPrompt,
+                agentMode,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                planContext: input.planContext ?? null,
+              });
 
         analyticsCorrectionPasses = result.correctionPasses;
         analyticsErrorCategory = result.primaryErrorCategory;
@@ -1046,15 +1067,25 @@ export async function runJob(input: JobInput): Promise<void> {
             "generating_code",
             `Validation failed — escalating to ${buildEscalationMode} mode and retrying…`,
           );
-          const escalatedResult = await runBuildPipeline({
-            projectName: project.name,
-            projectKind: project.kind,
-            userPrompt,
-            agentMode: buildEscalationMode,
-            conversationHistory,
-            knowledgeContext: knowledgeContext || undefined,
-            planContext: input.planContext ?? null,
-          });
+          const escalatedResult = isReactViteProject
+            ? await runReactViteBuildPipeline({
+                projectName: project.name,
+                projectKind: project.kind,
+                userPrompt,
+                agentMode: buildEscalationMode,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                planContext: input.planContext ?? null,
+              })
+            : await runBuildPipeline({
+                projectName: project.name,
+                projectKind: project.kind,
+                userPrompt,
+                agentMode: buildEscalationMode,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                planContext: input.planContext ?? null,
+              });
           wasEscalated = true;
           agentMode = buildEscalationMode;
           result = escalatedResult;
@@ -1127,7 +1158,11 @@ export async function runJob(input: JobInput): Promise<void> {
 
         report = result.report;
         assistantSummary = result.assistantSummary;
-        nextVersionLabel = isMobileProject ? "Initial mobile build" : "Initial build";
+        nextVersionLabel = isMobileProject
+          ? "Initial mobile build"
+          : isReactViteProject
+            ? "Initial React + Vite build"
+            : "Initial build";
         filesToSmellScan = result.files;
       } else {
         await emitEvent(
@@ -1178,14 +1213,18 @@ export async function runJob(input: JobInput): Promise<void> {
           "narration",
           isMobileProject
             ? "Applying your changes to the Expo project now."
-            : "Applying your requested changes to the codebase now.",
+            : isReactViteProject
+              ? "Applying your changes to the React + Vite project now."
+              : "Applying your requested changes to the codebase now.",
         );
         await emitEvent(
           taskId,
           "generating_code",
           isMobileProject
             ? "Applying change to Expo project with AI…"
-            : "Applying change request with AI…",
+            : isReactViteProject
+              ? "Applying change to React + Vite project with AI…"
+              : "Applying change request with AI…",
         );
 
         let refineResult = isMobileProject
@@ -1201,17 +1240,30 @@ export async function runJob(input: JobInput): Promise<void> {
               configuredSecretNames,
               onEvent: async (type, message) => emitEvent(taskId, type, message),
             })
-          : await runRefinePipeline({
-              projectName: project.name,
-              projectKind: project.kind,
-              userPrompt,
-              agentMode,
-              existingFiles,
-              conversationHistory,
-              knowledgeContext: knowledgeContext || undefined,
-              unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-              planContext: input.planContext ?? null,
-            });
+          : isReactViteProject
+            ? await runReactViteRefinePipeline({
+                projectName: project.name,
+                projectKind: project.kind,
+                userPrompt,
+                agentMode,
+                existingFiles,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                planContext: input.planContext ?? null,
+                onEvent: async (type, message) => emitEvent(taskId, type, message),
+              })
+            : await runRefinePipeline({
+                projectName: project.name,
+                projectKind: project.kind,
+                userPrompt,
+                agentMode,
+                existingFiles,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                planContext: input.planContext ?? null,
+              });
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
         analyticsErrorCategory = refineResult.primaryErrorCategory;
@@ -1228,17 +1280,29 @@ export async function runJob(input: JobInput): Promise<void> {
             "generating_code",
             `Validation failed — escalating to ${refineEscalationMode} mode and retrying…`,
           );
-          const escalatedResult = await runRefinePipeline({
-            projectName: project.name,
-            projectKind: project.kind,
-            userPrompt,
-            agentMode: refineEscalationMode,
-            existingFiles,
-            conversationHistory,
-            knowledgeContext: knowledgeContext || undefined,
-            unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-            planContext: input.planContext ?? null,
-          });
+          const escalatedResult = isReactViteProject
+            ? await runReactViteRefinePipeline({
+                projectName: project.name,
+                projectKind: project.kind,
+                userPrompt,
+                agentMode: refineEscalationMode,
+                existingFiles,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                planContext: input.planContext ?? null,
+              })
+            : await runRefinePipeline({
+                projectName: project.name,
+                projectKind: project.kind,
+                userPrompt,
+                agentMode: refineEscalationMode,
+                existingFiles,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                planContext: input.planContext ?? null,
+              });
           wasEscalated = true;
           agentMode = refineEscalationMode;
           refineResult = escalatedResult;
@@ -1597,6 +1661,7 @@ export async function runJob(input: JobInput): Promise<void> {
           taskId,
           project.name,
           project.kind,
+          project.projectFormat ?? "static-html",
           userPrompt,
           assistantSummary,
           snapshot.map((f) => f.path),
@@ -1861,6 +1926,7 @@ export async function runJob(input: JobInput): Promise<void> {
           taskId,
           project.name,
           project.kind,
+          project.projectFormat ?? "static-html",
           userPrompt,
           `Build failed: ${message.slice(0, 200)}`,
           [],
@@ -2055,6 +2121,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       taskId,
       project.name,
       project.kind,
+      project.projectFormat ?? "static-html",
       userPrompt,
       assistantSummary,
       snapshot.map((f) => f.path),

@@ -130,6 +130,17 @@ export const ProjectDefaultAgent = {
   main: 'main',
 } as const;
 
+/**
+ * Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).
+ */
+export type ProjectProjectFormat = typeof ProjectProjectFormat[keyof typeof ProjectProjectFormat];
+
+
+export const ProjectProjectFormat = {
+  'static-html': 'static-html',
+  'react-vite': 'react-vite',
+} as const;
+
 export interface Project {
   id: number;
   /** @nullable */
@@ -164,6 +175,8 @@ export interface Project {
   healthScore?: number | null;
   /** User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
   defaultAgent?: ProjectDefaultAgent;
+  /** Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects). */
+  projectFormat?: ProjectProjectFormat;
   createdAt: string;
   updatedAt: string;
 }

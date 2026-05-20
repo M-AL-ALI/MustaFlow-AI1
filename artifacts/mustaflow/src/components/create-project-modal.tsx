@@ -231,6 +231,9 @@ export function CreateProjectModal({
                 >
                   <Monitor className="h-4 w-4" />
                   Web
+                  <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 leading-none">
+                    React + Vite
+                  </span>
                 </button>
                 <button
                   type="button"

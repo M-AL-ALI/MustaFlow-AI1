@@ -48,6 +48,10 @@ export const projectsTable = pgTable("projects", {
   // pageMapData: AI-extracted and user-edited page/screen flow map.
   // Structure: { web: { nodes, edges }, ios: { nodes, edges }, android: { nodes, edges } }
   pageMapData: jsonb("page_map_data"),
+  // projectFormat: the output format for this project's builder pipeline.
+  // "static-html" = single-file HTML/CSS/JS with CDN dependencies (legacy default).
+  // "react-vite" = multi-file React + Vite + Tailwind npm project (new default for web).
+  projectFormat: text("project_format").notNull().default("static-html"),
   // defaultAgent: user's preferred agent for this project.
   // "planning" = Planning Agent, "task" = Task Agent (staging gate),
   // "main" = Main Agent (direct fast edit). Default "main".

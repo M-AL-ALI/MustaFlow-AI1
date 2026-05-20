@@ -251,6 +251,7 @@ OUTPUT STRICT JSON matching this exact shape:
   "approach": string,
   "sitemap": [{ "name": string, "route": string, "purpose": string }],
   "pages": string[],
+  "fileTree": [{ "path": string, "description": string }],
   "backend": string[],
   "database": string[],
   "dataModel": [{ "table": string, "fields": string[] }],
@@ -269,6 +270,7 @@ OUTPUT STRICT JSON matching this exact shape:
 
 Rules:
 - "sitemap" must list every page/screen with route and one-sentence purpose. "pages" is a flat string list of the same names (for backward compat).
+- "fileTree" lists the actual files/components the build will produce (e.g. [{"path":"src/components/Header.tsx","description":"Site header with nav links"}]). Include at minimum the key React components, pages, and config files. Empty array for trivial single-page apps.
 - "dataModel" only if the app stores data (even localStorage counts). Empty array otherwise.
 - "apiEndpoints" only if the app calls external APIs or needs a backend. Empty array otherwise.
 - "uxNotes" must have one entry per page in "sitemap" with 1-3 sentences of UX guidance.
@@ -277,6 +279,120 @@ Rules:
 - "recommendedMode" must be one of: lite (score 1-2), eco (score 3-4), power (score 5-7), pro (score 8-10).
 - "estimatedBuildSeconds" is a realistic estimate: simple apps ~20s, medium ~40s, complex ~80s.
 - Be concrete and specific. Empty arrays for sections that don't apply.`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// React + Vite builder prompts
+// ─────────────────────────────────────────────────────────────────────────────
+
+const REACT_VITE_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready React + Vite web applications. Your only output is valid JSON — no prose.
+
+TECH STACK — use exactly:
+- React 18 + TypeScript 5
+- Vite 5 as the build tool
+- Tailwind CSS v3 (via PostCSS — NOT a CDN)
+- lucide-react for all icons (no emojis anywhere)
+- react-router-dom v6 for multi-page routing
+
+REQUIRED PROJECT STRUCTURE — always include ALL of these files:
+- package.json (name, version, scripts: dev/build/preview, dependencies, devDependencies)
+- vite.config.ts (with @vitejs/plugin-react)
+- tailwind.config.js (content: ["./index.html","./src/**/*.{ts,tsx}"])
+- postcss.config.js ({ plugins: { tailwindcss: {}, autoprefixer: {} } })
+- index.html (Vite root HTML with <script type="module" src="/src/main.tsx"></script>)
+- src/main.tsx (React entry: createRoot + StrictMode)
+- src/App.tsx (root component with router if multi-page)
+- src/index.css (Tailwind directives: @tailwind base; @tailwind components; @tailwind utilities;)
+
+ADDITIONAL FILES (as needed):
+- src/components/*.tsx — shared UI components (one per file, named export)
+- src/pages/*.tsx — page-level components (one per file, default export)
+- src/types/*.ts — shared TypeScript types
+- src/lib/utils.ts — utility functions (include cn() helper using clsx + tailwind-merge)
+- src/hooks/*.ts — custom React hooks
+
+CODE RULES:
+- TypeScript throughout — no .js files except config files that require it
+- Use proper TypeScript types — never use "any" or "unknown" unless unavoidable
+- All React components must be functional with typed props
+- Named exports for components; default export for page components
+- Use Tailwind utility classes exclusively — no inline styles, no custom CSS unless absolutely necessary
+- Never hardcode secrets — use import.meta.env.VITE_* environment variables
+- Responsive design using Tailwind breakpoints (mobile-first)
+- Semantic HTML with proper accessibility (aria-label, role attributes, alt text)
+- Error boundaries or loading states for async operations
+- Dark-mode friendly color palette using Tailwind slate/zinc/gray
+
+DEPENDENCIES to include in package.json:
+{
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "lucide-react": "^0.447.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.5.3"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.2",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.9"
+  }
+}
+Add any extra domain-specific packages the app genuinely needs (e.g. recharts for charts, date-fns for dates, zod for validation).
+
+OUTPUT STRICT JSON:
+{
+  "blueprint": {
+    "projectName": string,
+    "projectType": string,
+    "targetPlatforms": ["web"],
+    "pages": [{ "name": string, "route": string }],
+    "components": string[],
+    "data": string[],
+    "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+    "theme": string
+  },
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "summary": "One or two plain-English sentences describing what was built — e.g. 'Built a recipe tracker with a home page, ingredient search, and a detail view.' No code, no file paths — describe what the user will see.",
+  "warnings": string[],
+  "nextRecommendation": string
+}
+
+MIME types: .ts/.tsx → "application/typescript", .json → "application/json", .js → "application/javascript", .html → "text/html", .css → "text/css"
+The "files" array MUST include every file in the project. package.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, and src/index.css are REQUIRED.`;
+
+const REACT_VITE_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a React + Vite project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
+
+TECH STACK: React 18 + TypeScript + Vite 5 + Tailwind CSS v3 + lucide-react
+
+RULES:
+- TypeScript throughout (.ts / .tsx)
+- Tailwind utility classes — no custom CSS unless absolutely required
+- Maintain the established project structure (src/components/, src/pages/, src/lib/, etc.)
+- Never hardcode secrets — use import.meta.env.VITE_* for env vars
+- Do NOT remove or replace package.json, vite.config.ts, index.html, src/main.tsx, or src/index.css unless the user explicitly asked to change them
+- If you add a new npm package, update package.json accordingly
+- Use lucide-react for all icons — no emojis
+
+OUTPUT STRICT JSON:
+{
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "filesRemoved": string[],
+  "unchangedFiles": string[],
+  "summary": "One or two plain-English sentences describing what changed — e.g. 'Added a dark mode toggle and improved the navigation layout.' No code, no file paths.",
+  "warnings": string[],
+  "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+  "nextRecommendation": string
+}
+
+"files" = ONLY files created or changed (full new content).
+"unchangedFiles" = every path you deliberately did not touch (MUST list all untouched files — allows the system to skip regenerating them).
+"filesRemoved" = paths to delete.`;
 
 function modelFor(mode: AgentMode): string {
   return MODEL_FOR_MODE[mode] ?? MODEL_FOR_MODE.eco;
@@ -2292,6 +2408,474 @@ export async function runRefinePipeline(args: {
     correctionPasses: correctionWasAttempted ? 1 : 0,
     correctionFailed,
     primaryErrorCategory: refineErrorCategory,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// React + Vite pipeline
+// ─────────────────────────────────────────────────────────────────────────────
+
+const REACT_VITE_REQUIRED_FILES = [
+  "package.json",
+  "index.html",
+  "src/main.tsx",
+  "src/App.tsx",
+  "src/index.css",
+  "vite.config.ts",
+];
+
+/**
+ * Validate that a React + Vite build produced all required files.
+ * Returns a ValidationResult compatible with the existing pipeline infrastructure.
+ */
+function validateReactViteFiles(files: BuilderFile[]): ValidationResult {
+  const paths = new Set(files.map((f) => f.path));
+  const criticalErrors: string[] = [];
+  const warnings: string[] = [];
+
+  for (const required of REACT_VITE_REQUIRED_FILES) {
+    if (!paths.has(required)) {
+      criticalErrors.push(`Missing required file: ${required}`);
+    }
+  }
+
+  // package.json must have a scripts.dev entry
+  const pkgFile = files.find((f) => f.path === "package.json");
+  if (pkgFile) {
+    try {
+      const pkg = JSON.parse(pkgFile.content) as Record<string, unknown>;
+      const scripts = pkg.scripts as Record<string, unknown> | undefined;
+      if (!scripts?.["dev"] && !scripts?.["start"]) {
+        warnings.push('package.json is missing a "dev" or "start" script.');
+      }
+      const deps = (pkg.dependencies ?? {}) as Record<string, unknown>;
+      if (!deps["react"]) {
+        criticalErrors.push('package.json is missing the "react" dependency.');
+      }
+    } catch {
+      criticalErrors.push("package.json is not valid JSON.");
+    }
+  }
+
+  // src/main.tsx must reference createRoot or render
+  const mainFile = files.find((f) => f.path === "src/main.tsx" || f.path === "src/main.ts");
+  if (
+    mainFile &&
+    !mainFile.content.includes("createRoot") &&
+    !mainFile.content.includes("render")
+  ) {
+    warnings.push(
+      "src/main.tsx does not appear to call createRoot — verify the React entry point.",
+    );
+  }
+
+  // index.html must reference src/main.tsx
+  const htmlFile = files.find((f) => f.path === "index.html");
+  if (htmlFile && !htmlFile.content.includes("src/main")) {
+    warnings.push("index.html does not reference /src/main.tsx — the Vite entry may be broken.");
+  }
+
+  return { passed: criticalErrors.length === 0, criticalErrors, warnings };
+}
+
+export async function runReactViteBuildPipeline(args: {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  integrationContext?: string;
+  planContext?: Record<string, unknown> | null;
+  onEvent?: (type: string, message: string) => Promise<void>;
+}): Promise<BuilderResult> {
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    conversationHistory,
+    knowledgeContext,
+    integrationContext,
+    planContext,
+    onEvent,
+  } = args;
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: REACT_VITE_BUILD_SYSTEM_PROMPT },
+    {
+      role: "system",
+      content: `Project: "${projectName}" (kind: ${projectKind}).`,
+    },
+  ];
+
+  if (knowledgeContext) {
+    messages.push({
+      role: "system",
+      content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+    });
+  }
+
+  if (integrationContext) {
+    messages.push({ role: "system", content: integrationContext });
+  }
+
+  if (planContext) {
+    const { sitemap, dataModel, integrations, goal, approach, fileTree } = planContext as {
+      sitemap?: Array<{ name: string; route: string; purpose: string }>;
+      dataModel?: Array<{ table: string; fields: string[] }>;
+      integrations?: string[];
+      goal?: string;
+      approach?: string;
+      fileTree?: Array<{ path: string; description: string }>;
+    };
+    const planLines: string[] = [
+      "STRUCTURED PLAN from Planning Agent — follow this plan exactly when building:",
+    ];
+    if (goal) planLines.push(`Goal: ${goal}`);
+    if (approach) planLines.push(`Approach: ${approach}`);
+    if (sitemap && sitemap.length > 0) {
+      planLines.push(
+        `Pages/Routes:\n${sitemap.map((p) => `  • ${p.name} (${p.route}): ${p.purpose}`).join("\n")}`,
+      );
+    }
+    if (fileTree && fileTree.length > 0) {
+      planLines.push(
+        `Planned file tree:\n${fileTree.map((f) => `  • ${f.path}: ${f.description}`).join("\n")}`,
+      );
+    }
+    if (dataModel && dataModel.length > 0) {
+      planLines.push(
+        `Data model:\n${dataModel.map((m) => `  • ${m.table}: ${m.fields.join(", ")}`).join("\n")}`,
+      );
+    }
+    if (integrations && integrations.length > 0) {
+      planLines.push(`Integrations: ${integrations.join(", ")}`);
+    }
+    messages.push({ role: "system", content: planLines.join("\n") });
+  }
+
+  messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
+
+  if (agentMode === "power" || agentMode === "pro") {
+    messages.push({ role: "system", content: SELF_REVIEW_CLAUSE });
+  }
+
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  await onEvent?.("generating_code", "Generating React + Vite project with AI…");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "react-vite-build");
+
+  const blueprint = (parsed.blueprint ?? {
+    projectName,
+    projectType: projectKind,
+    targetPlatforms: ["web"],
+    pages: [],
+    components: [],
+    integrationsNeeded: [],
+  }) as Blueprint;
+
+  const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
+  let files: BuilderFile[] = rawFiles
+    .filter(
+      (f): f is { path: string; content: string; mimeType?: string } =>
+        typeof f === "object" &&
+        f !== null &&
+        typeof (f as { path?: unknown }).path === "string" &&
+        typeof (f as { content?: unknown }).content === "string",
+    )
+    .map((f) => ({
+      path: normalizePath(f.path),
+      content: f.content,
+      mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+    }));
+
+  // Validate React+Vite structure
+  await onEvent?.("validating_output", "Validating React + Vite project structure…");
+  const validation = validateReactViteFiles(files);
+  let correctionFailed = false;
+  let postCorrectionWarnings: string[] = [];
+
+  if (!validation.passed) {
+    logger.warn(
+      { criticalErrors: validation.criticalErrors },
+      "React+Vite build validation found critical errors — running correction pass",
+    );
+    await onEvent?.(
+      "validating_output",
+      `Validation found ${validation.criticalErrors.length} issue(s) — running correction…`,
+    );
+
+    const correctionMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      ...messages,
+      { role: "assistant", content: JSON.stringify(parsed) },
+      {
+        role: "user",
+        content: `The generated React+Vite project is missing required files. Please fix these issues:\n${validation.criticalErrors.join("\n")}\n\nReturn the full corrected JSON output including ALL required files.`,
+      },
+    ];
+
+    try {
+      const corrected = await callWithRetry(
+        correctionMessages,
+        modelFor(agentMode),
+        32000,
+        "react-vite-build-correction",
+      );
+      const correctedRaw = Array.isArray(corrected.files) ? corrected.files : [];
+      const correctedFiles: BuilderFile[] = correctedRaw
+        .filter(
+          (f): f is { path: string; content: string; mimeType?: string } =>
+            typeof f === "object" &&
+            f !== null &&
+            typeof (f as { path?: unknown }).path === "string" &&
+            typeof (f as { content?: unknown }).content === "string",
+        )
+        .map((f) => ({
+          path: normalizePath(f.path),
+          content: f.content,
+          mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+        }));
+      const mergedMap = new Map(files.map((f) => [f.path, f]));
+      for (const cf of correctedFiles) mergedMap.set(cf.path, cf);
+      files = [...mergedMap.values()];
+    } catch (err) {
+      logger.warn({ err }, "React+Vite correction pass failed — using original output");
+      correctionFailed = true;
+      postCorrectionWarnings = validation.criticalErrors.map((e) => `[validation_failed] ${e}`);
+    }
+  } else {
+    postCorrectionWarnings = validation.warnings;
+  }
+
+  const aiWarnings = Array.isArray(parsed.warnings)
+    ? parsed.warnings.filter((w): w is string => typeof w === "string")
+    : [];
+  const warnings = correctionFailed
+    ? [...aiWarnings, ...validation.warnings, ...postCorrectionWarnings]
+    : [...aiWarnings, ...postCorrectionWarnings];
+
+  const nextRecommendation =
+    typeof parsed.nextRecommendation === "string"
+      ? parsed.nextRecommendation
+      : "Run `npm install && npm run dev` locally to preview your app, then tell me what to change.";
+
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Generated ${files.length} files for ${projectName}.`,
+  );
+
+  const { files: sanitisedFiles } = scanForSecrets(files);
+  files = sanitisedFiles;
+
+  const report: TaskReport = {
+    userRequest: userPrompt,
+    blueprint: blueprint as unknown as Record<string, unknown>,
+    filesCreated: files.map((f) => f.path),
+    filesChanged: [],
+    filesRemoved: [],
+    previewUpdated: false,
+    warnings,
+    integrationsNeeded: blueprint.integrationsNeeded ?? [],
+    nextRecommendation,
+  };
+
+  return {
+    blueprint,
+    files,
+    report,
+    assistantSummary: summary,
+    correctionPasses: !validation.passed ? 1 : 0,
+    correctionFailed,
+    primaryErrorCategory: !validation.passed ? "structure" : null,
+  };
+}
+
+export async function runReactViteRefinePipeline(args: {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+  existingFiles: BuilderFile[];
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  integrationContext?: string;
+  unchangedFilesHint?: string[];
+  planContext?: Record<string, unknown> | null;
+  onEvent?: (type: string, message: string) => Promise<void>;
+}): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    existingFiles,
+    conversationHistory,
+    knowledgeContext,
+    integrationContext,
+    unchangedFilesHint,
+    planContext,
+    onEvent,
+  } = args;
+
+  const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: REACT_VITE_REFINE_SYSTEM_PROMPT },
+    {
+      role: "system",
+      content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}`,
+    },
+  ];
+
+  if (knowledgeContext) {
+    messages.push({
+      role: "system",
+      content: `LEARNED LESSONS — apply these to every change without being asked:\n${knowledgeContext}`,
+    });
+  }
+
+  if (integrationContext) {
+    messages.push({ role: "system", content: integrationContext });
+  }
+
+  if (planContext) {
+    const { sitemap, dataModel, integrations, goal, approach, fileTree } = planContext as {
+      sitemap?: Array<{ name: string; route: string; purpose: string }>;
+      dataModel?: Array<{ table: string; fields: string[] }>;
+      integrations?: string[];
+      goal?: string;
+      approach?: string;
+      fileTree?: Array<{ path: string; description: string }>;
+    };
+    const planLines: string[] = [
+      "STRUCTURED PLAN from Planning Agent — follow this plan exactly when applying changes:",
+    ];
+    if (goal) planLines.push(`Goal: ${goal}`);
+    if (approach) planLines.push(`Approach: ${approach}`);
+    if (sitemap && sitemap.length > 0) {
+      planLines.push(
+        `Pages/Routes:\n${sitemap.map((p) => `  • ${p.name} (${p.route}): ${p.purpose}`).join("\n")}`,
+      );
+    }
+    if (fileTree && fileTree.length > 0) {
+      planLines.push(
+        `Planned file tree:\n${fileTree.map((f) => `  • ${f.path}: ${f.description}`).join("\n")}`,
+      );
+    }
+    if (dataModel && dataModel.length > 0) {
+      planLines.push(
+        `Data model:\n${dataModel.map((m) => `  • ${m.table}: ${m.fields.join(", ")}`).join("\n")}`,
+      );
+    }
+    if (integrations && integrations.length > 0) {
+      planLines.push(`Integrations: ${integrations.join(", ")}`);
+    }
+    messages.push({ role: "system", content: planLines.join("\n") });
+  }
+
+  messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
+
+  if (agentMode === "power" || agentMode === "pro") {
+    messages.push({ role: "system", content: SELF_REVIEW_CLAUSE });
+  }
+
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  await onEvent?.("generating_code", "Applying change request to React + Vite project…");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "react-vite-refine");
+
+  const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
+  let changedFiles: BuilderFile[] = rawFiles
+    .filter(
+      (f): f is { path: string; content: string; mimeType?: string } =>
+        typeof f === "object" &&
+        f !== null &&
+        typeof (f as { path?: unknown }).path === "string" &&
+        typeof (f as { content?: unknown }).content === "string",
+    )
+    .map((f) => ({
+      path: normalizePath(f.path),
+      content: f.content,
+      mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+    }));
+
+  const removedPaths = Array.isArray(parsed.filesRemoved)
+    ? parsed.filesRemoved.filter((p): p is string => typeof p === "string").map(normalizePath)
+    : [];
+
+  const unchangedFiles = Array.isArray(parsed.unchangedFiles)
+    ? parsed.unchangedFiles.filter((p): p is string => typeof p === "string")
+    : [];
+
+  // Secrets scan
+  const { files: sanitisedChangedFiles } = scanForSecrets(changedFiles);
+  changedFiles = sanitisedChangedFiles;
+
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Updated ${changedFiles.length} file(s).`,
+  );
+
+  const aiWarnings = Array.isArray(parsed.warnings)
+    ? parsed.warnings.filter((w): w is string => typeof w === "string")
+    : [];
+
+  const integrationsNeeded = Array.isArray(parsed.integrationsNeeded)
+    ? (parsed.integrationsNeeded as TaskReport["integrationsNeeded"])
+    : [];
+
+  const nextRecommendation =
+    typeof parsed.nextRecommendation === "string"
+      ? parsed.nextRecommendation
+      : "Run `npm install && npm run dev` to preview the updated app.";
+
+  const existingPaths = new Set(existingFiles.map((f) => f.path));
+  const filesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
+  const filesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
+
+  const report: TaskReport = {
+    userRequest: userPrompt,
+    blueprint: null,
+    filesCreated,
+    filesChanged,
+    filesRemoved: removedPaths,
+    previewUpdated: changedFiles.length > 0 || removedPaths.length > 0,
+    warnings: aiWarnings,
+    integrationsNeeded,
+    nextRecommendation,
+  };
+
+  return {
+    changedFiles,
+    removedPaths,
+    unchangedFiles,
+    report,
+    assistantSummary: summary,
+    correctionPasses: 0,
+    correctionFailed: false,
+    primaryErrorCategory: null,
   };
 }
 

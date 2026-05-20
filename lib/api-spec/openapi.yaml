@@ -1815,6 +1815,10 @@ components:
           type: string
           enum: [planning, task, main]
           description: "User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit)."
+        projectFormat:
+          type: string
+          enum: [static-html, react-vite]
+          description: "Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects)."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 

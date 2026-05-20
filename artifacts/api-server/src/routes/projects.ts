@@ -188,6 +188,11 @@ router.post("/projects", async (req, res): Promise<void> => {
   };
   const platform = platformMap[projectInput.kind] ?? "web";
 
+  // New web projects default to the React + Vite multi-file pipeline.
+  // Mobile projects keep "static-html" (Expo pipelines are separate).
+  // Legacy static-html projects created before this change retain their format via DB default.
+  const projectFormat = platform === "web" ? "react-vite" : "static-html";
+
   const [project] = await db
     .insert(projectsTable)
     .values({
@@ -197,6 +202,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       description: projectInput.description ?? null,
       kind: projectInput.kind,
       platform,
+      projectFormat,
       lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
     })
     .returning();
@@ -204,6 +210,177 @@ router.post("/projects", async (req, res): Promise<void> => {
   if (!project) {
     res.status(500).json({ error: "Failed to create project" });
     return;
+  }
+
+  // Seed minimal React + Vite scaffold so the code editor shows a real file tree
+  // immediately — before the first AI build runs.
+  if (projectFormat === "react-vite") {
+    const safeName = project.name.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+    const scaffoldFiles = [
+      {
+        path: "package.json",
+        mimeType: "application/json",
+        content: JSON.stringify(
+          {
+            name: safeName,
+            private: true,
+            version: "0.0.0",
+            type: "module",
+            scripts: {
+              dev: "vite",
+              build: "tsc && vite build",
+              preview: "vite preview",
+            },
+            dependencies: {
+              react: "^18.3.1",
+              "react-dom": "^18.3.1",
+            },
+            devDependencies: {
+              "@types/react": "^18.3.5",
+              "@types/react-dom": "^18.3.0",
+              "@vitejs/plugin-react": "^4.3.1",
+              autoprefixer: "^10.4.20",
+              postcss: "^8.4.45",
+              tailwindcss: "^3.4.10",
+              typescript: "^5.5.3",
+              vite: "^5.4.2",
+            },
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: "index.html",
+        mimeType: "text/html",
+        content: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${project.name}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`,
+      },
+      {
+        path: "vite.config.ts",
+        mimeType: "application/typescript",
+        content: `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+})
+`,
+      },
+      {
+        path: "tailwind.config.js",
+        mimeType: "application/javascript",
+        content: `/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+`,
+      },
+      {
+        path: "postcss.config.js",
+        mimeType: "application/javascript",
+        content: `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+`,
+      },
+      {
+        path: "tsconfig.json",
+        mimeType: "application/json",
+        content: JSON.stringify(
+          {
+            compilerOptions: {
+              target: "ES2020",
+              useDefineForClassFields: true,
+              lib: ["ES2020", "DOM", "DOM.Iterable"],
+              module: "ESNext",
+              skipLibCheck: true,
+              moduleResolution: "bundler",
+              allowImportingTsExtensions: true,
+              isolatedModules: true,
+              moduleDetection: "force",
+              noEmit: true,
+              jsx: "react-jsx",
+              strict: true,
+              noUnusedLocals: true,
+              noUnusedParameters: true,
+              noFallthroughCasesInSwitch: true,
+            },
+            include: ["src"],
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: "src/main.tsx",
+        mimeType: "application/typescript",
+        content: `import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+`,
+      },
+      {
+        path: "src/App.tsx",
+        mimeType: "application/typescript",
+        content: `export default function App() {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">${project.name}</h1>
+        <p className="text-gray-500">Your app is ready. Describe what to build in the chat.</p>
+      </div>
+    </div>
+  )
+}
+`,
+      },
+      {
+        path: "src/index.css",
+        mimeType: "text/css",
+        content: `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+`,
+      },
+    ];
+
+    await db.insert(projectFilesTable).values(
+      scaffoldFiles.map((f) => ({
+        projectId: project.id,
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+      })),
+    );
   }
 
   if (initialPrompt && initialPrompt.trim().length > 0) {
