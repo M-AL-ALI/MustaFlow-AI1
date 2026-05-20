@@ -4187,6 +4187,631 @@ export async function runPlanPipeline(args: {
   return { summary, plan, currentState, recommendedAgent };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Node.js (Express) builder prompts
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NODE_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, working Node.js / Express web API projects. Your only output is valid JSON — no prose.
+
+TECH STACK — use exactly:
+- Node.js (20 or 22 LTS) + Express 4 for the HTTP server
+- Plain JavaScript (CommonJS with require()) — no TypeScript, no build step
+- Tailwind CSS via CDN only (for any HTML pages served statically)
+
+REQUIRED PROJECT STRUCTURE — always include ALL of these files:
+- package.json (name, version, scripts: { "start": "node src/index.js", "dev": "node --watch src/index.js" }, dependencies: { express })
+- src/index.js (main entry point — creates Express app, registers routes, calls app.listen(PORT || 3000))
+- src/routes/ directory (at least one route file imported by index.js)
+- index.html (static landing page served at GET /, uses Tailwind CDN to show the app name and API docs)
+- README.md (brief project overview, how to run, API endpoint docs)
+
+CODE RULES:
+- Use const, let — never var
+- Use async/await for async operations; always use try/catch around awaits
+- Express error handler middleware (4 args: err, req, res, next) at the end of index.js
+- Never hardcode secrets — use process.env.MY_KEY with helpful comments
+- Every route must respond with JSON (except GET / which serves the HTML landing page)
+- Include CORS headers: app.use(require('cors')()) — add cors to dependencies
+
+MIME types: .js → "application/javascript", .json → "application/json", .html → "text/html", .md → "text/plain"
+
+OUTPUT STRICT JSON:
+{
+  "blueprint": {
+    "projectName": string,
+    "projectType": string,
+    "targetPlatforms": ["node"],
+    "pages": [{ "name": string, "route": string }],
+    "components": string[],
+    "data": string[],
+    "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+    "theme": string
+  },
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "summary": "One or two plain-English sentences describing what was built — describe the API endpoints and what the server does. No code, no file paths.",
+  "warnings": string[],
+  "nextRecommendation": string
+}
+
+The "files" array MUST include every file in the project. package.json, src/index.js, and index.html are REQUIRED.`;
+
+const NODE_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Node.js / Express project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
+
+TECH STACK: Node.js + Express 4 + plain JavaScript (CommonJS)
+
+RULES:
+- Maintain the established project structure (src/routes/, etc.)
+- Never hardcode secrets — use process.env.*
+- Do NOT remove package.json, src/index.js, or index.html unless explicitly asked
+- If you add a new npm package, update package.json accordingly
+- Use async/await with try/catch; always include an error handler middleware
+
+OUTPUT STRICT JSON:
+{
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "filesRemoved": string[],
+  "unchangedFiles": string[],
+  "summary": "One or two plain-English sentences describing what changed. No code, no file paths.",
+  "warnings": string[],
+  "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+  "nextRecommendation": string
+}
+
+"files" = ONLY files created or changed (full new content).
+"unchangedFiles" = every path you deliberately did not touch (MUST list all untouched files).
+"filesRemoved" = paths to delete.`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Python (Flask) builder prompts
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PYTHON_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, working Python / Flask web API projects. Your only output is valid JSON — no prose.
+
+TECH STACK — use exactly:
+- Python 3.12 + Flask 3 for the HTTP server
+- flask-cors for CORS support
+- python-dotenv for environment variable loading
+
+REQUIRED PROJECT STRUCTURE — always include ALL of these files:
+- requirements.txt (list one package per line: flask, flask-cors, python-dotenv — add extras as needed)
+- app.py (main entry point — creates Flask app, registers blueprints/routes, calls app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 3000))) inside if __name__ == "__main__")
+- routes/ directory (at least one route module imported by app.py)
+- index.html (static landing page served at GET /, uses Tailwind CDN to show the app name and API docs)
+- README.md (brief project overview, how to run locally, API endpoint docs)
+- .env.example (commented-out list of all required env vars, e.g. # MY_API_KEY=your_key_here)
+
+CODE RULES:
+- Python 3.12 style: type hints, f-strings, dataclasses where useful
+- Use Flask Blueprints for route organisation — one blueprint per logical group
+- Every route must return jsonify(data) (except GET / which returns render_template or send_file for index.html)
+- Never hardcode secrets — use os.environ.get("KEY") with a descriptive comment
+- Always wrap DB / external calls in try/except and return structured JSON errors on failure
+- Use flask.abort() for 4xx errors; register a @app.errorhandler(Exception) catch-all
+
+MIME types: .py → "text/x-python", .txt → "text/plain", .html → "text/html", .md → "text/plain", .json → "application/json"
+
+OUTPUT STRICT JSON:
+{
+  "blueprint": {
+    "projectName": string,
+    "projectType": string,
+    "targetPlatforms": ["python"],
+    "pages": [{ "name": string, "route": string }],
+    "components": string[],
+    "data": string[],
+    "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+    "theme": string
+  },
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "summary": "One or two plain-English sentences describing what was built — describe the API endpoints and what the server does. No code, no file paths.",
+  "warnings": string[],
+  "nextRecommendation": string
+}
+
+The "files" array MUST include every file in the project. requirements.txt, app.py, and index.html are REQUIRED.`;
+
+const PYTHON_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Python / Flask project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
+
+TECH STACK: Python 3.12 + Flask 3 + flask-cors + python-dotenv
+
+RULES:
+- Maintain the established project structure (routes/ blueprints, etc.)
+- Never hardcode secrets — use os.environ.get("KEY")
+- Do NOT remove requirements.txt, app.py, or index.html unless explicitly asked
+- If you add a new package, update requirements.txt accordingly
+- Use try/except with proper error handling; return structured JSON errors
+
+OUTPUT STRICT JSON:
+{
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "filesRemoved": string[],
+  "unchangedFiles": string[],
+  "summary": "One or two plain-English sentences describing what changed. No code, no file paths.",
+  "warnings": string[],
+  "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+  "nextRecommendation": string
+}
+
+"files" = ONLY files created or changed (full new content).
+"unchangedFiles" = every path you deliberately did not touch (MUST list all untouched files).
+"filesRemoved" = paths to delete.`;
+
+/**
+ * Build pipeline for Node.js (Express) projects.
+ * Generates a complete Node.js API project structure.
+ */
+export async function runNodeBuildPipeline(args: {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  planContext?: Record<string, unknown> | null;
+  onEvent?: (type: string, message: string) => Promise<void>;
+}): Promise<BuilderResult> {
+  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext, planContext, onEvent } = args;
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: NODE_BUILD_SYSTEM_PROMPT },
+    { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).` },
+  ];
+
+  if (knowledgeContext) {
+    messages.push({ role: "system", content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}` });
+  }
+
+  if (planContext) {
+    const { goal, approach } = planContext as { goal?: string; approach?: string };
+    const planLines = ["STRUCTURED PLAN from Planning Agent — follow this plan exactly when building:"];
+    if (goal) planLines.push(`Goal: ${goal}`);
+    if (approach) planLines.push(`Approach: ${approach}`);
+    messages.push({ role: "system", content: planLines.join("\n") });
+  }
+
+  messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
+
+  if (agentMode === "power" || agentMode === "pro") {
+    messages.push({ role: "system", content: SELF_REVIEW_CLAUSE });
+  }
+
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  await onEvent?.("generating_code", "Generating Node.js / Express project with AI…");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "node-build");
+
+  const blueprint = (parsed.blueprint ?? {
+    projectName,
+    projectType: projectKind,
+    targetPlatforms: ["node"],
+    pages: [],
+    components: [],
+    integrationsNeeded: [],
+  }) as Blueprint;
+
+  const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
+  const files: BuilderFile[] = rawFiles
+    .filter(
+      (f): f is { path: string; content: string; mimeType?: string } =>
+        typeof f === "object" && f !== null &&
+        typeof (f as { path?: unknown }).path === "string" &&
+        typeof (f as { content?: unknown }).content === "string",
+    )
+    .map((f) => ({
+      path: normalizePath(f.path),
+      content: f.content,
+      mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+    }));
+
+  const { files: sanitisedFiles } = scanForSecrets(files);
+  const aiWarnings = Array.isArray(parsed.warnings)
+    ? parsed.warnings.filter((w): w is string => typeof w === "string")
+    : [];
+  const nextRecommendation =
+    typeof parsed.nextRecommendation === "string"
+      ? parsed.nextRecommendation
+      : "Run `npm install && npm start` in the container to start the server.";
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Generated ${sanitisedFiles.length} files for ${projectName}.`,
+  );
+
+  const report: TaskReport = {
+    userRequest: userPrompt,
+    blueprint: blueprint as unknown as Record<string, unknown>,
+    filesCreated: sanitisedFiles.map((f) => f.path),
+    filesChanged: [],
+    filesRemoved: [],
+    previewUpdated: false,
+    warnings: aiWarnings,
+    integrationsNeeded: blueprint.integrationsNeeded ?? [],
+    nextRecommendation,
+  };
+
+  return {
+    blueprint,
+    files: sanitisedFiles,
+    report,
+    assistantSummary: summary,
+    correctionPasses: 0,
+    correctionFailed: false,
+    primaryErrorCategory: null,
+  };
+}
+
+/**
+ * Refine pipeline for Node.js (Express) projects.
+ */
+export async function runNodeRefinePipeline(args: {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+  existingFiles: BuilderFile[];
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  unchangedFilesHint?: string[];
+  planContext?: Record<string, unknown> | null;
+  onEvent?: (type: string, message: string) => Promise<void>;
+}): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext, unchangedFilesHint, planContext, onEvent } = args;
+
+  const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: NODE_REFINE_SYSTEM_PROMPT },
+    { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}` },
+  ];
+
+  if (knowledgeContext) {
+    messages.push({ role: "system", content: `LEARNED LESSONS:\n${knowledgeContext}` });
+  }
+
+  if (planContext) {
+    const { goal, approach } = planContext as { goal?: string; approach?: string };
+    const planLines = ["STRUCTURED PLAN:"];
+    if (goal) planLines.push(`Goal: ${goal}`);
+    if (approach) planLines.push(`Approach: ${approach}`);
+    messages.push({ role: "system", content: planLines.join("\n") });
+  }
+
+  messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
+
+  if (agentMode === "power" || agentMode === "pro") {
+    messages.push({ role: "system", content: SELF_REVIEW_CLAUSE });
+  }
+
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  await onEvent?.("generating_code", "Applying changes to Node.js project…");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "node-refine");
+
+  const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
+  let changedFiles: BuilderFile[] = rawFiles
+    .filter(
+      (f): f is { path: string; content: string; mimeType?: string } =>
+        typeof f === "object" && f !== null &&
+        typeof (f as { path?: unknown }).path === "string" &&
+        typeof (f as { content?: unknown }).content === "string",
+    )
+    .map((f) => ({
+      path: normalizePath(f.path),
+      content: f.content,
+      mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+    }));
+
+  const removedPaths = Array.isArray(parsed.filesRemoved)
+    ? parsed.filesRemoved.filter((p): p is string => typeof p === "string").map(normalizePath)
+    : [];
+  const unchangedFiles = Array.isArray(parsed.unchangedFiles)
+    ? parsed.unchangedFiles.filter((p): p is string => typeof p === "string")
+    : [];
+
+  const { files: sanitisedChangedFiles } = scanForSecrets(changedFiles);
+  changedFiles = sanitisedChangedFiles;
+
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Updated ${changedFiles.length} file(s).`,
+  );
+  const aiWarnings = Array.isArray(parsed.warnings)
+    ? parsed.warnings.filter((w): w is string => typeof w === "string")
+    : [];
+  const integrationsNeeded = Array.isArray(parsed.integrationsNeeded)
+    ? (parsed.integrationsNeeded as TaskReport["integrationsNeeded"])
+    : [];
+  const nextRecommendation =
+    typeof parsed.nextRecommendation === "string"
+      ? parsed.nextRecommendation
+      : "Restart the dev server to pick up the changes.";
+
+  const existingPaths = new Set(existingFiles.map((f) => f.path));
+  const filesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
+  const filesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
+
+  const report: TaskReport = {
+    userRequest: userPrompt,
+    blueprint: null,
+    filesCreated,
+    filesChanged,
+    filesRemoved: removedPaths,
+    previewUpdated: changedFiles.length > 0 || removedPaths.length > 0,
+    warnings: aiWarnings,
+    integrationsNeeded,
+    nextRecommendation,
+  };
+
+  return {
+    changedFiles,
+    removedPaths,
+    unchangedFiles,
+    report,
+    assistantSummary: summary,
+    correctionPasses: 0,
+    correctionFailed: false,
+    primaryErrorCategory: null,
+  };
+}
+
+/**
+ * Build pipeline for Python (Flask) projects.
+ * Generates a complete Python API project structure.
+ */
+export async function runPythonBuildPipeline(args: {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  planContext?: Record<string, unknown> | null;
+  onEvent?: (type: string, message: string) => Promise<void>;
+}): Promise<BuilderResult> {
+  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext, planContext, onEvent } = args;
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: PYTHON_BUILD_SYSTEM_PROMPT },
+    { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).` },
+  ];
+
+  if (knowledgeContext) {
+    messages.push({ role: "system", content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}` });
+  }
+
+  if (planContext) {
+    const { goal, approach } = planContext as { goal?: string; approach?: string };
+    const planLines = ["STRUCTURED PLAN from Planning Agent — follow this plan exactly when building:"];
+    if (goal) planLines.push(`Goal: ${goal}`);
+    if (approach) planLines.push(`Approach: ${approach}`);
+    messages.push({ role: "system", content: planLines.join("\n") });
+  }
+
+  messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
+
+  if (agentMode === "power" || agentMode === "pro") {
+    messages.push({ role: "system", content: SELF_REVIEW_CLAUSE });
+  }
+
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  await onEvent?.("generating_code", "Generating Python / Flask project with AI…");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "python-build");
+
+  const blueprint = (parsed.blueprint ?? {
+    projectName,
+    projectType: projectKind,
+    targetPlatforms: ["python"],
+    pages: [],
+    components: [],
+    integrationsNeeded: [],
+  }) as Blueprint;
+
+  const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
+  const files: BuilderFile[] = rawFiles
+    .filter(
+      (f): f is { path: string; content: string; mimeType?: string } =>
+        typeof f === "object" && f !== null &&
+        typeof (f as { path?: unknown }).path === "string" &&
+        typeof (f as { content?: unknown }).content === "string",
+    )
+    .map((f) => ({
+      path: normalizePath(f.path),
+      content: f.content,
+      mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+    }));
+
+  const { files: sanitisedFiles } = scanForSecrets(files);
+  const aiWarnings = Array.isArray(parsed.warnings)
+    ? parsed.warnings.filter((w): w is string => typeof w === "string")
+    : [];
+  const nextRecommendation =
+    typeof parsed.nextRecommendation === "string"
+      ? parsed.nextRecommendation
+      : "Run `pip install -r requirements.txt && python app.py` in the container to start the server.";
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Generated ${sanitisedFiles.length} files for ${projectName}.`,
+  );
+
+  const report: TaskReport = {
+    userRequest: userPrompt,
+    blueprint: blueprint as unknown as Record<string, unknown>,
+    filesCreated: sanitisedFiles.map((f) => f.path),
+    filesChanged: [],
+    filesRemoved: [],
+    previewUpdated: false,
+    warnings: aiWarnings,
+    integrationsNeeded: blueprint.integrationsNeeded ?? [],
+    nextRecommendation,
+  };
+
+  return {
+    blueprint,
+    files: sanitisedFiles,
+    report,
+    assistantSummary: summary,
+    correctionPasses: 0,
+    correctionFailed: false,
+    primaryErrorCategory: null,
+  };
+}
+
+/**
+ * Refine pipeline for Python (Flask) projects.
+ */
+export async function runPythonRefinePipeline(args: {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+  existingFiles: BuilderFile[];
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  unchangedFilesHint?: string[];
+  planContext?: Record<string, unknown> | null;
+  onEvent?: (type: string, message: string) => Promise<void>;
+}): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext, unchangedFilesHint, planContext, onEvent } = args;
+
+  const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: PYTHON_REFINE_SYSTEM_PROMPT },
+    { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}` },
+  ];
+
+  if (knowledgeContext) {
+    messages.push({ role: "system", content: `LEARNED LESSONS:\n${knowledgeContext}` });
+  }
+
+  if (planContext) {
+    const { goal, approach } = planContext as { goal?: string; approach?: string };
+    const planLines = ["STRUCTURED PLAN:"];
+    if (goal) planLines.push(`Goal: ${goal}`);
+    if (approach) planLines.push(`Approach: ${approach}`);
+    messages.push({ role: "system", content: planLines.join("\n") });
+  }
+
+  messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
+
+  if (agentMode === "power" || agentMode === "pro") {
+    messages.push({ role: "system", content: SELF_REVIEW_CLAUSE });
+  }
+
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  await onEvent?.("generating_code", "Applying changes to Python project…");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "python-refine");
+
+  const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
+  let changedFiles: BuilderFile[] = rawFiles
+    .filter(
+      (f): f is { path: string; content: string; mimeType?: string } =>
+        typeof f === "object" && f !== null &&
+        typeof (f as { path?: unknown }).path === "string" &&
+        typeof (f as { content?: unknown }).content === "string",
+    )
+    .map((f) => ({
+      path: normalizePath(f.path),
+      content: f.content,
+      mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+    }));
+
+  const removedPaths = Array.isArray(parsed.filesRemoved)
+    ? parsed.filesRemoved.filter((p): p is string => typeof p === "string").map(normalizePath)
+    : [];
+  const unchangedFiles = Array.isArray(parsed.unchangedFiles)
+    ? parsed.unchangedFiles.filter((p): p is string => typeof p === "string")
+    : [];
+
+  const { files: sanitisedChangedFiles } = scanForSecrets(changedFiles);
+  changedFiles = sanitisedChangedFiles;
+
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Updated ${changedFiles.length} file(s).`,
+  );
+  const aiWarnings = Array.isArray(parsed.warnings)
+    ? parsed.warnings.filter((w): w is string => typeof w === "string")
+    : [];
+  const integrationsNeeded = Array.isArray(parsed.integrationsNeeded)
+    ? (parsed.integrationsNeeded as TaskReport["integrationsNeeded"])
+    : [];
+  const nextRecommendation =
+    typeof parsed.nextRecommendation === "string"
+      ? parsed.nextRecommendation
+      : "Restart the Flask server to pick up the changes.";
+
+  const existingPaths = new Set(existingFiles.map((f) => f.path));
+  const filesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
+  const filesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
+
+  const report: TaskReport = {
+    userRequest: userPrompt,
+    blueprint: null,
+    filesCreated,
+    filesChanged,
+    filesRemoved: removedPaths,
+    previewUpdated: changedFiles.length > 0 || removedPaths.length > 0,
+    warnings: aiWarnings,
+    integrationsNeeded,
+    nextRecommendation,
+  };
+
+  return {
+    changedFiles,
+    removedPaths,
+    unchangedFiles,
+    report,
+    assistantSummary: summary,
+    correctionPasses: 0,
+    correctionFailed: false,
+    primaryErrorCategory: null,
+  };
+}
+
 export function normalizePath(p: string): string {
   let clean = p.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
   if (clean.includes("..")) {

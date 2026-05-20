@@ -27,6 +27,8 @@ import {
   ShoppingCart,
   MessageSquare,
   CreditCard,
+  Server,
+  Code2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TemplatePicker } from "@/components/template-picker";
@@ -47,6 +49,45 @@ const MOBILE_PROJECT_TYPES = [
   { label: "Chat", kind: "mobile-cross", icon: MessageSquare, preset: "mobile-chat" },
   { label: "SaaS", kind: "mobile-cross", icon: CreditCard, preset: "mobile-subscription-saas" },
 ] as const;
+
+type RuntimeOption = "react-vite" | "node20" | "node22" | "python312";
+
+const WEB_RUNTIMES: Array<{
+  value: RuntimeOption;
+  label: string;
+  badge: string;
+  description: string;
+  icon: typeof Monitor;
+}> = [
+  {
+    value: "react-vite",
+    label: "React + Vite",
+    badge: "Default",
+    description: "Modern React SPA with Tailwind CSS and Vite build tool",
+    icon: Monitor,
+  },
+  {
+    value: "node20",
+    label: "Node.js 20",
+    badge: "LTS",
+    description: "Express API server with Node.js 20 LTS runtime",
+    icon: Server,
+  },
+  {
+    value: "node22",
+    label: "Node.js 22",
+    badge: "Latest",
+    description: "Express API server with Node.js 22 latest runtime",
+    icon: Server,
+  },
+  {
+    value: "python312",
+    label: "Python 3.12",
+    badge: "Flask",
+    description: "Flask/FastAPI web server with Python 3.12",
+    icon: Code2,
+  },
+];
 
 type PlatformTab = "web" | "mobile";
 
@@ -84,6 +125,7 @@ export function CreateProjectModal({
   const [name, setName] = useState("");
   const [nameDirty, setNameDirty] = useState(false);
   const [kind, setKind] = useState<ProjectKind>("web");
+  const [runtime, setRuntime] = useState<RuntimeOption>("react-vite");
   const [prompt, setPrompt] = useState(initialPrompt);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | undefined>(
     initialTemplate,
@@ -100,12 +142,14 @@ export function CreateProjectModal({
       const templateKind = initialTemplate.projectKind as ProjectKind;
       setKind(templateKind);
       setPlatformTab(isMobileKind(templateKind) ? "mobile" : "web");
+      setRuntime("react-vite");
     } else {
       setSelectedTemplate(undefined);
       setName("");
       setPrompt(initialPrompt);
       setKind("web");
       setPlatformTab("web");
+      setRuntime("react-vite");
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -127,6 +171,7 @@ export function CreateProjectModal({
     const templateKind = template.projectKind as ProjectKind;
     setKind(templateKind);
     setPlatformTab(isMobileKind(templateKind) ? "mobile" : "web");
+    setRuntime("react-vite");
     setView("form");
   }
 
@@ -143,6 +188,7 @@ export function CreateProjectModal({
   function handlePlatformTabChange(tab: PlatformTab) {
     setPlatformTab(tab);
     setSelectedTemplate(undefined);
+    setRuntime("react-vite");
     if (tab === "mobile") {
       setKind("mobile-cross");
     } else {
@@ -161,6 +207,7 @@ export function CreateProjectModal({
           description: prompt.trim() || undefined,
           workspaceId: currentWorkspace?.id,
           kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
+          runtime: platformTab === "web" ? runtime : undefined,
           initialPrompt: prompt.trim() || undefined,
         },
       },
@@ -175,6 +222,10 @@ export function CreateProjectModal({
   }
 
   const templateCount = platformTab === "mobile" ? "6 mobile templates" : "16 templates";
+
+  // For non-react-vite runtimes, show a note about container-based execution
+  const isServerRuntime = runtime !== "react-vite" && platformTab === "web";
+  const selectedRuntimeDef = WEB_RUNTIMES.find((r) => r.value === runtime);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -231,9 +282,6 @@ export function CreateProjectModal({
                 >
                   <Monitor className="h-4 w-4" />
                   Web
-                  <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 leading-none">
-                    React + Vite
-                  </span>
                 </button>
                 <button
                   type="button"
@@ -249,6 +297,64 @@ export function CreateProjectModal({
                   Mobile
                 </button>
               </div>
+
+              {/* Runtime selector — web only */}
+              {platformTab === "web" && (
+                <div className="space-y-1.5">
+                  <Label>Runtime</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {WEB_RUNTIMES.map((rt) => {
+                      const Icon = rt.icon;
+                      const isSelected = runtime === rt.value;
+                      return (
+                        <button
+                          key={rt.value}
+                          type="button"
+                          onClick={() => setRuntime(rt.value)}
+                          className={cn(
+                            "flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                            isSelected
+                              ? "border-primary bg-primary/10 text-foreground"
+                              : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
+                          )}
+                        >
+                          <Icon
+                            className={cn(
+                              "h-4 w-4 mt-0.5 shrink-0",
+                              isSelected ? "text-primary" : "",
+                            )}
+                          />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-semibold">{rt.label}</span>
+                              <span
+                                className={cn(
+                                  "text-[10px] px-1.5 py-0.5 rounded font-medium leading-none",
+                                  isSelected
+                                    ? "bg-primary/20 text-primary"
+                                    : "bg-muted-foreground/15 text-muted-foreground",
+                                )}
+                              >
+                                {rt.badge}
+                              </span>
+                            </div>
+                            <p className="text-[10px] mt-0.5 leading-tight opacity-75 line-clamp-2">
+                              {rt.description}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {isServerRuntime && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Server className="h-3 w-3 shrink-0" />
+                      {selectedRuntimeDef?.label} projects run in a dedicated container. Start the
+                      container from the workspace to run and preview your server.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Mobile info banner */}
               {platformTab === "mobile" && (
@@ -338,7 +444,11 @@ export function CreateProjectModal({
                         ? nameFromPrompt(prompt)
                         : platformTab === "mobile"
                           ? "My mobile app"
-                          : "My towing company site"
+                          : runtime === "python312"
+                            ? "My Python API"
+                            : runtime === "node20" || runtime === "node22"
+                              ? "My Node.js API"
+                              : "My web app"
                   }
                   autoFocus
                 />
@@ -416,7 +526,11 @@ export function CreateProjectModal({
                   placeholder={
                     platformTab === "mobile"
                       ? "Describe your mobile app — e.g. A fitness tracker with workout logging, progress charts, and a home screen dashboard."
-                      : "Describe what you want to build — e.g. A landing page for a local towing company with a hero section, services, and contact form."
+                      : runtime === "python312"
+                        ? "Describe your Python API — e.g. A REST API for a task management system with user authentication and CRUD endpoints."
+                        : runtime === "node20" || runtime === "node22"
+                          ? "Describe your Node.js API — e.g. An Express REST API for a recipe book with search, categories, and user bookmarks."
+                          : "Describe what you want to build — e.g. A landing page for a local towing company with a hero section, services, and contact form."
                   }
                   rows={selectedTemplate ? 4 : 3}
                   className="resize-none"

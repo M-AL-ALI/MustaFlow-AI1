@@ -36,8 +36,20 @@ const FLY_APP = process.env.FLY_APP_NAME ?? "mustaflow-containers";
 const FLY_ORG = process.env.FLY_ORG_SLUG ?? "personal";
 const FLY_REGION = process.env.FLY_REGION ?? "iad";
 
-/** Node.js 20 LTS image for project containers */
-const CONTAINER_IMAGE = "node:20-alpine";
+/** Docker image per project runtime */
+const RUNTIME_IMAGES: Record<string, string> = {
+  "react-vite": "node:20-alpine",
+  node20: "node:20-alpine",
+  node22: "node:22-alpine",
+  python312: "python:3.12-slim",
+};
+
+/** Fallback image when runtime is unrecognised */
+const DEFAULT_CONTAINER_IMAGE = "node:20-alpine";
+
+function imageForRuntime(runtime: string | null | undefined): string {
+  return RUNTIME_IMAGES[runtime ?? "react-vite"] ?? DEFAULT_CONTAINER_IMAGE;
+}
 
 /** Internal port the dev server listens on inside the container */
 const INTERNAL_PORT = 3000;
@@ -96,6 +108,7 @@ async function writeLog(
  */
 export async function createContainer(
   projectId: number,
+  runtime?: string | null,
   extraEnv?: Record<string, string>,
 ): Promise<ContainerInfo | null> {
   if (!isConfigured()) {
@@ -104,12 +117,13 @@ export async function createContainer(
   }
 
   const machineName = `project-${projectId}`;
+  const image = imageForRuntime(runtime);
 
   const body = {
     name: machineName,
     region: FLY_REGION,
     config: {
-      image: CONTAINER_IMAGE,
+      image,
       env: {
         PROJECT_ID: String(projectId),
         PORT: String(INTERNAL_PORT),
@@ -479,6 +493,7 @@ export async function provisionContainer(
       containerId: projectsTable.containerId,
       containerStatus: projectsTable.containerStatus,
       containerUrl: projectsTable.containerUrl,
+      runtime: projectsTable.runtime,
     })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
@@ -504,8 +519,9 @@ export async function provisionContainer(
   let containerUrl = project.containerUrl;
 
   if (!machineId) {
-    // Create new machine with project secrets as env vars
-    const info = await createContainer(projectId, extraEnv);
+    // Create new machine using the project's runtime for the right Docker image,
+    // and inject decrypted project secrets as env vars.
+    const info = await createContainer(projectId, project.runtime, extraEnv);
     if (!info) {
       await db
         .update(projectsTable)
@@ -592,6 +608,7 @@ export interface ProdContainerInfo {
 export async function createProductionContainer(
   projectId: number,
   envVars: Record<string, string>,
+  runtime?: string | null,
 ): Promise<ProdContainerInfo | null> {
   if (!isConfigured()) {
     logger.warn({ projectId }, "FLY_API_TOKEN not set — prod container creation skipped");
@@ -604,7 +621,7 @@ export async function createProductionContainer(
     name: machineName,
     region: FLY_REGION,
     config: {
-      image: CONTAINER_IMAGE,
+      image: imageForRuntime(runtime),
       env: {
         ...envVars,
         PROJECT_ID: String(projectId),
@@ -721,8 +738,14 @@ export async function deployProductionContainer(
 
   await writeLog(projectId, "system", "Starting blue/green production deploy…");
 
+  // Load project runtime so the container uses the correct Docker image
+  const [proj] = await db
+    .select({ runtime: projectsTable.runtime })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId));
+
   // Create new green container
-  const greenInfo = await createProductionContainer(projectId, envVars);
+  const greenInfo = await createProductionContainer(projectId, envVars, proj?.runtime);
   if (!greenInfo) {
     await writeLog(projectId, "system", "Failed to create new prod container — aborting deploy");
     return null;

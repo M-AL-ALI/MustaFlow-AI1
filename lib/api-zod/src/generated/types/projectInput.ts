@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProjectInputKind } from './projectInputKind';
+import type { ProjectInputRuntime } from './projectInputRuntime';
 
 export interface ProjectInput {
   /** @minLength 1 */
@@ -13,5 +14,7 @@ export interface ProjectInput {
   description?: string;
   workspaceId?: number;
   kind: ProjectInputKind;
+  /** Server-side runtime. Defaults to react-vite for web projects. */
+  runtime?: ProjectInputRuntime;
   initialPrompt?: string;
 }

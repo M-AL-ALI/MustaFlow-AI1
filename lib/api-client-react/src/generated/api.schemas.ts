@@ -170,6 +170,19 @@ export const ProjectProjectFormat = {
   'react-vite': 'react-vite',
 } as const;
 
+/**
+ * Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 / node22 = Node.js backend (Express/Fastify, runs in container). python312 = Python 3.12 backend (Flask/FastAPI, runs in container).
+ */
+export type ProjectRuntime = typeof ProjectRuntime[keyof typeof ProjectRuntime];
+
+
+export const ProjectRuntime = {
+  'react-vite': 'react-vite',
+  node20: 'node20',
+  node22: 'node22',
+  python312: 'python312',
+} as const;
+
 export interface Project {
   id: number;
   /** @nullable */
@@ -230,6 +243,8 @@ export interface Project {
   defaultAgent?: ProjectDefaultAgent;
   /** Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects). */
   projectFormat?: ProjectProjectFormat;
+  /** Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 / node22 = Node.js backend (Express/Fastify, runs in container). python312 = Python 3.12 backend (Flask/FastAPI, runs in container). */
+  runtime?: ProjectRuntime;
   createdAt: string;
   updatedAt: string;
 }
@@ -252,12 +267,27 @@ export const ProjectInputKind = {
   spreadsheet: 'spreadsheet',
 } as const;
 
+/**
+ * Server-side runtime. Defaults to react-vite for web projects.
+ */
+export type ProjectInputRuntime = typeof ProjectInputRuntime[keyof typeof ProjectInputRuntime];
+
+
+export const ProjectInputRuntime = {
+  'react-vite': 'react-vite',
+  node20: 'node20',
+  node22: 'node22',
+  python312: 'python312',
+} as const;
+
 export interface ProjectInput {
   /** @minLength 1 */
   name: string;
   description?: string;
   workspaceId?: number;
   kind: ProjectInputKind;
+  /** Server-side runtime. Defaults to react-vite for web projects. */
+  runtime?: ProjectInputRuntime;
   initialPrompt?: string;
 }
 

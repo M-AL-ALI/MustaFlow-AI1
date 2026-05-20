@@ -129,6 +129,7 @@ export const ListProjectsResponseItem = zod.object({
   "healthScore": zod.number().min(listProjectsResponseHealthScoreMin).max(listProjectsResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
+  "runtime": zod.enum(['react-vite', 'node20', 'node22', 'python312']).optional().describe('Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 \/ node22 = Node.js backend (Express\/Fastify, runs in container). python312 = Python 3.12 backend (Flask\/FastAPI, runs in container).'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -146,6 +147,7 @@ export const CreateProjectBody = zod.object({
   "description": zod.string().optional(),
   "workspaceId": zod.number().optional(),
   "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'mobile-cross', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "runtime": zod.enum(['react-vite', 'node20', 'node22', 'python312']).optional().describe('Server-side runtime. Defaults to react-vite for web projects.'),
   "initialPrompt": zod.string().optional()
 })
 
@@ -184,6 +186,7 @@ export const GetProjectResponse = zod.object({
   "healthScore": zod.number().min(getProjectResponseHealthScoreMin).max(getProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
+  "runtime": zod.enum(['react-vite', 'node20', 'node22', 'python312']).optional().describe('Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 \/ node22 = Node.js backend (Express\/Fastify, runs in container). python312 = Python 3.12 backend (Flask\/FastAPI, runs in container).'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -234,6 +237,7 @@ export const UpdateProjectResponse = zod.object({
   "healthScore": zod.number().min(updateProjectResponseHealthScoreMin).max(updateProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
+  "runtime": zod.enum(['react-vite', 'node20', 'node22', 'python312']).optional().describe('Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 \/ node22 = Node.js backend (Express\/Fastify, runs in container). python312 = Python 3.12 backend (Flask\/FastAPI, runs in container).'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -281,6 +285,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "healthScore": zod.number().min(getProjectsSummaryResponseRecentItemHealthScoreMin).max(getProjectsSummaryResponseRecentItemHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
+  "runtime": zod.enum(['react-vite', 'node20', 'node22', 'python312']).optional().describe('Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 \/ node22 = Node.js backend (Express\/Fastify, runs in container). python312 = Python 3.12 backend (Flask\/FastAPI, runs in container).'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))

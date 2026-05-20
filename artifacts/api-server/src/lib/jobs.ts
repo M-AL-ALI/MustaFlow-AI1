@@ -23,6 +23,10 @@ import {
   runReactViteRefinePipeline,
   runMobileBuildPipeline,
   runMobileRefinePipeline,
+  runNodeBuildPipeline,
+  runNodeRefinePipeline,
+  runPythonBuildPipeline,
+  runPythonRefinePipeline,
   scanCodeSmells,
   sanitisePrompt,
   scanForSecrets,
@@ -970,6 +974,12 @@ export async function runJob(input: JobInput): Promise<void> {
         project.kind,
       );
       const isReactViteProject = !isMobileProject && project.projectFormat === "react-vite";
+      const isNodeProject =
+        !isMobileProject &&
+        !isReactViteProject &&
+        (project.runtime === "node20" || project.runtime === "node22");
+      const isPythonProject =
+        !isMobileProject && !isReactViteProject && project.runtime === "python312";
 
       // For mobile projects: load last successful task's wired modules + project secret names once,
       // so both build and refine pipelines have durable module context.
@@ -1006,7 +1016,11 @@ export async function runJob(input: JobInput): Promise<void> {
             ? "Let me plan the mobile app structure before writing any code."
             : isReactViteProject
               ? "Let me plan the React + Vite project structure before writing any code."
-              : "Let me plan the app structure before writing any code.",
+              : isNodeProject
+                ? "Let me plan the Node.js project structure before writing any code."
+                : isPythonProject
+                  ? "Let me plan the Python project structure before writing any code."
+                  : "Let me plan the app structure before writing any code.",
         );
         await emitEvent(taskId, "planning", "Reading project configuration…");
         await emitEvent(
@@ -1016,7 +1030,11 @@ export async function runJob(input: JobInput): Promise<void> {
             ? "Generating Expo/React Native app with AI…"
             : isReactViteProject
               ? "Generating React + Vite project with AI…"
-              : "Generating app blueprint and code with AI…",
+              : isNodeProject
+                ? "Generating Node.js / Express project with AI…"
+                : isPythonProject
+                  ? "Generating Python / Flask project with AI…"
+                  : "Generating app blueprint and code with AI…",
         );
 
         let result = isMobileProject
@@ -1042,7 +1060,29 @@ export async function runJob(input: JobInput): Promise<void> {
                 planContext: input.planContext ?? null,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
               })
-            : await runBuildPipeline({
+            : isNodeProject
+              ? await runNodeBuildPipeline({
+                  projectName: project.name,
+                  projectKind: project.kind,
+                  userPrompt,
+                  agentMode,
+                  conversationHistory,
+                  knowledgeContext: knowledgeContext || undefined,
+                  planContext: input.planContext ?? null,
+                  onEvent: async (type, message) => emitEvent(taskId, type, message),
+                })
+              : isPythonProject
+                ? await runPythonBuildPipeline({
+                    projectName: project.name,
+                    projectKind: project.kind,
+                    userPrompt,
+                    agentMode,
+                    conversationHistory,
+                    knowledgeContext: knowledgeContext || undefined,
+                    planContext: input.planContext ?? null,
+                    onEvent: async (type, message) => emitEvent(taskId, type, message),
+                  })
+                : await runBuildPipeline({
                 projectName: project.name,
                 projectKind: project.kind,
                 userPrompt,
@@ -1162,7 +1202,11 @@ export async function runJob(input: JobInput): Promise<void> {
           ? "Initial mobile build"
           : isReactViteProject
             ? "Initial React + Vite build"
-            : "Initial build";
+            : isNodeProject
+              ? "Initial Node.js build"
+              : isPythonProject
+                ? "Initial Python build"
+                : "Initial build";
         filesToSmellScan = result.files;
       } else {
         await emitEvent(
@@ -1215,7 +1259,11 @@ export async function runJob(input: JobInput): Promise<void> {
             ? "Applying your changes to the Expo project now."
             : isReactViteProject
               ? "Applying your changes to the React + Vite project now."
-              : "Applying your requested changes to the codebase now.",
+              : isNodeProject
+                ? "Applying your changes to the Node.js project now."
+                : isPythonProject
+                  ? "Applying your changes to the Python project now."
+                  : "Applying your requested changes to the codebase now.",
         );
         await emitEvent(
           taskId,
@@ -1224,7 +1272,11 @@ export async function runJob(input: JobInput): Promise<void> {
             ? "Applying change to Expo project with AI…"
             : isReactViteProject
               ? "Applying change to React + Vite project with AI…"
-              : "Applying change request with AI…",
+              : isNodeProject
+                ? "Applying change to Node.js project with AI…"
+                : isPythonProject
+                  ? "Applying change to Python project with AI…"
+                  : "Applying change request with AI…",
         );
 
         let refineResult = isMobileProject
@@ -1253,17 +1305,43 @@ export async function runJob(input: JobInput): Promise<void> {
                 planContext: input.planContext ?? null,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
               })
-            : await runRefinePipeline({
-                projectName: project.name,
-                projectKind: project.kind,
-                userPrompt,
-                agentMode,
-                existingFiles,
-                conversationHistory,
-                knowledgeContext: knowledgeContext || undefined,
-                unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                planContext: input.planContext ?? null,
-              });
+            : isNodeProject
+              ? await runNodeRefinePipeline({
+                  projectName: project.name,
+                  projectKind: project.kind,
+                  userPrompt,
+                  agentMode,
+                  existingFiles,
+                  conversationHistory,
+                  knowledgeContext: knowledgeContext || undefined,
+                  unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                  planContext: input.planContext ?? null,
+                  onEvent: async (type, message) => emitEvent(taskId, type, message),
+                })
+              : isPythonProject
+                ? await runPythonRefinePipeline({
+                    projectName: project.name,
+                    projectKind: project.kind,
+                    userPrompt,
+                    agentMode,
+                    existingFiles,
+                    conversationHistory,
+                    knowledgeContext: knowledgeContext || undefined,
+                    unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                    planContext: input.planContext ?? null,
+                    onEvent: async (type, message) => emitEvent(taskId, type, message),
+                  })
+                : await runRefinePipeline({
+                    projectName: project.name,
+                    projectKind: project.kind,
+                    userPrompt,
+                    agentMode,
+                    existingFiles,
+                    conversationHistory,
+                    knowledgeContext: knowledgeContext || undefined,
+                    unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                    planContext: input.planContext ?? null,
+                  });
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
         analyticsErrorCategory = refineResult.primaryErrorCategory;
