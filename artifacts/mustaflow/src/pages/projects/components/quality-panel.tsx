@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useGetProjectAudit, getGetProjectAuditQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   ShieldCheck,
   Eye,
@@ -221,7 +220,7 @@ export function QualityPanel({
 }) {
   const queryClient = useQueryClient();
 
-  const { data: audit, isLoading, isError, error } = useGetProjectAudit(projectId, {
+  const { data: audit, isLoading, isError } = useGetProjectAudit(projectId, {
     query: {
       enabled: !!projectId,
       queryKey: getGetProjectAuditQueryKey(projectId),
