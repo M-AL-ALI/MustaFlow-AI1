@@ -1026,6 +1026,7 @@ async function extractAppJsonSummary(projectId: number): Promise<string> {
 
 async function runEasBuildJob(input: EasJobInput): Promise<void> {
   const { deploymentLogId, projectId, userId, platform, accessToken, appSlug, appOwner } = input;
+  // eslint-disable-next-line no-useless-assignment
   let easBuildId: string | null = null;
 
   try {

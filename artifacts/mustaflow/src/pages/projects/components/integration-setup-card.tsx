@@ -3,8 +3,6 @@ import {
   MapPin,
   Key,
   ExternalLink,
-  CheckCircle2,
-  Circle,
   ChevronDown,
   ChevronRight,
   ShieldCheck,

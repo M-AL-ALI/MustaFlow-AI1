@@ -242,6 +242,7 @@ router.post(
     const txtLookup = `_mustaflow.${domain}`;
 
     let txtVerified = false;
+    // eslint-disable-next-line no-useless-assignment
     let cnameVerified = false;
     let cnameRecords: string[] = [];
     let txtRecords: string[][] = [];

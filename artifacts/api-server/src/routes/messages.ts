@@ -116,6 +116,7 @@ router.post(
     }
 
     let assistantContent: string;
+    // eslint-disable-next-line no-useless-assignment
     let plan: Record<string, unknown> | null = null;
 
     if (planMode) {

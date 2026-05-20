@@ -77,7 +77,7 @@ interface Props {
 
 export function BuildProgressFeed({ projectId, taskId, taskStartedAt }: Props) {
   const [now, setNow] = useState(() => Date.now());
-  const [visible, setVisible] = useState(true);
+  const [visible] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: events = [] } = useListTaskEvents(

@@ -21,7 +21,7 @@ const CONSOLE_BRIDGE_SCRIPT = `<script>(function(){
     var m=e.reason&&e.reason.message?e.reason.message:String(e.reason);
     window.parent.postMessage({__mustaflow:true,type:"crash",level:"error",args:["Unhandled rejection: "+m]},"*");
   });
-})();<\/script>`;
+})();</script>`;
 
 export function injectBridge(html: string): string {
   if (/<head[\s>]/i.test(html)) {

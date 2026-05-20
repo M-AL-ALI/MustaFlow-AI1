@@ -1,4 +1,4 @@
-import { BookOpen, Code2, Video, FileText, ExternalLink } from "lucide-react";
+import { BookOpen, Code2, FileText, ExternalLink } from "lucide-react";
 
 const RESOURCES = [
   {

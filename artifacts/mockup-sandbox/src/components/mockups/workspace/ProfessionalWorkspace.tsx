@@ -17,19 +17,13 @@ import {
   Monitor,
   Smartphone,
   Tablet,
-  ChevronDown,
-  Plus,
   Blocks,
   TerminalSquare,
   CheckSquare,
-  KeyRound,
-  AlertTriangle,
   FileCode2,
-  Layers,
   Activity,
   BarChart3,
   Cpu,
-  PanelLeft,
 } from "lucide-react";
 
 const EVENTS = [

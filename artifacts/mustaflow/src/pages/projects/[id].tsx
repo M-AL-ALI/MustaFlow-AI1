@@ -19,47 +19,33 @@ import { BuildProgressFeed } from "@/components/build-progress-feed";
 import { CodeEditorTab } from "./components/code-editor-tab";
 import { ChatHistory } from "./components/chat-history";
 import { PageMapTab } from "./components/page-map-tab";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // used by inner components only
 import { Button } from "@/components/ui/button";
 import {
   Settings,
   History,
-  Lock,
   FileCode2,
   Blocks,
   Globe,
   TerminalSquare,
-  Zap,
-  CheckSquare,
   BrainCircuit,
   CheckCircle2,
   AlertTriangle,
   CreditCard,
   KeyRound,
-  ShieldCheck,
   Paintbrush2,
-  Cpu,
   Activity,
   Rocket,
   Sparkles,
   Monitor,
-  Tablet,
-  Smartphone,
   Wrench,
   Plus,
   MessageSquare,
   ExternalLink,
   BookOpen,
   ChevronRight,
-  FilePen,
-  FolderOpen,
-  GitCommit,
-  RotateCcw,
-  Pencil,
   X,
   Puzzle,
   ListOrdered,
-  ServerCog,
 } from "lucide-react";
 import { QueueComposer } from "./components/queue-composer";
 import { QueueProgressStrip } from "./components/queue-progress-strip";
@@ -294,20 +280,6 @@ function ErrorCard({
   );
 }
 
-const PROJECT_NAV = [
-  { icon: TerminalSquare, label: "New Task" },
-  { icon: CheckSquare, label: "Plans" },
-  { icon: Zap, label: "Tasks" },
-  { icon: FileCode2, label: "Files" },
-  { icon: Blocks, label: "Integrations" },
-  { icon: Lock, label: "Secrets" },
-  { icon: Globe, label: "Publishing" },
-  { icon: ShieldCheck, label: "Security Scan" },
-  { icon: BrainCircuit, label: "Knowledge" },
-  { icon: History, label: "Versions" },
-  { icon: Settings, label: "Settings" },
-];
-
 const WORKSPACE_TABS = [
   { label: "Preview", value: "preview", icon: Monitor },
   { label: "Code", value: "code", icon: FileCode2 },
@@ -346,7 +318,7 @@ export default function ProjectWorkspacePage() {
       refetchInterval: (project?.status === "building" || sendMessage.isPending) ? 2000 : 15000,
     },
   });
-  const rollbackVersion = useRollbackVersion();
+  const _rollbackVersion = useRollbackVersion();
   const { data: versions } = useListVersions(projectId, {
     query: { enabled: !!projectId, queryKey: getListVersionsQueryKey(projectId) },
   });
@@ -365,7 +337,7 @@ export default function ProjectWorkspacePage() {
 
   const [prompt, setPrompt] = useState("");
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
-  const [batchTotalCount, setBatchTotalCount] = useState(0);
+  const [_batchTotalCount, setBatchTotalCount] = useState(0);
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [agentMode, setAgentMode] = useState<AgentMode>("power");
   const [planMode, setPlanMode] = useState(false);
@@ -666,7 +638,7 @@ export default function ProjectWorkspacePage() {
     setActiveTab("tools-files");
   }, []);
 
-  const handleSend = () => {
+  const _handleSend = () => {
     const currentPrompt = prompt;
     setPrompt("");
     send(currentPrompt);

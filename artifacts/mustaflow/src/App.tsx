@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { applyTheme, syncThemeDom, getStoredTheme } from "@/lib/theme";
+import { syncThemeDom, getStoredTheme } from "@/lib/theme";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";

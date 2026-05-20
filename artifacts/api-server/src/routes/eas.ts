@@ -112,7 +112,6 @@ async function triggerEasGqlBuild(
   platform: "IOS" | "ANDROID",
   profile = "preview",
 ): Promise<EasBuildData | null> {
-  type BuildMutation = { build: { createAndroidBuild?: EasBuildData; createIosBuild?: EasBuildData } };
   // EAS uses separate mutations per platform
   const mutation =
     platform === "ANDROID"

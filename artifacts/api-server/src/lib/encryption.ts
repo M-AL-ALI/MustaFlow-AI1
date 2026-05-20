@@ -21,7 +21,7 @@ import { logger } from "./logger";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_BYTES = 12;
-const TAG_BYTES = 16;
+const _TAG_BYTES = 16;
 const VERSION_PREFIX = "v1:";
 
 export interface EncryptionService {

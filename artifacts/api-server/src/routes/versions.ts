@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, sql, type SQL } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,

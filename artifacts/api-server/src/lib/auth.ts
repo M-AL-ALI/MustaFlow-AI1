@@ -41,6 +41,7 @@ class ClerkAuthAdapter implements AuthAdapter {
 // Every request is treated as the same demo user.
 // Hard-fails in production — can never be accidentally shipped.
 // Activate by swapping activeAdapter below when running without Clerk.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 class DevOnlyAuthAdapter implements AuthAdapter {
   private static warned = false;
 

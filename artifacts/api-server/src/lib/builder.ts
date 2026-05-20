@@ -41,7 +41,7 @@ const MODE_QUALITY_STANDARDS: Record<AgentMode, string> = {
 - Long-term maintainability: logical file structure, named CSS custom properties for theme tokens, no magic numbers.`,
 };
 
-const MODE_QUALITY_HINTS: Record<AgentMode, string> = {
+const _MODE_QUALITY_HINTS: Record<AgentMode, string> = {
   lite: "Speed over polish. Generate minimal, working code quickly. Keep it simple.",
   eco: "Balance quality and brevity. Write clean, readable code without over-engineering.",
   power: "Production-grade quality. Prioritize completeness, accessibility, polished UX, and thorough error handling.",
@@ -1016,7 +1016,7 @@ async function callWithRetry(
       const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
       try {
         return JSON.parse(raw) as Record<string, unknown>;
-      } catch (parseErr) {
+      } catch {
         logger.warn(
           { attempt, raw: raw.slice(0, 300), label },
           "JSON parse failed, will retry",
@@ -1421,7 +1421,6 @@ export async function runRefinePipeline(args: {
       f.path.endsWith(".mjs"),
   );
 
-  let correctionFailed = false;
   let validationWarnings: string[] = [];
 
   if (filesToValidate.length > 0) {
@@ -1440,7 +1439,6 @@ export async function runRefinePipeline(args: {
         // Correction succeeded — only surface non-critical warnings
         validationWarnings = validation.warnings;
       } else {
-        correctionFailed = true;
         validationWarnings = [
           ...validation.warnings,
           ...validation.criticalErrors.map((e) => `[validation_failed] ${e}`),
@@ -2466,6 +2464,7 @@ export async function runPlanPipeline(args: {
 
   messages.push({ role: "user", content: userPrompt });
 
+  // eslint-disable-next-line no-useless-assignment
   let plan: Record<string, unknown> | null = null;
   try {
     plan = await callWithRetry(messages, modelFor(agentMode), 8000, "plan");

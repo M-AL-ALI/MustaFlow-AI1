@@ -128,7 +128,7 @@ export async function getEasBuildStatus(
  * Trigger EAS Submit to send the build to TestFlight (iOS) or Play Store Internal Testing (Android).
  */
 export async function triggerEasSubmit(input: TriggerSubmitInput): Promise<EasSubmission> {
-  const { accessToken, buildId, platform, appOwner } = input;
+  const { accessToken, buildId, platform } = input;
 
   logger.info({ buildId, platform }, "Triggering EAS submit");
 

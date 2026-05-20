@@ -21,7 +21,7 @@ import {
   deploymentLogsTable,
   secretAuditLogTable,
 } from "@workspace/db";
-import { isAdminUser, requireAdmin } from "../lib/adminAuth";
+import { requireAdmin } from "../lib/adminAuth";
 
 const router: IRouter = Router();
 

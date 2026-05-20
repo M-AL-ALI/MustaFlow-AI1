@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,10 +10,8 @@ import {
   Type,
   ImageIcon,
   RefreshCw,
-  Download,
   Layers,
   Monitor,
-  ChevronRight,
   Wand2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";

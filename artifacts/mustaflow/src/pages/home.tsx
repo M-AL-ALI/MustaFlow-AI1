@@ -20,7 +20,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useState } from "react";
-import { useCreateProject, useListProjects, getListProjectsQueryKey } from "@workspace/api-client-react";
+import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { TemplatePicker } from "@/components/template-picker";
 import { CreateProjectModal } from "@/components/create-project-modal";

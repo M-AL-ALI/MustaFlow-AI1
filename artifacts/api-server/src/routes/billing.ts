@@ -12,7 +12,7 @@
 import { Router, type IRouter } from "express";
 import { createHmac } from "crypto";
 import { eq, desc } from "drizzle-orm";
-import { db, userCreditsTable, creditTransactionsTable } from "@workspace/db";
+import { db, creditTransactionsTable } from "@workspace/db";
 import { grantCredits, getOrCreateCredits } from "./credits";
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;

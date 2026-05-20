@@ -79,7 +79,7 @@ export function QueueComposer({
   }, [onPromptValueChange]);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>, rowId: string) => {
+    (e: React.KeyboardEvent<HTMLTextAreaElement>, _rowId: string) => {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         void handleSend();
@@ -123,6 +123,7 @@ export function QueueComposer({
       if (onPromptValueChange) onPromptValueChange("");
       onBatchStarted(data.batchId, data.totalTasks);
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.error("Queue submission failed:", err);
     } finally {
       setIsSubmitting(false);

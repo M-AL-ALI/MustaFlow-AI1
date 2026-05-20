@@ -266,8 +266,8 @@ router.post(
 
       // Read or initialise app.json
       const appJsonResult = await readAppJson(projectId);
-      let expo: Record<string, unknown> = appJsonResult?.expo ?? {};
-      let appJson: Record<string, unknown> = appJsonResult
+      const expo: Record<string, unknown> = appJsonResult?.expo ?? {};
+      const appJson: Record<string, unknown> = appJsonResult
         ? JSON.parse(appJsonResult.row.content) as Record<string, unknown>
         : { expo: {} };
 
