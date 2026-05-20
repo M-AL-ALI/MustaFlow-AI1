@@ -181,9 +181,7 @@ function KnowledgeEntryCard({
     <div
       className={cn(
         "border rounded-lg p-3 bg-card space-y-2 transition-all",
-        selected
-          ? "border-primary/50 bg-primary/5"
-          : "border-border",
+        selected ? "border-primary/50 bg-primary/5" : "border-border",
         entry.archivedAt ? "opacity-50" : "",
       )}
       onMouseEnter={() => setHovered(true)}
@@ -462,7 +460,8 @@ function NewEntryForm({
   const [severity, setSeverity] = useState<"info" | "warning" | "error">("info");
   const createKnowledge = useCreateKnowledge();
 
-  const canSubmit = title.trim().length > 0 && content.trim().length > 0 && !createKnowledge.isPending;
+  const canSubmit =
+    title.trim().length > 0 && content.trim().length > 0 && !createKnowledge.isPending;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -489,10 +488,7 @@ function NewEntryForm({
     <div className="border border-primary/30 rounded-lg bg-card p-3 space-y-2.5">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-foreground">New entry</span>
-        <button
-          onClick={onCancel}
-          className="text-muted-foreground hover:text-foreground"
-        >
+        <button onClick={onCancel} className="text-muted-foreground hover:text-foreground">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -552,27 +548,15 @@ function NewEntryForm({
       </div>
 
       {createKnowledge.isError && (
-        <p className="text-[10px] text-destructive">
-          Failed to save entry. Please try again.
-        </p>
+        <p className="text-[10px] text-destructive">Failed to save entry. Please try again.</p>
       )}
 
       <div className="flex items-center gap-2 pt-0.5">
-        <Button
-          size="sm"
-          className="h-7 text-xs px-3"
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-        >
-          {createKnowledge.isPending ? (
-            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-          ) : null}
+        <Button size="sm" className="h-7 text-xs px-3" onClick={handleSubmit} disabled={!canSubmit}>
+          {createKnowledge.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
           Save entry
         </Button>
-        <button
-          onClick={onCancel}
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
+        <button onClick={onCancel} className="text-xs text-muted-foreground hover:text-foreground">
           Cancel
         </button>
       </div>
@@ -643,8 +627,7 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
     });
   }, []);
 
-  const allFilteredSelected =
-    filtered.length > 0 && filtered.every((e) => selectedIds.has(e.id));
+  const allFilteredSelected = filtered.length > 0 && filtered.every((e) => selectedIds.has(e.id));
 
   const toggleSelectAll = () => {
     if (allFilteredSelected) {
@@ -668,9 +651,7 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
       const entry = entries.find((e) => e.id === id);
       if (!entry) return Promise.resolve();
       const data =
-        action === "approve"
-          ? { approvedForReuse: true }
-          : { archived: !entry.archivedAt };
+        action === "approve" ? { approvedForReuse: true } : { archived: !entry.archivedAt };
       return new Promise<void>((resolve) => {
         updateKnowledge.mutate({ id, data }, { onSettled: () => resolve() });
       });
@@ -922,9 +903,7 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
       {selectedCount > 0 && (
         <div className="absolute bottom-0 left-0 right-0 z-20 px-4 py-3 border-t border-border bg-card/95 backdrop-blur-sm">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground shrink-0">
-              {selectedCount} selected
-            </span>
+            <span className="text-xs text-muted-foreground shrink-0">{selectedCount} selected</span>
             <div className="flex-1 flex items-center gap-2 justify-end">
               <Button
                 size="sm"
