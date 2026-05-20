@@ -1049,6 +1049,59 @@ export interface AdminAuditLogPage {
   offset: number;
 }
 
+export type AuditFindingCategory = typeof AuditFindingCategory[keyof typeof AuditFindingCategory];
+
+
+export const AuditFindingCategory = {
+  accessibility: 'accessibility',
+  seo: 'seo',
+  performance: 'performance',
+  security: 'security',
+} as const;
+
+export type AuditFindingSeverity = typeof AuditFindingSeverity[keyof typeof AuditFindingSeverity];
+
+
+export const AuditFindingSeverity = {
+  error: 'error',
+  warning: 'warning',
+  info: 'info',
+} as const;
+
+export interface AuditFinding {
+  category: AuditFindingCategory;
+  severity: AuditFindingSeverity;
+  file: string;
+  message: string;
+  suggestion: string;
+}
+
+export type AuditScoreCategory = typeof AuditScoreCategory[keyof typeof AuditScoreCategory];
+
+
+export const AuditScoreCategory = {
+  accessibility: 'accessibility',
+  seo: 'seo',
+  performance: 'performance',
+  security: 'security',
+} as const;
+
+export interface AuditScore {
+  category: AuditScoreCategory;
+  label: string;
+  pass: number;
+  warnings: number;
+  failures: number;
+  score: number;
+}
+
+export interface ProjectAuditResult {
+  findings: AuditFinding[];
+  scores: AuditScore[];
+  auditedAt: string;
+  fileCount: number;
+}
+
 export type DeleteWorkspace200 = {
   deleted: boolean;
 };

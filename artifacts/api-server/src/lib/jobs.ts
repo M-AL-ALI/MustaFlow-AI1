@@ -34,6 +34,7 @@ import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, deductCredits } from "../routes/credits";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
+import { runAudit } from "./auditor";
 import {
   triggerEasBuild,
   getEasBuildStatus,
@@ -967,6 +968,59 @@ export async function runJob(input: JobInput): Promise<void> {
         } catch (err) {
           logger.warn({ err, taskId }, "Code-smell scan error (non-fatal)");
         }
+      });
+    }
+
+    // Fire-and-forget quality audit — accessibility, SEO, performance, CDN vulnerability.
+    // Runs asynchronously after task completion so it never delays the pipeline.
+    // Results are stored on the project_versions row AND merged into the task report
+    // so that audit findings surface in the chat report card.
+    // We read the latest task report from DB before merging to avoid clobbering
+    // codeSmells (or any other field) written by the concurrent code-smell setImmediate.
+    if (version && filesToSmellScan.length > 0) {
+      const versionIdForAudit = version.id;
+      const taskIdForAudit = taskId;
+      setImmediate(() => {
+        void (async () => {
+          try {
+            const allProjectFiles = await db
+              .select()
+              .from(projectFilesTable)
+              .where(eq(projectFilesTable.projectId, projectId));
+            const auditFiles = allProjectFiles.map((f) => ({
+              path: f.path,
+              content: f.content,
+              mimeType: f.mimeType,
+            }));
+            const auditReport = runAudit(auditFiles.length > 0 ? auditFiles : filesToSmellScan);
+
+            // Persist on the version row so GET /api/projects/:id/audit can fetch it
+            await db
+              .update(projectVersionsTable)
+              .set({ auditReport })
+              .where(eq(projectVersionsTable.id, versionIdForAudit));
+
+            // Read the latest report from DB before merging so we don't overwrite
+            // fields (e.g. codeSmells) written by the concurrent code-smell scan.
+            const [latestTask] = await db
+              .select({ report: agentTasksTable.report })
+              .from(agentTasksTable)
+              .where(eq(agentTasksTable.id, taskIdForAudit))
+              .limit(1);
+            const latestReport = latestTask?.report ?? report;
+            await db
+              .update(agentTasksTable)
+              .set({ report: { ...latestReport, auditReport } })
+              .where(eq(agentTasksTable.id, taskIdForAudit));
+
+            logger.info(
+              { projectId, versionId: versionIdForAudit, findings: auditReport.findings.length },
+              "Quality audit complete",
+            );
+          } catch (err) {
+            logger.warn({ err, projectId, versionId: versionIdForAudit }, "Quality audit failed (non-fatal)");
+          }
+        })();
       });
     }
 

@@ -22,6 +22,25 @@ export type TaskReport = {
   nativeFeatures?: string[];
   modulesWired?: Array<{ id: string; name: string; secretsConsumed: string[] }>;
   codeSmells?: string[];
+  auditReport?: {
+    findings: Array<{
+      category: "accessibility" | "seo" | "performance" | "security";
+      severity: "error" | "warning" | "info";
+      file: string;
+      message: string;
+      suggestion: string;
+    }>;
+    scores: Array<{
+      category: "accessibility" | "seo" | "performance" | "security";
+      label: string;
+      pass: number;
+      warnings: number;
+      failures: number;
+      score: number;
+    }>;
+    auditedAt: string;
+    fileCount: number;
+  } | null;
 };
 
 export const agentTasksTable = pgTable(

@@ -472,6 +472,34 @@ export const RollbackVersionResponse = zod.object({
 
 
 /**
+ * @summary Get the latest code quality audit report for a project
+ */
+export const GetProjectAuditParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetProjectAuditResponse = zod.object({
+  "findings": zod.array(zod.object({
+  "category": zod.enum(['accessibility', 'seo', 'performance', 'security']),
+  "severity": zod.enum(['error', 'warning', 'info']),
+  "file": zod.string(),
+  "message": zod.string(),
+  "suggestion": zod.string()
+})),
+  "scores": zod.array(zod.object({
+  "category": zod.enum(['accessibility', 'seo', 'performance', 'security']),
+  "label": zod.string(),
+  "pass": zod.number(),
+  "warnings": zod.number(),
+  "failures": zod.number(),
+  "score": zod.number()
+})),
+  "auditedAt": zod.coerce.date(),
+  "fileCount": zod.number()
+})
+
+
+/**
  * @summary List generated files for a project
  */
 export const ListProjectFilesParams = zod.object({

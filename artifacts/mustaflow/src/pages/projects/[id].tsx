@@ -46,6 +46,7 @@ import {
   X,
   Puzzle,
   ListOrdered,
+  ShieldCheck,
 } from "lucide-react";
 import { QueueComposer } from "./components/queue-composer";
 import { QueueProgressStrip } from "./components/queue-progress-strip";
@@ -86,6 +87,25 @@ type TaskReport = {
   knowledgeApplied?: Array<{ title: string; category: string }>;
   nativeFeatures?: string[];
   modulesWired?: Array<{ id: string; name: string; secretsConsumed: string[] }>;
+  auditReport?: {
+    findings: Array<{
+      category: "accessibility" | "seo" | "performance" | "security";
+      severity: "error" | "warning" | "info";
+      file: string;
+      message: string;
+      suggestion: string;
+    }>;
+    scores: Array<{
+      category: "accessibility" | "seo" | "performance" | "security";
+      label: string;
+      pass: number;
+      warnings: number;
+      failures: number;
+      score: number;
+    }>;
+    auditedAt: string;
+    fileCount: number;
+  } | null;
 };
 
 type ChatPlanPayload =
@@ -229,6 +249,39 @@ function ReportCard({
       {report.nextRecommendation && (
         <div className="pt-1.5 border-t border-border text-muted-foreground italic text-[10px]">
           {report.nextRecommendation}
+        </div>
+      )}
+      {report.auditReport && report.auditReport.findings.length > 0 && (
+        <div className="pt-1.5 border-t border-border space-y-1.5">
+          <div className="font-semibold text-foreground flex items-center gap-1 text-[11px]">
+            <ShieldCheck className="h-3 w-3 text-primary" /> Quality audit
+          </div>
+          <div className="grid grid-cols-4 gap-1">
+            {report.auditReport.scores.map((s) => (
+              <div key={s.category} className="bg-muted rounded p-1 text-center">
+                <div
+                  className={cn(
+                    "text-sm font-bold leading-none",
+                    s.score >= 90 ? "text-green-400" : s.score >= 70 ? "text-yellow-400" : "text-red-400",
+                  )}
+                >
+                  {s.score}
+                </div>
+                <div className="text-[9px] text-muted-foreground mt-0.5 truncate">{s.label}</div>
+              </div>
+            ))}
+          </div>
+          {report.auditReport.findings.filter((f) => f.severity === "error").slice(0, 3).map((f, i) => (
+            <div key={i} className="flex items-start gap-1 text-[10px] text-red-400">
+              <AlertTriangle className="h-2.5 w-2.5 shrink-0 mt-0.5" />
+              <span className="truncate">{f.message}</span>
+            </div>
+          ))}
+          {report.auditReport.findings.filter((f) => f.severity === "warning").length > 0 && (
+            <div className="text-[10px] text-muted-foreground">
+              +{report.auditReport.findings.filter((f) => f.severity === "warning").length} warnings — see Quality tab for details
+            </div>
+          )}
         </div>
       )}
     </div>

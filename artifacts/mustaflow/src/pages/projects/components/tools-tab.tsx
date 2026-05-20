@@ -23,9 +23,11 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  ShieldCheck,
 } from "lucide-react";
 import { IntegrationsRegistry } from "./integrations-registry";
 import { VersionTimeline } from "./version-timeline";
+import { QualityPanel } from "./quality-panel";
 import {
   useListSecrets,
   useCreateSecret,
@@ -653,6 +655,9 @@ export function ToolsTab({
             <TabsTrigger value="integrations">
               <Blocks className="h-4 w-4 mr-2" /> Integrations
             </TabsTrigger>
+            <TabsTrigger value="quality">
+              <ShieldCheck className="h-4 w-4 mr-2" /> Quality
+            </TabsTrigger>
             {isMobile && (
               <TabsTrigger value="modules">
                 <Puzzle className="h-4 w-4 mr-2" /> Modules
@@ -830,6 +835,10 @@ export function ToolsTab({
 
             <TabsContent value="integrations" className="h-full m-0 p-4">
               <IntegrationsRegistry projectId={projectId} secrets={secrets ?? []} />
+            </TabsContent>
+
+            <TabsContent value="quality" className="h-full m-0 p-4">
+              <QualityPanel projectId={projectId} onSendMessage={onSendMessage} />
             </TabsContent>
 
             {isMobile && (

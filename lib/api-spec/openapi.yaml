@@ -416,6 +416,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/RollbackResult"
 
+  /projects/{id}/audit:
+    get:
+      operationId: getProjectAudit
+      tags: [projects]
+      summary: Get the latest code quality audit report for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Latest audit report from the most recent project version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAuditResult"
+        "404":
+          description: No audit report found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/files:
     get:
       operationId: listProjectFiles
@@ -2224,3 +2245,45 @@ components:
         total: { type: integer }
         limit: { type: integer }
         offset: { type: integer }
+
+    AuditFinding:
+      type: object
+      required: [category, severity, file, message, suggestion]
+      properties:
+        category:
+          type: string
+          enum: [accessibility, seo, performance, security]
+        severity:
+          type: string
+          enum: [error, warning, info]
+        file: { type: string }
+        message: { type: string }
+        suggestion: { type: string }
+
+    AuditScore:
+      type: object
+      required: [category, label, pass, warnings, failures, score]
+      properties:
+        category:
+          type: string
+          enum: [accessibility, seo, performance, security]
+        label: { type: string }
+        pass: { type: integer }
+        warnings: { type: integer }
+        failures: { type: integer }
+        score: { type: integer }
+
+    ProjectAuditResult:
+      type: object
+      required: [findings, scores, auditedAt, fileCount]
+      properties:
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditFinding"
+        scores:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditScore"
+        auditedAt: { type: string, format: date-time }
+        fileCount: { type: integer }

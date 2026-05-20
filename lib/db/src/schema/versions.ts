@@ -7,6 +7,30 @@ export type FileSnapshotEntry = {
   mimeType: string;
 };
 
+export type AuditFinding = {
+  category: "accessibility" | "seo" | "performance" | "security";
+  severity: "error" | "warning" | "info";
+  file: string;
+  message: string;
+  suggestion: string;
+};
+
+export type AuditScore = {
+  category: "accessibility" | "seo" | "performance" | "security";
+  label: string;
+  pass: number;
+  warnings: number;
+  failures: number;
+  score: number;
+};
+
+export type AuditReport = {
+  findings: AuditFinding[];
+  scores: AuditScore[];
+  auditedAt: string;
+  fileCount: number;
+};
+
 export const projectVersionsTable = pgTable("project_versions", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id")
@@ -16,6 +40,7 @@ export const projectVersionsTable = pgTable("project_versions", {
   note: text("note"),
   filesSnapshot: jsonb("files_snapshot").$type<FileSnapshotEntry[]>(),
   planSnapshot: jsonb("plan_snapshot").$type<Record<string, unknown>>(),
+  auditReport: jsonb("audit_report").$type<AuditReport>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
