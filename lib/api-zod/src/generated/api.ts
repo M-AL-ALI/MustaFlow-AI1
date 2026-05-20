@@ -474,12 +474,15 @@ export const ApplyTaskStagingResponse = zod.object({
   "knowledgeApplied": zod.array(zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
-})).optional()
+})).optional(),
+  "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
   "suggestions": zod.array(zod.string()).optional(),
   "createdAt": zod.coerce.date(),
-  "completedAt": zod.coerce.date().nullish()
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish(),
+  "elapsedSeconds": zod.number().nullish()
 })
 
 
@@ -516,12 +519,15 @@ export const DiscardTaskStagingResponse = zod.object({
   "knowledgeApplied": zod.array(zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
-})).optional()
+})).optional(),
+  "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
   "suggestions": zod.array(zod.string()).optional(),
   "createdAt": zod.coerce.date(),
-  "completedAt": zod.coerce.date().nullish()
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish(),
+  "elapsedSeconds": zod.number().nullish()
 })
 
 
