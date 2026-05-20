@@ -2561,8 +2561,16 @@ components:
         publishedAt: { type: string, format: date-time }
         snapshotVersionId: { type: integer }
         filesPublished: { type: integer }
-        containerDeployed: { type: boolean, description: "True when a production container was provisioned instead of (or alongside) the static snapshot." }
-        containerUrl: { type: ["string", "null"], description: "Fly.io proxy URL of the always-on production container. Null when containerDeployed is false." }
+        containerDeployed:
+          {
+            type: boolean,
+            description: "True when a production container was provisioned instead of (or alongside) the static snapshot.",
+          }
+        containerUrl:
+          {
+            type: ["string", "null"],
+            description: "Fly.io proxy URL of the always-on production container. Null when containerDeployed is false.",
+          }
         note: { type: string }
 
     DeployResult:

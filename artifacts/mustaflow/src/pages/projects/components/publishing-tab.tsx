@@ -3342,7 +3342,9 @@ export function PublishingTab({
                   <div className="flex items-center gap-2 text-xs bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
                     <Server className="h-3.5 w-3.5 text-primary shrink-0" />
                     <span className="text-primary font-medium">Container deployed</span>
-                    <span className="text-muted-foreground">— public URL proxies to a live production server</span>
+                    <span className="text-muted-foreground">
+                      — public URL proxies to a live production server
+                    </span>
                   </div>
                 )}
                 <div className="flex items-center gap-2">

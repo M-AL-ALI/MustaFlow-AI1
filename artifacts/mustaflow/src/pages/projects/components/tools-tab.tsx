@@ -1054,6 +1054,34 @@ export function ToolsTab({
                   })}
                 </div>
               )}
+              {/* Container environment display */}
+              {secrets && secrets.length > 0 && (
+                <div className="border border-border rounded-lg overflow-hidden bg-card">
+                  <div className="px-4 py-2.5 border-b border-border bg-muted/50 flex items-center gap-2">
+                    <TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs font-semibold">Container Environment</span>
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {secrets.length} var{secrets.length !== 1 ? "s" : ""} injected on start
+                    </span>
+                  </div>
+                  <div className="p-3 bg-[#0d1117]">
+                    <div className="font-mono text-xs space-y-0.5">
+                      {secrets.map((s) => (
+                        <div key={s.id} className="flex items-center gap-2">
+                          <span className="text-[#79c0ff]">{s.name}</span>
+                          <span className="text-[#8b949e]">=</span>
+                          <span className="text-[#a5d6ff] opacity-60">••••••••</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/50 mt-2">
+                      All secrets are injected as environment variables when the container starts.
+                      Changing a secret restarts a running container automatically.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-start gap-2 text-xs text-muted-foreground mt-2">
                 <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                 Secret values are never returned by the API. Use Development keys for local testing,

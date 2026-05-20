@@ -727,8 +727,8 @@ export function CodeEditorTab({
       try {
         localStorage.setItem(EDITOR_LS_KEY(projectId), String(fileId));
       } catch {
-      // intentionally ignored
-    }
+        // intentionally ignored
+      }
     }
     setSidebarMode("files");
   }
@@ -757,8 +757,8 @@ export function CodeEditorTab({
       try {
         localStorage.setItem(EDITOR_LS_KEY(projectId), String(pendingFileId));
       } catch {
-      // intentionally ignored
-    }
+        // intentionally ignored
+      }
     }
   }
 
@@ -829,8 +829,8 @@ export function CodeEditorTab({
       try {
         localStorage.setItem(EDITOR_LS_KEY(projectId), String(created.id));
       } catch {
-      // intentionally ignored
-    }
+        // intentionally ignored
+      }
       toast({ title: "File created", description: trimmed });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Could not create file.";
@@ -887,8 +887,8 @@ export function CodeEditorTab({
         try {
           localStorage.removeItem(EDITOR_LS_KEY(projectId));
         } catch {
-      // intentionally ignored
-    }
+          // intentionally ignored
+        }
       }
       toast({ title: "File deleted" });
     } catch (err: unknown) {
@@ -1253,8 +1253,8 @@ export function CodeEditorTab({
                         try {
                           localStorage.setItem(EDITOR_LS_KEY(projectId), String(pendingFileId));
                         } catch {
-      // intentionally ignored
-    }
+                          // intentionally ignored
+                        }
                       }
                     })
                   }

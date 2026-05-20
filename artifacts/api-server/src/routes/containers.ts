@@ -11,8 +11,13 @@
 
 import { Router, type IRouter } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { db, projectsTable, projectFilesTable, containerLogsTable, secretsTable } from "@workspace/db";
-import { encryptionService } from "../lib/encryption";
+import {
+  db,
+  projectsTable,
+  projectFilesTable,
+  containerLogsTable,
+  secretsTable,
+} from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import {
   provisionContainer,
@@ -22,6 +27,7 @@ import {
   destroyContainer,
   deployProductionContainer,
 } from "../lib/container";
+import { encryptionService } from "../lib/encryption";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -42,6 +48,28 @@ async function loadProjectFiles(projectId: number) {
     .from(projectFilesTable)
     .where(eq(projectFilesTable.projectId, projectId));
   return rows;
+}
+
+/**
+ * Load all project secrets and return them as a plain { KEY: value } map
+ * suitable for injecting into a container's environment.
+ * Decryption errors for individual secrets are caught and skipped (best-effort).
+ */
+async function loadProjectSecretsAsEnv(projectId: number): Promise<Record<string, string>> {
+  const rows = await db
+    .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
+    .from(secretsTable)
+    .where(eq(secretsTable.projectId, projectId));
+
+  const env: Record<string, string> = {};
+  for (const row of rows) {
+    try {
+      env[row.name] = encryptionService.decrypt(row.valueEncrypted);
+    } catch {
+      // skip secrets that can't be decrypted rather than aborting the whole start
+    }
+  }
+  return env;
 }
 
 // ── GET /api/projects/:id/container/status ───────────────────────────────────
@@ -100,8 +128,16 @@ router.post(
 
     req.log.info({ projectId }, "Provisioning container");
 
-    // Load project files for initial sync
-    const files = await loadProjectFiles(projectId);
+    // Load project files and decrypted secrets in parallel
+    const [files, envVars] = await Promise.all([
+      loadProjectFiles(projectId),
+      loadProjectSecretsAsEnv(projectId),
+    ]);
+
+    req.log.info(
+      { projectId, secretCount: Object.keys(envVars).length },
+      "Injecting project secrets into container env",
+    );
 
     // Start container in background — respond immediately with "starting"
     res.json({
@@ -112,7 +148,7 @@ router.post(
 
     // Provision asynchronously (don't await — client will poll /status)
     setImmediate(() => {
-      provisionContainer(projectId, files).catch((err: unknown) => {
+      provisionContainer(projectId, files, envVars).catch((err: unknown) => {
         logger.error({ err, projectId }, "Container provisioning failed");
       });
     });

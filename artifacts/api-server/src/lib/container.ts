@@ -91,8 +91,13 @@ async function writeLog(
  * Create a new Fly.io machine for a project and return its ID + proxy URL.
  * The machine image is node:20-alpine; the entrypoint keeps it alive.
  * A persistent volume should already exist (managed separately).
+ *
+ * @param extraEnv  Optional additional env vars (decrypted project secrets) to inject.
  */
-export async function createContainer(projectId: number): Promise<ContainerInfo | null> {
+export async function createContainer(
+  projectId: number,
+  extraEnv?: Record<string, string>,
+): Promise<ContainerInfo | null> {
   if (!isConfigured()) {
     logger.warn({ projectId }, "FLY_API_TOKEN not set — container creation skipped");
     return null;
@@ -108,6 +113,7 @@ export async function createContainer(projectId: number): Promise<ContainerInfo 
       env: {
         PROJECT_ID: String(projectId),
         PORT: String(INTERNAL_PORT),
+        ...(extraEnv ?? {}),
       },
       init: {
         cmd: ["/bin/sh", "-c", "mkdir -p /app && tail -f /dev/null"],
@@ -368,6 +374,88 @@ export async function ensureFlyApp(): Promise<void> {
 }
 
 /**
+ * Update the env vars on an existing Fly.io machine via PATCH.
+ * The system vars (PROJECT_ID, PORT) are always preserved.
+ */
+export async function updateContainerEnv(
+  machineId: string,
+  projectId: number,
+  extraEnv: Record<string, string>,
+): Promise<boolean> {
+  if (!isConfigured()) return false;
+  try {
+    const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        config: {
+          env: {
+            PROJECT_ID: String(projectId),
+            PORT: String(INTERNAL_PORT),
+            ...extraEnv,
+          },
+        },
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      logger.warn({ machineId, projectId, body: text }, "Failed to update Fly machine env");
+    }
+    return res.ok;
+  } catch (err) {
+    logger.error({ err, machineId, projectId }, "Error updating Fly machine env");
+    return false;
+  }
+}
+
+/**
+ * Update the env vars on the project's running container and restart it
+ * so the new secrets take effect immediately.
+ *
+ * Called when secrets are added, updated, or deleted while the container is live.
+ * Best-effort — failures are logged but never propagated to the caller.
+ */
+export async function restartContainerWithSecrets(
+  projectId: number,
+  envVars: Record<string, string>,
+): Promise<void> {
+  if (!isConfigured()) return;
+
+  const [project] = await db
+    .select({
+      containerId: projectsTable.containerId,
+      containerStatus: projectsTable.containerStatus,
+    })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId));
+
+  if (!project?.containerId || project.containerStatus !== "running") return;
+
+  const machineId = project.containerId;
+
+  // 1. Update the stored machine config with the new env vars
+  await updateContainerEnv(machineId, projectId, envVars);
+
+  // 2. Restart the machine so processes see the new env
+  try {
+    const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/restart`, {
+      method: "POST",
+    });
+    if (res.ok) {
+      await writeLog(projectId, "system", "Container restarted to apply updated secrets");
+      logger.info({ projectId, machineId }, "Container restarted after secret change");
+    } else {
+      const text = await res.text();
+      logger.warn(
+        { machineId, projectId, body: text },
+        "Failed to restart Fly machine after secret update",
+      );
+    }
+  } catch (err) {
+    logger.error({ err, machineId, projectId }, "Error restarting Fly machine after secret update");
+  }
+}
+
+/**
  * Provision or wake a container for a project.
  *
  * - If no containerId: creates a new machine + syncs files + runs npm install
@@ -375,10 +463,13 @@ export async function ensureFlyApp(): Promise<void> {
  * - If already running: returns current info immediately
  *
  * Updates `projects` table with the latest container metadata.
+ *
+ * @param extraEnv  Decrypted project secrets to inject as env vars.
  */
 export async function provisionContainer(
   projectId: number,
   files: Array<{ path: string; content: string }>,
+  extraEnv?: Record<string, string>,
 ): Promise<ContainerInfo | null> {
   if (!isConfigured()) return null;
 
@@ -413,8 +504,8 @@ export async function provisionContainer(
   let containerUrl = project.containerUrl;
 
   if (!machineId) {
-    // Create new machine
-    const info = await createContainer(projectId);
+    // Create new machine with project secrets as env vars
+    const info = await createContainer(projectId, extraEnv);
     if (!info) {
       await db
         .update(projectsTable)
@@ -437,6 +528,11 @@ export async function provisionContainer(
     // Sync files to container
     await syncFilesToContainer(machineId, projectId, files);
   } else {
+    // Always update env vars on the existing machine before waking it.
+    // Passing an empty map clears any previously injected secrets that were
+    // deleted while the container was hibernated — this is intentional so that
+    // removed secrets do not reappear after restart.
+    await updateContainerEnv(machineId, projectId, extraEnv ?? {});
     // Wake existing machine
     await startContainer(machineId, projectId);
     await waitForMachineReady(machineId, 30);

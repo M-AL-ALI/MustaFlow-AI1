@@ -10,6 +10,34 @@ import {
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService, maskValue } from "../lib/encryption";
 import { writeKnowledge } from "../lib/knowledge";
+import { restartContainerWithSecrets } from "../lib/container";
+
+/**
+ * Load all secrets for a project as decrypted { name: value } pairs and
+ * fire a best-effort container restart with the latest env.
+ * Never throws — failures are swallowed so secret mutations always succeed.
+ */
+async function triggerContainerSecretRefresh(projectId: number): Promise<void> {
+  try {
+    const rows = await db
+      .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
+      .from(secretsTable)
+      .where(eq(secretsTable.projectId, projectId));
+
+    const envVars: Record<string, string> = {};
+    for (const row of rows) {
+      try {
+        envVars[row.name] = encryptionService.decrypt(row.valueEncrypted);
+      } catch {
+        // skip individual decrypt failures
+      }
+    }
+
+    await restartContainerWithSecrets(projectId, envVars);
+  } catch {
+    // best-effort — never fail the main secret operation
+  }
+}
 
 // Environment mismatch: warn if a key labelled for one env is being used in another.
 // This is informational only — we surface a warning flag in the response so the UI can show it.
@@ -132,6 +160,9 @@ router.post("/projects/:id/secrets", requireProjectOwnership, async (req, res): 
     userId: req.userId,
   });
 
+  // Restart container (if running) so the new secret is available immediately
+  void triggerContainerSecretRefresh(params.data.id);
+
   res.status(201).json(toEntry(row));
 });
 
@@ -171,6 +202,9 @@ router.delete(
       projectId,
       userId: req.userId,
     });
+
+    // Restart container (if running) so the removed secret is no longer available
+    void triggerContainerSecretRefresh(projectId);
 
     res.json({ deleted: true, id: secretId });
   },
@@ -242,6 +276,9 @@ router.patch(
       projectId,
       userId: req.userId,
     });
+
+    // Restart container (if running) so the updated secret value is picked up
+    void triggerContainerSecretRefresh(projectId);
 
     res.json(toEntry(row));
   },
