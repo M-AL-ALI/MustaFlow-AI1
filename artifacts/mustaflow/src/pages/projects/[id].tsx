@@ -8,6 +8,7 @@ import {
   useSendMessage,
   useListTasks,
   useRollbackVersion,
+  useListSuggestions,
   getGetProjectQueryKey,
   getListMessagesQueryKey,
   getListProjectFilesQueryKey,
@@ -426,6 +427,24 @@ export default function ProjectWorkspacePage() {
       refetchInterval: sendMessage.isPending ? 1500 : 15000,
     },
   });
+
+  // Global suggestions poll — catches background build suggestions even when SuggestionChips
+  // is not visible (background tasks don't create a foreground report card).
+  const { data: allSuggestions = [] } = useListSuggestions(
+    projectId,
+    {},
+    {
+      query: {
+        enabled: !!projectId,
+        queryKey: getListSuggestionsQueryKey(projectId, {}),
+        refetchInterval: 30000,
+        staleTime: 10000,
+      },
+    },
+  );
+  const pendingSuggestionsCount = allSuggestions.filter(
+    (s) => s.status === "pending",
+  ).length;
 
   const [prompt, setPrompt] = useState("");
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
@@ -1078,7 +1097,12 @@ export default function ProjectWorkspacePage() {
                     : t === "history"
                       ? History
                       : Bookmark;
-              const badge = t === "files" && files.length > 0 ? files.length : null;
+              const badge =
+                t === "files" && files.length > 0
+                  ? files.length
+                  : t === "saved" && pendingSuggestionsCount > 0
+                    ? pendingSuggestionsCount
+                    : null;
               return (
                 <button
                   key={t}
@@ -1348,135 +1372,14 @@ export default function ProjectWorkspacePage() {
                       </div>
                     </div>
                   )}
-                      </div>
-                    )}
-                    {messages?.slice(-20).map((msg) => {
-                      const planPayload = msg.plan as ChatPlanPayload | null | undefined;
-                      const payloadKind =
-                        planPayload && typeof planPayload === "object"
-                          ? (planPayload as { kind?: string }).kind
-                          : undefined;
-                      const isReport = payloadKind === "report";
-                      const isQueued = payloadKind === "task-queued";
-                      const isError = payloadKind === "error";
-                      const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
-                      const structuredPlan =
-                        isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
-                      return (
-                        <div
-                          key={msg.id}
-                          className={cn(
-                            "flex",
-                            msg.role === "user" ? "justify-end" : "justify-start",
-                          )}
-                        >
-                          <div
-                            className={cn(
-                              "max-w-[90%] px-3 py-2 rounded-xl text-xs",
-                              msg.role === "user"
-                                ? "bg-primary text-primary-foreground rounded-br-sm"
-                                : isError
-                                  ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
-                                  : "bg-muted text-foreground rounded-bl-sm border border-border",
-                            )}
-                          >
-                            <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
-                            {isReport &&
-                              (() => {
-                                const rp = planPayload as {
-                                  kind: "report";
-                                  report: TaskReport;
-                                  queueBatchId?: string;
-                                  queueIndex?: number | null;
-                                  queueTotalCount?: number | null;
-                                };
-                                const hasBatch =
-                                  rp.queueBatchId && rp.queueTotalCount && rp.queueTotalCount > 1;
-                                return (
-                                  <>
-                                    {hasBatch && (
-                                      <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
-                                        <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
-                                        <span className="text-[10px] text-muted-foreground/70 font-medium">
-                                          Task {(rp.queueIndex ?? 0) + 1} of {rp.queueTotalCount}
-                                        </span>
-                                      </div>
-                                    )}
-                                    <ReportCard
-                                      report={rp.report}
-                                      onViewFile={(path) => {
-                                        const f = files.find((x) => x.path === path);
-                                        if (f) {
-                                          setSelectedCodeFileId(f.id);
-                                          setActiveTab("code");
-                                        }
-                                      }}
-                                    />
-                                  </>
-                                );
-                              })()}
-                            {isQueued && (
-                              <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
-                                <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary" />
-                                Background task #{(planPayload as { taskId: number }).taskId}{" "}
-                                running…
-                              </div>
-                            )}
-                            {isError && (
-                              <ErrorCard
-                                message={(planPayload as { message: string }).message}
-                                suggestions={
-                                  (planPayload as { suggestions?: string[] }).suggestions
-                                }
-                                onTryFix={(text) => {
-                                  setPrompt(text);
-                                }}
-                                onBuyCredits={() => setBuyCreditsOpen(true)}
-                              />
-                            )}
-                            {isPlanCard && (
-                              <PlanCard
-                                plan={structuredPlan}
-                                projectId={projectId}
-                                initialAgentMode={agentMode}
-                                onBuild={runPlanned}
-                                onAddKey={handleAddKey}
-                                disabled={sendMessage.isPending}
-                                messageId={msg.id}
-                              />
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {sendMessage.isPending && !activeTaskId && (
-                      <div className="flex justify-start">
-                        <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
-                          <div
-                            className={cn(
-                              "animate-pulse w-1.5 h-1.5 rounded-full",
-                              pendingIsPlan ? "bg-secondary" : "bg-primary",
-                            )}
-                          />
-                          <span className="text-muted-foreground">
-                            {pendingIsPlan ? "Thinking through the plan…" : "MustaFlow is working…"}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {activeTaskId !== null && (
-                      <ActivityStream
-                        projectId={projectId}
-                        taskId={activeTaskId}
-                        onDismiss={() => setActiveTaskId(null)}
-                      />
-                    )}
-                  </div>
                 </div>
-              );
-            })()}
+                {activeTaskId !== null && (
+                  <ActivityStream
+                    projectId={projectId}
+                    taskId={activeTaskId}
+                    onDismiss={() => setActiveTaskId(null)}
+                  />
+                )}
 
                   {/* Activity ticker / Status bar */}
                   <div className="shrink-0 border-t border-border/40">

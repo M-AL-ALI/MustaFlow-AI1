@@ -2,6 +2,7 @@ import {
   useListSuggestions,
   useAcceptSuggestion,
   useDismissSuggestion,
+  useSaveSuggestion,
   getListSuggestionsQueryKey,
   type ProjectSuggestion,
 } from "@workspace/api-client-react";
@@ -9,6 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import {
   Bookmark,
+  BookmarkCheck,
   Lightbulb,
   Wrench,
   Star,
@@ -41,14 +43,21 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
     {
       query: {
         queryKey: getListSuggestionsQueryKey(projectId, {}),
-        refetchInterval: false,
-        staleTime: 30000,
+        // Poll every 30s so background build suggestions surface automatically
+        refetchInterval: 30000,
+        staleTime: 10000,
       },
     },
   );
 
   const saved = (suggestions ?? []).filter(
     (s: ProjectSuggestion) => s.status === "saved",
+  );
+
+  // Pending suggestions include output from background builds that never had a
+  // foreground SuggestionChips panel attached to them.
+  const pending = (suggestions ?? []).filter(
+    (s: ProjectSuggestion) => s.status === "pending",
   );
 
   const accept = useAcceptSuggestion({
@@ -60,6 +69,16 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
         if (data.taskId && onAccepted) {
           onAccepted(data.taskId);
         }
+      },
+    },
+  });
+
+  const save = useSaveSuggestion({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: getListSuggestionsQueryKey(projectId, {}),
+        });
       },
     },
   });
@@ -82,7 +101,7 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
     );
   }
 
-  if (saved.length === 0) {
+  if (pending.length === 0 && saved.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground px-4">
         <Bookmark className="h-8 w-8 opacity-25" />
@@ -97,45 +116,119 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
   }
 
   return (
-    <div className="flex-1 overflow-y-auto py-2 space-y-1 px-2">
-      {saved.map((s: ProjectSuggestion) => {
-        const meta = CATEGORY_META[s.category] ?? CATEGORY_META.feature!;
-        const Icon = meta.icon;
-        return (
-          <div
-            key={s.id}
-            className="group flex items-start gap-2 bg-muted/50 border border-border/60 rounded-lg px-2.5 py-2 hover:border-border transition-colors"
-          >
-            <Icon className={cn("h-3 w-3 mt-0.5 shrink-0", meta.color)} />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-baseline gap-1.5 flex-wrap">
-                <span className="text-[10px] font-semibold text-foreground">{s.title}</span>
-                <span className={cn("text-[9px] font-medium uppercase tracking-wide shrink-0", meta.color)}>
-                  {meta.label}
-                </span>
-              </div>
-              <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
-              <div className="flex items-center gap-1.5 mt-1.5">
-                <button
-                  onClick={() => accept.mutate({ id: projectId, suggestionId: s.id })}
-                  disabled={accept.isPending}
-                  className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/15 transition-colors"
-                >
-                  <Play className="h-2.5 w-2.5" />
-                  Build now
-                </button>
-                <button
-                  onClick={() => dismiss.mutate({ id: projectId, suggestionId: s.id })}
-                  className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-                >
-                  <X className="h-2.5 w-2.5" />
-                  Remove
-                </button>
-              </div>
-            </div>
+    <div className="flex-1 overflow-y-auto py-2 space-y-3 px-2">
+      {/* Pending suggestions — surfaced from background builds */}
+      {pending.length > 0 && (
+        <div className="space-y-1">
+          <div className="px-0.5 pb-0.5 flex items-center gap-1.5">
+            <Lightbulb className="h-3 w-3 text-muted-foreground/60" />
+            <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+              New ideas
+            </span>
+            <span className="ml-1 px-1 py-0.5 rounded-full bg-primary/15 text-primary text-[9px] font-semibold leading-none">
+              {pending.length}
+            </span>
           </div>
-        );
-      })}
+          {pending.map((s: ProjectSuggestion) => {
+            const meta = CATEGORY_META[s.category] ?? CATEGORY_META.feature!;
+            const Icon = meta.icon;
+            return (
+              <div
+                key={s.id}
+                className="group flex items-start gap-2 bg-muted/50 border border-border/60 rounded-lg px-2.5 py-2 hover:border-border transition-colors"
+              >
+                <Icon className={cn("h-3 w-3 mt-0.5 shrink-0", meta.color)} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-semibold text-foreground">{s.title}</span>
+                    <span className={cn("text-[9px] font-medium uppercase tracking-wide shrink-0", meta.color)}>
+                      {meta.label}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <button
+                      onClick={() => accept.mutate({ id: projectId, suggestionId: s.id })}
+                      disabled={accept.isPending}
+                      className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/15 transition-colors"
+                    >
+                      <Play className="h-2.5 w-2.5" />
+                      Build now
+                    </button>
+                    <button
+                      onClick={() => save.mutate({ id: projectId, suggestionId: s.id })}
+                      disabled={save.isPending}
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-foreground transition-colors"
+                    >
+                      <BookmarkCheck className="h-2.5 w-2.5" />
+                      Save
+                    </button>
+                    <button
+                      onClick={() => dismiss.mutate({ id: projectId, suggestionId: s.id })}
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Saved suggestions */}
+      {saved.length > 0 && (
+        <div className="space-y-1">
+          {pending.length > 0 && (
+            <div className="px-0.5 pb-0.5 flex items-center gap-1.5">
+              <Bookmark className="h-3 w-3 text-muted-foreground/60" />
+              <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+                Saved
+              </span>
+            </div>
+          )}
+          {saved.map((s: ProjectSuggestion) => {
+            const meta = CATEGORY_META[s.category] ?? CATEGORY_META.feature!;
+            const Icon = meta.icon;
+            return (
+              <div
+                key={s.id}
+                className="group flex items-start gap-2 bg-muted/50 border border-border/60 rounded-lg px-2.5 py-2 hover:border-border transition-colors"
+              >
+                <Icon className={cn("h-3 w-3 mt-0.5 shrink-0", meta.color)} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-semibold text-foreground">{s.title}</span>
+                    <span className={cn("text-[9px] font-medium uppercase tracking-wide shrink-0", meta.color)}>
+                      {meta.label}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <button
+                      onClick={() => accept.mutate({ id: projectId, suggestionId: s.id })}
+                      disabled={accept.isPending}
+                      className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/15 transition-colors"
+                    >
+                      <Play className="h-2.5 w-2.5" />
+                      Build now
+                    </button>
+                    <button
+                      onClick={() => dismiss.mutate({ id: projectId, suggestionId: s.id })}
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
