@@ -68,6 +68,10 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
   const { content, agentMode, planMode } = parsed.data;
   const mode = agentMode as AgentMode;
+  // Foreground requests that were queued by aiBuilderLimiter physically wait
+  // in-line (HTTP connection held open) until a slot frees, then run here
+  // synchronously. Only explicit background=true from the client triggers
+  // the async background-job path.
   const runInBackground = Boolean(parsed.data.background);
 
   // Load recent conversation history for AI context (last 8 user/assistant turns)

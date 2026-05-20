@@ -1,6 +1,12 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
-import { db, projectsTable, chatMessagesTable, agentTasksTable } from "@workspace/db";
+import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import {
+  db,
+  projectsTable,
+  projectFilesTable,
+  chatMessagesTable,
+  agentTasksTable,
+} from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import {
   CreateProjectBody,
@@ -14,6 +20,98 @@ import {
   GetProjectsSummaryResponse,
 } from "@workspace/api-zod";
 import { buildInitialAssistantMessage } from "../lib/ai";
+
+// ── Health score — content-based analysis ─────────────────────────────────────
+// Computes a 0–100 score by inspecting the actual generated HTML files for a
+// project. Four weighted dimensions (25 pts each):
+//   Accessibility  — alt text, ARIA roles, semantic elements
+//   SEO            — <title>, meta description, <h1>
+//   Performance    — external script count, lazy loading
+//   Security       — absence of eval(), document.write(), raw innerHTML concat
+//
+// Returns 0 for projects with no files yet.
+
+interface FileRow {
+  path: string;
+  content: string;
+  mimeType: string;
+}
+
+function scoreHtml(files: FileRow[]): number {
+  const htmlFiles = files.filter(
+    (f) => f.mimeType === "text/html" || f.path.endsWith(".html"),
+  );
+  if (htmlFiles.length === 0) {
+    // Has non-HTML files — give partial credit for structure
+    return files.length > 0 ? 20 : 0;
+  }
+  const html = htmlFiles.map((f) => f.content).join("\n");
+
+  // Accessibility (0-25)
+  let accessibility = 0;
+  if (/<img[^>]+alt\s*=/.test(html))                             accessibility += 8;
+  if (/aria-[a-z]+/.test(html))                                  accessibility += 9;
+  if (/<(nav|main|header|footer|section|article)\b/.test(html)) accessibility += 8;
+
+  // SEO (0-25)
+  let seo = 0;
+  if (/<title\b[^>]*>[^<]{2,}/.test(html))                            seo += 10;
+  if (/meta[^>]+name\s*=\s*["']description["']/.test(html))           seo += 10;
+  if (/<h1\b/.test(html))                                              seo +=  5;
+
+  // Performance (0-25)
+  const externalScripts = (html.match(/<script[^>]+src\s*=/g) ?? []).length;
+  let performance = Math.max(0, 20 - externalScripts * 3);
+  if (/loading\s*=\s*["']lazy["']/.test(html))                  performance +=  5;
+
+  // Security (0-25) — deduct for dangerous patterns
+  let security = 25;
+  if (/\beval\s*\(/.test(html))                                  security -= 15;
+  if (/document\.write\s*\(/.test(html))                         security -=  5;
+  if (/innerHTML\s*=\s*[^"'`][^;]*\+/.test(html))               security -=  5;
+  security = Math.max(0, security);
+
+  return Math.min(100, accessibility + seo + performance + security);
+}
+
+async function computeHealthScoreForProject(projectId: number): Promise<number> {
+  const files = await db
+    .select({
+      path: projectFilesTable.path,
+      content: projectFilesTable.content,
+      mimeType: projectFilesTable.mimeType,
+    })
+    .from(projectFilesTable)
+    .where(eq(projectFilesTable.projectId, projectId));
+  return scoreHtml(files);
+}
+
+async function computeHealthScoresBatch(
+  projectIds: number[],
+): Promise<Map<number, number>> {
+  if (projectIds.length === 0) return new Map();
+  const files = await db
+    .select({
+      projectId: projectFilesTable.projectId,
+      path: projectFilesTable.path,
+      content: projectFilesTable.content,
+      mimeType: projectFilesTable.mimeType,
+    })
+    .from(projectFilesTable)
+    .where(inArray(projectFilesTable.projectId, projectIds));
+
+  const byProject = new Map<number, FileRow[]>();
+  for (const f of files) {
+    if (!byProject.has(f.projectId)) byProject.set(f.projectId, []);
+    byProject.get(f.projectId)!.push(f);
+  }
+
+  const scores = new Map<number, number>();
+  for (const id of projectIds) {
+    scores.set(id, scoreHtml(byProject.get(id) ?? []));
+  }
+  return scores;
+}
 
 const router: IRouter = Router();
 
@@ -30,7 +128,13 @@ router.get("/projects", async (req, res): Promise<void> => {
     .from(projectsTable)
     .where(and(...conditions))
     .orderBy(desc(projectsTable.updatedAt));
-  res.json(ListProjectsResponse.parse(rows));
+  const parsed = ListProjectsResponse.parse(rows);
+  const scores = await computeHealthScoresBatch(rows.map((r) => r.id));
+  const withScore = parsed.map((p) => ({
+    ...p,
+    healthScore: scores.get(p.id) ?? 0,
+  }));
+  res.json(withScore);
 });
 
 router.get("/projects/summary", async (req, res): Promise<void> => {
@@ -46,18 +150,25 @@ router.get("/projects/summary", async (req, res): Promise<void> => {
     byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
   }
 
-  const recent = [...rows]
+  const recentRows = [...rows]
     .sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt))
     .slice(0, 6);
 
-  res.json(
-    GetProjectsSummaryResponse.parse({
-      total: rows.length,
-      byStatus,
-      byKind,
-      recent,
-    }),
-  );
+  const summaryParsed = GetProjectsSummaryResponse.parse({
+    total: rows.length,
+    byStatus,
+    byKind,
+    recent: recentRows,
+  });
+
+  const recentScores = await computeHealthScoresBatch(recentRows.map((r) => r.id));
+  res.json({
+    ...summaryParsed,
+    recent: summaryParsed.recent.map((p) => ({
+      ...p,
+      healthScore: recentScores.get(p.id) ?? 0,
+    })),
+  });
 });
 
 router.post("/projects", async (req, res): Promise<void> => {
@@ -134,7 +245,9 @@ router.get("/projects/:id", requireProjectOwnership, async (req, res): Promise<v
     return;
   }
 
-  res.json(GetProjectResponse.parse(project));
+  const parsed = GetProjectResponse.parse(project);
+  const healthScore = await computeHealthScoreForProject(project.id);
+  res.json({ ...parsed, healthScore });
 });
 
 router.patch("/projects/:id", requireProjectOwnership, async (req, res): Promise<void> => {

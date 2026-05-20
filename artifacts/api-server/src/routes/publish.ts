@@ -19,6 +19,7 @@ import {
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
+import { generateOgSvg } from "../lib/ogImage";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
@@ -70,6 +71,17 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   const isRepublish = project.publicSlug !== null;
   const deploymentLabel = `${isRepublish ? "Republished" : "Published"} — ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
 
+  // Generate OG image at publish time and store as a base64 data URL so the
+  // frozen snapshot always carries its own social preview card — no separate
+  // on-demand route required.
+  const ogSvg = generateOgSvg({
+    name: project.name,
+    description: project.description,
+    themeColor: project.themeColor ?? null,
+    kind: project.kind,
+  });
+  const ogImageUrl = `data:image/svg+xml;base64,${Buffer.from(ogSvg).toString("base64")}`;
+
   // Snapshot the files into a version record (this is the frozen public copy).
   const [deploymentVersion] = await db
     .insert(projectVersionsTable)
@@ -77,6 +89,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       projectId,
       label: deploymentLabel,
       note: `Deployment snapshot. ${files.length} file(s). Actor: ${req.userId ?? "unknown"}. Published: ${publishedAt}`,
+      ogImageUrl,
       filesSnapshot: files.map((f) => ({
         path: f.path,
         content: f.content,
@@ -85,44 +98,19 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     })
     .returning({ id: projectVersionsTable.id, label: projectVersionsTable.label });
 
-  // Mark the project published, store which snapshot is live, and save the slug.
-  await db
-    .update(projectsTable)
-    .set({
-      status: "published",
-      publishedSnapshotId: deploymentVersion?.id ?? null,
-      publicSlug: slug,
-      updatedAt: sql`now()`,
-    })
-    .where(eq(projectsTable.id, projectId));
-
   const publicUrl = `https://${slug}.${PLATFORM_DOMAIN}/`;
   const internalPathUrl = `/api/p/${slug}/`;
 
-  void writeKnowledge({
-    title: `${isRepublish ? "Republished" : "Published"}: project ${projectId}`,
-    content: `Project id:${projectId} ${isRepublish ? "republished" : "published"} by ${req.userId ?? "unknown"}. Slug: ${slug}. Snapshot version id:${deploymentVersion?.id}. ${files.length} file(s) frozen. Public URL: ${publicUrl}`,
-    type: "publish",
-    category: "event",
-    severity: "info",
-    projectId,
-    userId: req.userId,
-    relatedVersionId: deploymentVersion?.id,
-  });
-
+  // Mark the project published, store which snapshot is live, and save the slug.
+  // Best-effort inside setImmediate so the response returns immediately.
   setImmediate(() => {
     void db
-      .insert(deploymentLogsTable)
-      .values({
-        projectId,
-        userId: req.userId ?? "unknown",
-        env: "production",
-        status: "passed",
+      .update(projectsTable)
+      .set({
+        status: "published",
+        publishedSnapshotId: deploymentVersion?.id ?? null,
         publicSlug: slug,
-        publicUrl,
-        filesCount: files.length,
-        snapshotVersionId: deploymentVersion?.id ?? null,
-        note: isRepublish ? "Republished by user." : "Published by user.",
+        updatedAt: new Date(),
       })
       .catch(() => {
         /* best-effort */

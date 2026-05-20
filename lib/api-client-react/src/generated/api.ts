@@ -28,6 +28,8 @@ import type {
   AdminStats,
   AgentTask,
   AgentTaskInput,
+  AnalyticsPingInput,
+  AnalyticsSummary,
   AnalyzePageMapParams,
   ApiError,
   BillingCheckoutInput,
@@ -90,7 +92,10 @@ import type {
   SecretEntry,
   SecretInput,
   SecretVerifyResult,
+  SetProjectSubdomain400,
   StripeWebhook200,
+  SubdomainInput,
+  SubdomainResult,
   SuggestionAcceptResult,
   TaskEvent,
   TaskFeedbackInput,
@@ -3578,6 +3583,227 @@ export function useListDeployments<TData = Awaited<ReturnType<typeof listDeploym
 
 
 
+
+export const getRecordPageViewUrl = (publicSlug: string,) => {
+
+
+
+
+  return `/api/p/${publicSlug}/analytics/ping`
+}
+
+/**
+ * @summary Record a public page view (analytics ping from published app)
+ */
+export const recordPageView = async (publicSlug: string,
+    analyticsPingInput: AnalyticsPingInput, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getRecordPageViewUrl(publicSlug),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      analyticsPingInput,)
+  }
+);}
+
+
+
+
+export const getRecordPageViewMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordPageView>>, TError,{publicSlug: string;data: BodyType<AnalyticsPingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordPageView>>, TError,{publicSlug: string;data: BodyType<AnalyticsPingInput>}, TContext> => {
+
+const mutationKey = ['recordPageView'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordPageView>>, {publicSlug: string;data: BodyType<AnalyticsPingInput>}> = (props) => {
+          const {publicSlug,data} = props ?? {};
+
+          return  recordPageView(publicSlug,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordPageViewMutationResult = NonNullable<Awaited<ReturnType<typeof recordPageView>>>
+    export type RecordPageViewMutationBody = BodyType<AnalyticsPingInput>
+    export type RecordPageViewMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Record a public page view (analytics ping from published app)
+ */
+export const useRecordPageView = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordPageView>>, TError,{publicSlug: string;data: BodyType<AnalyticsPingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof recordPageView>>,
+        TError,
+        {publicSlug: string;data: BodyType<AnalyticsPingInput>},
+        TContext
+      > => {
+      return useMutation(getRecordPageViewMutationOptions(options));
+    }
+
+export const getGetAnalyticsSummaryUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/analytics/summary`
+}
+
+/**
+ * @summary Get analytics summary for a project
+ */
+export const getAnalyticsSummary = async (id: number, options?: RequestInit): Promise<AnalyticsSummary> => {
+
+  return customFetch<AnalyticsSummary>(getGetAnalyticsSummaryUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalyticsSummaryQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/analytics/summary`
+    ] as const;
+    }
+
+
+export const getGetAnalyticsSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getAnalyticsSummary>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalyticsSummaryQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalyticsSummary>>> = ({ signal }) => getAnalyticsSummary(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsSummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalyticsSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalyticsSummary>>>
+export type GetAnalyticsSummaryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get analytics summary for a project
+ */
+
+export function useGetAnalyticsSummary<TData = Awaited<ReturnType<typeof getAnalyticsSummary>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalyticsSummaryQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSetProjectSubdomainUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/subdomain`
+}
+
+/**
+ * @summary Set a custom subdomain (publicSlug) for a project
+ */
+export const setProjectSubdomain = async (id: number,
+    subdomainInput: SubdomainInput, options?: RequestInit): Promise<SubdomainResult> => {
+
+  return customFetch<SubdomainResult>(getSetProjectSubdomainUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      subdomainInput,)
+  }
+);}
+
+
+
+
+export const getSetProjectSubdomainMutationOptions = <TError = ErrorType<SetProjectSubdomain400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProjectSubdomain>>, TError,{id: number;data: BodyType<SubdomainInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setProjectSubdomain>>, TError,{id: number;data: BodyType<SubdomainInput>}, TContext> => {
+
+const mutationKey = ['setProjectSubdomain'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setProjectSubdomain>>, {id: number;data: BodyType<SubdomainInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setProjectSubdomain(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetProjectSubdomainMutationResult = NonNullable<Awaited<ReturnType<typeof setProjectSubdomain>>>
+    export type SetProjectSubdomainMutationBody = BodyType<SubdomainInput>
+    export type SetProjectSubdomainMutationError = ErrorType<SetProjectSubdomain400>
+
+    /**
+ * @summary Set a custom subdomain (publicSlug) for a project
+ */
+export const useSetProjectSubdomain = <TError = ErrorType<SetProjectSubdomain400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProjectSubdomain>>, TError,{id: number;data: BodyType<SubdomainInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setProjectSubdomain>>,
+        TError,
+        {id: number;data: BodyType<SubdomainInput>},
+        TContext
+      > => {
+      return useMutation(getSetProjectSubdomainMutationOptions(options));
+    }
 
 export const getGetUserCreditsUrl = () => {
 

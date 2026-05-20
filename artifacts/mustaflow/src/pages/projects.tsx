@@ -1,7 +1,18 @@
 import { useState } from "react";
-import { useGetProjectsSummary, useGetRecentActivity } from "@workspace/api-client-react";
+import { Link, useLocation } from "wouter";
+import {
+  useGetProjectsSummary,
+  useGetRecentActivity,
+  useCreateProject,
+  getListProjectsQueryKey,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { CreateProjectModal } from "@/components/create-project-modal";
 import {
   FolderKanban,
   Activity,
@@ -17,15 +28,27 @@ import {
   ChevronUp,
   Rocket,
   Eye,
+  Heart,
 } from "lucide-react";
-import { Link, useLocation } from "wouter";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { CreateProjectModal } from "@/components/create-project-modal";
-import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
 
+
+function HealthBadge({ score }: { score: number }) {
+  const color =
+    score >= 80
+      ? "text-green-400 bg-green-500/10 border-green-500/20"
+      : score >= 50
+      ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
+      : "text-destructive bg-destructive/10 border-destructive/20";
+  return (
+    <span
+      title={`Health score: ${score}/100`}
+      className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${color}`}
+    >
+      <Heart className="h-2.5 w-2.5" />
+      {score}
+    </span>
+  );
+}
 function QuickStartBox() {
   const [prompt, setPrompt] = useState("");
   const [, setLocation] = useLocation();
@@ -351,9 +374,12 @@ export default function ProjectsPage() {
                 <Link key={project.id} href={`/projects/${project.id}`}>
                   <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
                     <CardHeader className="pb-2">
-                      <div className="flex justify-between items-start">
-                        <CardTitle className="text-lg">{project.name}</CardTitle>
-                        <Badge variant={project.status === "published" ? "default" : "secondary"}>
+                      <div className="flex justify-between items-start gap-2">
+                        <CardTitle className="text-lg leading-tight">{project.name}</CardTitle>
+                        <Badge
+                          variant={project.status === "published" ? "default" : "secondary"}
+                          className="shrink-0"
+                        >
                           {project.status}
                         </Badge>
                       </div>
@@ -362,9 +388,12 @@ export default function ProjectsPage() {
                       <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
                         {project.description || "No description provided."}
                       </p>
-                      <div className="flex items-center text-xs text-muted-foreground gap-2">
-                        <Clock className="h-3 w-3" />
-                        Updated {new Date(project.updatedAt).toLocaleDateString()}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center text-xs text-muted-foreground gap-2">
+                          <Clock className="h-3 w-3" />
+                          Updated {new Date(project.updatedAt).toLocaleDateString()}
+                        </div>
+                        <HealthBadge score={project.healthScore ?? 0} />
                       </div>
                     </CardContent>
                   </Card>

@@ -1534,10 +1534,38 @@ export async function runJob(input: JobInput): Promise<void> {
   }
 }
 
+// ── Bounded-concurrency background job runner ──────────────────────────────────
+// Ensures at most JOB_CONCURRENCY background (non-foreground) AI jobs run at
+// once. Jobs submitted beyond the concurrency cap wait in _pendingJobs until
+// a slot frees. This provides genuine deferred execution — jobs do not start
+// until capacity is available, complementing the HTTP-level queue in
+// rateLimit.ts for foreground requests.
+
+const JOB_CONCURRENCY = 3;
+let _activeJobs = 0;
+const _pendingJobs: Array<JobInput> = [];
+
+function _drainJobs(): void {
+  while (_activeJobs < JOB_CONCURRENCY && _pendingJobs.length > 0) {
+    const input = _pendingJobs.shift()!;
+    _activeJobs++;
+    void runJob(input).finally(() => {
+      _activeJobs--;
+      _drainJobs();
+    });
+  }
+}
+
 export function enqueueJob(input: JobInput): void {
-  setImmediate(() => {
-    void runJob(input);
-  });
+  if (_activeJobs < JOB_CONCURRENCY) {
+    _activeJobs++;
+    void runJob(input).finally(() => {
+      _activeJobs--;
+      _drainJobs();
+    });
+  } else {
+    _pendingJobs.push(input);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

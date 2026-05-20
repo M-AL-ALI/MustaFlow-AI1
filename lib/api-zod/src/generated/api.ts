@@ -99,6 +99,11 @@ export const ListProjectsQueryParams = zod.object({
   "workspaceId": zod.coerce.number().optional()
 })
 
+export const listProjectsResponseHealthScoreMin = 0;
+export const listProjectsResponseHealthScoreMax = 100;
+
+
+
 export const ListProjectsResponseItem = zod.object({
   "id": zod.number(),
   "workspaceId": zod.number().nullish(),
@@ -115,6 +120,7 @@ export const ListProjectsResponseItem = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
+  "healthScore": zod.number().min(listProjectsResponseHealthScoreMin).max(listProjectsResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -140,6 +146,11 @@ export const GetProjectParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const getProjectResponseHealthScoreMin = 0;
+export const getProjectResponseHealthScoreMax = 100;
+
+
+
 export const GetProjectResponse = zod.object({
   "id": zod.number(),
   "workspaceId": zod.number().nullish(),
@@ -156,6 +167,7 @@ export const GetProjectResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
+  "healthScore": zod.number().min(getProjectResponseHealthScoreMin).max(getProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -175,6 +187,11 @@ export const UpdateProjectBody = zod.object({
   "themeColor": zod.string().optional()
 })
 
+export const updateProjectResponseHealthScoreMin = 0;
+export const updateProjectResponseHealthScoreMax = 100;
+
+
+
 export const UpdateProjectResponse = zod.object({
   "id": zod.number(),
   "workspaceId": zod.number().nullish(),
@@ -191,6 +208,7 @@ export const UpdateProjectResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
+  "healthScore": zod.number().min(updateProjectResponseHealthScoreMin).max(updateProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -204,6 +222,11 @@ export const DeleteProjectParams = zod.object({
 /**
  * @summary Dashboard aggregate counts
  */
+export const getProjectsSummaryResponseRecentItemHealthScoreMin = 0;
+export const getProjectsSummaryResponseRecentItemHealthScoreMax = 100;
+
+
+
 export const GetProjectsSummaryResponse = zod.object({
   "total": zod.number(),
   "byStatus": zod.record(zod.string(), zod.number()),
@@ -224,6 +247,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "metaDescription": zod.string().nullish(),
   "themeColor": zod.string().nullish(),
   "mobilePreviewUrl": zod.string().nullish(),
+  "healthScore": zod.number().min(getProjectsSummaryResponseRecentItemHealthScoreMin).max(getProjectsSummaryResponseRecentItemHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))
@@ -1251,6 +1275,65 @@ export const ListDeploymentsResponse = zod.object({
   "testflightUrl": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }))
+})
+
+
+/**
+ * @summary Record a public page view (analytics ping from published app)
+ */
+export const RecordPageViewParams = zod.object({
+  "publicSlug": zod.coerce.string()
+})
+
+export const RecordPageViewBody = zod.object({
+  "path": zod.string(),
+  "referrer": zod.string().optional(),
+  "sessionId": zod.string().optional()
+})
+
+
+/**
+ * @summary Get analytics summary for a project
+ */
+export const GetAnalyticsSummaryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetAnalyticsSummaryResponse = zod.object({
+  "totalViews": zod.number(),
+  "uniqueVisitors": zod.number(),
+  "topReferrers": zod.array(zod.object({
+  "referrer": zod.string(),
+  "count": zod.number()
+})),
+  "dailyTrend": zod.array(zod.object({
+  "date": zod.string(),
+  "views": zod.number()
+}))
+})
+
+
+/**
+ * @summary Set a custom subdomain (publicSlug) for a project
+ */
+export const SetProjectSubdomainParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const setProjectSubdomainBodySlugMin = 3;
+export const setProjectSubdomainBodySlugMax = 63;
+
+
+export const setProjectSubdomainBodySlugRegExp = new RegExp('^[a-z0-9][a-z0-9-]\*[a-z0-9]$');
+
+
+export const SetProjectSubdomainBody = zod.object({
+  "slug": zod.string().min(setProjectSubdomainBodySlugMin).max(setProjectSubdomainBodySlugMax).regex(setProjectSubdomainBodySlugRegExp)
+})
+
+export const SetProjectSubdomainResponse = zod.object({
+  "publicSlug": zod.string(),
+  "publicUrl": zod.string()
 })
 
 

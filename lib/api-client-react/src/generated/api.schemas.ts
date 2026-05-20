@@ -143,6 +143,13 @@ export interface Project {
   themeColor?: string | null;
   /** @nullable */
   mobilePreviewUrl?: string | null;
+  /**
+     * 0–100 score derived from generated file quality: accessibility (alt/ARIA/semantic), SEO (title/description/h1), performance (script count/lazy), security (no eval/document.write). Null if no files built yet.
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  healthScore?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -982,6 +989,43 @@ export interface AdminRole {
   updatedAt?: string | null;
 }
 
+export interface AnalyticsPingInput {
+  path: string;
+  referrer?: string;
+  sessionId?: string;
+}
+
+export type AnalyticsSummaryTopReferrersItem = {
+  referrer: string;
+  count: number;
+};
+
+export type AnalyticsSummaryDailyTrendItem = {
+  date: string;
+  views: number;
+};
+
+export interface AnalyticsSummary {
+  totalViews: number;
+  uniqueVisitors: number;
+  topReferrers: AnalyticsSummaryTopReferrersItem[];
+  dailyTrend: AnalyticsSummaryDailyTrendItem[];
+}
+
+export interface SubdomainInput {
+  /**
+     * @minLength 3
+     * @maxLength 63
+     * @pattern ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+     */
+  slug: string;
+}
+
+export interface SubdomainResult {
+  publicSlug: string;
+  publicUrl: string;
+}
+
 export type AdminRoleInputRole = typeof AdminRoleInputRole[keyof typeof AdminRoleInputRole];
 
 
@@ -1237,6 +1281,10 @@ taskId?: number;
 
 export type ListDeployments200 = {
   deployments: DeploymentLog[];
+};
+
+export type SetProjectSubdomain400 = {
+  error: string;
 };
 
 export type ListCreditTransactions200 = {

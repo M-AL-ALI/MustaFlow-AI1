@@ -4,7 +4,17 @@
 // Uses a simple in-memory store (sufficient for single-process dev/prod on Replit).
 // Each limiter stores per-IP counters with a TTL matching the window.
 //
-// JSON 429 responses are returned when limits are exceeded.
+// JSON 429 responses are returned when hard limits are exceeded.
+//
+// The AI builder limiter uses a real deferred-request queue:
+//   - Up to MAX_CONCURRENT AI calls are processed concurrently per IP.
+//   - When at capacity, over-limit requests are placed in a FIFO pending queue.
+//     Their HTTP connections are held open (long-poll style) until a slot frees.
+//   - releaseSlot() is called when a response finishes. It drains the next
+//     pending entry by calling its next() function — so the route handler runs
+//     only after an actual concurrent slot becomes available.
+//   - If the pending queue would exceed MAX_QUEUED, a hard 429 is returned.
+//   - If a queued request waits longer than QUEUE_TIMEOUT_MS, it receives a 429.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { Request, Response, NextFunction } from "express";
@@ -64,13 +74,111 @@ function createLimiter(opts: {
   };
 }
 
-// AI builder requests — 20 per minute per IP
-export const aiBuilderLimiter = createLimiter({
-  windowMs: 60_000,
-  max: 20,
-  keyPrefix: "ai",
-  message: "AI build rate limit exceeded. Please wait a moment before sending another request.",
-});
+// ── Real deferred-request queue ────────────────────────────────────────────────
+// When all concurrent AI slots are occupied, new requests are placed in a
+// FIFO pending queue. Their HTTP connections stay open until:
+//   a) a slot frees (releaseSlot drains the next pending entry via next()), or
+//   b) QUEUE_TIMEOUT_MS elapses (they receive a 429).
+//
+// This provides actual deferred execution — queued jobs do not start until
+// a real concurrent slot is available.
+
+const MAX_CONCURRENT = 3;   // simultaneous AI calls per IP before queuing kicks in
+const MAX_QUEUED     = 5;   // pending requests allowed per IP before hard 429
+const QUEUE_TIMEOUT_MS = 60_000; // max wait in queue (ms) before 429
+
+interface PendingEntry {
+  nextFn: NextFunction;
+  res: Response;
+  position: number;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface SemaphoreEntry {
+  active: number;
+  pending: PendingEntry[];
+}
+
+const semaphoreStore = new Map<string, SemaphoreEntry>();
+
+function releaseSlot(key: string): void {
+  const entry = semaphoreStore.get(key);
+  if (!entry) return;
+  entry.active = Math.max(0, entry.active - 1);
+  // Drain the next waiting request (skip any whose response already closed)
+  while (entry.pending.length > 0) {
+    const pend = entry.pending.shift()!;
+    clearTimeout(pend.timer);
+    if (!pend.res.headersSent) {
+      entry.active += 1;
+      pend.res.once("finish", () => releaseSlot(key));
+      pend.nextFn();
+      return;
+    }
+    // Timed-out entry — skip and try next
+  }
+  // Clean up idle entries
+  if (entry.active === 0 && entry.pending.length === 0) {
+    semaphoreStore.delete(key);
+  }
+}
+
+export const aiBuilderLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? req.socket.remoteAddress ?? "unknown";
+  const key = `ai_sem:${ip}`;
+
+  let entry = semaphoreStore.get(key);
+  if (!entry) {
+    entry = { active: 0, pending: [] };
+    semaphoreStore.set(key, entry);
+  }
+
+  res.setHeader("X-AI-Active",  entry.active);
+  res.setHeader("X-AI-Queued",  entry.pending.length);
+
+  if (entry.active < MAX_CONCURRENT) {
+    // Slot available — proceed immediately.
+    entry.active += 1;
+    res.once("finish", () => releaseSlot(key));
+    next();
+    return;
+  }
+
+  // At capacity — reject if queue is full.
+  if (entry.pending.length >= MAX_QUEUED) {
+    res.status(429).json({
+      error: "Too many AI requests queued. Please wait for current builds to finish.",
+      retryAfter: 60,
+    });
+    return;
+  }
+
+  // Queue the request. The HTTP connection stays open; next() is called by
+  // releaseSlot() when a concurrent slot becomes available.
+  const position = entry.pending.length + 1;
+  req.queuePosition = position;
+
+  res.setHeader("X-Queue-Position",      position);
+  res.setHeader("X-Estimated-Wait-Ms",   position * 20_000);
+
+  const timer = setTimeout(() => {
+    const e = semaphoreStore.get(key);
+    if (e) e.pending = e.pending.filter((p) => p !== pendingEntry);
+    if (!res.headersSent) {
+      res.status(429).json({
+        error: "Queue wait timeout. Too many concurrent AI builds in progress. Please try again.",
+        retryAfter: 60,
+      });
+    }
+  }, QUEUE_TIMEOUT_MS);
+
+  // `let` so the variable is captured by the timer closure above.
+  // eslint-disable-next-line prefer-const
+  let pendingEntry: PendingEntry;
+  pendingEntry = { nextFn: next, res, position, timer };
+  entry.pending.push(pendingEntry);
+  // Do NOT call next() here — the request physically waits until releaseSlot() drains it.
+};
 
 // Publish/unpublish — 10 per minute per IP
 export const publishLimiter = createLimiter({

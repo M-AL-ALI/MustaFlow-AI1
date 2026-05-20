@@ -28,3 +28,19 @@ export const buildAnalyticsTable = pgTable(
 
 export type BuildAnalytic = typeof buildAnalyticsTable.$inferSelect;
 export type InsertBuildAnalytic = typeof buildAnalyticsTable.$inferInsert;
+
+export const pageViewsTable = pgTable("page_views", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projectsTable.id, { onDelete: "cascade" }),
+  publicSlug: text("public_slug").notNull(),
+  visitedAt: timestamp("visited_at", { withTimezone: true }).notNull().defaultNow(),
+  referrer: text("referrer"),
+  userAgentHash: text("user_agent_hash"),
+  sessionId: text("session_id"),
+  pagePath: text("page_path").notNull().default("/"),
+});
+
+export type PageView = typeof pageViewsTable.$inferSelect;
+export type InsertPageView = typeof pageViewsTable.$inferInsert;

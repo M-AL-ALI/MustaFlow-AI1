@@ -75,6 +75,10 @@ declare global {
   namespace Express {
     interface Request {
       userId?: string;
+      /** Set by aiBuilderLimiter when concurrent AI slots are full. */
+      forceBackground?: boolean;
+      /** Queue position (1-based) set by aiBuilderLimiter when forceBackground is true. */
+      queuePosition?: number;
     }
   }
 }

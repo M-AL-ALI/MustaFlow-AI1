@@ -164,6 +164,11 @@ export function PreviewTab({
   const healthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const entryIdRef = useRef(0);
   const consoleEndRef = useRef<HTMLDivElement>(null);
+  // Tracks whether we are within the 30-second crash-watch window after a build completes.
+  const postBuildWindowRef = useRef(false);
+  const postBuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [rollbackBanner, setRollbackBanner] = useState<{ crashMsg: string } | null>(null);
+  const [rollingBack, setRollingBack] = useState(false);
 
   const { data: files, isLoading: filesLoading } = useListProjectFiles(project.id, {
     query: {
@@ -199,6 +204,10 @@ export function PreviewTab({
       ]);
       if (isCrash) {
         setCrashBanner(args.join(" "));
+        // If crash happens within 30s of a build completing, offer rollback
+        if (postBuildWindowRef.current) {
+          setRollbackBanner({ crashMsg: args.join(" ") });
+        }
       }
     };
     window.addEventListener("message", handler);
@@ -219,7 +228,7 @@ export function PreviewTab({
     setIframeKey((k) => k + 1);
   }, []);
 
-  // Auto-refresh when project finishes building
+  // Auto-refresh when project finishes building + open 30s crash-watch window
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = project.status;
@@ -227,7 +236,14 @@ export function PreviewTab({
       setHealthWarning(null);
       setConsoleEntries([]);
       setCrashBanner(null);
+      setRollbackBanner(null);
       setIframeKey((k) => k + 1);
+      // Open the crash-watch window for 30 seconds
+      postBuildWindowRef.current = true;
+      if (postBuildTimerRef.current) clearTimeout(postBuildTimerRef.current);
+      postBuildTimerRef.current = setTimeout(() => {
+        postBuildWindowRef.current = false;
+      }, 30_000);
     }
   }, [project.status, hasFiles]);
 
@@ -594,8 +610,74 @@ export function PreviewTab({
         </div>
       )}
 
+      {/* Crash auto-rollback prompt — shown within 30s of a build completing */}
+      {rollbackBanner && (
+        <div
+          role="alert"
+          className="shrink-0 flex items-start gap-2 px-3 py-2.5 bg-orange-500/10 border-b border-orange-500/25 text-orange-400 text-xs"
+        >
+          <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-px text-orange-400" />
+          <div className="flex-1 min-w-0">
+            <span className="font-semibold text-orange-300">Crash detected after build. </span>
+            <span className="line-clamp-1 break-all text-orange-400/80">{rollbackBanner.crashMsg}</span>
+          </div>
+          <button
+            type="button"
+            disabled={rollingBack}
+            onClick={async () => {
+              setRollingBack(true);
+              try {
+                // Fetch the most recent version to roll back to
+                const vRes = await fetch(`/api/projects/${project.id}/versions`);
+                if (vRes.ok) {
+                  const versions = (await vRes.json()) as Array<{ id: number; label: string }>;
+                  // Skip the first (current) version and roll back to the second
+                  const target = versions[1];
+                  if (target) {
+                    const rbRes = await fetch(
+                      `/api/projects/${project.id}/versions/${target.id}/rollback`,
+                      { method: "POST" },
+                    );
+                    if (rbRes.ok) {
+                      setRollbackBanner(null);
+                      setCrashBanner(null);
+                      refresh();
+                    }
+                  }
+                }
+              } catch { /* ignore */ }
+              finally { setRollingBack(false); }
+            }}
+            className="shrink-0 text-[10px] font-semibold px-2 py-1 rounded-md bg-orange-500/20 border border-orange-500/30 text-orange-300 hover:bg-orange-500/30 transition-colors whitespace-nowrap disabled:opacity-60"
+          >
+            {rollingBack ? "Rolling back…" : "Roll back"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const fixText = `Fix this crash that appeared right after the last build: ${rollbackBanner.crashMsg}`;
+              if (onAutoSendPrompt) onAutoSendPrompt(fixText);
+              else onFixPrompt?.(fixText);
+              setRollbackBanner(null);
+              setCrashBanner(null);
+            }}
+            className="shrink-0 text-[10px] font-semibold px-2 py-1 rounded-md bg-destructive/15 border border-destructive/25 text-destructive hover:bg-destructive/25 transition-colors whitespace-nowrap"
+          >
+            Fix with AI
+          </button>
+          <button
+            type="button"
+            onClick={() => setRollbackBanner(null)}
+            className="shrink-0 hover:opacity-70 transition-opacity"
+            aria-label="Dismiss"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Runtime crash banner */}
-      {crashBanner && !consoleOpen && (
+      {crashBanner && !rollbackBanner && !consoleOpen && (
         <div
           role="alert"
           className="shrink-0 flex items-start gap-2 px-3 py-2 bg-destructive/10 border-b border-destructive/25 text-destructive text-xs"

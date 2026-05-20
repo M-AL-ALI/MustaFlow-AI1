@@ -42,6 +42,9 @@ export const projectVersionsTable = pgTable("project_versions", {
   filesSnapshot: jsonb("files_snapshot").$type<FileSnapshotEntry[]>(),
   planSnapshot: jsonb("plan_snapshot").$type<Record<string, unknown>>(),
   auditReport: jsonb("audit_report").$type<AuditReport>(),
+  // ogImageUrl: URL of the generated Open Graph image for this snapshot.
+  // Set at publish time; served via the public route's <head> injection.
+  ogImageUrl: text("og_image_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

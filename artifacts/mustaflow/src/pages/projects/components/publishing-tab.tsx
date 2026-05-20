@@ -436,6 +436,96 @@ function ChecklistGroup({
   );
 }
 
+// ── CustomSubdomainPicker ─────────────────────────────────────────────────────
+// Lets users pick a human-friendly subdomain after their first publish.
+// Calls POST /api/projects/:id/subdomain and updates the displayed URL.
+
+function CustomSubdomainPicker({
+  projectId,
+  currentSlug,
+  platformDomain,
+  onSuccess,
+}: {
+  projectId: number;
+  currentSlug: string;
+  platformDomain: string;
+  onSuccess: (slug: string, subdomain: string) => void;
+}) {
+  const [input, setInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = async () => {
+    const slug = input.trim().toLowerCase();
+    if (!slug) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/subdomain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string; publicSlug?: string };
+      if (!res.ok || !data.ok) {
+        setError(data.error ?? "Failed to update subdomain.");
+        return;
+      }
+      const newSlug = data.publicSlug ?? slug;
+      onSuccess(newSlug, `${newSlug}.${platformDomain}`);
+      setInput("");
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Custom Subdomain</p>
+      <p className="text-xs text-muted-foreground">
+        Pick a memorable name for your app. Your current slug is{" "}
+        <span className="font-mono text-foreground">{currentSlug}</span>.
+      </p>
+      <div className="flex items-center gap-1 bg-muted rounded-lg px-3 py-2 overflow-hidden">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+          onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); }}
+          placeholder={currentSlug}
+          maxLength={40}
+          className="flex-1 bg-transparent text-sm font-mono placeholder:text-muted-foreground/40 focus:outline-none min-w-0"
+        />
+        <span className="text-sm text-muted-foreground shrink-0">.{platformDomain}</span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void handleSave()}
+          disabled={saving || !input.trim()}
+          className="ml-2 shrink-0"
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : saved ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Save className="h-3.5 w-3.5" />}
+          <span className="ml-1">{saved ? "Saved" : "Save"}</span>
+        </Button>
+      </div>
+      {error && (
+        <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
+      <p className="text-[11px] text-muted-foreground/60">
+        Lowercase letters, numbers, and hyphens only. 3–40 characters.
+      </p>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 // ── Readiness gate types & components ────────────────────────────────────────
@@ -2446,6 +2536,26 @@ export function PublishingTab({
                   Automatically assigned. Available as soon as you publish.
                 </p>
               </div>
+
+              {/* Custom subdomain picker — only shown after first publish */}
+              {domainInfo?.subdomain && (
+                <CustomSubdomainPicker
+                  projectId={projectId}
+                  currentSlug={domainInfo.subdomain.split(".")[0] ?? ""}
+                  platformDomain={domainInfo.platformDomain}
+                  onSuccess={(newSlug, newSubdomain) => {
+                    setDomainInfo((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            subdomain: newSubdomain,
+                            subdomainUrl: `https://${newSubdomain}`,
+                          }
+                        : prev,
+                    );
+                  }}
+                />
+              )}
 
               <div className="border-t border-border" />
 

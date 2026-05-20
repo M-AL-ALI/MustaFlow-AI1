@@ -35,6 +35,13 @@ export interface Project {
   themeColor?: string | null;
   /** @nullable */
   mobilePreviewUrl?: string | null;
+  /**
+     * 0–100 score derived from generated file quality: accessibility (alt/ARIA/semantic), SEO (title/description/h1), performance (script count/lazy), security (no eval/document.write). Null if no files built yet.
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  healthScore?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }

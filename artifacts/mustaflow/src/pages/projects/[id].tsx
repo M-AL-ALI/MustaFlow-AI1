@@ -1488,6 +1488,20 @@ export default function ProjectWorkspacePage() {
                       />
                     ) : (
                       <>
+                        {/* Queue indicator — shown briefly after a queued response */}
+                        {(() => {
+                          const lastMsg = messages?.[messages.length - 1];
+                          const lastPlan = lastMsg?.plan as Record<string, unknown> | null | undefined;
+                          const isRecentlyQueued = lastMsg?.role === "assistant"
+                            && typeof lastPlan === "object"
+                            && (lastPlan as Record<string, unknown>)?.kind === "task-queued";
+                          return isRecentlyQueued ? (
+                            <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-orange-500/5">
+                              <div className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse shrink-0" />
+                              <span className="text-[10px] text-orange-400 font-medium">Queued — running in background</span>
+                            </div>
+                          ) : null;
+                        })()}
                         {/* Bottom status bar — shown when idle */}
                         <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-muted/20">
                           <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />

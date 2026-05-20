@@ -38,8 +38,6 @@ import {
   getGetProjectFileQueryKey,
   useListVersions,
   getListVersionsQueryKey,
-  useGetSecretAuditLog,
-  getGetSecretAuditLogQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -110,6 +108,104 @@ const MOBILE_MODULES = [
   },
 ];
 
+// ── Secrets Guide ─────────────────────────────────────────────────────────────
+// Static catalogue of common secret categories with typical key names and links.
+const SECRETS_GUIDE = [
+  { category: "Authentication", name: "CLERK_PUBLISHABLE_KEY", description: "Clerk auth — publishable key for client-side use.", doc: "https://clerk.com/docs" },
+  { category: "Authentication", name: "CLERK_SECRET_KEY", description: "Clerk auth — secret key for server-side API calls.", doc: "https://clerk.com/docs" },
+  { category: "Database", name: "DATABASE_URL", description: "PostgreSQL connection string (postgres://user:pass@host/db).", doc: "https://www.postgresql.org/docs/current/libpq-connect.html" },
+  { category: "Database", name: "SUPABASE_URL", description: "Supabase project URL.", doc: "https://supabase.com/docs" },
+  { category: "Database", name: "SUPABASE_ANON_KEY", description: "Supabase anon/public key for client-side queries.", doc: "https://supabase.com/docs" },
+  { category: "Payments", name: "STRIPE_SECRET_KEY", description: "Stripe secret key for server-side payment operations.", doc: "https://stripe.com/docs/keys" },
+  { category: "Payments", name: "STRIPE_PUBLISHABLE_KEY", description: "Stripe publishable key for client-side Stripe.js.", doc: "https://stripe.com/docs/keys" },
+  { category: "Payments", name: "STRIPE_WEBHOOK_SECRET", description: "Stripe webhook signing secret for verifying events.", doc: "https://stripe.com/docs/webhooks" },
+  { category: "AI / ML", name: "OPENAI_API_KEY", description: "OpenAI API key for GPT and embedding calls.", doc: "https://platform.openai.com/api-keys" },
+  { category: "AI / ML", name: "ANTHROPIC_API_KEY", description: "Anthropic API key for Claude models.", doc: "https://docs.anthropic.com" },
+  { category: "Email", name: "RESEND_API_KEY", description: "Resend email API key for transactional email.", doc: "https://resend.com/docs" },
+  { category: "Email", name: "SENDGRID_API_KEY", description: "SendGrid API key for email delivery.", doc: "https://docs.sendgrid.com" },
+  { category: "Storage", name: "AWS_ACCESS_KEY_ID", description: "AWS access key for S3 and other services.", doc: "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html" },
+  { category: "Storage", name: "AWS_SECRET_ACCESS_KEY", description: "AWS secret key (pair with AWS_ACCESS_KEY_ID).", doc: "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html" },
+  { category: "Storage", name: "CLOUDINARY_URL", description: "Cloudinary connection URL for image/video storage.", doc: "https://cloudinary.com/documentation" },
+  { category: "Maps & Location", name: "GOOGLE_MAPS_API_KEY", description: "Google Maps API key for map embeds and geocoding.", doc: "https://developers.google.com/maps/documentation" },
+  { category: "Analytics", name: "AMPLITUDE_API_KEY", description: "Amplitude analytics API key.", doc: "https://www.docs.developers.amplitude.com" },
+  { category: "SMS", name: "TWILIO_ACCOUNT_SID", description: "Twilio account SID for SMS sending.", doc: "https://www.twilio.com/docs" },
+  { category: "SMS", name: "TWILIO_AUTH_TOKEN", description: "Twilio auth token (pair with TWILIO_ACCOUNT_SID).", doc: "https://www.twilio.com/docs" },
+  { category: "Push Notifications", name: "EXPO_ACCESS_TOKEN", description: "Expo access token for EAS Build and push notifications.", doc: "https://docs.expo.dev/eas/json" },
+] as const;
+
+type SecretsGuideEntry = { category: string; name: string; description: string; doc: string };
+
+function SecretsGuide({ onSelect }: { onSelect: (name: string) => void }) {
+  const [search, setSearch] = useState("");
+  const filtered = (SECRETS_GUIDE as readonly SecretsGuideEntry[]).filter(
+    (e) =>
+      !search ||
+      e.name.toLowerCase().includes(search.toLowerCase()) ||
+      e.category.toLowerCase().includes(search.toLowerCase()) ||
+      e.description.toLowerCase().includes(search.toLowerCase()),
+  );
+  const grouped = filtered.reduce<Record<string, SecretsGuideEntry[]>>((acc, e) => {
+    (acc[e.category] ??= []).push(e);
+    return acc;
+  }, {});
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden bg-card">
+      <div className="px-4 py-2.5 border-b border-border bg-muted/50 flex items-center gap-2">
+        <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs font-semibold">Secrets Guide</span>
+        <span className="text-xs text-muted-foreground ml-auto">Click to pre-fill name</span>
+      </div>
+      <div className="p-3">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search services, key names…"
+          className="w-full bg-background border border-border rounded-md px-3 py-1.5 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary mb-3"
+        />
+        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+          {Object.entries(grouped).map(([cat, entries]) => (
+            <div key={cat}>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5 px-0.5">{cat}</div>
+              <div className="space-y-1">
+                {entries.map((e) => (
+                  <button
+                    key={e.name}
+                    type="button"
+                    onClick={() => onSelect(e.name)}
+                    className="w-full text-left flex items-start gap-2.5 px-2.5 py-2 rounded-md hover:bg-muted transition-colors group"
+                  >
+                    <div className="shrink-0 mt-0.5 h-5 w-5 rounded bg-primary/10 flex items-center justify-center">
+                      <Lock className="h-2.5 w-2.5 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-mono text-xs text-foreground group-hover:text-primary transition-colors">{e.name}</div>
+                      <div className="text-[10px] text-muted-foreground/70 mt-0.5 line-clamp-1">{e.description}</div>
+                    </div>
+                    <a
+                      href={e.doc}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(ev) => ev.stopPropagation()}
+                      className="shrink-0 mt-0.5 text-muted-foreground/30 hover:text-primary transition-colors"
+                      title="Documentation"
+                    >
+                      <Info className="h-3 w-3" />
+                    </a>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <div className="py-6 text-center text-xs text-muted-foreground/50">No matching secrets found.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const ACTION_LABELS: Record<string, string> = {
   created: "Created",
   updated: "Updated",
@@ -142,9 +238,24 @@ function relativeTime(dateStr: string): string {
 function SecretAuditTimeline({ secretId, projectId }: { secretId: number; projectId: number }) {
   const [expanded, setExpanded] = useState(false);
 
-  const { data: entries, isLoading } = useGetSecretAuditLog(projectId, secretId, undefined, {
-    query: { queryKey: getGetSecretAuditLogQueryKey(projectId, secretId) },
-  });
+  type AuditEntry = { id: number; action: string; createdAt: string; actorId?: string };
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    fetch(`/api/projects/${projectId}/secrets/${secretId}/audit`)
+      .then(async (r) => {
+        if (r.ok) {
+          const data = (await r.json()) as AuditEntry[];
+          if (!cancelled) setEntries(Array.isArray(data) ? data : []);
+        }
+      })
+      .catch(() => { /* endpoint may not exist yet — show empty */ })
+      .finally(() => { if (!cancelled) setIsLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectId, secretId]);
 
   if (isLoading) {
     return (
@@ -167,7 +278,7 @@ function SecretAuditTimeline({ secretId, projectId }: { secretId: number; projec
 
   return (
     <div className="px-3 pb-3 pt-0 space-y-1.5">
-      {visibleEntries.map((entry, i) => (
+      {visibleEntries.map((entry: AuditEntry, i: number) => (
         <div key={entry.id} className="flex items-start gap-2 min-w-0">
           <div className="relative flex flex-col items-center shrink-0 mt-0.5">
             <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
@@ -729,6 +840,9 @@ export function ToolsTab({
             </TabsContent>
 
             <TabsContent value="secrets" className="h-full m-0 p-4 space-y-6">
+              {/* Secrets Guide — searchable catalogue of common key names */}
+              <SecretsGuide onSelect={(name) => setNewSecretName(name)} />
+
               <div className="grid grid-cols-4 gap-3 border border-border rounded-lg p-4 bg-card">
                 <div className="col-span-4 font-semibold mb-1">Add new secret</div>
                 <Input

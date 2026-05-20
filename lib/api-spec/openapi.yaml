@@ -912,6 +912,77 @@ paths:
                     items:
                       $ref: "#/components/schemas/DeploymentLog"
 
+  /p/{publicSlug}/analytics/ping:
+    post:
+      operationId: recordPageView
+      tags: [analytics]
+      summary: Record a public page view (analytics ping from published app)
+      parameters:
+        - in: path
+          name: publicSlug
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyticsPingInput"
+      responses:
+        "204":
+          description: Recorded
+
+  /projects/{id}/analytics/summary:
+    get:
+      operationId: getAnalyticsSummary
+      tags: [analytics]
+      summary: Get analytics summary for a project
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Analytics summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsSummary"
+
+  /projects/{id}/subdomain:
+    post:
+      operationId: setProjectSubdomain
+      tags: [projects]
+      summary: Set a custom subdomain (publicSlug) for a project
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubdomainInput"
+      responses:
+        "200":
+          description: Updated subdomain
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubdomainResult"
+        "400":
+          description: Invalid or taken slug
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
+
   /credits:
     get:
       operationId: getUserCredits
@@ -1592,6 +1663,11 @@ components:
         metaDescription: { type: ["string", "null"] }
         themeColor: { type: ["string", "null"] }
         mobilePreviewUrl: { type: ["string", "null"] }
+        healthScore:
+          type: ["integer", "null"]
+          minimum: 0
+          maximum: 100
+          description: "0–100 score derived from generated file quality: accessibility (alt/ARIA/semantic), SEO (title/description/h1), performance (script count/lazy), security (no eval/document.write). Null if no files built yet."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -2323,6 +2399,54 @@ components:
         grantedBy: { type: ["string", "null"] }
         createdAt: { type: ["string", "null"], format: date-time }
         updatedAt: { type: ["string", "null"], format: date-time }
+
+    AnalyticsPingInput:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string }
+        referrer: { type: string }
+        sessionId: { type: string }
+
+    AnalyticsSummary:
+      type: object
+      required: [totalViews, uniqueVisitors, topReferrers, dailyTrend]
+      properties:
+        totalViews: { type: integer }
+        uniqueVisitors: { type: integer }
+        topReferrers:
+          type: array
+          items:
+            type: object
+            required: [referrer, count]
+            properties:
+              referrer: { type: string }
+              count: { type: integer }
+        dailyTrend:
+          type: array
+          items:
+            type: object
+            required: [date, views]
+            properties:
+              date: { type: string }
+              views: { type: integer }
+
+    SubdomainInput:
+      type: object
+      required: [slug]
+      properties:
+        slug:
+          type: string
+          minLength: 3
+          maxLength: 63
+          pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+
+    SubdomainResult:
+      type: object
+      required: [publicSlug, publicUrl]
+      properties:
+        publicSlug: { type: string }
+        publicUrl: { type: string }
 
     AdminRoleInput:
       type: object

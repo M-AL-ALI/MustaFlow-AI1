@@ -30,6 +30,7 @@ import analyticsRouter from "./analytics";
 import auditRouter from "./audit";
 import suggestionsRouter from "./suggestions";
 import githubRouter from "./github";
+import subdomainRouter from "./subdomain";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -41,8 +42,9 @@ router.use(generalLimiter);
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 router.use(healthRouter);
 router.use(publicRouter);
-router.use(sslWebhookRouter); // POST /domain/ssl-webhook (Cloudflare → us)
-router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
+router.use(analyticsRouter);        // POST /p/:slug/analytics/ping (public ping)
+router.use(sslWebhookRouter);       // POST /domain/ssl-webhook (Cloudflare → us)
+router.use(billingWebhookRouter);   // POST /billing/webhook    (Stripe → us)
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
@@ -121,6 +123,7 @@ router.use(analyticsRouter);
 router.use(auditRouter);
 router.use(suggestionsRouter);
 router.use(githubRouter);
+router.use(subdomainRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {
