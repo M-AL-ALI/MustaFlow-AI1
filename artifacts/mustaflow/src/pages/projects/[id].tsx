@@ -74,6 +74,7 @@ import { LogsTab } from "./components/logs-tab";
 import { AnalyticsTab } from "./components/analytics-tab";
 import { ResourcesTab } from "./components/resources-tab";
 import { ManageTab } from "./components/manage-tab";
+import { KnowledgeTab } from "./components/knowledge-tab";
 import { ActivityStream } from "./components/activity-stream";
 import { HistoryTab } from "./components/history-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
@@ -314,6 +315,7 @@ const WORKSPACE_TABS = [
   { label: "Page Map", value: "page-map", icon: Globe },
   { label: "Tools & Files", value: "tools-files", icon: Blocks },
   { label: "Publishing", value: "publishing", icon: Rocket },
+  { label: "Knowledge", value: "knowledge", icon: BrainCircuit },
   { label: "Logs", value: "logs", icon: TerminalSquare },
   { label: "Resources", value: "resources", icon: BookOpen },
   { label: "Analytics", value: "analytics", icon: Activity },
@@ -1497,6 +1499,7 @@ export default function ProjectWorkspacePage() {
                 }}
               />
             )}
+            {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
             {activeTab === "analytics" && <AnalyticsTab project={project} />}
             {activeTab === "resources" && <ResourcesTab />}
             {activeTab === "manage" && <ManageTab projectId={projectId} />}
