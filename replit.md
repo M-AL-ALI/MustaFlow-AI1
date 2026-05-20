@@ -14,7 +14,7 @@ The intended user journey is: Login → create project → build app → preview
 - `pnpm --filter @workspace/mustaflow run dev` — frontend (Vite, port assigned by workflow)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks + Zod schemas after editing openapi.yaml (run `codegen-drift` validation to confirm generated files are in sync)
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks + Zod schemas after editing openapi.yaml (run `codegen-drift` validation to confirm generated files are in sync; run `typecheck` validation to catch type errors across all packages; both can be run together in a single validation pass)
 - `pnpm --filter @workspace/db run push` — push DB schema (dev)
 - `pnpm --filter @workspace/scripts run seed` — seed sample projects (no-op if any exist)
 - Required env: `DATABASE_URL`, `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `SESSION_SECRET`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `ENCRYPTION_KEY`
