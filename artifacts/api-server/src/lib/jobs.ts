@@ -942,6 +942,30 @@ export async function runJob(input: JobInput): Promise<void> {
       userPrompt,
     );
 
+    // Build database context when the project has a provisioned DB
+    let databaseContext: string | undefined;
+    if (project.dbProvider && project.dbProvider !== "none" && project.dbStatus === "ready") {
+      const dbSecretRow = await db
+        .select({ name: secretsTable.name })
+        .from(secretsTable)
+        .where(and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")))
+        .limit(1);
+      if (dbSecretRow.length > 0) {
+        const providerLabel =
+          project.dbProvider === "postgres" ? "PostgreSQL (Neon serverless)" : "SQLite";
+        databaseContext = `DATABASE CONTEXT — This project has a provisioned ${providerLabel} database. The DATABASE_URL secret is set and contains the connection string.
+When generating or modifying code for this project, you MUST:
+1. Use real database queries instead of hardcoded/mock data.
+2. Generate a Drizzle ORM schema file at "src/db/schema.ts" (or "drizzle/schema.ts") defining the tables your app needs.
+3. Generate a Drizzle config file at "drizzle.config.ts" using process.env.DATABASE_URL as the connection string.
+4. Generate migration SQL files in "drizzle/migrations/" for schema changes.
+5. For server-side routes (Express/Node), use the pg package (Postgres) or better-sqlite3 (SQLite) connected via process.env.DATABASE_URL.
+6. Return real database records from API routes — never placeholder arrays.
+7. Add proper error handling for database connection failures.
+Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. Never interpolate user input into SQL. Wrap mutations in transactions where appropriate.`;
+      }
+    }
+
     // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
     const creditCost = CREDIT_COST[agentMode] ?? 1;
     if (project.ownerId) {
@@ -1057,6 +1081,7 @@ export async function runJob(input: JobInput): Promise<void> {
                 agentMode,
                 conversationHistory,
                 knowledgeContext: knowledgeContext || undefined,
+                databaseContext,
                 planContext: input.planContext ?? null,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
               })
@@ -1089,6 +1114,7 @@ export async function runJob(input: JobInput): Promise<void> {
                 agentMode,
                 conversationHistory,
                 knowledgeContext: knowledgeContext || undefined,
+                databaseContext,
                 planContext: input.planContext ?? null,
               });
 
@@ -1115,6 +1141,7 @@ export async function runJob(input: JobInput): Promise<void> {
                 agentMode: buildEscalationMode,
                 conversationHistory,
                 knowledgeContext: knowledgeContext || undefined,
+                databaseContext,
                 planContext: input.planContext ?? null,
               })
             : await runBuildPipeline({
@@ -1124,6 +1151,7 @@ export async function runJob(input: JobInput): Promise<void> {
                 agentMode: buildEscalationMode,
                 conversationHistory,
                 knowledgeContext: knowledgeContext || undefined,
+                databaseContext,
                 planContext: input.planContext ?? null,
               });
           wasEscalated = true;
@@ -1301,6 +1329,7 @@ export async function runJob(input: JobInput): Promise<void> {
                 existingFiles,
                 conversationHistory,
                 knowledgeContext: knowledgeContext || undefined,
+                databaseContext,
                 unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                 planContext: input.planContext ?? null,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
@@ -1339,6 +1368,7 @@ export async function runJob(input: JobInput): Promise<void> {
                     existingFiles,
                     conversationHistory,
                     knowledgeContext: knowledgeContext || undefined,
+                    databaseContext,
                     unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                     planContext: input.planContext ?? null,
                   });
@@ -1367,6 +1397,7 @@ export async function runJob(input: JobInput): Promise<void> {
                 existingFiles,
                 conversationHistory,
                 knowledgeContext: knowledgeContext || undefined,
+                databaseContext,
                 unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                 planContext: input.planContext ?? null,
               })
@@ -1378,6 +1409,7 @@ export async function runJob(input: JobInput): Promise<void> {
                 existingFiles,
                 conversationHistory,
                 knowledgeContext: knowledgeContext || undefined,
+                databaseContext,
                 unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                 planContext: input.planContext ?? null,
               });

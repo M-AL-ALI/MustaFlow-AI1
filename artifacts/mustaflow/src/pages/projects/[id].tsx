@@ -53,6 +53,7 @@ import {
   Bookmark,
   Layers2,
   RotateCcw,
+  DatabaseZap,
 } from "lucide-react";
 import { SuggestionChips } from "./components/suggestion-chips";
 import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
@@ -73,6 +74,7 @@ import { ManageTab } from "./components/manage-tab";
 import { KnowledgeTab } from "./components/knowledge-tab";
 import { HistoryTab } from "./components/history-tab";
 import { TerminalTab } from "./components/terminal-tab";
+import { DatabaseTab } from "./components/database-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { cn } from "@/lib/utils";
@@ -405,6 +407,7 @@ const WORKSPACE_TABS = [
   { label: "Tools & Files", value: "tools-files", icon: Blocks },
   { label: "Publishing", value: "publishing", icon: Rocket },
   { label: "Knowledge", value: "knowledge", icon: BrainCircuit },
+  { label: "Database", value: "database", icon: DatabaseZap },
   { label: "Logs", value: "logs", icon: Wrench },
   { label: "Resources", value: "resources", icon: BookOpen },
   { label: "Analytics", value: "analytics", icon: Activity },
@@ -2145,6 +2148,7 @@ export default function ProjectWorkspacePage() {
                 }}
               />
             )}
+            {activeTab === "database" && <DatabaseTab projectId={projectId} />}
             {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
             {activeTab === "analytics" && <AnalyticsTab project={project} />}
             {activeTab === "resources" && <ResourcesTab />}

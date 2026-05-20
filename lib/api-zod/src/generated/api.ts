@@ -130,6 +130,9 @@ export const ListProjectsResponseItem = zod.object({
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
   "runtime": zod.enum(['react-vite', 'node20', 'node22', 'python312']).optional().describe('Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 \/ node22 = Node.js backend (Express\/Fastify, runs in container). python312 = Python 3.12 backend (Flask\/FastAPI, runs in container).'),
+  "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
+  "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
+  "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -187,6 +190,9 @@ export const GetProjectResponse = zod.object({
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
   "runtime": zod.enum(['react-vite', 'node20', 'node22', 'python312']).optional().describe('Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 \/ node22 = Node.js backend (Express\/Fastify, runs in container). python312 = Python 3.12 backend (Flask\/FastAPI, runs in container).'),
+  "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
+  "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
+  "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -238,6 +244,9 @@ export const UpdateProjectResponse = zod.object({
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
   "runtime": zod.enum(['react-vite', 'node20', 'node22', 'python312']).optional().describe('Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 \/ node22 = Node.js backend (Express\/Fastify, runs in container). python312 = Python 3.12 backend (Flask\/FastAPI, runs in container).'),
+  "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
+  "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
+  "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -286,6 +295,9 @@ export const GetProjectsSummaryResponse = zod.object({
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
   "runtime": zod.enum(['react-vite', 'node20', 'node22', 'python312']).optional().describe('Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 \/ node22 = Node.js backend (Express\/Fastify, runs in container). python312 = Python 3.12 backend (Flask\/FastAPI, runs in container).'),
+  "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
+  "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
+  "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))
@@ -2110,6 +2122,93 @@ export const UninstallPackageResponse = zod.object({
   "output": zod.string().optional().describe('npm output from the container exec (empty when container is not running)'),
   "dependencies": zod.record(zod.string(), zod.string()),
   "devDependencies": zod.record(zod.string(), zod.string())
+})
+
+
+/**
+ * @summary Provision a database for the project and inject DATABASE_URL secret
+ */
+export const ProvisionDatabaseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ProvisionDatabaseBody = zod.object({
+  "provider": zod.enum(['postgres', 'sqlite'])
+})
+
+export const ProvisionDatabaseResponse = zod.object({
+  "dbProvider": zod.enum(['none', 'postgres', 'sqlite']),
+  "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']),
+  "dbConnectionId": zod.string().nullish(),
+  "maskedUrl": zod.string().nullish().describe('Masked connection string preview (last 4 chars visible). Null if not yet connected.')
+})
+
+
+/**
+ * @summary Get the current database status for a project
+ */
+export const GetDatabaseStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetDatabaseStatusResponse = zod.object({
+  "dbProvider": zod.enum(['none', 'postgres', 'sqlite']),
+  "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']),
+  "dbConnectionId": zod.string().nullish(),
+  "maskedUrl": zod.string().nullish().describe('Masked connection string preview (last 4 chars visible). Null if not yet connected.')
+})
+
+
+/**
+ * @summary Remove the project database and DATABASE_URL secret
+ */
+export const DeprovisionDatabaseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeprovisionDatabaseResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Run a read-only SQL query against the project database (SELECT only, 200-row limit)
+ */
+export const QueryDatabaseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const QueryDatabaseBody = zod.object({
+  "sql": zod.string()
+})
+
+export const QueryDatabaseResponse = zod.object({
+  "columns": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.unknown())),
+  "rowCount": zod.number(),
+  "truncated": zod.boolean(),
+  "executionMs": zod.number().optional()
+})
+
+
+/**
+ * @summary Get the schema (tables and columns) of the project database
+ */
+export const GetDatabaseSchemaParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetDatabaseSchemaResponse = zod.object({
+  "provider": zod.enum(['postgres', 'sqlite']),
+  "tables": zod.array(zod.object({
+  "tableName": zod.string(),
+  "columns": zod.array(zod.object({
+  "name": zod.string(),
+  "type": zod.string(),
+  "nullable": zod.boolean(),
+  "isPrimaryKey": zod.boolean().optional()
+}))
+}))
 })
 
 

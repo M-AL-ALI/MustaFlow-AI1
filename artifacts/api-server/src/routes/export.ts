@@ -49,17 +49,22 @@ npx serve .
 python3 -m http.server 8080
 \`\`\``;
 
+  const hasDrizzle = files.some((f) => f.path.startsWith("drizzle/") || f.path === "drizzle.config.ts");
+  const drizzleNote = hasDrizzle
+    ? `\n- Database migrations are in the \`drizzle/migrations/\` folder. Run \`npx drizzle-kit migrate\` after setting \`DATABASE_URL\` in \`.env\`.`
+    : "";
+
   const notes = isReactVite
     ? `## Notes
 
 - Stack: React 18, Vite 5, TypeScript, Tailwind CSS v3.
 - Run \`npm install\` first — CDN dependencies are not used.
-- Secrets are not included in this export; add them to \`.env\` (see \`.env.example\`).`
+- Secrets are not included in this export; add them to \`.env\` (see \`.env.example\`).${drizzleNote}`
     : `## Notes
 
 - Generated files use Tailwind CSS and Lucide icons via CDN.
 - No build step required for web; mobile targets may need Expo setup.
-- Secrets are not included in this export for security reasons.`;
+- Secrets are not included in this export for security reasons.${drizzleNote}`;
 
   return `# ${project.name}
 

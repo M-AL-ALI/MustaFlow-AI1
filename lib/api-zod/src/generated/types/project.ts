@@ -7,6 +7,8 @@
  */
 import type { ProjectAgentMode } from './projectAgentMode';
 import type { ProjectContainerStatus } from './projectContainerStatus';
+import type { ProjectDbProvider } from './projectDbProvider';
+import type { ProjectDbStatus } from './projectDbStatus';
 import type { ProjectDefaultAgent } from './projectDefaultAgent';
 import type { ProjectKind } from './projectKind';
 import type { ProjectPlatform } from './projectPlatform';
@@ -77,6 +79,15 @@ export interface Project {
   projectFormat?: ProjectProjectFormat;
   /** Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 / node22 = Node.js backend (Express/Fastify, runs in container). python312 = Python 3.12 backend (Flask/FastAPI, runs in container). */
   runtime?: ProjectRuntime;
+  /** Which database engine is provisioned for this project. none = no DB. */
+  dbProvider?: ProjectDbProvider;
+  /** Current database lifecycle state. */
+  dbStatus?: ProjectDbStatus;
+  /**
+     * Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.
+     * @nullable
+     */
+  dbConnectionId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

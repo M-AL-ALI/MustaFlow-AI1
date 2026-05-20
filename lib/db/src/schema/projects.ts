@@ -76,6 +76,13 @@ export const projectsTable = pgTable("projects", {
   prodContainerId: text("prod_container_id"),
   prodContainerStatus: text("prod_container_status").notNull().default("stopped"),
   prodContainerUrl: text("prod_container_url"),
+  // Per-project database provisioning (Phase G).
+  // dbProvider: none | postgres | sqlite — which database engine is provisioned for this project.
+  // dbStatus: none | provisioning | connected | error — current lifecycle state.
+  // dbConnectionId: opaque identifier for the provisioned DB (e.g. Neon project ID). Null = not provisioned.
+  dbProvider: text("db_provider").notNull().default("none"),
+  dbStatus: text("db_status").notNull().default("none"),
+  dbConnectionId: text("db_connection_id"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

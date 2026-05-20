@@ -229,6 +229,9 @@ importers:
       openai:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@3.25.76)
+      pg:
+        specifier: ^8.20.0
+        version: 8.20.0
       pino:
         specifier: ^9.14.0
         version: 9.14.0
@@ -257,6 +260,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.6.2
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.20.0
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1

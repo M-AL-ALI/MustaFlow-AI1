@@ -183,6 +183,31 @@ export const ProjectRuntime = {
   python312: 'python312',
 } as const;
 
+/**
+ * Which database engine is provisioned for this project. none = no DB.
+ */
+export type ProjectDbProvider = typeof ProjectDbProvider[keyof typeof ProjectDbProvider];
+
+
+export const ProjectDbProvider = {
+  none: 'none',
+  postgres: 'postgres',
+  sqlite: 'sqlite',
+} as const;
+
+/**
+ * Current database lifecycle state.
+ */
+export type ProjectDbStatus = typeof ProjectDbStatus[keyof typeof ProjectDbStatus];
+
+
+export const ProjectDbStatus = {
+  none: 'none',
+  provisioning: 'provisioning',
+  connected: 'connected',
+  error: 'error',
+} as const;
+
 export interface Project {
   id: number;
   /** @nullable */
@@ -245,6 +270,15 @@ export interface Project {
   projectFormat?: ProjectProjectFormat;
   /** Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 / node22 = Node.js backend (Express/Fastify, runs in container). python312 = Python 3.12 backend (Flask/FastAPI, runs in container). */
   runtime?: ProjectRuntime;
+  /** Which database engine is provisioned for this project. none = no DB. */
+  dbProvider?: ProjectDbProvider;
+  /** Current database lifecycle state. */
+  dbStatus?: ProjectDbStatus;
+  /**
+     * Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.
+     * @nullable
+     */
+  dbConnectionId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1502,6 +1536,86 @@ export interface PackageManagerResult {
   devDependencies: PackageManagerResultDevDependencies;
 }
 
+export type DatabaseProvisionInputProvider = typeof DatabaseProvisionInputProvider[keyof typeof DatabaseProvisionInputProvider];
+
+
+export const DatabaseProvisionInputProvider = {
+  postgres: 'postgres',
+  sqlite: 'sqlite',
+} as const;
+
+export interface DatabaseProvisionInput {
+  provider: DatabaseProvisionInputProvider;
+}
+
+export type DatabaseStatusDbProvider = typeof DatabaseStatusDbProvider[keyof typeof DatabaseStatusDbProvider];
+
+
+export const DatabaseStatusDbProvider = {
+  none: 'none',
+  postgres: 'postgres',
+  sqlite: 'sqlite',
+} as const;
+
+export type DatabaseStatusDbStatus = typeof DatabaseStatusDbStatus[keyof typeof DatabaseStatusDbStatus];
+
+
+export const DatabaseStatusDbStatus = {
+  none: 'none',
+  provisioning: 'provisioning',
+  connected: 'connected',
+  error: 'error',
+} as const;
+
+export interface DatabaseStatus {
+  dbProvider: DatabaseStatusDbProvider;
+  dbStatus: DatabaseStatusDbStatus;
+  /** @nullable */
+  dbConnectionId?: string | null;
+  /**
+     * Masked connection string preview (last 4 chars visible). Null if not yet connected.
+     * @nullable
+     */
+  maskedUrl?: string | null;
+}
+
+export interface DatabaseQueryInput {
+  sql: string;
+}
+
+export interface DatabaseQueryResult {
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+  truncated: boolean;
+  executionMs?: number;
+}
+
+export type DatabaseSchemaTableColumnsItem = {
+  name: string;
+  type: string;
+  nullable: boolean;
+  isPrimaryKey?: boolean;
+};
+
+export interface DatabaseSchemaTable {
+  tableName: string;
+  columns: DatabaseSchemaTableColumnsItem[];
+}
+
+export type DatabaseSchemaResultProvider = typeof DatabaseSchemaResultProvider[keyof typeof DatabaseSchemaResultProvider];
+
+
+export const DatabaseSchemaResultProvider = {
+  postgres: 'postgres',
+  sqlite: 'sqlite',
+} as const;
+
+export interface DatabaseSchemaResult {
+  provider: DatabaseSchemaResultProvider;
+  tables: DatabaseSchemaTable[];
+}
+
 export type DeleteWorkspace200 = {
   deleted: boolean;
 };
@@ -1655,6 +1769,10 @@ export type UnpublishContainer200 = {
 
 export type DestroyContainer200 = {
   destroyed: boolean;
+};
+
+export type DeprovisionDatabase200 = {
+  ok: boolean;
 };
 
 export type StripeWebhook200 = {

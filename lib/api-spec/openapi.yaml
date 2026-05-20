@@ -36,6 +36,8 @@ tags:
     description: Billing aliases and Stripe webhook
   - name: suggestions
     description: AI-generated post-build next-step suggestions
+  - name: database
+    description: Per-project database provisioning and query browser
 paths:
   /healthz:
     get:
@@ -1829,6 +1831,112 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/database/provision:
+    post:
+      operationId: provisionDatabase
+      tags: [database]
+      summary: Provision a database for the project and inject DATABASE_URL secret
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatabaseProvisionInput"
+      responses:
+        "200":
+          description: Database provisioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseStatus"
+        "400":
+          description: Invalid provider or already provisioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/database:
+    get:
+      operationId: getDatabaseStatus
+      tags: [database]
+      summary: Get the current database status for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Database status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseStatus"
+    delete:
+      operationId: deprovisionDatabase
+      tags: [database]
+      summary: Remove the project database and DATABASE_URL secret
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Database removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+
+  /projects/{id}/database/query:
+    post:
+      operationId: queryDatabase
+      tags: [database]
+      summary: Run a read-only SQL query against the project database (SELECT only, 200-row limit)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatabaseQueryInput"
+      responses:
+        "200":
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseQueryResult"
+        "400":
+          description: Query rejected (not SELECT or no database provisioned)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/database/schema:
+    get:
+      operationId: getDatabaseSchema
+      tags: [database]
+      summary: Get the schema (tables and columns) of the project database
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Database schema
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseSchemaResult"
+        "400":
+          description: No database provisioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /billing/webhook:
     post:
       operationId: stripeWebhook
@@ -2170,6 +2278,17 @@ components:
           type: string
           enum: [react-vite, node20, node22, python312]
           description: "Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 / node22 = Node.js backend (Express/Fastify, runs in container). python312 = Python 3.12 backend (Flask/FastAPI, runs in container)."
+        dbProvider:
+          type: string
+          enum: [none, postgres, sqlite]
+          description: "Which database engine is provisioned for this project. none = no DB."
+        dbStatus:
+          type: string
+          enum: [none, provisioning, connected, error]
+          description: "Current database lifecycle state."
+        dbConnectionId:
+          type: ["string", "null"]
+          description: "Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -3281,3 +3400,77 @@ components:
         devDependencies:
           type: object
           additionalProperties: { type: string }
+
+    DatabaseProvisionInput:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          enum: [postgres, sqlite]
+
+    DatabaseStatus:
+      type: object
+      required: [dbProvider, dbStatus]
+      properties:
+        dbProvider:
+          type: string
+          enum: [none, postgres, sqlite]
+        dbStatus:
+          type: string
+          enum: [none, provisioning, connected, error]
+        dbConnectionId:
+          type: ["string", "null"]
+        maskedUrl:
+          type: ["string", "null"]
+          description: "Masked connection string preview (last 4 chars visible). Null if not yet connected."
+
+    DatabaseQueryInput:
+      type: object
+      required: [sql]
+      properties:
+        sql: { type: string }
+
+    DatabaseQueryResult:
+      type: object
+      required: [columns, rows, rowCount, truncated]
+      properties:
+        columns:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          items:
+            type: array
+            items: {}
+        rowCount: { type: integer }
+        truncated: { type: boolean }
+        executionMs: { type: integer }
+
+    DatabaseSchemaTable:
+      type: object
+      required: [tableName, columns]
+      properties:
+        tableName: { type: string }
+        columns:
+          type: array
+          items:
+            type: object
+            required: [name, type, nullable]
+            properties:
+              name: { type: string }
+              type: { type: string }
+              nullable: { type: boolean }
+              isPrimaryKey: { type: boolean }
+
+    DatabaseSchemaResult:
+      type: object
+      required: [provider, tables]
+      properties:
+        provider:
+          type: string
+          enum: [postgres, sqlite]
+        tables:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatabaseSchemaTable"

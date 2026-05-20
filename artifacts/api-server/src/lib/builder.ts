@@ -1865,6 +1865,8 @@ export async function runBuildPipeline(args: {
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
   integrationContext?: string;
+  /** When set, the AI is instructed to generate real database-backed code using this provider. */
+  databaseContext?: string;
   /** Structured plan from the Planning Agent — injected as a system message so the builder honours the plan exactly. */
   planContext?: Record<string, unknown> | null;
   onEvent?: (type: string, message: string) => Promise<void>;
@@ -1877,6 +1879,7 @@ export async function runBuildPipeline(args: {
     conversationHistory,
     knowledgeContext,
     integrationContext,
+    databaseContext,
     planContext,
     onEvent,
   } = args;
@@ -1901,6 +1904,10 @@ export async function runBuildPipeline(args: {
       role: "system",
       content: integrationContext,
     });
+  }
+
+  if (databaseContext) {
+    messages.push({ role: "system", content: databaseContext });
   }
 
   if (planContext) {
@@ -2098,6 +2105,7 @@ export async function runRefinePipeline(args: {
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
   integrationContext?: string;
+  databaseContext?: string;
   unchangedFilesHint?: string[];
   /** Structured plan from the Planning Agent — injected as a system message so the builder honours the plan exactly. */
   planContext?: Record<string, unknown> | null;
@@ -2121,6 +2129,7 @@ export async function runRefinePipeline(args: {
     conversationHistory,
     knowledgeContext,
     integrationContext,
+    databaseContext,
     unchangedFilesHint,
     planContext,
     onEvent,
@@ -2148,6 +2157,10 @@ export async function runRefinePipeline(args: {
       role: "system",
       content: integrationContext,
     });
+  }
+
+  if (databaseContext) {
+    messages.push({ role: "system", content: databaseContext });
   }
 
   if (planContext) {
@@ -2486,6 +2499,7 @@ export async function runReactViteBuildPipeline(args: {
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
   integrationContext?: string;
+  databaseContext?: string;
   planContext?: Record<string, unknown> | null;
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<BuilderResult> {
@@ -2497,6 +2511,7 @@ export async function runReactViteBuildPipeline(args: {
     conversationHistory,
     knowledgeContext,
     integrationContext,
+    databaseContext,
     planContext,
     onEvent,
   } = args;
@@ -2518,6 +2533,10 @@ export async function runReactViteBuildPipeline(args: {
 
   if (integrationContext) {
     messages.push({ role: "system", content: integrationContext });
+  }
+
+  if (databaseContext) {
+    messages.push({ role: "system", content: databaseContext });
   }
 
   if (planContext) {
@@ -2706,6 +2725,7 @@ export async function runReactViteRefinePipeline(args: {
   conversationHistory?: ConversationTurn[];
   knowledgeContext?: string;
   integrationContext?: string;
+  databaseContext?: string;
   unchangedFilesHint?: string[];
   planContext?: Record<string, unknown> | null;
   onEvent?: (type: string, message: string) => Promise<void>;
@@ -2728,6 +2748,7 @@ export async function runReactViteRefinePipeline(args: {
     conversationHistory,
     knowledgeContext,
     integrationContext,
+    databaseContext,
     unchangedFilesHint,
     planContext,
     onEvent,
@@ -2752,6 +2773,10 @@ export async function runReactViteRefinePipeline(args: {
 
   if (integrationContext) {
     messages.push({ role: "system", content: integrationContext });
+  }
+
+  if (databaseContext) {
+    messages.push({ role: "system", content: databaseContext });
   }
 
   if (planContext) {
