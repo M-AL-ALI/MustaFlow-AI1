@@ -42,9 +42,9 @@ router.use(generalLimiter);
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 router.use(healthRouter);
 router.use(publicRouter);
-router.use(analyticsRouter);        // POST /p/:slug/analytics/ping (public ping)
-router.use(sslWebhookRouter);       // POST /domain/ssl-webhook (Cloudflare → us)
-router.use(billingWebhookRouter);   // POST /billing/webhook    (Stripe → us)
+router.use(analyticsRouter); // POST /p/:slug/analytics/ping (public ping)
+router.use(sslWebhookRouter); // POST /domain/ssl-webhook (Cloudflare → us)
+router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.

@@ -133,7 +133,9 @@ function InlineReportCard({
         <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
         Builder report
       </div>
-      <div className={`grid gap-1.5 ${(report.filesUnchanged?.length ?? 0) > 0 ? "grid-cols-4" : "grid-cols-3"}`}>
+      <div
+        className={`grid gap-1.5 ${(report.filesUnchanged?.length ?? 0) > 0 ? "grid-cols-4" : "grid-cols-3"}`}
+      >
         <div className="bg-muted rounded p-1.5">
           <div className="text-muted-foreground text-[10px] uppercase">Created</div>
           <div className="font-semibold text-foreground">{report.filesCreated.length}</div>

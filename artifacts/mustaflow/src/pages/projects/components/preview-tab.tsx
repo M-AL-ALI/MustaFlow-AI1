@@ -729,7 +729,9 @@ export function PreviewTab({
           <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-px text-orange-400" />
           <div className="flex-1 min-w-0">
             <span className="font-semibold text-orange-300">Crash detected after build. </span>
-            <span className="line-clamp-1 break-all text-orange-400/80">{rollbackBanner.crashMsg}</span>
+            <span className="line-clamp-1 break-all text-orange-400/80">
+              {rollbackBanner.crashMsg}
+            </span>
           </div>
           <button
             type="button"
@@ -755,8 +757,11 @@ export function PreviewTab({
                     }
                   }
                 }
-              } catch { /* ignore */ }
-              finally { setRollingBack(false); }
+              } catch {
+                /* ignore */
+              } finally {
+                setRollingBack(false);
+              }
             }}
             className="shrink-0 text-[10px] font-semibold px-2 py-1 rounded-md bg-orange-500/20 border border-orange-500/30 text-orange-300 hover:bg-orange-500/30 transition-colors whitespace-nowrap disabled:opacity-60"
           >

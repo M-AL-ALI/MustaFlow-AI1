@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import {
   useListSecrets,
   useCreateSecret,
+  useDeleteSecret,
   getListSecretsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -487,7 +488,9 @@ function CustomSubdomainPicker({
 
   return (
     <div className="space-y-2">
-      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Custom Subdomain</p>
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        Custom Subdomain
+      </p>
       <p className="text-xs text-muted-foreground">
         Pick a memorable name for your app. Your current slug is{" "}
         <span className="font-mono text-foreground">{currentSlug}</span>.
@@ -496,7 +499,9 @@ function CustomSubdomainPicker({
         <input
           value={input}
           onChange={(e) => setInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
-          onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSave();
+          }}
           placeholder={currentSlug}
           maxLength={40}
           className="flex-1 bg-transparent text-sm font-mono placeholder:text-muted-foreground/40 focus:outline-none min-w-0"
@@ -509,7 +514,13 @@ function CustomSubdomainPicker({
           disabled={saving || !input.trim()}
           className="ml-2 shrink-0"
         >
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : saved ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Save className="h-3.5 w-3.5" />}
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : saved ? (
+            <Check className="h-3.5 w-3.5 text-green-500" />
+          ) : (
+            <Save className="h-3.5 w-3.5" />
+          )}
           <span className="ml-1">{saved ? "Saved" : "Save"}</span>
         </Button>
       </div>
@@ -1639,6 +1650,14 @@ function saveGithubState(projectId: number, state: GithubSavedState) {
   }
 }
 
+function clearGithubState(projectId: number) {
+  try {
+    localStorage.removeItem(githubStorageKey(projectId));
+  } catch {
+    // Non-fatal
+  }
+}
+
 function GithubPushPanel({ projectId }: { projectId: number }) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState("");
@@ -1660,14 +1679,36 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
   // Saved connection state (repo/branch from last successful push — stored in localStorage)
   const [savedState, setSavedState] = useState<GithubSavedState | null>(null);
 
+  const [disconnecting, setDisconnecting] = useState(false);
+
   const queryClient = useQueryClient();
   const createSecret = useCreateSecret();
+  const deleteSecret = useDeleteSecret();
 
   // Check if GITHUB_TOKEN secret is already stored for this project
   const { data: secrets = [] } = useListSecrets(projectId, {
     query: { queryKey: getListSecretsQueryKey(projectId), enabled: open },
   });
   const hasStoredToken = secrets.some((s) => s.name === "GITHUB_TOKEN");
+  const githubTokenSecret = secrets.find((s) => s.name === "GITHUB_TOKEN");
+
+  const handleDisconnect = async () => {
+    if (!githubTokenSecret) return;
+    setDisconnecting(true);
+    try {
+      await deleteSecret.mutateAsync({ id: projectId, secretId: githubTokenSecret.id });
+      void queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
+      clearGithubState(projectId);
+      setSavedState(null);
+      setToken("");
+      setRepo("");
+      setBranch("main");
+    } catch {
+      // Non-fatal: ignore disconnect errors silently
+    } finally {
+      setDisconnecting(false);
+    }
+  };
 
   // Load saved state from localStorage when the panel first opens
   useEffect(() => {
@@ -1835,9 +1876,25 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
               <div className="space-y-1">
                 <label className="text-xs font-medium text-foreground">Personal access token</label>
                 {hasStoredToken && (
-                  <div className="flex items-center gap-2 text-[10px] text-green-500 bg-green-500/10 border border-green-500/20 rounded px-2 py-1 mb-1">
-                    <Key className="h-3 w-3 shrink-0" />
-                    Saved GITHUB_TOKEN found — leave blank to use it
+                  <div className="flex items-center justify-between gap-2 bg-green-500/10 border border-green-500/20 rounded px-2 py-1 mb-1">
+                    <div className="flex items-center gap-2 text-[10px] text-green-500">
+                      <Key className="h-3 w-3 shrink-0" />
+                      Saved GITHUB_TOKEN found — leave blank to use it
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleDisconnect()}
+                      disabled={disconnecting}
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
+                      title="Remove saved token"
+                    >
+                      {disconnecting ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <XCircle className="h-3 w-3" />
+                      )}
+                      {disconnecting ? "Removing…" : "Disconnect"}
+                    </button>
                   </div>
                 )}
                 <input

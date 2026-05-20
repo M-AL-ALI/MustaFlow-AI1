@@ -129,8 +129,8 @@ export function AnalyticsTab({ project }: { project: Project }) {
           <div>
             <p className="text-sm font-medium text-foreground">No analytics yet</p>
             <p className="text-xs text-muted-foreground mt-1">
-              Publish your app to start tracking page views and visitors. Analytics
-              data updates automatically as users visit your published app.
+              Publish your app to start tracking page views and visitors. Analytics data updates
+              automatically as users visit your published app.
             </p>
           </div>
         </div>
@@ -191,7 +191,14 @@ export function AnalyticsTab({ project }: { project: Project }) {
           <StatCard
             icon={Calendar}
             label="Last Published"
-            value={lastPublish ? new Date(lastPublish.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—"}
+            value={
+              lastPublish
+                ? new Date(lastPublish.createdAt).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                  })
+                : "—"
+            }
             sub={lastPublish ? formatDate(lastPublish.createdAt) : "No publish yet"}
           />
         </div>
@@ -211,7 +218,9 @@ export function AnalyticsTab({ project }: { project: Project }) {
               {analytics.dailyTrend.length > 0 && (
                 <>
                   <span>{formatDay(analytics.dailyTrend[0]?.day ?? "")}</span>
-                  <span>{formatDay(analytics.dailyTrend[analytics.dailyTrend.length - 1]?.day ?? "")}</span>
+                  <span>
+                    {formatDay(analytics.dailyTrend[analytics.dailyTrend.length - 1]?.day ?? "")}
+                  </span>
                 </>
               )}
             </div>
@@ -302,7 +311,8 @@ export function AnalyticsTab({ project }: { project: Project }) {
         </div>
 
         <p className="text-[11px] text-muted-foreground/50 text-center">
-          Page view tracking is automatically injected into your published app. No extra setup needed.
+          Page view tracking is automatically injected into your published app. No extra setup
+          needed.
         </p>
       </div>
     </div>

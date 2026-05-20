@@ -68,7 +68,7 @@ async function githubFetch(
       ...(options.headers as Record<string, string> | undefined),
     },
   });
-  const body = await res.json() as unknown;
+  const body = (await res.json()) as unknown;
   if (!res.ok) {
     const msg =
       typeof body === "object" && body !== null && "message" in body
@@ -109,13 +109,15 @@ router.post(
     }
 
     if (!token) {
-      res.status(400).json({ error: "A GitHub personal access token is required. Enter one below or save it as the GITHUB_TOKEN project secret." });
+      res.status(400).json({
+        error:
+          "A GitHub personal access token is required. Enter one below or save it as the GITHUB_TOKEN project secret.",
+      });
       return;
     }
     const repoName = body.repo.trim().replace(/[^a-zA-Z0-9_.-]/g, "-");
     const branch = (body.branch ?? "main").trim();
-    const commitMessage =
-      body.commitMessage?.trim() || "Push from MustaFlow AI";
+    const commitMessage = body.commitMessage?.trim() || "Push from MustaFlow AI";
     const isPrivate = body.private !== false;
 
     try {
@@ -128,7 +130,11 @@ router.post(
 
       // 2. Load all project files
       const files = await db
-        .select({ path: projectFilesTable.path, content: projectFilesTable.content, mimeType: projectFilesTable.mimeType })
+        .select({
+          path: projectFilesTable.path,
+          content: projectFilesTable.content,
+          mimeType: projectFilesTable.mimeType,
+        })
         .from(projectFilesTable)
         .where(eq(projectFilesTable.projectId, projectId));
 
@@ -141,7 +147,10 @@ router.post(
       let repoUrl = "";
       let repoCreated = false;
       try {
-        const existingRepo = (await githubFetch(`/repos/${owner}/${repoName}`, token)) as GithubApiRepo;
+        const existingRepo = (await githubFetch(
+          `/repos/${owner}/${repoName}`,
+          token,
+        )) as GithubApiRepo;
         repoUrl = existingRepo.html_url;
       } catch {
         // Repo doesn't exist — create it
@@ -179,9 +188,7 @@ router.post(
             token,
           )) as GithubApiTreeResponse;
           existingRepoFiles = new Set(
-            existingTree.tree
-              .filter((e) => e.type === "blob")
-              .map((e) => e.path),
+            existingTree.tree.filter((e) => e.type === "blob").map((e) => e.path),
           );
         } catch {
           // Non-fatal: if we can't list the tree, just push without deletion
@@ -219,11 +226,10 @@ router.post(
       const treePayload: Record<string, unknown> = { tree: treeItems };
       if (baseTreeSha) treePayload.base_tree = baseTreeSha;
 
-      const newTree = (await githubFetch(
-        `/repos/${owner}/${repoName}/git/trees`,
-        token,
-        { method: "POST", body: JSON.stringify(treePayload) },
-      )) as GithubApiTree;
+      const newTree = (await githubFetch(`/repos/${owner}/${repoName}/git/trees`, token, {
+        method: "POST",
+        body: JSON.stringify(treePayload),
+      })) as GithubApiTree;
 
       // 6. Create the commit
       const commitPayload: Record<string, unknown> = {
@@ -232,32 +238,23 @@ router.post(
       };
       if (parentSha) commitPayload.parents = [parentSha];
 
-      const newCommit = (await githubFetch(
-        `/repos/${owner}/${repoName}/git/commits`,
-        token,
-        { method: "POST", body: JSON.stringify(commitPayload) },
-      )) as GithubApiCommit;
+      const newCommit = (await githubFetch(`/repos/${owner}/${repoName}/git/commits`, token, {
+        method: "POST",
+        body: JSON.stringify(commitPayload),
+      })) as GithubApiCommit;
 
       // 7. Update (or create) the branch ref
       try {
-        await githubFetch(
-          `/repos/${owner}/${repoName}/git/refs/heads/${branch}`,
-          token,
-          {
-            method: "PATCH",
-            body: JSON.stringify({ sha: newCommit.sha, force: true }),
-          },
-        ) as GithubApiUpdateRef;
+        (await githubFetch(`/repos/${owner}/${repoName}/git/refs/heads/${branch}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ sha: newCommit.sha, force: true }),
+        })) as GithubApiUpdateRef;
       } catch {
         // Ref doesn't exist — create it
-        await githubFetch(
-          `/repos/${owner}/${repoName}/git/refs`,
-          token,
-          {
-            method: "POST",
-            body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: newCommit.sha }),
-          },
-        );
+        await githubFetch(`/repos/${owner}/${repoName}/git/refs`, token, {
+          method: "POST",
+          body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: newCommit.sha }),
+        });
       }
 
       logger.info(

@@ -569,7 +569,9 @@ async function generatePostBuildSuggestions(
 ): Promise<void> {
   try {
     const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(projectKind);
-    const platformHint = isMobile ? "React Native / Expo mobile app" : "static web app (HTML/CSS/JS + Tailwind)";
+    const platformHint = isMobile
+      ? "React Native / Expo mobile app"
+      : "static web app (HTML/CSS/JS + Tailwind)";
 
     const systemPrompt = `You are a senior product/engineering advisor reviewing a just-completed AI-generated ${platformHint} build.
 Based on the build context, generate 3-5 specific, actionable next-step suggestions the user could build or improve next.
@@ -730,10 +732,7 @@ async function drainNextProjectTask(projectId: number): Promise<void> {
 
   if (!nextTask) return;
 
-  const [project] = await db
-    .select()
-    .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
   if (!project) return;
 
   const [fileRow] = await db
@@ -824,10 +823,7 @@ export async function runJob(input: JobInput): Promise<void> {
       .set({ status: kind === "build" ? "building" : "planning" })
       .where(eq(agentTasksTable.id, taskId));
 
-    const [project] = await db
-      .select()
-      .from(projectsTable)
-      .where(eq(projectsTable.id, projectId));
+    const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
     if (!project) {
       await emitEvent(taskId, "failed", "Project not found.");
       await db
@@ -861,665 +857,689 @@ export async function runJob(input: JobInput): Promise<void> {
       }
     }
 
-  try {
-    let report: TaskReport;
-    let assistantSummary: string;
-    let nextVersionLabel: string;
-    let diffSummary: DiffSummary | undefined;
-    let filesToSmellScan: BuilderFile[] = [];
+    try {
+      let report: TaskReport;
+      let assistantSummary: string;
+      let nextVersionLabel: string;
+      let diffSummary: DiffSummary | undefined;
+      let filesToSmellScan: BuilderFile[] = [];
 
-    const isMobileProject = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind);
-
-    // For mobile projects: load last successful task's wired modules + project secret names once,
-    // so both build and refine pipelines have durable module context.
-    let activeModuleIds: string[] = [];
-    let configuredSecretNames: string[] = [];
-    if (isMobileProject) {
-      const [lastTask, projectSecrets] = await Promise.all([
-        db
-          .select({ report: agentTasksTable.report })
-          .from(agentTasksTable)
-          .where(
-            and(eq(agentTasksTable.projectId, projectId), eq(agentTasksTable.status, "completed")),
-          )
-          .orderBy(desc(agentTasksTable.completedAt))
-          .limit(1),
-        db
-          .select({ name: secretsTable.name })
-          .from(secretsTable)
-          .where(eq(secretsTable.projectId, projectId)),
-      ]);
-      const lastReport = lastTask[0]?.report as TaskReport | null;
-      activeModuleIds = lastReport?.modulesWired?.map((m) => m.id) ?? [];
-      configuredSecretNames = projectSecrets.map((s) => s.name);
-    }
-
-    if (kind === "build") {
-      await emitEvent(taskId, "planning", "Reading project configuration…");
-      await emitEvent(
-        taskId,
-        "generating_code",
-        isMobileProject
-          ? "Generating Expo/React Native app with AI…"
-          : "Generating app blueprint and code with AI…",
+      const isMobileProject = ["mobile-ios", "mobile-android", "mobile-cross"].includes(
+        project.kind,
       );
 
-      let result = isMobileProject
-        ? await runMobileBuildPipeline({
-            projectName: project.name,
-            projectKind: project.kind,
-            userPrompt,
-            agentMode,
-            conversationHistory,
-            knowledgeContext: knowledgeContext || undefined,
-            activeModuleIds,
-            configuredSecretNames,
-            onEvent: async (type, message) => emitEvent(taskId, type, message),
-          })
-        : await runBuildPipeline({
-            projectName: project.name,
-            projectKind: project.kind,
-            userPrompt,
-            agentMode,
-            conversationHistory,
-            knowledgeContext: knowledgeContext || undefined,
-          });
+      // For mobile projects: load last successful task's wired modules + project secret names once,
+      // so both build and refine pipelines have durable module context.
+      let activeModuleIds: string[] = [];
+      let configuredSecretNames: string[] = [];
+      if (isMobileProject) {
+        const [lastTask, projectSecrets] = await Promise.all([
+          db
+            .select({ report: agentTasksTable.report })
+            .from(agentTasksTable)
+            .where(
+              and(
+                eq(agentTasksTable.projectId, projectId),
+                eq(agentTasksTable.status, "completed"),
+              ),
+            )
+            .orderBy(desc(agentTasksTable.completedAt))
+            .limit(1),
+          db
+            .select({ name: secretsTable.name })
+            .from(secretsTable)
+            .where(eq(secretsTable.projectId, projectId)),
+        ]);
+        const lastReport = lastTask[0]?.report as TaskReport | null;
+        activeModuleIds = lastReport?.modulesWired?.map((m) => m.id) ?? [];
+        configuredSecretNames = projectSecrets.map((s) => s.name);
+      }
 
-      analyticsCorrectionPasses = result.correctionPasses;
-      analyticsErrorCategory = result.primaryErrorCategory;
-
-      // Auto-escalation: if correction pass failed, retry at next model tier
-      const buildEscalationMode = ESCALATION_MAP[agentMode];
-      if (result.correctionFailed && buildEscalationMode && !isMobileProject) {
-        logger.info(
-          { taskId, projectId, from: agentMode, to: buildEscalationMode },
-          "Auto-escalating build to higher model tier",
-        );
+      if (kind === "build") {
+        await emitEvent(taskId, "planning", "Reading project configuration…");
         await emitEvent(
           taskId,
           "generating_code",
-          `Validation failed — escalating to ${buildEscalationMode} mode and retrying…`,
+          isMobileProject
+            ? "Generating Expo/React Native app with AI…"
+            : "Generating app blueprint and code with AI…",
         );
-        const escalatedResult = await runBuildPipeline({
-          projectName: project.name,
-          projectKind: project.kind,
-          userPrompt,
-          agentMode: buildEscalationMode,
-          conversationHistory,
-          knowledgeContext: knowledgeContext || undefined,
-        });
-        wasEscalated = true;
-        agentMode = buildEscalationMode;
-        result = escalatedResult;
-        analyticsCorrectionPasses += escalatedResult.correctionPasses;
-        analyticsErrorCategory = escalatedResult.primaryErrorCategory ?? analyticsErrorCategory;
-        result.report.warnings = [
-          `Auto-escalated from ${input.agentMode} to ${buildEscalationMode} mode after validation failure`,
-          ...(result.report.warnings ?? []),
-        ];
-      }
 
-      // Secrets scan — redact before persisting
-      const { files: sanitisedFiles, findings: secretFindings } = scanForSecrets(result.files);
-      if (secretFindings.length > 0) {
-        logger.warn(
-          { taskId, projectId, secretFindings },
-          "Secrets detected and redacted in generated build files",
-        );
-        result.report.warnings = [
-          ...(result.report.warnings ?? []),
-          ...secretFindings.map(
-            (f) => `Secrets Scan: ${f.category} detected in ${f.file} and redacted before saving`,
-          ),
-        ];
-      }
-      result = { ...result, files: sanitisedFiles };
+        let result = isMobileProject
+          ? await runMobileBuildPipeline({
+              projectName: project.name,
+              projectKind: project.kind,
+              userPrompt,
+              agentMode,
+              conversationHistory,
+              knowledgeContext: knowledgeContext || undefined,
+              activeModuleIds,
+              configuredSecretNames,
+              onEvent: async (type, message) => emitEvent(taskId, type, message),
+            })
+          : await runBuildPipeline({
+              projectName: project.name,
+              projectKind: project.kind,
+              userPrompt,
+              agentMode,
+              conversationHistory,
+              knowledgeContext: knowledgeContext || undefined,
+            });
 
-      // Cross-file consistency check
-      const buildConsistencyWarnings = validateCrossFileConsistency(sanitisedFiles);
-      if (buildConsistencyWarnings.length > 0) {
-        result.report.warnings = [...(result.report.warnings ?? []), ...buildConsistencyWarnings];
-      }
+        analyticsCorrectionPasses = result.correctionPasses;
+        analyticsErrorCategory = result.primaryErrorCategory;
 
-      await emitEvent(
-        taskId,
-        "generating_code",
-        `Blueprint created: ${result.files.length} file(s) planned.`,
-      );
-
-      await emitEvent(taskId, "editing_files", "Writing generated files…");
-      for (const f of result.files) {
-        await emitEvent(taskId, "editing_files", `Writing ${f.path}`, f.path);
-      }
-      await writeFiles(projectId, result.files, true);
-      diffSummary = computeBuildDiff(result.files);
-
-      report = result.report;
-      assistantSummary = result.assistantSummary;
-      nextVersionLabel = isMobileProject ? "Initial mobile build" : "Initial build";
-      filesToSmellScan = result.files;
-    } else {
-      await emitEvent(taskId, "reading_files", "Reading current project files…");
-      const existingFiles = await loadFiles(projectId);
-      await emitEvent(taskId, "reading_files", `Loaded ${existingFiles.length} existing file(s).`);
-
-      // Load unchanged-files hint from the last completed task for this project.
-      // These paths were declared untouched by the model in the prior refine turn and are
-      // passed to makeCompactManifest so they get a path-only stub instead of a full content
-      // block, reducing the token count of the file manifest sent to the model.
-      let unchangedFilesHint: string[] = [];
-      try {
-        const [lastTask] = await db
-          .select({ report: agentTasksTable.report })
-          .from(agentTasksTable)
-          .where(
-            and(eq(agentTasksTable.projectId, projectId), eq(agentTasksTable.status, "completed")),
-          )
-          .orderBy(desc(agentTasksTable.completedAt))
-          .limit(1);
-        unchangedFilesHint = lastTask?.report?.filesUnchanged ?? [];
-      } catch (err) {
-        logger.warn({ err, taskId }, "Failed to load prior unchangedFiles hint (non-fatal)");
-      }
-
-      if (unchangedFilesHint.length > 0) {
-        logger.info(
-          { taskId, projectId, count: unchangedFilesHint.length },
-          "Applying unchangedFiles hint to file manifest — skipping full content for these paths",
-        );
-      }
-
-      await emitEvent(
-        taskId,
-        "generating_code",
-        isMobileProject
-          ? "Applying change to Expo project with AI…"
-          : "Applying change request with AI…",
-      );
-
-      let refineResult = isMobileProject
-        ? await runMobileRefinePipeline({
+        // Auto-escalation: if correction pass failed, retry at next model tier
+        const buildEscalationMode = ESCALATION_MAP[agentMode];
+        if (result.correctionFailed && buildEscalationMode && !isMobileProject) {
+          logger.info(
+            { taskId, projectId, from: agentMode, to: buildEscalationMode },
+            "Auto-escalating build to higher model tier",
+          );
+          await emitEvent(
+            taskId,
+            "generating_code",
+            `Validation failed — escalating to ${buildEscalationMode} mode and retrying…`,
+          );
+          const escalatedResult = await runBuildPipeline({
             projectName: project.name,
             projectKind: project.kind,
             userPrompt,
-            agentMode,
-            existingFiles,
+            agentMode: buildEscalationMode,
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
-            activeModuleIds,
-            configuredSecretNames,
-            onEvent: async (type, message) => emitEvent(taskId, type, message),
-          })
-        : await runRefinePipeline({
+          });
+          wasEscalated = true;
+          agentMode = buildEscalationMode;
+          result = escalatedResult;
+          analyticsCorrectionPasses += escalatedResult.correctionPasses;
+          analyticsErrorCategory = escalatedResult.primaryErrorCategory ?? analyticsErrorCategory;
+          result.report.warnings = [
+            `Auto-escalated from ${input.agentMode} to ${buildEscalationMode} mode after validation failure`,
+            ...(result.report.warnings ?? []),
+          ];
+        }
+
+        // Secrets scan — redact before persisting
+        const { files: sanitisedFiles, findings: secretFindings } = scanForSecrets(result.files);
+        if (secretFindings.length > 0) {
+          logger.warn(
+            { taskId, projectId, secretFindings },
+            "Secrets detected and redacted in generated build files",
+          );
+          result.report.warnings = [
+            ...(result.report.warnings ?? []),
+            ...secretFindings.map(
+              (f) => `Secrets Scan: ${f.category} detected in ${f.file} and redacted before saving`,
+            ),
+          ];
+        }
+        result = { ...result, files: sanitisedFiles };
+
+        // Cross-file consistency check
+        const buildConsistencyWarnings = validateCrossFileConsistency(sanitisedFiles);
+        if (buildConsistencyWarnings.length > 0) {
+          result.report.warnings = [...(result.report.warnings ?? []), ...buildConsistencyWarnings];
+        }
+
+        await emitEvent(
+          taskId,
+          "generating_code",
+          `Blueprint created: ${result.files.length} file(s) planned.`,
+        );
+
+        await emitEvent(taskId, "editing_files", "Writing generated files…");
+        for (const f of result.files) {
+          await emitEvent(taskId, "editing_files", `Writing ${f.path}`, f.path);
+        }
+        await writeFiles(projectId, result.files, true);
+        diffSummary = computeBuildDiff(result.files);
+
+        report = result.report;
+        assistantSummary = result.assistantSummary;
+        nextVersionLabel = isMobileProject ? "Initial mobile build" : "Initial build";
+        filesToSmellScan = result.files;
+      } else {
+        await emitEvent(taskId, "reading_files", "Reading current project files…");
+        const existingFiles = await loadFiles(projectId);
+        await emitEvent(
+          taskId,
+          "reading_files",
+          `Loaded ${existingFiles.length} existing file(s).`,
+        );
+
+        // Load unchanged-files hint from the last completed task for this project.
+        // These paths were declared untouched by the model in the prior refine turn and are
+        // passed to makeCompactManifest so they get a path-only stub instead of a full content
+        // block, reducing the token count of the file manifest sent to the model.
+        let unchangedFilesHint: string[] = [];
+        try {
+          const [lastTask] = await db
+            .select({ report: agentTasksTable.report })
+            .from(agentTasksTable)
+            .where(
+              and(
+                eq(agentTasksTable.projectId, projectId),
+                eq(agentTasksTable.status, "completed"),
+              ),
+            )
+            .orderBy(desc(agentTasksTable.completedAt))
+            .limit(1);
+          unchangedFilesHint = lastTask?.report?.filesUnchanged ?? [];
+        } catch (err) {
+          logger.warn({ err, taskId }, "Failed to load prior unchangedFiles hint (non-fatal)");
+        }
+
+        if (unchangedFilesHint.length > 0) {
+          logger.info(
+            { taskId, projectId, count: unchangedFilesHint.length },
+            "Applying unchangedFiles hint to file manifest — skipping full content for these paths",
+          );
+        }
+
+        await emitEvent(
+          taskId,
+          "generating_code",
+          isMobileProject
+            ? "Applying change to Expo project with AI…"
+            : "Applying change request with AI…",
+        );
+
+        let refineResult = isMobileProject
+          ? await runMobileRefinePipeline({
+              projectName: project.name,
+              projectKind: project.kind,
+              userPrompt,
+              agentMode,
+              existingFiles,
+              conversationHistory,
+              knowledgeContext: knowledgeContext || undefined,
+              activeModuleIds,
+              configuredSecretNames,
+              onEvent: async (type, message) => emitEvent(taskId, type, message),
+            })
+          : await runRefinePipeline({
+              projectName: project.name,
+              projectKind: project.kind,
+              userPrompt,
+              agentMode,
+              existingFiles,
+              conversationHistory,
+              knowledgeContext: knowledgeContext || undefined,
+              unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+            });
+
+        analyticsCorrectionPasses = refineResult.correctionPasses;
+        analyticsErrorCategory = refineResult.primaryErrorCategory;
+
+        // Auto-escalation: if correction pass failed, retry at next model tier
+        const refineEscalationMode = ESCALATION_MAP[agentMode];
+        if (refineResult.correctionFailed && refineEscalationMode && !isMobileProject) {
+          logger.info(
+            { taskId, projectId, from: agentMode, to: refineEscalationMode },
+            "Auto-escalating refine to higher model tier",
+          );
+          await emitEvent(
+            taskId,
+            "generating_code",
+            `Validation failed — escalating to ${refineEscalationMode} mode and retrying…`,
+          );
+          const escalatedResult = await runRefinePipeline({
             projectName: project.name,
             projectKind: project.kind,
             userPrompt,
-            agentMode,
+            agentMode: refineEscalationMode,
             existingFiles,
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
             unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
           });
+          wasEscalated = true;
+          agentMode = refineEscalationMode;
+          refineResult = escalatedResult;
+          analyticsCorrectionPasses += escalatedResult.correctionPasses;
+          analyticsErrorCategory = escalatedResult.primaryErrorCategory ?? analyticsErrorCategory;
+          refineResult.report.warnings = [
+            `Auto-escalated from ${input.agentMode} to ${refineEscalationMode} mode after validation failure`,
+            ...(refineResult.report.warnings ?? []),
+          ];
+        }
 
-      analyticsCorrectionPasses = refineResult.correctionPasses;
-      analyticsErrorCategory = refineResult.primaryErrorCategory;
-
-      // Auto-escalation: if correction pass failed, retry at next model tier
-      const refineEscalationMode = ESCALATION_MAP[agentMode];
-      if (refineResult.correctionFailed && refineEscalationMode && !isMobileProject) {
-        logger.info(
-          { taskId, projectId, from: agentMode, to: refineEscalationMode },
-          "Auto-escalating refine to higher model tier",
+        // Secrets scan — redact before persisting
+        const { files: sanitisedChangedFiles, findings: refineSecretFindings } = scanForSecrets(
+          refineResult.changedFiles,
         );
+        if (refineSecretFindings.length > 0) {
+          logger.warn(
+            { taskId, projectId, refineSecretFindings },
+            "Secrets detected and redacted in refined files",
+          );
+          refineResult.report.warnings = [
+            ...(refineResult.report.warnings ?? []),
+            ...refineSecretFindings.map(
+              (f) => `Secrets Scan: ${f.category} detected in ${f.file} and redacted before saving`,
+            ),
+          ];
+        }
+        refineResult = { ...refineResult, changedFiles: sanitisedChangedFiles };
+
+        // Cross-file consistency check on the merged project file set
+        const mergedFilesForConsistency = [...existingFiles];
+        for (const cf of refineResult.changedFiles) {
+          const idx = mergedFilesForConsistency.findIndex((f) => f.path === cf.path);
+          if (idx >= 0) mergedFilesForConsistency[idx] = cf;
+          else mergedFilesForConsistency.push(cf);
+        }
+        const refineConsistencyWarnings = validateCrossFileConsistency(mergedFilesForConsistency);
+        if (refineConsistencyWarnings.length > 0) {
+          refineResult.report.warnings = [
+            ...(refineResult.report.warnings ?? []),
+            ...refineConsistencyWarnings,
+          ];
+        }
+
+        const result = refineResult;
+
         await emitEvent(
           taskId,
-          "generating_code",
-          `Validation failed — escalating to ${refineEscalationMode} mode and retrying…`,
+          "editing_files",
+          `AI returned ${result.changedFiles.length} changed file(s).`,
         );
-        const escalatedResult = await runRefinePipeline({
-          projectName: project.name,
-          projectKind: project.kind,
-          userPrompt,
-          agentMode: refineEscalationMode,
-          existingFiles,
-          conversationHistory,
-          knowledgeContext: knowledgeContext || undefined,
-          unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-        });
-        wasEscalated = true;
-        agentMode = refineEscalationMode;
-        refineResult = escalatedResult;
-        analyticsCorrectionPasses += escalatedResult.correctionPasses;
-        analyticsErrorCategory = escalatedResult.primaryErrorCategory ?? analyticsErrorCategory;
-        refineResult.report.warnings = [
-          `Auto-escalated from ${input.agentMode} to ${refineEscalationMode} mode after validation failure`,
-          ...(refineResult.report.warnings ?? []),
-        ];
-      }
 
-      // Secrets scan — redact before persisting
-      const { files: sanitisedChangedFiles, findings: refineSecretFindings } = scanForSecrets(
-        refineResult.changedFiles,
-      );
-      if (refineSecretFindings.length > 0) {
-        logger.warn(
-          { taskId, projectId, refineSecretFindings },
-          "Secrets detected and redacted in refined files",
-        );
-        refineResult.report.warnings = [
-          ...(refineResult.report.warnings ?? []),
-          ...refineSecretFindings.map(
-            (f) => `Secrets Scan: ${f.category} detected in ${f.file} and redacted before saving`,
-          ),
-        ];
-      }
-      refineResult = { ...refineResult, changedFiles: sanitisedChangedFiles };
-
-      // Cross-file consistency check on the merged project file set
-      const mergedFilesForConsistency = [...existingFiles];
-      for (const cf of refineResult.changedFiles) {
-        const idx = mergedFilesForConsistency.findIndex((f) => f.path === cf.path);
-        if (idx >= 0) mergedFilesForConsistency[idx] = cf;
-        else mergedFilesForConsistency.push(cf);
-      }
-      const refineConsistencyWarnings = validateCrossFileConsistency(mergedFilesForConsistency);
-      if (refineConsistencyWarnings.length > 0) {
-        refineResult.report.warnings = [
-          ...(refineResult.report.warnings ?? []),
-          ...refineConsistencyWarnings,
-        ];
-      }
-
-      const result = refineResult;
-
-      await emitEvent(
-        taskId,
-        "editing_files",
-        `AI returned ${result.changedFiles.length} changed file(s).`,
-      );
-
-      if (result.changedFiles.length > 0) {
-        for (const f of result.changedFiles) {
-          await emitEvent(taskId, "editing_files", `Updating ${f.path}`, f.path);
-        }
-        await writeFiles(projectId, result.changedFiles, false);
-      }
-      if (result.removedPaths.length > 0) {
-        for (const p of result.removedPaths) {
-          await emitEvent(taskId, "editing_files", `Removing ${p}`, p);
-        }
-        await deleteFiles(projectId, result.removedPaths);
-      }
-      diffSummary = computeRefineDiff(existingFiles, result.changedFiles, result.removedPaths);
-
-      report = result.report;
-
-      // Surface unchanged-files count in the task report so the report card can display it.
-      // Also persists the list for the next refine turn's manifest pruning hint.
-      if (result.unchangedFiles.length > 0) {
-        report.filesUnchanged = result.unchangedFiles;
-        logger.info(
-          { taskId, projectId, count: result.unchangedFiles.length },
-          "Refine: skipped writeFiles for unchanged paths (already correct in DB)",
-        );
-      }
-
-      assistantSummary = result.assistantSummary;
-      nextVersionLabel = userPrompt.slice(0, 40) || "Refinement";
-      filesToSmellScan = result.changedFiles;
-    }
-
-    // Attach knowledge lessons that influenced this build
-    if (knowledgeApplied.length > 0) {
-      report.knowledgeApplied = knowledgeApplied;
-    }
-
-    await emitEvent(taskId, "saving_version", "Saving version rollback point…");
-    const snapshot = await snapshotFilesForVersion(projectId);
-
-    // Fetch the most recent plan snapshot to annotate this version
-    const planSnapshot = await loadLatestPlanSnapshot(projectId);
-
-    // Build changelog entry: combine action context with diff summary
-    const changelogLines: string[] = [];
-    changelogLines.push(`**${nextVersionLabel}**`);
-    if (kind === "build") {
-      changelogLines.push(`Initial build — ${(report.filesCreated ?? []).length} file(s) generated.`);
-    } else if (diffSummary) {
-      if (diffSummary.filesAdded.length > 0) changelogLines.push(`Added: ${diffSummary.filesAdded.join(", ")}`);
-      if (diffSummary.filesModified.length > 0) changelogLines.push(`Modified: ${diffSummary.filesModified.join(", ")}`);
-      if (diffSummary.filesRemoved.length > 0) changelogLines.push(`Removed: ${diffSummary.filesRemoved.join(", ")}`);
-    }
-    if (assistantSummary) changelogLines.push(assistantSummary.slice(0, 180));
-    const changelogEntry = changelogLines.join("\n");
-
-    const [version] = await db
-      .insert(projectVersionsTable)
-      .values({
-        projectId,
-        label: nextVersionLabel,
-        note: assistantSummary.slice(0, 200),
-        changelogEntry: changelogEntry.slice(0, 500),
-        filesSnapshot: snapshot,
-        planSnapshot: planSnapshot ?? undefined,
-      })
-      .returning();
-    report.versionId = version?.id ?? null;
-
-    await emitEvent(taskId, "updating_preview", "Refreshing preview…");
-
-    await db
-      .update(agentTasksTable)
-      .set({
-        status: "completed",
-        result: assistantSummary,
-        report,
-        completedAt: sql`now()`,
-      })
-      .where(eq(agentTasksTable.id, taskId));
-
-    // Fire-and-forget code-smell scan — runs after task is already "completed"
-    // so it never delays pipeline completion or the user-facing response.
-    if (filesToSmellScan.length > 0) {
-      setImmediate(() => {
-        try {
-          const smells = scanCodeSmells(filesToSmellScan);
-          if (smells.length > 0) {
-            db.update(agentTasksTable)
-              .set({ report: { ...report, codeSmells: smells } })
-              .where(eq(agentTasksTable.id, taskId))
-              .catch((err: unknown) =>
-                logger.warn(
-                  { err, taskId },
-                  "Failed to persist code-smell scan results (non-fatal)",
-                ),
-              );
+        if (result.changedFiles.length > 0) {
+          for (const f of result.changedFiles) {
+            await emitEvent(taskId, "editing_files", `Updating ${f.path}`, f.path);
           }
-        } catch (err) {
-          logger.warn({ err, taskId }, "Code-smell scan error (non-fatal)");
+          await writeFiles(projectId, result.changedFiles, false);
         }
-      });
-    }
+        if (result.removedPaths.length > 0) {
+          for (const p of result.removedPaths) {
+            await emitEvent(taskId, "editing_files", `Removing ${p}`, p);
+          }
+          await deleteFiles(projectId, result.removedPaths);
+        }
+        diffSummary = computeRefineDiff(existingFiles, result.changedFiles, result.removedPaths);
 
-    // Fire-and-forget quality audit — accessibility, SEO, performance, CDN vulnerability.
-    // Runs asynchronously after task completion so it never delays the pipeline.
-    // Results are stored on the project_versions row AND merged into the task report
-    // so that audit findings surface in the chat report card.
-    // We read the latest task report from DB before merging to avoid clobbering
-    // codeSmells (or any other field) written by the concurrent code-smell setImmediate.
-    if (version && filesToSmellScan.length > 0) {
-      const versionIdForAudit = version.id;
-      const taskIdForAudit = taskId;
-      setImmediate(() => {
-        void (async () => {
+        report = result.report;
+
+        // Surface unchanged-files count in the task report so the report card can display it.
+        // Also persists the list for the next refine turn's manifest pruning hint.
+        if (result.unchangedFiles.length > 0) {
+          report.filesUnchanged = result.unchangedFiles;
+          logger.info(
+            { taskId, projectId, count: result.unchangedFiles.length },
+            "Refine: skipped writeFiles for unchanged paths (already correct in DB)",
+          );
+        }
+
+        assistantSummary = result.assistantSummary;
+        nextVersionLabel = userPrompt.slice(0, 40) || "Refinement";
+        filesToSmellScan = result.changedFiles;
+      }
+
+      // Attach knowledge lessons that influenced this build
+      if (knowledgeApplied.length > 0) {
+        report.knowledgeApplied = knowledgeApplied;
+      }
+
+      await emitEvent(taskId, "saving_version", "Saving version rollback point…");
+      const snapshot = await snapshotFilesForVersion(projectId);
+
+      // Fetch the most recent plan snapshot to annotate this version
+      const planSnapshot = await loadLatestPlanSnapshot(projectId);
+
+      // Build changelog entry: combine action context with diff summary
+      const changelogLines: string[] = [];
+      changelogLines.push(`**${nextVersionLabel}**`);
+      if (kind === "build") {
+        changelogLines.push(
+          `Initial build — ${(report.filesCreated ?? []).length} file(s) generated.`,
+        );
+      } else if (diffSummary) {
+        if (diffSummary.filesAdded.length > 0)
+          changelogLines.push(`Added: ${diffSummary.filesAdded.join(", ")}`);
+        if (diffSummary.filesModified.length > 0)
+          changelogLines.push(`Modified: ${diffSummary.filesModified.join(", ")}`);
+        if (diffSummary.filesRemoved.length > 0)
+          changelogLines.push(`Removed: ${diffSummary.filesRemoved.join(", ")}`);
+      }
+      if (assistantSummary) changelogLines.push(assistantSummary.slice(0, 180));
+      const changelogEntry = changelogLines.join("\n");
+
+      const [version] = await db
+        .insert(projectVersionsTable)
+        .values({
+          projectId,
+          label: nextVersionLabel,
+          note: assistantSummary.slice(0, 200),
+          changelogEntry: changelogEntry.slice(0, 500),
+          filesSnapshot: snapshot,
+          planSnapshot: planSnapshot ?? undefined,
+        })
+        .returning();
+      report.versionId = version?.id ?? null;
+
+      await emitEvent(taskId, "updating_preview", "Refreshing preview…");
+
+      await db
+        .update(agentTasksTable)
+        .set({
+          status: "completed",
+          result: assistantSummary,
+          report,
+          completedAt: sql`now()`,
+        })
+        .where(eq(agentTasksTable.id, taskId));
+
+      // Fire-and-forget code-smell scan — runs after task is already "completed"
+      // so it never delays pipeline completion or the user-facing response.
+      if (filesToSmellScan.length > 0) {
+        setImmediate(() => {
           try {
-            const allProjectFiles = await db
-              .select()
-              .from(projectFilesTable)
-              .where(eq(projectFilesTable.projectId, projectId));
-            const auditFiles = allProjectFiles.map((f) => ({
-              path: f.path,
-              content: f.content,
-              mimeType: f.mimeType,
-            }));
-            const auditReport = runAudit(auditFiles.length > 0 ? auditFiles : filesToSmellScan);
-
-            // Persist on the version row so GET /api/projects/:id/audit can fetch it
-            await db
-              .update(projectVersionsTable)
-              .set({ auditReport })
-              .where(eq(projectVersionsTable.id, versionIdForAudit));
-
-            // Read the latest report from DB before merging so we don't overwrite
-            // fields (e.g. codeSmells) written by the concurrent code-smell scan.
-            const [latestTask] = await db
-              .select({ report: agentTasksTable.report })
-              .from(agentTasksTable)
-              .where(eq(agentTasksTable.id, taskIdForAudit))
-              .limit(1);
-            const latestReport = latestTask?.report ?? report;
-            await db
-              .update(agentTasksTable)
-              .set({ report: { ...latestReport, auditReport } })
-              .where(eq(agentTasksTable.id, taskIdForAudit));
-
-            logger.info(
-              { projectId, versionId: versionIdForAudit, findings: auditReport.findings.length },
-              "Quality audit complete",
-            );
+            const smells = scanCodeSmells(filesToSmellScan);
+            if (smells.length > 0) {
+              db.update(agentTasksTable)
+                .set({ report: { ...report, codeSmells: smells } })
+                .where(eq(agentTasksTable.id, taskId))
+                .catch((err: unknown) =>
+                  logger.warn(
+                    { err, taskId },
+                    "Failed to persist code-smell scan results (non-fatal)",
+                  ),
+                );
+            }
           } catch (err) {
-            logger.warn(
-              { err, projectId, versionId: versionIdForAudit },
-              "Quality audit failed (non-fatal)",
-            );
+            logger.warn({ err, taskId }, "Code-smell scan error (non-fatal)");
           }
-        })();
-      });
-    }
+        });
+      }
 
-    // Update project status and persist the latest summary as the project-level description
-    await db
-      .update(projectsTable)
-      .set({
-        status: "testing",
-        lastTaskSummary: assistantSummary.slice(0, 140),
-        summary: assistantSummary,
-        updatedAt: sql`now()`,
-      })
-      .where(eq(projectsTable.id, projectId));
+      // Fire-and-forget quality audit — accessibility, SEO, performance, CDN vulnerability.
+      // Runs asynchronously after task completion so it never delays the pipeline.
+      // Results are stored on the project_versions row AND merged into the task report
+      // so that audit findings surface in the chat report card.
+      // We read the latest task report from DB before merging to avoid clobbering
+      // codeSmells (or any other field) written by the concurrent code-smell setImmediate.
+      if (version && filesToSmellScan.length > 0) {
+        const versionIdForAudit = version.id;
+        const taskIdForAudit = taskId;
+        setImmediate(() => {
+          void (async () => {
+            try {
+              const allProjectFiles = await db
+                .select()
+                .from(projectFilesTable)
+                .where(eq(projectFilesTable.projectId, projectId));
+              const auditFiles = allProjectFiles.map((f) => ({
+                path: f.path,
+                content: f.content,
+                mimeType: f.mimeType,
+              }));
+              const auditReport = runAudit(auditFiles.length > 0 ? auditFiles : filesToSmellScan);
 
-    // Extract the page map BEFORE emitting "completed" so the
-    // "page_map_updated" event is guaranteed to precede the terminal event.
-    // This eliminates the race where event consumers stop listening on
-    // "completed" and never see the subsequent "page_map_updated".
-    try {
-      await extractPageMap(projectId);
-      await emitEvent(taskId, "page_map_updated", "Page map updated.");
-    } catch (err) {
-      logger.warn({ err, projectId }, "Page map extraction failed (non-fatal)");
-    }
+              // Persist on the version row so GET /api/projects/:id/audit can fetch it
+              await db
+                .update(projectVersionsTable)
+                .set({ auditReport })
+                .where(eq(projectVersionsTable.id, versionIdForAudit));
 
-    await emitEvent(taskId, "completed", "Task completed.");
+              // Read the latest report from DB before merging so we don't overwrite
+              // fields (e.g. codeSmells) written by the concurrent code-smell scan.
+              const [latestTask] = await db
+                .select({ report: agentTasksTable.report })
+                .from(agentTasksTable)
+                .where(eq(agentTasksTable.id, taskIdForAudit))
+                .limit(1);
+              const latestReport = latestTask?.report ?? report;
+              await db
+                .update(agentTasksTable)
+                .set({ report: { ...latestReport, auditReport } })
+                .where(eq(agentTasksTable.id, taskIdForAudit));
 
-    // Drain batch tasks, then any orphaned project-level queued tasks
-    void drainNextBatchTask(taskId).catch((err) =>
-      logger.warn({ err, taskId }, "Failed to drain next batch task"),
-    );
-    void drainNextProjectTask(projectId).catch((err) =>
-      logger.warn({ err, projectId }, "Failed to drain next project task"),
-    );
+              logger.info(
+                { projectId, versionId: versionIdForAudit, findings: auditReport.findings.length },
+                "Quality audit complete",
+              );
+            } catch (err) {
+              logger.warn(
+                { err, projectId, versionId: versionIdForAudit },
+                "Quality audit failed (non-fatal)",
+              );
+            }
+          })();
+        });
+      }
 
-    // Generate post-build suggestions in the background (non-blocking)
-    setImmediate(() => {
-      void generatePostBuildSuggestions(
-        projectId,
-        taskId,
-        project.name,
-        project.kind,
-        userPrompt,
-        assistantSummary,
-        snapshot.map((f) => f.path),
-        knowledgeContext,
-      ).catch((err) =>
-        logger.warn({ err, taskId }, "Background suggestion generation failed"),
+      // Update project status and persist the latest summary as the project-level description
+      await db
+        .update(projectsTable)
+        .set({
+          status: "testing",
+          lastTaskSummary: assistantSummary.slice(0, 140),
+          summary: assistantSummary,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(projectsTable.id, projectId));
+
+      // Extract the page map BEFORE emitting "completed" so the
+      // "page_map_updated" event is guaranteed to precede the terminal event.
+      // This eliminates the race where event consumers stop listening on
+      // "completed" and never see the subsequent "page_map_updated".
+      try {
+        await extractPageMap(projectId);
+        await emitEvent(taskId, "page_map_updated", "Page map updated.");
+      } catch (err) {
+        logger.warn({ err, projectId }, "Page map extraction failed (non-fatal)");
+      }
+
+      await emitEvent(taskId, "completed", "Task completed.");
+
+      // Drain batch tasks, then any orphaned project-level queued tasks
+      void drainNextBatchTask(taskId).catch((err) =>
+        logger.warn({ err, taskId }, "Failed to drain next batch task"),
       );
-    });
+      void drainNextProjectTask(projectId).catch((err) =>
+        logger.warn({ err, projectId }, "Failed to drain next project task"),
+      );
 
-    // --- Deduct credits after a successful AI build/refine ---
-    if (project.ownerId) {
-      void deductCredits(project.ownerId, creditCost, {
-        type: kind,
-        description: `${kind === "build" ? "Build" : "Refine"} (${agentMode}) — project ${projectId}`,
-        projectId,
-      }).catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
-    }
+      // Generate post-build suggestions in the background (non-blocking)
+      setImmediate(() => {
+        void generatePostBuildSuggestions(
+          projectId,
+          taskId,
+          project.name,
+          project.kind,
+          userPrompt,
+          assistantSummary,
+          snapshot.map((f) => f.path),
+          knowledgeContext,
+        ).catch((err) => logger.warn({ err, taskId }, "Background suggestion generation failed"));
+      });
 
-    // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
-    void maybeEscalateWarnings(projectId, report.warnings ?? []);
-    const nativeFeaturesNote =
-      report.nativeFeatures && report.nativeFeatures.length > 0
-        ? ` Native features used: ${report.nativeFeatures.join(", ")} — these require a real device and cannot be previewed in the web iframe.`
-        : "";
-    void writeKnowledge({
-      title: `${kind === "build" ? "Build" : "Refinement"} completed: "${userPrompt.slice(0, 60)}"`,
-      content: `${assistantSummary.slice(0, 400)} — Files created: ${report.filesCreated.length}, changed: ${report.filesChanged.length}, removed: ${report.filesRemoved.length}. Warnings: ${report.warnings?.length ?? 0}.${nativeFeaturesNote}`,
-      type: kind,
-      category: kind === "build" ? "build" : "refinement",
-      severity: (report.warnings?.length ?? 0) > 0 ? "warning" : "info",
-      projectId,
-      userId: project.ownerId,
-      relatedTaskId: taskId,
-      relatedVersionId: version?.id,
-      tags: [
-        ...(report.integrationsNeeded?.map((i) => i.name) ?? []),
-        ...(report.nativeFeatures ?? []),
-      ],
-      diffSummary,
-    });
+      // --- Deduct credits after a successful AI build/refine ---
+      if (project.ownerId) {
+        void deductCredits(project.ownerId, creditCost, {
+          type: kind,
+          description: `${kind === "build" ? "Build" : "Refine"} (${agentMode}) — project ${projectId}`,
+          projectId,
+        }).catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
+      }
 
-    // Mobile-specific: write Knowledge Vault entries capturing which modules were wired
-    if (isMobileProject && report.modulesWired && report.modulesWired.length > 0) {
-      const moduleNames = report.modulesWired.map((m) => m.name).join(", ");
-      const secretsConsumed = [...new Set(report.modulesWired.flatMap((m) => m.secretsConsumed))];
+      // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
+      void maybeEscalateWarnings(projectId, report.warnings ?? []);
+      const nativeFeaturesNote =
+        report.nativeFeatures && report.nativeFeatures.length > 0
+          ? ` Native features used: ${report.nativeFeatures.join(", ")} — these require a real device and cannot be previewed in the web iframe.`
+          : "";
       void writeKnowledge({
-        title: `Mobile modules wired: ${moduleNames.slice(0, 60)}`,
-        content: `${kind === "build" ? "Build" : "Refine"} for "${userPrompt.slice(0, 80)}" wired ${report.modulesWired.length} power module(s): ${moduleNames}. Secrets consumed: ${secretsConsumed.length > 0 ? secretsConsumed.join(", ") : "none"}. Warnings: ${report.warnings?.length ?? 0}.`,
+        title: `${kind === "build" ? "Build" : "Refinement"} completed: "${userPrompt.slice(0, 60)}"`,
+        content: `${assistantSummary.slice(0, 400)} — Files created: ${report.filesCreated.length}, changed: ${report.filesChanged.length}, removed: ${report.filesRemoved.length}. Warnings: ${report.warnings?.length ?? 0}.${nativeFeaturesNote}`,
         type: kind,
-        category: "mobile_module",
-        severity: "info",
+        category: kind === "build" ? "build" : "refinement",
+        severity: (report.warnings?.length ?? 0) > 0 ? "warning" : "info",
         projectId,
         userId: project.ownerId,
         relatedTaskId: taskId,
         relatedVersionId: version?.id,
-        tags: [...report.modulesWired.map((m) => m.id), "mobile", "expo"],
+        tags: [
+          ...(report.integrationsNeeded?.map((i) => i.name) ?? []),
+          ...(report.nativeFeatures ?? []),
+        ],
+        diffSummary,
       });
-    }
 
-    // Append a system message so the chat shows the report was produced
-    const batchMeta = queueBatchId
-      ? { queueBatchId, queueIndex: queueIndex ?? null, queueTotalCount: queueTotalCount ?? null }
-      : {};
-    await db.insert(chatMessagesTable).values({
-      projectId,
-      role: "system",
-      content: assistantSummary,
-      agentMode,
-      planMode: false,
-      plan: { kind: "report", report, taskId, ...batchMeta } as unknown as Record<string, unknown>,
-    });
-    void db
-      .insert(buildAnalyticsTable)
-      .values({
-        taskId,
-        projectId,
-        userId: project.ownerId ?? null,
-        model: MODEL_FOR_MODE[agentMode],
-        agentMode,
-        kind,
-        durationMs: Date.now() - jobStartTime,
-        correctionPasses: analyticsCorrectionPasses,
-        escalated: wasEscalated,
-        outcome: "success" as const,
-        primaryErrorCategory: analyticsErrorCategory,
-      })
-      .catch((err) => logger.warn({ err, taskId }, "Failed to record build analytics (non-fatal)"));
-  } catch (err) {
-    logger.error({ err, taskId, projectId }, "Builder job failed");
-    const message = err instanceof Error ? err.message : "Unknown builder error";
-    await emitEvent(taskId, "failed", message);
+      // Mobile-specific: write Knowledge Vault entries capturing which modules were wired
+      if (isMobileProject && report.modulesWired && report.modulesWired.length > 0) {
+        const moduleNames = report.modulesWired.map((m) => m.name).join(", ");
+        const secretsConsumed = [...new Set(report.modulesWired.flatMap((m) => m.secretsConsumed))];
+        void writeKnowledge({
+          title: `Mobile modules wired: ${moduleNames.slice(0, 60)}`,
+          content: `${kind === "build" ? "Build" : "Refine"} for "${userPrompt.slice(0, 80)}" wired ${report.modulesWired.length} power module(s): ${moduleNames}. Secrets consumed: ${secretsConsumed.length > 0 ? secretsConsumed.join(", ") : "none"}. Warnings: ${report.warnings?.length ?? 0}.`,
+          type: kind,
+          category: "mobile_module",
+          severity: "info",
+          projectId,
+          userId: project.ownerId,
+          relatedTaskId: taskId,
+          relatedVersionId: version?.id,
+          tags: [...report.modulesWired.map((m) => m.id), "mobile", "expo"],
+        });
+      }
 
-    // Generate specific fix suggestions via AI (parallel with DB writes)
-    const [suggestions] = await Promise.all([
-      generateFixSuggestions(userPrompt, message),
-      db
-        .update(agentTasksTable)
-        .set({ status: "failed", result: message, completedAt: sql`now()` })
-        .where(eq(agentTasksTable.id, taskId)),
-      db
-        .update(projectsTable)
-        .set({ status: "failed", updatedAt: sql`now()` })
-        .where(eq(projectsTable.id, projectId)),
-    ]);
-
-    // Store fix suggestions on the task record
-    await db
-      .update(agentTasksTable)
-      .set({
-        report: {
-          userRequest: userPrompt,
-          filesCreated: [],
-          filesChanged: [],
-          filesRemoved: [],
-          previewUpdated: false,
-          warnings: [],
-          suggestions,
-          integrationsNeeded: [],
-        },
-      })
-      .where(eq(agentTasksTable.id, taskId));
-
-    // Record build analytics for the failed job (best-effort, non-fatal)
-    void db
-      .insert(buildAnalyticsTable)
-      .values({
-        taskId,
-        projectId,
-        userId: project?.ownerId ?? null,
-        model: MODEL_FOR_MODE[agentMode],
-        agentMode,
-        kind,
-        durationMs: Date.now() - jobStartTime,
-        correctionPasses: analyticsCorrectionPasses,
-        escalated: wasEscalated,
-        outcome: "failed",
-        primaryErrorCategory: analyticsErrorCategory,
-      })
-      .catch((analyticsErr) =>
-        logger.warn({ analyticsErr, taskId }, "Failed to record failed build analytics"),
-      );
-
-    // Auto-write a diagnostic lesson to the Knowledge Vault
-    void autoWriteFailureLesson(userPrompt, message, projectId, project.ownerId);
-
-    // Cancel remaining queued tasks in the same batch
-    void cancelRemainingBatchTasks(taskId).catch((err) =>
-      logger.warn({ err, taskId }, "Failed to cancel remaining batch tasks"),
-    );
-
-    // Generate post-build suggestions even on failure — gives the user recovery ideas
-    setImmediate(() => {
-      void generatePostBuildSuggestions(
-        projectId,
-        taskId,
-        project.name,
-        project.kind,
-        userPrompt,
-        `Build failed: ${message.slice(0, 200)}`,
-        [],
-        "",
-      ).catch((err) => logger.warn({ err, taskId }, "Failure-path suggestion generation failed"));
-    });
-
-    // Post a rich error message with suggestions into the chat
-    try {
-      const errBatchMeta = queueBatchId
+      // Append a system message so the chat shows the report was produced
+      const batchMeta = queueBatchId
         ? { queueBatchId, queueIndex: queueIndex ?? null, queueTotalCount: queueTotalCount ?? null }
         : {};
       await db.insert(chatMessagesTable).values({
         projectId,
-        role: "assistant",
-        content: `Build failed: ${message}`,
+        role: "system",
+        content: assistantSummary,
         agentMode,
         planMode: false,
-        plan: { kind: "error", message, suggestions, ...errBatchMeta } as unknown as Record<
+        plan: { kind: "report", report, taskId, ...batchMeta } as unknown as Record<
           string,
           unknown
         >,
       });
-    } catch {
-      // best-effort
+      void db
+        .insert(buildAnalyticsTable)
+        .values({
+          taskId,
+          projectId,
+          userId: project.ownerId ?? null,
+          model: MODEL_FOR_MODE[agentMode],
+          agentMode,
+          kind,
+          durationMs: Date.now() - jobStartTime,
+          correctionPasses: analyticsCorrectionPasses,
+          escalated: wasEscalated,
+          outcome: "success" as const,
+          primaryErrorCategory: analyticsErrorCategory,
+        })
+        .catch((err) =>
+          logger.warn({ err, taskId }, "Failed to record build analytics (non-fatal)"),
+        );
+    } catch (err) {
+      logger.error({ err, taskId, projectId }, "Builder job failed");
+      const message = err instanceof Error ? err.message : "Unknown builder error";
+      await emitEvent(taskId, "failed", message);
+
+      // Generate specific fix suggestions via AI (parallel with DB writes)
+      const [suggestions] = await Promise.all([
+        generateFixSuggestions(userPrompt, message),
+        db
+          .update(agentTasksTable)
+          .set({ status: "failed", result: message, completedAt: sql`now()` })
+          .where(eq(agentTasksTable.id, taskId)),
+        db
+          .update(projectsTable)
+          .set({ status: "failed", updatedAt: sql`now()` })
+          .where(eq(projectsTable.id, projectId)),
+      ]);
+
+      // Store fix suggestions on the task record
+      await db
+        .update(agentTasksTable)
+        .set({
+          report: {
+            userRequest: userPrompt,
+            filesCreated: [],
+            filesChanged: [],
+            filesRemoved: [],
+            previewUpdated: false,
+            warnings: [],
+            suggestions,
+            integrationsNeeded: [],
+          },
+        })
+        .where(eq(agentTasksTable.id, taskId));
+
+      // Record build analytics for the failed job (best-effort, non-fatal)
+      void db
+        .insert(buildAnalyticsTable)
+        .values({
+          taskId,
+          projectId,
+          userId: project?.ownerId ?? null,
+          model: MODEL_FOR_MODE[agentMode],
+          agentMode,
+          kind,
+          durationMs: Date.now() - jobStartTime,
+          correctionPasses: analyticsCorrectionPasses,
+          escalated: wasEscalated,
+          outcome: "failed",
+          primaryErrorCategory: analyticsErrorCategory,
+        })
+        .catch((analyticsErr) =>
+          logger.warn({ analyticsErr, taskId }, "Failed to record failed build analytics"),
+        );
+
+      // Auto-write a diagnostic lesson to the Knowledge Vault
+      void autoWriteFailureLesson(userPrompt, message, projectId, project.ownerId);
+
+      // Cancel remaining queued tasks in the same batch
+      void cancelRemainingBatchTasks(taskId).catch((err) =>
+        logger.warn({ err, taskId }, "Failed to cancel remaining batch tasks"),
+      );
+
+      // Generate post-build suggestions even on failure — gives the user recovery ideas
+      setImmediate(() => {
+        void generatePostBuildSuggestions(
+          projectId,
+          taskId,
+          project.name,
+          project.kind,
+          userPrompt,
+          `Build failed: ${message.slice(0, 200)}`,
+          [],
+          "",
+        ).catch((err) => logger.warn({ err, taskId }, "Failure-path suggestion generation failed"));
+      });
+
+      // Post a rich error message with suggestions into the chat
+      try {
+        const errBatchMeta = queueBatchId
+          ? {
+              queueBatchId,
+              queueIndex: queueIndex ?? null,
+              queueTotalCount: queueTotalCount ?? null,
+            }
+          : {};
+        await db.insert(chatMessagesTable).values({
+          projectId,
+          role: "assistant",
+          content: `Build failed: ${message}`,
+          agentMode,
+          planMode: false,
+          plan: { kind: "error", message, suggestions, ...errBatchMeta } as unknown as Record<
+            string,
+            unknown
+          >,
+        });
+      } catch {
+        // best-effort
+      }
     }
-  }
   } finally {
     // Always release the advisory lock and pool client, and clear the in-memory guard.
     if (lockAcquired) {

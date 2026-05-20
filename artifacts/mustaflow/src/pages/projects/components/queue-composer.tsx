@@ -101,8 +101,10 @@ export function QueueComposer({
     if (onPromptValueChange) onPromptValueChange("");
   }, [onPromptValueChange]);
 
-  const VARIANT_A_SUFFIX = "\n\n[VARIANT A — Design direction: clean, minimalist, light palette, generous whitespace, subtle typography]";
-  const VARIANT_B_SUFFIX = "\n\n[VARIANT B — Design direction: bold, rich, dark palette, vibrant accent colors, eye-catching visuals]";
+  const VARIANT_A_SUFFIX =
+    "\n\n[VARIANT A — Design direction: clean, minimalist, light palette, generous whitespace, subtle typography]";
+  const VARIANT_B_SUFFIX =
+    "\n\n[VARIANT B — Design direction: bold, rich, dark palette, vibrant accent colors, eye-catching visuals]";
 
   const handleSend = useCallback(async () => {
     const messages = rows.map((r) => r.text.trim()).filter(Boolean);
@@ -129,7 +131,8 @@ export function QueueComposer({
         if (onPromptValueChange) onPromptValueChange("");
         onBatchStarted(data.batchId, data.totalTasks);
       } catch (err) {
-        void err;
+        // eslint-disable-next-line no-console
+        console.error("Variant queue submission failed:", err);
       } finally {
         setIsSubmitting(false);
       }
@@ -166,7 +169,16 @@ export function QueueComposer({
     } finally {
       setIsSubmitting(false);
     }
-  }, [rows, agentMode, planMode, variantMode, projectId, onSingleSend, onBatchStarted, onPromptValueChange]);
+  }, [
+    rows,
+    agentMode,
+    planMode,
+    variantMode,
+    projectId,
+    onSingleSend,
+    onBatchStarted,
+    onPromptValueChange,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>, _rowId: string) => {

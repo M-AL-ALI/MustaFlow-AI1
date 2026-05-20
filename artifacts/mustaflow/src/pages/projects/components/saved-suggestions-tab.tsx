@@ -55,15 +55,11 @@ export function SavedSuggestionsTab({ projectId, onAccepted }: SavedSuggestionsT
     },
   );
 
-  const saved = (suggestions ?? []).filter(
-    (s: ProjectSuggestion) => s.status === "saved",
-  );
+  const saved = (suggestions ?? []).filter((s: ProjectSuggestion) => s.status === "saved");
 
   // Pending suggestions include output from background builds that never had a
   // foreground SuggestionChips panel attached to them.
-  const pending = (suggestions ?? []).filter(
-    (s: ProjectSuggestion) => s.status === "pending",
-  );
+  const pending = (suggestions ?? []).filter((s: ProjectSuggestion) => s.status === "pending");
 
   const accept = useAcceptSuggestion({
     mutation: {

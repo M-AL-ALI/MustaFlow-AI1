@@ -144,11 +144,15 @@ function FileSearchPanel({
         {!query && (
           <div className="px-3 py-6 text-center">
             <Search className="h-5 w-5 text-muted-foreground/30 mx-auto mb-2" />
-            <div className="text-[10px] text-muted-foreground">Type to search across all project files</div>
+            <div className="text-[10px] text-muted-foreground">
+              Type to search across all project files
+            </div>
           </div>
         )}
         {searched && results.length === 0 && query && (
-          <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">No matches found</div>
+          <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
+            No matches found
+          </div>
         )}
         {Object.entries(grouped).map(([file, hits]) => (
           <div key={file}>
@@ -215,8 +219,12 @@ function SnippetLibraryPanel({ onInsert }: { onInsert: (prompt: string) => void 
               >
                 <Layers className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-[11px] font-medium text-foreground truncate">{snippet.name}</div>
-                  <div className="text-[10px] text-muted-foreground truncate">{snippet.description}</div>
+                  <div className="text-[11px] font-medium text-foreground truncate">
+                    {snippet.name}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground truncate">
+                    {snippet.description}
+                  </div>
                 </div>
                 <ChevronRight
                   className={cn(
@@ -227,7 +235,9 @@ function SnippetLibraryPanel({ onInsert }: { onInsert: (prompt: string) => void 
               </button>
               {isOpen && (
                 <div className="px-3 pb-2 space-y-2">
-                  <p className="text-[10px] text-muted-foreground leading-relaxed">{snippet.prompt}</p>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    {snippet.prompt}
+                  </p>
                   <button
                     onClick={() => {
                       onInsert(snippet.prompt);
@@ -506,7 +516,9 @@ export function CodeEditorTab({
                 <div className="px-3 py-6 text-center">
                   <FileCode2 className="h-6 w-6 text-muted-foreground/30 mx-auto mb-2" />
                   <div className="text-[11px] text-muted-foreground">No files yet.</div>
-                  <div className="text-[10px] text-muted-foreground/60 mt-0.5">Build something first.</div>
+                  <div className="text-[10px] text-muted-foreground/60 mt-0.5">
+                    Build something first.
+                  </div>
                 </div>
               ) : (
                 files.map((file) => (
@@ -536,7 +548,9 @@ export function CodeEditorTab({
           <>
             <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2">
               <Search className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Search</span>
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Search
+              </span>
             </div>
             <div className="flex-1 min-h-0">
               <FileSearchPanel projectId={projectId} onFileSelect={switchToFile} />
@@ -548,7 +562,9 @@ export function CodeEditorTab({
           <>
             <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2">
               <Layers className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Snippets</span>
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Snippets
+              </span>
             </div>
             <div className="flex-1 min-h-0">
               <SnippetLibraryPanel
@@ -636,7 +652,9 @@ export function CodeEditorTab({
                 value={displayContent}
                 onChange={handleEditorChange}
                 theme="vs-dark"
-                onMount={(ed) => { editorRef.current = ed; }}
+                onMount={(ed) => {
+                  editorRef.current = ed;
+                }}
                 options={{
                   minimap: { enabled: false },
                   fontSize: 12,

@@ -83,8 +83,8 @@ function createLimiter(opts: {
 // This provides actual deferred execution — queued jobs do not start until
 // a real concurrent slot is available.
 
-const MAX_CONCURRENT = 3;   // simultaneous AI calls per IP before queuing kicks in
-const MAX_QUEUED     = 5;   // pending requests allowed per IP before hard 429
+const MAX_CONCURRENT = 3; // simultaneous AI calls per IP before queuing kicks in
+const MAX_QUEUED = 5; // pending requests allowed per IP before hard 429
 const QUEUE_TIMEOUT_MS = 60_000; // max wait in queue (ms) before 429
 
 interface PendingEntry {
@@ -124,7 +124,10 @@ function releaseSlot(key: string): void {
 }
 
 export const aiBuilderLimiter = (req: Request, res: Response, next: NextFunction): void => {
-  const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? req.socket.remoteAddress ?? "unknown";
+  const ip =
+    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
+    req.socket.remoteAddress ??
+    "unknown";
   const key = `ai_sem:${ip}`;
 
   let entry = semaphoreStore.get(key);
@@ -133,8 +136,8 @@ export const aiBuilderLimiter = (req: Request, res: Response, next: NextFunction
     semaphoreStore.set(key, entry);
   }
 
-  res.setHeader("X-AI-Active",  entry.active);
-  res.setHeader("X-AI-Queued",  entry.pending.length);
+  res.setHeader("X-AI-Active", entry.active);
+  res.setHeader("X-AI-Queued", entry.pending.length);
 
   if (entry.active < MAX_CONCURRENT) {
     // Slot available — proceed immediately.
@@ -158,8 +161,8 @@ export const aiBuilderLimiter = (req: Request, res: Response, next: NextFunction
   const position = entry.pending.length + 1;
   req.queuePosition = position;
 
-  res.setHeader("X-Queue-Position",      position);
-  res.setHeader("X-Estimated-Wait-Ms",   position * 20_000);
+  res.setHeader("X-Queue-Position", position);
+  res.setHeader("X-Estimated-Wait-Ms", position * 20_000);
 
   const timer = setTimeout(() => {
     const e = semaphoreStore.get(key);

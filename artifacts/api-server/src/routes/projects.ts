@@ -38,9 +38,7 @@ interface FileRow {
 }
 
 function scoreHtml(files: FileRow[]): number {
-  const htmlFiles = files.filter(
-    (f) => f.mimeType === "text/html" || f.path.endsWith(".html"),
-  );
+  const htmlFiles = files.filter((f) => f.mimeType === "text/html" || f.path.endsWith(".html"));
   if (htmlFiles.length === 0) {
     // Has non-HTML files — give partial credit for structure
     return files.length > 0 ? 20 : 0;
@@ -49,26 +47,26 @@ function scoreHtml(files: FileRow[]): number {
 
   // Accessibility (0-25)
   let accessibility = 0;
-  if (/<img[^>]+alt\s*=/.test(html))                             accessibility += 8;
-  if (/aria-[a-z]+/.test(html))                                  accessibility += 9;
+  if (/<img[^>]+alt\s*=/.test(html)) accessibility += 8;
+  if (/aria-[a-z]+/.test(html)) accessibility += 9;
   if (/<(nav|main|header|footer|section|article)\b/.test(html)) accessibility += 8;
 
   // SEO (0-25)
   let seo = 0;
-  if (/<title\b[^>]*>[^<]{2,}/.test(html))                            seo += 10;
-  if (/meta[^>]+name\s*=\s*["']description["']/.test(html))           seo += 10;
-  if (/<h1\b/.test(html))                                              seo +=  5;
+  if (/<title\b[^>]*>[^<]{2,}/.test(html)) seo += 10;
+  if (/meta[^>]+name\s*=\s*["']description["']/.test(html)) seo += 10;
+  if (/<h1\b/.test(html)) seo += 5;
 
   // Performance (0-25)
   const externalScripts = (html.match(/<script[^>]+src\s*=/g) ?? []).length;
   let performance = Math.max(0, 20 - externalScripts * 3);
-  if (/loading\s*=\s*["']lazy["']/.test(html))                  performance +=  5;
+  if (/loading\s*=\s*["']lazy["']/.test(html)) performance += 5;
 
   // Security (0-25) — deduct for dangerous patterns
   let security = 25;
-  if (/\beval\s*\(/.test(html))                                  security -= 15;
-  if (/document\.write\s*\(/.test(html))                         security -=  5;
-  if (/innerHTML\s*=\s*[^"'`][^;]*\+/.test(html))               security -=  5;
+  if (/\beval\s*\(/.test(html)) security -= 15;
+  if (/document\.write\s*\(/.test(html)) security -= 5;
+  if (/innerHTML\s*=\s*[^"'`][^;]*\+/.test(html)) security -= 5;
   security = Math.max(0, security);
 
   return Math.min(100, accessibility + seo + performance + security);
@@ -86,9 +84,7 @@ async function computeHealthScoreForProject(projectId: number): Promise<number> 
   return scoreHtml(files);
 }
 
-async function computeHealthScoresBatch(
-  projectIds: number[],
-): Promise<Map<number, number>> {
+async function computeHealthScoresBatch(projectIds: number[]): Promise<Map<number, number>> {
   if (projectIds.length === 0) return new Map();
   const files = await db
     .select({

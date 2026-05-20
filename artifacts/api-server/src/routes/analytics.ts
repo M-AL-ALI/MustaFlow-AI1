@@ -72,12 +72,15 @@ const SESSION_COOKIE = "mf_view_session";
 // Rate-limit a ping to 1 per session per project per 30 minutes using a simple
 // in-memory map. Keys: `${projectId}:${sessionId}`, value: last ping timestamp.
 const pingThrottle = new Map<string, number>();
-setInterval(() => {
-  const cutoff = Date.now() - 30 * 60 * 1000;
-  for (const [key, ts] of pingThrottle) {
-    if (ts < cutoff) pingThrottle.delete(key);
-  }
-}, 5 * 60 * 1000).unref();
+setInterval(
+  () => {
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    for (const [key, ts] of pingThrottle) {
+      if (ts < cutoff) pingThrottle.delete(key);
+    }
+  },
+  5 * 60 * 1000,
+).unref();
 
 // ── POST /api/p/:slug/analytics/ping ─────────────────────────────────────────
 // Public — no auth. Called by the injected analytics snippet.
@@ -165,12 +168,7 @@ router.get(
     const uniqueSessions = await db
       .selectDistinct({ sessionId: pageViewsTable.sessionId })
       .from(pageViewsTable)
-      .where(
-        and(
-          eq(pageViewsTable.projectId, projectId),
-          gte(pageViewsTable.visitedAt, since),
-        ),
-      );
+      .where(and(eq(pageViewsTable.projectId, projectId), gte(pageViewsTable.visitedAt, since)));
 
     // Top referrers — group by referrer domain (exclude nulls/empty)
     const referrerRows = await db

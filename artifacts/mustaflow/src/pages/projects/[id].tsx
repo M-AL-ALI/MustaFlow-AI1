@@ -117,7 +117,14 @@ type TaskReport = {
 };
 
 type ChatPlanPayload =
-  | { kind: "report"; report: TaskReport; taskId?: number; queueBatchId?: string; queueIndex?: number | null; queueTotalCount?: number | null }
+  | {
+      kind: "report";
+      report: TaskReport;
+      taskId?: number;
+      queueBatchId?: string;
+      queueIndex?: number | null;
+      queueTotalCount?: number | null;
+    }
   | { kind: "task-queued"; taskId: number }
   | { kind: "task-done"; taskId: number }
   | { kind: "error"; message: string; suggestions?: string[] }
@@ -136,7 +143,9 @@ function ReportCard({
         <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
         Builder report
       </div>
-      <div className={`grid gap-1.5 ${(report.filesUnchanged?.length ?? 0) > 0 ? "grid-cols-4" : "grid-cols-3"}`}>
+      <div
+        className={`grid gap-1.5 ${(report.filesUnchanged?.length ?? 0) > 0 ? "grid-cols-4" : "grid-cols-3"}`}
+      >
         <div className="bg-muted rounded p-1.5">
           <div className="text-muted-foreground text-[10px] uppercase">Created</div>
           <div className="font-semibold text-foreground">{report.filesCreated.length}</div>
@@ -441,9 +450,7 @@ export default function ProjectWorkspacePage() {
       },
     },
   );
-  const pendingSuggestionsCount = allSuggestions.filter(
-    (s) => s.status === "pending",
-  ).length;
+  const pendingSuggestionsCount = allSuggestions.filter((s) => s.status === "pending").length;
 
   const [prompt, setPrompt] = useState("");
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
@@ -454,7 +461,10 @@ export default function ProjectWorkspacePage() {
   const [runInBackground, setRunInBackground] = useState(false);
   const [variantMode, setVariantMode] = useState(false);
   const [variantBatchPending, setVariantBatchPending] = useState(false);
-  const [variantComparison, setVariantComparison] = useState<{ versionA: { id: number; userRequest: string; changelogEntry?: string | null }; versionB: { id: number; userRequest: string; changelogEntry?: string | null } } | null>(null);
+  const [variantComparison, setVariantComparison] = useState<{
+    versionA: { id: number; userRequest: string; changelogEntry?: string | null };
+    versionB: { id: number; userRequest: string; changelogEntry?: string | null };
+  } | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -559,7 +569,10 @@ export default function ProjectWorkspacePage() {
       const ref = tab === "chat" ? scrollRef : tab === "files" ? filesScrollRef : null;
       if (ref?.current) {
         try {
-          localStorage.setItem(`mustaflow_scroll_${projectId}_${tab}`, String(ref.current.scrollTop));
+          localStorage.setItem(
+            `mustaflow_scroll_${projectId}_${tab}`,
+            String(ref.current.scrollTop),
+          );
         } catch {
           /* ignore */
         }
@@ -821,19 +834,26 @@ export default function ProjectWorkspacePage() {
       setVariantBatchPending(false);
       // Give the versions query time to refresh, then build comparison
       setTimeout(() => {
-        void queryClient.fetchQuery({
-          queryKey: getListVersionsQueryKey(projectId),
-          staleTime: 0,
-        }).then((fetchedVersions: unknown) => {
-          const vs = fetchedVersions as Array<{ id: number; userRequest: string; changelogEntry?: string | null }>;
-          if (Array.isArray(vs) && vs.length >= 2) {
-            const [vB, vA] = vs.slice(0, 2);
-            if (vA && vB) {
-              setVariantComparison({ versionA: vA, versionB: vB });
-              setActiveTab("preview");
+        void queryClient
+          .fetchQuery({
+            queryKey: getListVersionsQueryKey(projectId),
+            staleTime: 0,
+          })
+          .then((fetchedVersions: unknown) => {
+            const vs = fetchedVersions as Array<{
+              id: number;
+              userRequest: string;
+              changelogEntry?: string | null;
+            }>;
+            if (Array.isArray(vs) && vs.length >= 2) {
+              const [vB, vA] = vs.slice(0, 2);
+              if (vA && vB) {
+                setVariantComparison({ versionA: vA, versionB: vB });
+                setActiveTab("preview");
+              }
             }
-          }
-        }).catch(() => undefined);
+          })
+          .catch(() => undefined);
       }, 1500);
     }
   }, [projectId, queryClient, variantBatchPending]);
@@ -1114,7 +1134,13 @@ export default function ProjectWorkspacePage() {
                   )}
                 >
                   <Icon className="h-3 w-3" />
-                  {t === "chat" ? "Chat" : t === "files" ? "Files" : t === "history" ? "History" : "Saved"}
+                  {t === "chat"
+                    ? "Chat"
+                    : t === "files"
+                      ? "Files"
+                      : t === "history"
+                        ? "History"
+                        : "Saved"}
                   {badge !== null && (
                     <span className="ml-0.5 px-1 py-0.5 rounded-full bg-muted text-[9px] font-semibold leading-none">
                       {badge}
@@ -1170,206 +1196,218 @@ export default function ProjectWorkspacePage() {
 
           {/* ── CHAT TAB ── */}
           {leftPanelTab === "chat" && (
-          <>
-            {/* Chat panel header */}
-            <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
-              <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
-                <Sparkles style={{ width: 10, height: 10 }} className="text-white" />
-              </div>
-              <span className="text-xs font-semibold text-foreground">AI Builder</span>
-              <span
-                className={cn(
-                  "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-                  sendMessage.isPending
-                    ? pendingIsPlan
-                      ? "bg-secondary/15 text-secondary"
-                      : "bg-primary/15 text-primary"
-                    : "bg-green-500/15 text-green-400",
-                )}
-              >
-                {sendMessage.isPending ? (pendingIsPlan ? "Planning…" : "Working…") : "Ready"}
-              </span>
-              <button
-                onClick={() => setShowChatHistory((v) => !v)}
-                title={showChatHistory ? "Back to live chat" : "View chat history"}
-                className={cn(
-                  "ml-1.5 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
-                  showChatHistory
-                    ? "bg-primary/10 text-primary border-primary/20"
-                    : "text-muted-foreground border-border hover:text-foreground hover:bg-muted",
-                )}
-              >
-                <History className="h-3 w-3" />
-                {showChatHistory ? "Live" : "History"}
-              </button>
-            </div>
-
-            {/* Chat History overlay */}
-            {showChatHistory && (
-              <div className="flex-1 min-h-0 relative">
-                <ChatHistory
-                  messages={messages}
-                  isLoading={messages === undefined}
-                  onViewFile={(path) => {
-                    const f = files.find((x) => x.path === path);
-                    if (f) {
-                      setSelectedCodeFileId(f.id);
-                      setActiveTab("code");
-                    }
-                  }}
-                  onClose={() => setShowChatHistory(false)}
-                />
-              </div>
-            )}
-
-            {/* Messages + controls (hidden in history mode) */}
-            {!showChatHistory && (
-              <>
-                <div
-                  ref={scrollRef}
-                  onScroll={() => {
-                    const el = scrollRef.current;
-                    if (!el) return;
-                    chatAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                  }}
-                  className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
-                >
-                  {creditsSuccess && (
-                    <div className="sticky top-0 z-10 pb-1">
-                      <CreditsSuccessBanner onDismiss={() => setCreditsSuccess(false)} />
-                    </div>
+            <>
+              {/* Chat panel header */}
+              <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
+                <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
+                  <Sparkles style={{ width: 10, height: 10 }} className="text-white" />
+                </div>
+                <span className="text-xs font-semibold text-foreground">AI Builder</span>
+                <span
+                  className={cn(
+                    "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                    sendMessage.isPending
+                      ? pendingIsPlan
+                        ? "bg-secondary/15 text-secondary"
+                        : "bg-primary/15 text-primary"
+                      : "bg-green-500/15 text-green-400",
                   )}
-                  {(() => {
-                    const visibleMsgs = messages?.slice(-20) ?? [];
-                    const lastReportIdx = visibleMsgs.reduce<number>((acc, msg, idx) => {
-                      const p = msg.plan as ChatPlanPayload | null | undefined;
-                      const k = p && typeof p === "object" ? (p as { kind?: string }).kind : undefined;
-                      return k === "report" ? idx : acc;
-                    }, -1);
-                    return visibleMsgs.map((msg, msgIdx) => {
-                      const planPayload = msg.plan as ChatPlanPayload | null | undefined;
-                      const payloadKind =
-                        planPayload && typeof planPayload === "object"
-                          ? (planPayload as { kind?: string }).kind
-                          : undefined;
-                      const isReport = payloadKind === "report";
-                      const isQueued = payloadKind === "task-queued";
-                      const isError = payloadKind === "error";
-                      const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
-                      const structuredPlan =
-                        isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
-                      return (
-                        <div
-                          key={msg.id}
-                          className={cn(
-                            "flex",
-                            msg.role === "user" ? "justify-end" : "justify-start",
-                          )}
-                        >
+                >
+                  {sendMessage.isPending ? (pendingIsPlan ? "Planning…" : "Working…") : "Ready"}
+                </span>
+                <button
+                  onClick={() => setShowChatHistory((v) => !v)}
+                  title={showChatHistory ? "Back to live chat" : "View chat history"}
+                  className={cn(
+                    "ml-1.5 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
+                    showChatHistory
+                      ? "bg-primary/10 text-primary border-primary/20"
+                      : "text-muted-foreground border-border hover:text-foreground hover:bg-muted",
+                  )}
+                >
+                  <History className="h-3 w-3" />
+                  {showChatHistory ? "Live" : "History"}
+                </button>
+              </div>
+
+              {/* Chat History overlay */}
+              {showChatHistory && (
+                <div className="flex-1 min-h-0 relative">
+                  <ChatHistory
+                    messages={messages}
+                    isLoading={messages === undefined}
+                    onViewFile={(path) => {
+                      const f = files.find((x) => x.path === path);
+                      if (f) {
+                        setSelectedCodeFileId(f.id);
+                        setActiveTab("code");
+                      }
+                    }}
+                    onClose={() => setShowChatHistory(false)}
+                  />
+                </div>
+              )}
+
+              {/* Messages + controls (hidden in history mode) */}
+              {!showChatHistory && (
+                <>
+                  <div
+                    ref={scrollRef}
+                    onScroll={() => {
+                      const el = scrollRef.current;
+                      if (!el) return;
+                      chatAtBottomRef.current =
+                        el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                    }}
+                    className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
+                  >
+                    {creditsSuccess && (
+                      <div className="sticky top-0 z-10 pb-1">
+                        <CreditsSuccessBanner onDismiss={() => setCreditsSuccess(false)} />
+                      </div>
+                    )}
+                    {(() => {
+                      const visibleMsgs = messages?.slice(-20) ?? [];
+                      const lastReportIdx = visibleMsgs.reduce<number>((acc, msg, idx) => {
+                        const p = msg.plan as ChatPlanPayload | null | undefined;
+                        const k =
+                          p && typeof p === "object" ? (p as { kind?: string }).kind : undefined;
+                        return k === "report" ? idx : acc;
+                      }, -1);
+                      return visibleMsgs.map((msg, msgIdx) => {
+                        const planPayload = msg.plan as ChatPlanPayload | null | undefined;
+                        const payloadKind =
+                          planPayload && typeof planPayload === "object"
+                            ? (planPayload as { kind?: string }).kind
+                            : undefined;
+                        const isReport = payloadKind === "report";
+                        const isQueued = payloadKind === "task-queued";
+                        const isError = payloadKind === "error";
+                        const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
+                        const structuredPlan =
+                          isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
+                        return (
                           <div
+                            key={msg.id}
                             className={cn(
-                              "max-w-[90%] px-3 py-2 rounded-xl text-xs",
-                              msg.role === "user"
-                                ? "bg-primary text-primary-foreground rounded-br-sm"
-                                : isError
-                                  ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
-                                  : "bg-muted text-foreground rounded-bl-sm border border-border",
+                              "flex",
+                              msg.role === "user" ? "justify-end" : "justify-start",
                             )}
                           >
-                            <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
-                            {isReport &&
-                              (() => {
-                                const rp = planPayload as {
-                                  kind: "report";
-                                  report: TaskReport;
-                                  taskId?: number;
-                                  queueBatchId?: string;
-                                  queueIndex?: number | null;
-                                  queueTotalCount?: number | null;
-                                };
-                                const hasBatch =
-                                  rp.queueBatchId && rp.queueTotalCount && rp.queueTotalCount > 1;
-                                const isLastReport = msgIdx === lastReportIdx;
-                                return (
-                                  <>
-                                    {hasBatch && (
-                                      <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
-                                        <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
-                                        <span className="text-[10px] text-muted-foreground/70 font-medium">
-                                          Task {(rp.queueIndex ?? 0) + 1} of {rp.queueTotalCount}
-                                        </span>
-                                      </div>
-                                    )}
-                                    <ReportCard
-                                      report={rp.report}
-                                      onViewFile={(path) => {
-                                        const f = files.find((x) => x.path === path);
-                                        if (f) {
-                                          setSelectedCodeFileId(f.id);
-                                          setActiveTab("code");
-                                        }
-                                      }}
-                                    />
-                                    {isLastReport && rp.taskId && !sendMessage.isPending && (
-                                      <SuggestionChips
-                                        projectId={projectId}
-                                        taskId={rp.taskId}
-                                        onAccepted={(tid) => setActiveTaskId(tid)}
-                                      />
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            {isQueued && (
-                              <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
-                                <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary" />
-                                Background task #{(planPayload as { taskId: number }).taskId}{" "}
-                                running…
+                            <div
+                              className={cn(
+                                "max-w-[90%] px-3 py-2 rounded-xl text-xs",
+                                msg.role === "user"
+                                  ? "bg-primary text-primary-foreground rounded-br-sm"
+                                  : isError
+                                    ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
+                                    : "bg-muted text-foreground rounded-bl-sm border border-border",
+                              )}
+                            >
+                              <div className="whitespace-pre-wrap leading-relaxed">
+                                {msg.content}
                               </div>
-                            )}
-                            {isError && (
-                              <ErrorCard
-                                message={(planPayload as { message: string }).message}
-                                suggestions={
-                                  (planPayload as { suggestions?: string[] }).suggestions
-                                }
-                                onTryFix={(text) => {
-                                  setPrompt(text);
-                                }}
-                                onBuyCredits={() => setBuyCreditsOpen(true)}
-                              />
-                            )}
-                            {isPlanCard && (
-                              <PlanCard
-                                plan={structuredPlan}
-                                projectId={projectId}
-                                initialAgentMode={agentMode}
-                                onBuild={runPlanned}
-                                onAddKey={handleAddKey}
-                                disabled={sendMessage.isPending}
-                                messageId={msg.id}
-                              />
-                            )}
+                              {isReport &&
+                                (() => {
+                                  const rp = planPayload as {
+                                    kind: "report";
+                                    report: TaskReport;
+                                    taskId?: number;
+                                    queueBatchId?: string;
+                                    queueIndex?: number | null;
+                                    queueTotalCount?: number | null;
+                                  };
+                                  const hasBatch =
+                                    rp.queueBatchId && rp.queueTotalCount && rp.queueTotalCount > 1;
+                                  const isLastReport = msgIdx === lastReportIdx;
+                                  return (
+                                    <>
+                                      {hasBatch && (
+                                        <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
+                                          <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
+                                          <span className="text-[10px] text-muted-foreground/70 font-medium">
+                                            Task {(rp.queueIndex ?? 0) + 1} of {rp.queueTotalCount}
+                                          </span>
+                                        </div>
+                                      )}
+                                      <ReportCard
+                                        report={rp.report}
+                                        onViewFile={(path) => {
+                                          const f = files.find((x) => x.path === path);
+                                          if (f) {
+                                            setSelectedCodeFileId(f.id);
+                                            setActiveTab("code");
+                                          }
+                                        }}
+                                      />
+                                      {isLastReport && rp.taskId && !sendMessage.isPending && (
+                                        <SuggestionChips
+                                          projectId={projectId}
+                                          taskId={rp.taskId}
+                                          onAccepted={(tid) => setActiveTaskId(tid)}
+                                        />
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              {isQueued && (
+                                <div className="mt-2 bg-background border border-border rounded-lg p-2 text-[11px] flex items-center gap-2">
+                                  <div className="animate-pulse w-1.5 h-1.5 rounded-full bg-secondary" />
+                                  Background task #{(planPayload as { taskId: number }).taskId}{" "}
+                                  running…
+                                </div>
+                              )}
+                              {isError && (
+                                <ErrorCard
+                                  message={(planPayload as { message: string }).message}
+                                  suggestions={
+                                    (planPayload as { suggestions?: string[] }).suggestions
+                                  }
+                                  onTryFix={(text) => {
+                                    setPrompt(text);
+                                  }}
+                                  onBuyCredits={() => setBuyCreditsOpen(true)}
+                                />
+                              )}
+                              {isPlanCard && (
+                                <PlanCard
+                                  plan={structuredPlan}
+                                  projectId={projectId}
+                                  initialAgentMode={agentMode}
+                                  onBuild={runPlanned}
+                                  onAddKey={handleAddKey}
+                                  disabled={sendMessage.isPending}
+                                  messageId={msg.id}
+                                />
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    });
-                  })()}
+                        );
+                      });
+                    })()}
 
-                  {sendMessage.isPending && !activeTaskId && (
-                    <div className="flex justify-start">
-                      <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
-                        <div
-                          className={cn(
-                            "animate-pulse w-1.5 h-1.5 rounded-full",
-                            pendingIsPlan ? "bg-secondary" : "bg-primary",
-                          )}
-                        />
-                        <span className="text-muted-foreground">
-                          {pendingIsPlan ? "Thinking through the plan…" : "MustaFlow is working…"}
-                        </span>
+                    {sendMessage.isPending && !activeTaskId && (
+                      <div className="flex justify-start">
+                        <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
+                          <div
+                            className={cn(
+                              "animate-pulse w-1.5 h-1.5 rounded-full",
+                              pendingIsPlan ? "bg-secondary" : "bg-primary",
+                            )}
+                          />
+                          <span className="text-muted-foreground">
+                            {pendingIsPlan ? "Thinking through the plan…" : "MustaFlow is working…"}
+                          </span>
+                        </div>
                       </div>
-                    </div>
+                    )}
+                  </div>
+                  {activeTaskId !== null && (
+                    <ActivityStream
+                      projectId={projectId}
+                      taskId={activeTaskId}
+                      onDismiss={() => setActiveTaskId(null)}
+                    />
                   )}
 
                   {activeTaskId !== null && (
@@ -1394,14 +1432,20 @@ export default function ProjectWorkspacePage() {
                         {/* Queue indicator — shown briefly after a queued response */}
                         {(() => {
                           const lastMsg = messages?.[messages.length - 1];
-                          const lastPlan = lastMsg?.plan as Record<string, unknown> | null | undefined;
-                          const isRecentlyQueued = lastMsg?.role === "assistant"
-                            && typeof lastPlan === "object"
-                            && (lastPlan as Record<string, unknown>)?.kind === "task-queued";
+                          const lastPlan = lastMsg?.plan as
+                            | Record<string, unknown>
+                            | null
+                            | undefined;
+                          const isRecentlyQueued =
+                            lastMsg?.role === "assistant" &&
+                            typeof lastPlan === "object" &&
+                            (lastPlan as Record<string, unknown>)?.kind === "task-queued";
                           return isRecentlyQueued ? (
                             <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-orange-500/5">
                               <div className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse shrink-0" />
-                              <span className="text-[10px] text-orange-400 font-medium">Queued — running in background</span>
+                              <span className="text-[10px] text-orange-400 font-medium">
+                                Queued — running in background
+                              </span>
                             </div>
                           ) : null;
                         })()}
@@ -1695,8 +1739,12 @@ export default function ProjectWorkspacePage() {
                 <div className="shrink-0 px-4 py-2.5 bg-violet-950/40 border-b border-violet-500/30 flex items-center gap-3">
                   <Layers2 className="h-4 w-4 text-violet-400 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <span className="text-xs font-semibold text-violet-300">Design Variants Ready</span>
-                    <span className="ml-2 text-[11px] text-violet-400/70">Two versions were built — keep one to continue</span>
+                    <span className="text-xs font-semibold text-violet-300">
+                      Design Variants Ready
+                    </span>
+                    <span className="ml-2 text-[11px] text-violet-400/70">
+                      Two versions were built — keep one to continue
+                    </span>
                   </div>
                   <button
                     onClick={() => setVariantComparison(null)}
@@ -1710,9 +1758,13 @@ export default function ProjectWorkspacePage() {
                   {/* Variant A */}
                   <div className="flex-1 min-w-0 flex flex-col border-r border-violet-500/20">
                     <div className="shrink-0 px-3 py-2 bg-muted/60 border-b border-border flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">A</span>
+                      <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                        A
+                      </span>
                       <div className="flex-1 min-w-0">
-                        <span className="text-[11px] font-medium text-foreground">Minimalist · Light palette</span>
+                        <span className="text-[11px] font-medium text-foreground">
+                          Minimalist · Light palette
+                        </span>
                         {variantComparison.versionA.changelogEntry && (
                           <p className="text-[10px] text-muted-foreground truncate mt-0.5">
                             {variantComparison.versionA.changelogEntry.split("\n")[0]}
@@ -1723,7 +1775,14 @@ export default function ProjectWorkspacePage() {
                         onClick={() => {
                           rollbackVersion.mutate(
                             { id: projectId, versionId: variantComparison.versionA.id },
-                            { onSuccess: () => { setVariantComparison(null); void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) }); } },
+                            {
+                              onSuccess: () => {
+                                setVariantComparison(null);
+                                void queryClient.invalidateQueries({
+                                  queryKey: getListProjectFilesQueryKey(projectId),
+                                });
+                              },
+                            },
                           );
                         }}
                         disabled={rollbackVersion.isPending}
@@ -1742,9 +1801,13 @@ export default function ProjectWorkspacePage() {
                   {/* Variant B */}
                   <div className="flex-1 min-w-0 flex flex-col">
                     <div className="shrink-0 px-3 py-2 bg-muted/60 border-b border-border flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">B</span>
+                      <span className="text-[10px] font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">
+                        B
+                      </span>
                       <div className="flex-1 min-w-0">
-                        <span className="text-[11px] font-medium text-foreground">Bold · Dark palette</span>
+                        <span className="text-[11px] font-medium text-foreground">
+                          Bold · Dark palette
+                        </span>
                         {variantComparison.versionB.changelogEntry && (
                           <p className="text-[10px] text-muted-foreground truncate mt-0.5">
                             {variantComparison.versionB.changelogEntry.split("\n")[0]}
@@ -1755,7 +1818,14 @@ export default function ProjectWorkspacePage() {
                         onClick={() => {
                           rollbackVersion.mutate(
                             { id: projectId, versionId: variantComparison.versionB.id },
-                            { onSuccess: () => { setVariantComparison(null); void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) }); } },
+                            {
+                              onSuccess: () => {
+                                setVariantComparison(null);
+                                void queryClient.invalidateQueries({
+                                  queryKey: getListProjectFilesQueryKey(projectId),
+                                });
+                              },
+                            },
                           );
                         }}
                         disabled={rollbackVersion.isPending}
@@ -1774,7 +1844,8 @@ export default function ProjectWorkspacePage() {
                 </div>
                 <div className="shrink-0 px-4 py-2 bg-muted/30 border-t border-border text-[11px] text-muted-foreground flex items-center gap-2">
                   <RotateCcw className="h-3 w-3 shrink-0" />
-                  Keep A or Keep B to make that version active. The other snapshot stays in Build History.
+                  Keep A or Keep B to make that version active. The other snapshot stays in Build
+                  History.
                 </div>
               </div>
             )}
@@ -1823,7 +1894,11 @@ export default function ProjectWorkspacePage() {
                 projectId={projectId}
                 initialFileId={selectedCodeFileId}
                 onHtmlFileSaved={handleHtmlFileSaved}
-                onSnippetInsert={(prompt) => { switchLeftPanel("chat"); if (isMobileLayout) setChatDrawerOpen(true); send(prompt); }}
+                onSnippetInsert={(prompt) => {
+                  switchLeftPanel("chat");
+                  if (isMobileLayout) setChatDrawerOpen(true);
+                  send(prompt);
+                }}
               />
             )}
             {activeTab === "canvas" && <CanvasTab projectId={projectId} />}

@@ -1,11 +1,4 @@
-import {
-  pgTable,
-  serial,
-  integer,
-  text,
-  timestamp,
-  index,
-} from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, index } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 import { agentTasksTable } from "./tasks";
 
@@ -30,9 +23,7 @@ export const projectSuggestionsTable = pgTable(
     category: text("category").notNull().default("feature"),
     prompt: text("prompt").notNull(),
     status: text("status").notNull().default("pending"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("project_suggestions_project_id_idx").on(table.projectId),
@@ -42,5 +33,4 @@ export const projectSuggestionsTable = pgTable(
 );
 
 export type ProjectSuggestion = typeof projectSuggestionsTable.$inferSelect;
-export type InsertProjectSuggestion =
-  typeof projectSuggestionsTable.$inferInsert;
+export type InsertProjectSuggestion = typeof projectSuggestionsTable.$inferInsert;

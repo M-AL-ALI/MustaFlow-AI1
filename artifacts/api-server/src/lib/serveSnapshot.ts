@@ -24,12 +24,15 @@ function buildAnalyticsSnippet(slug: string): string {
 }
 
 /** Inject og:image and og:title meta tags into an HTML string's <head>. */
-function injectOgMeta(html: string, opts: {
-  title?: string | null;
-  description?: string | null;
-  ogImageUrl?: string | null;
-  slug: string;
-}): string {
+function injectOgMeta(
+  html: string,
+  opts: {
+    title?: string | null;
+    description?: string | null;
+    ogImageUrl?: string | null;
+    slug: string;
+  },
+): string {
   const tags: string[] = [];
   if (opts.ogImageUrl) {
     tags.push(`<meta property="og:image" content="${opts.ogImageUrl.replace(/"/g, "&quot;")}">`);
@@ -40,7 +43,9 @@ function injectOgMeta(html: string, opts: {
     tags.push(`<meta property="og:title" content="${opts.title.replace(/"/g, "&quot;")}">`);
   }
   if (opts.description) {
-    tags.push(`<meta property="og:description" content="${opts.description.replace(/"/g, "&quot;")}">`);
+    tags.push(
+      `<meta property="og:description" content="${opts.description.replace(/"/g, "&quot;")}">`,
+    );
   }
   if (tags.length === 0) return html;
   const inject = tags.join("");

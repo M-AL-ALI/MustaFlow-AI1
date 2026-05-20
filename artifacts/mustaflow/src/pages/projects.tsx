@@ -31,14 +31,13 @@ import {
   Heart,
 } from "lucide-react";
 
-
 function HealthBadge({ score }: { score: number }) {
   const color =
     score >= 80
       ? "text-green-400 bg-green-500/10 border-green-500/20"
       : score >= 50
-      ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
-      : "text-destructive bg-destructive/10 border-destructive/20";
+        ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
+        : "text-destructive bg-destructive/10 border-destructive/20";
   return (
     <span
       title={`Health score: ${score}/100`}

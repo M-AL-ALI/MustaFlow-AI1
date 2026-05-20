@@ -111,26 +111,126 @@ const MOBILE_MODULES = [
 // ── Secrets Guide ─────────────────────────────────────────────────────────────
 // Static catalogue of common secret categories with typical key names and links.
 const SECRETS_GUIDE = [
-  { category: "Authentication", name: "CLERK_PUBLISHABLE_KEY", description: "Clerk auth — publishable key for client-side use.", doc: "https://clerk.com/docs" },
-  { category: "Authentication", name: "CLERK_SECRET_KEY", description: "Clerk auth — secret key for server-side API calls.", doc: "https://clerk.com/docs" },
-  { category: "Database", name: "DATABASE_URL", description: "PostgreSQL connection string (postgres://user:pass@host/db).", doc: "https://www.postgresql.org/docs/current/libpq-connect.html" },
-  { category: "Database", name: "SUPABASE_URL", description: "Supabase project URL.", doc: "https://supabase.com/docs" },
-  { category: "Database", name: "SUPABASE_ANON_KEY", description: "Supabase anon/public key for client-side queries.", doc: "https://supabase.com/docs" },
-  { category: "Payments", name: "STRIPE_SECRET_KEY", description: "Stripe secret key for server-side payment operations.", doc: "https://stripe.com/docs/keys" },
-  { category: "Payments", name: "STRIPE_PUBLISHABLE_KEY", description: "Stripe publishable key for client-side Stripe.js.", doc: "https://stripe.com/docs/keys" },
-  { category: "Payments", name: "STRIPE_WEBHOOK_SECRET", description: "Stripe webhook signing secret for verifying events.", doc: "https://stripe.com/docs/webhooks" },
-  { category: "AI / ML", name: "OPENAI_API_KEY", description: "OpenAI API key for GPT and embedding calls.", doc: "https://platform.openai.com/api-keys" },
-  { category: "AI / ML", name: "ANTHROPIC_API_KEY", description: "Anthropic API key for Claude models.", doc: "https://docs.anthropic.com" },
-  { category: "Email", name: "RESEND_API_KEY", description: "Resend email API key for transactional email.", doc: "https://resend.com/docs" },
-  { category: "Email", name: "SENDGRID_API_KEY", description: "SendGrid API key for email delivery.", doc: "https://docs.sendgrid.com" },
-  { category: "Storage", name: "AWS_ACCESS_KEY_ID", description: "AWS access key for S3 and other services.", doc: "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html" },
-  { category: "Storage", name: "AWS_SECRET_ACCESS_KEY", description: "AWS secret key (pair with AWS_ACCESS_KEY_ID).", doc: "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html" },
-  { category: "Storage", name: "CLOUDINARY_URL", description: "Cloudinary connection URL for image/video storage.", doc: "https://cloudinary.com/documentation" },
-  { category: "Maps & Location", name: "GOOGLE_MAPS_API_KEY", description: "Google Maps API key for map embeds and geocoding.", doc: "https://developers.google.com/maps/documentation" },
-  { category: "Analytics", name: "AMPLITUDE_API_KEY", description: "Amplitude analytics API key.", doc: "https://www.docs.developers.amplitude.com" },
-  { category: "SMS", name: "TWILIO_ACCOUNT_SID", description: "Twilio account SID for SMS sending.", doc: "https://www.twilio.com/docs" },
-  { category: "SMS", name: "TWILIO_AUTH_TOKEN", description: "Twilio auth token (pair with TWILIO_ACCOUNT_SID).", doc: "https://www.twilio.com/docs" },
-  { category: "Push Notifications", name: "EXPO_ACCESS_TOKEN", description: "Expo access token for EAS Build and push notifications.", doc: "https://docs.expo.dev/eas/json" },
+  {
+    category: "Authentication",
+    name: "CLERK_PUBLISHABLE_KEY",
+    description: "Clerk auth — publishable key for client-side use.",
+    doc: "https://clerk.com/docs",
+  },
+  {
+    category: "Authentication",
+    name: "CLERK_SECRET_KEY",
+    description: "Clerk auth — secret key for server-side API calls.",
+    doc: "https://clerk.com/docs",
+  },
+  {
+    category: "Database",
+    name: "DATABASE_URL",
+    description: "PostgreSQL connection string (postgres://user:pass@host/db).",
+    doc: "https://www.postgresql.org/docs/current/libpq-connect.html",
+  },
+  {
+    category: "Database",
+    name: "SUPABASE_URL",
+    description: "Supabase project URL.",
+    doc: "https://supabase.com/docs",
+  },
+  {
+    category: "Database",
+    name: "SUPABASE_ANON_KEY",
+    description: "Supabase anon/public key for client-side queries.",
+    doc: "https://supabase.com/docs",
+  },
+  {
+    category: "Payments",
+    name: "STRIPE_SECRET_KEY",
+    description: "Stripe secret key for server-side payment operations.",
+    doc: "https://stripe.com/docs/keys",
+  },
+  {
+    category: "Payments",
+    name: "STRIPE_PUBLISHABLE_KEY",
+    description: "Stripe publishable key for client-side Stripe.js.",
+    doc: "https://stripe.com/docs/keys",
+  },
+  {
+    category: "Payments",
+    name: "STRIPE_WEBHOOK_SECRET",
+    description: "Stripe webhook signing secret for verifying events.",
+    doc: "https://stripe.com/docs/webhooks",
+  },
+  {
+    category: "AI / ML",
+    name: "OPENAI_API_KEY",
+    description: "OpenAI API key for GPT and embedding calls.",
+    doc: "https://platform.openai.com/api-keys",
+  },
+  {
+    category: "AI / ML",
+    name: "ANTHROPIC_API_KEY",
+    description: "Anthropic API key for Claude models.",
+    doc: "https://docs.anthropic.com",
+  },
+  {
+    category: "Email",
+    name: "RESEND_API_KEY",
+    description: "Resend email API key for transactional email.",
+    doc: "https://resend.com/docs",
+  },
+  {
+    category: "Email",
+    name: "SENDGRID_API_KEY",
+    description: "SendGrid API key for email delivery.",
+    doc: "https://docs.sendgrid.com",
+  },
+  {
+    category: "Storage",
+    name: "AWS_ACCESS_KEY_ID",
+    description: "AWS access key for S3 and other services.",
+    doc: "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html",
+  },
+  {
+    category: "Storage",
+    name: "AWS_SECRET_ACCESS_KEY",
+    description: "AWS secret key (pair with AWS_ACCESS_KEY_ID).",
+    doc: "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html",
+  },
+  {
+    category: "Storage",
+    name: "CLOUDINARY_URL",
+    description: "Cloudinary connection URL for image/video storage.",
+    doc: "https://cloudinary.com/documentation",
+  },
+  {
+    category: "Maps & Location",
+    name: "GOOGLE_MAPS_API_KEY",
+    description: "Google Maps API key for map embeds and geocoding.",
+    doc: "https://developers.google.com/maps/documentation",
+  },
+  {
+    category: "Analytics",
+    name: "AMPLITUDE_API_KEY",
+    description: "Amplitude analytics API key.",
+    doc: "https://www.docs.developers.amplitude.com",
+  },
+  {
+    category: "SMS",
+    name: "TWILIO_ACCOUNT_SID",
+    description: "Twilio account SID for SMS sending.",
+    doc: "https://www.twilio.com/docs",
+  },
+  {
+    category: "SMS",
+    name: "TWILIO_AUTH_TOKEN",
+    description: "Twilio auth token (pair with TWILIO_ACCOUNT_SID).",
+    doc: "https://www.twilio.com/docs",
+  },
+  {
+    category: "Push Notifications",
+    name: "EXPO_ACCESS_TOKEN",
+    description: "Expo access token for EAS Build and push notifications.",
+    doc: "https://docs.expo.dev/eas/json",
+  },
 ] as const;
 
 type SecretsGuideEntry = { category: string; name: string; description: string; doc: string };
@@ -166,7 +266,9 @@ function SecretsGuide({ onSelect }: { onSelect: (name: string) => void }) {
         <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
           {Object.entries(grouped).map(([cat, entries]) => (
             <div key={cat}>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5 px-0.5">{cat}</div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5 px-0.5">
+                {cat}
+              </div>
               <div className="space-y-1">
                 {entries.map((e) => (
                   <button
@@ -179,8 +281,12 @@ function SecretsGuide({ onSelect }: { onSelect: (name: string) => void }) {
                       <Lock className="h-2.5 w-2.5 text-primary" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-mono text-xs text-foreground group-hover:text-primary transition-colors">{e.name}</div>
-                      <div className="text-[10px] text-muted-foreground/70 mt-0.5 line-clamp-1">{e.description}</div>
+                      <div className="font-mono text-xs text-foreground group-hover:text-primary transition-colors">
+                        {e.name}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground/70 mt-0.5 line-clamp-1">
+                        {e.description}
+                      </div>
                     </div>
                     <a
                       href={e.doc}
@@ -198,7 +304,9 @@ function SecretsGuide({ onSelect }: { onSelect: (name: string) => void }) {
             </div>
           ))}
           {filtered.length === 0 && (
-            <div className="py-6 text-center text-xs text-muted-foreground/50">No matching secrets found.</div>
+            <div className="py-6 text-center text-xs text-muted-foreground/50">
+              No matching secrets found.
+            </div>
           )}
         </div>
       </div>
@@ -252,9 +360,15 @@ function SecretAuditTimeline({ secretId, projectId }: { secretId: number; projec
           if (!cancelled) setEntries(Array.isArray(data) ? data : []);
         }
       })
-      .catch(() => { /* endpoint may not exist yet — show empty */ })
-      .finally(() => { if (!cancelled) setIsLoading(false); });
-    return () => { cancelled = true; };
+      .catch(() => {
+        /* endpoint may not exist yet — show empty */
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, secretId]);
 
   if (isLoading) {

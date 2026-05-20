@@ -44,9 +44,7 @@ export function generateOgSvg(opts: {
   const { name, description, themeColor, kind } = opts;
 
   // Pick accent colour
-  const accent = themeColor && /^#[0-9a-fA-F]{3,6}$/.test(themeColor)
-    ? themeColor
-    : "#6366f1"; // indigo default
+  const accent = themeColor && /^#[0-9a-fA-F]{3,6}$/.test(themeColor) ? themeColor : "#6366f1"; // indigo default
 
   // Derive a slightly lighter variant for gradient
   const bg1 = "#0a0f1c";
@@ -55,7 +53,9 @@ export function generateOgSvg(opts: {
   const titleLines = wrapText(xmlEscape(name || "Untitled App"), 30, 2);
   const descLines = wrapText(xmlEscape(description ?? "Built with MustaFlow AI"), 58, 3);
 
-  const kindLabel = xmlEscape((kind ?? "web").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()));
+  const kindLabel = xmlEscape(
+    (kind ?? "web").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+  );
 
   // Build SVG
   const titleY = 220;
@@ -63,13 +63,19 @@ export function generateOgSvg(opts: {
   const descStartY = titleY + titleLines.length * titleLineHeight + 24;
   const descLineHeight = 38;
 
-  const titleSvg = titleLines.map((line, i) =>
-    `<text x="80" y="${titleY + i * titleLineHeight}" font-family="system-ui,sans-serif" font-size="60" font-weight="800" fill="#ffffff" letter-spacing="-1">${line}</text>`
-  ).join("\n");
+  const titleSvg = titleLines
+    .map(
+      (line, i) =>
+        `<text x="80" y="${titleY + i * titleLineHeight}" font-family="system-ui,sans-serif" font-size="60" font-weight="800" fill="#ffffff" letter-spacing="-1">${line}</text>`,
+    )
+    .join("\n");
 
-  const descSvg = descLines.map((line, i) =>
-    `<text x="80" y="${descStartY + i * descLineHeight}" font-family="system-ui,sans-serif" font-size="28" fill="#94a3b8">${line}</text>`
-  ).join("\n");
+  const descSvg = descLines
+    .map(
+      (line, i) =>
+        `<text x="80" y="${descStartY + i * descLineHeight}" font-family="system-ui,sans-serif" font-size="28" fill="#94a3b8">${line}</text>`,
+    )
+    .join("\n");
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
   <defs>

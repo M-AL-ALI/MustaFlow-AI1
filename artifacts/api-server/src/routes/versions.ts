@@ -142,14 +142,20 @@ router.get(
     }
 
     const [version] = await db
-      .select({ filesSnapshot: projectVersionsTable.filesSnapshot, projectId: projectVersionsTable.projectId })
+      .select({
+        filesSnapshot: projectVersionsTable.filesSnapshot,
+        projectId: projectVersionsTable.projectId,
+      })
       .from(projectVersionsTable)
       .where(eq(projectVersionsTable.id, versionId));
 
     if (!version || version.projectId !== projectId) {
-      res.status(404).type("text/html").send(
-        `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Version not found</h1></body></html>`,
-      );
+      res
+        .status(404)
+        .type("text/html")
+        .send(
+          `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Version not found</h1></body></html>`,
+        );
       return;
     }
 
@@ -164,9 +170,12 @@ router.get(
     if (!file) file = snapshot.find((f) => f.path === "index.html");
 
     if (!file) {
-      res.status(404).type("text/html").send(
-        `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">No preview yet</h1></body></html>`,
-      );
+      res
+        .status(404)
+        .type("text/html")
+        .send(
+          `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">No preview yet</h1></body></html>`,
+        );
       return;
     }
 

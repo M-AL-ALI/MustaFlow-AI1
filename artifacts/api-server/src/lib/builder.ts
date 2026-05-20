@@ -1443,8 +1443,20 @@ function generateMockData(apiPath: string): unknown {
   }
   if (seg.includes("post") || seg.includes("article") || seg.includes("blog")) {
     return [
-      { id: 1, title: "First Post", body: "Sample content here.", author: "Jane Doe", date: "2025-01-01" },
-      { id: 2, title: "Second Post", body: "More sample content.", author: "John Smith", date: "2025-01-15" },
+      {
+        id: 1,
+        title: "First Post",
+        body: "Sample content here.",
+        author: "Jane Doe",
+        date: "2025-01-01",
+      },
+      {
+        id: 2,
+        title: "Second Post",
+        body: "More sample content.",
+        author: "John Smith",
+        date: "2025-01-15",
+      },
     ];
   }
   if (seg.includes("comment")) {
@@ -1459,7 +1471,12 @@ function generateMockData(apiPath: string): unknown {
       { id: "ORD-002", status: "pending", total: 49.99, items: 1, date: "2025-01-20" },
     ];
   }
-  if (seg.includes("stat") || seg.includes("metric") || seg.includes("analytic") || seg.includes("dashboard")) {
+  if (
+    seg.includes("stat") ||
+    seg.includes("metric") ||
+    seg.includes("analytic") ||
+    seg.includes("dashboard")
+  ) {
     return { total: 1234, active: 567, revenue: 45678.9, growth: 12.3 };
   }
   if (seg.includes("notification") || seg.includes("alert")) {
@@ -1485,7 +1502,10 @@ function generateMockData(apiPath: string): unknown {
 /** Convert an API path to a safe filename under _mocks/ */
 function pathToMockFilename(apiPath: string): string {
   // e.g. /api/users/profile → _mocks/api/users/profile.json
-  const clean = apiPath.replace(/^\/+/, "").replace(/\/+$/, "").replace(/[?#].*$/, "");
+  const clean = apiPath
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .replace(/[?#].*$/, "");
   return `_mocks/${clean || "data"}.json`;
 }
 
@@ -2132,9 +2152,8 @@ export async function runRefinePipeline(args: {
   if (patchedIndexHtml && changedIndex && patchedIndexHtml.content !== changedIndex.content) {
     changedIndex.content = patchedIndexHtml.content;
   }
-  const finalChangedFiles = mockOnlyFiles.length > 0
-    ? [...changedFiles, ...mockOnlyFiles]
-    : changedFiles;
+  const finalChangedFiles =
+    mockOnlyFiles.length > 0 ? [...changedFiles, ...mockOnlyFiles] : changedFiles;
 
   // Auto-upgrade any vulnerable CDN URLs in changed files to safe versions
   const { files: cdnUpgradedFiles, upgrades: cdnUpgradesRaw } =

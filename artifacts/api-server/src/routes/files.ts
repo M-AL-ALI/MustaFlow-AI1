@@ -47,12 +47,21 @@ router.get(
     }
 
     const files = await db
-      .select({ id: projectFilesTable.id, path: projectFilesTable.path, content: projectFilesTable.content })
+      .select({
+        id: projectFilesTable.id,
+        path: projectFilesTable.path,
+        content: projectFilesTable.content,
+      })
       .from(projectFilesTable)
       .where(eq(projectFilesTable.projectId, projectId))
       .orderBy(asc(projectFilesTable.path));
 
-    const results: Array<{ fileId: number; file: string; lineNumber: number; lineContent: string }> = [];
+    const results: Array<{
+      fileId: number;
+      file: string;
+      lineNumber: number;
+      lineContent: string;
+    }> = [];
     const lowerQ = q.toLowerCase();
 
     for (const file of files) {
@@ -286,7 +295,9 @@ router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => 
     const [fallback] = await db
       .select()
       .from(projectFilesTable)
-      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, "index.html")));
+      .where(
+        and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, "index.html")),
+      );
     if (!fallback) {
       res
         .status(404)
@@ -312,7 +323,9 @@ router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => 
   if (isBinaryMime(mime)) {
     res.end(Buffer.from(row.content, "base64"));
   } else {
-    res.send(isHtml ? injectBridge(row.content, isOwnerPreview ? MOCK_FLAG_SCRIPT : "") : row.content);
+    res.send(
+      isHtml ? injectBridge(row.content, isOwnerPreview ? MOCK_FLAG_SCRIPT : "") : row.content,
+    );
   }
 });
 
