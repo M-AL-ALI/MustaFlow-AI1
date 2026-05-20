@@ -778,19 +778,29 @@ async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
 }
 
 export async function runJob(input: JobInput): Promise<void> {
-  const { taskId, projectId, kind, conversationHistory, queueBatchId, queueIndex, queueTotalCount } = input;
+  const {
+    taskId,
+    projectId,
+    kind,
+    conversationHistory,
+    queueBatchId,
+    queueIndex,
+    queueTotalCount,
+  } = input;
   let { userPrompt, agentMode } = input;
 
   const jobStartTime = Date.now();
   let wasEscalated = false;
   let analyticsErrorCategory: string | null = null;
   let analyticsCorrectionPasses = 0;
-  let analyticsOutcome: "success" | "failed" = "failed";
 
   // Sanitise prompt before injecting into AI context — strip injection patterns
   const { cleaned: sanitisedPrompt, wasModified: promptWasModified } = sanitisePrompt(userPrompt);
   if (promptWasModified) {
-    logger.warn({ taskId, projectId }, "Prompt injection patterns detected and stripped from user prompt");
+    logger.warn(
+      { taskId, projectId },
+      "Prompt injection patterns detected and stripped from user prompt",
+    );
     userPrompt = sanitisedPrompt;
   }
 
@@ -921,8 +931,15 @@ export async function runJob(input: JobInput): Promise<void> {
       // Auto-escalation: if correction pass failed, retry at next model tier
       const buildEscalationMode = ESCALATION_MAP[agentMode];
       if (result.correctionFailed && buildEscalationMode && !isMobileProject) {
-        logger.info({ taskId, projectId, from: agentMode, to: buildEscalationMode }, "Auto-escalating build to higher model tier");
-        await emitEvent(taskId, "generating_code", `Validation failed — escalating to ${buildEscalationMode} mode and retrying…`);
+        logger.info(
+          { taskId, projectId, from: agentMode, to: buildEscalationMode },
+          "Auto-escalating build to higher model tier",
+        );
+        await emitEvent(
+          taskId,
+          "generating_code",
+          `Validation failed — escalating to ${buildEscalationMode} mode and retrying…`,
+        );
         const escalatedResult = await runBuildPipeline({
           projectName: project.name,
           projectKind: project.kind,
@@ -945,10 +962,15 @@ export async function runJob(input: JobInput): Promise<void> {
       // Secrets scan — redact before persisting
       const { files: sanitisedFiles, findings: secretFindings } = scanForSecrets(result.files);
       if (secretFindings.length > 0) {
-        logger.warn({ taskId, projectId, secretFindings }, "Secrets detected and redacted in generated build files");
+        logger.warn(
+          { taskId, projectId, secretFindings },
+          "Secrets detected and redacted in generated build files",
+        );
         result.report.warnings = [
           ...(result.report.warnings ?? []),
-          ...secretFindings.map((f) => `Secrets Scan: ${f.category} detected in ${f.file} and redacted before saving`),
+          ...secretFindings.map(
+            (f) => `Secrets Scan: ${f.category} detected in ${f.file} and redacted before saving`,
+          ),
         ];
       }
       result = { ...result, files: sanitisedFiles };
@@ -1045,8 +1067,15 @@ export async function runJob(input: JobInput): Promise<void> {
       // Auto-escalation: if correction pass failed, retry at next model tier
       const refineEscalationMode = ESCALATION_MAP[agentMode];
       if (refineResult.correctionFailed && refineEscalationMode && !isMobileProject) {
-        logger.info({ taskId, projectId, from: agentMode, to: refineEscalationMode }, "Auto-escalating refine to higher model tier");
-        await emitEvent(taskId, "generating_code", `Validation failed — escalating to ${refineEscalationMode} mode and retrying…`);
+        logger.info(
+          { taskId, projectId, from: agentMode, to: refineEscalationMode },
+          "Auto-escalating refine to higher model tier",
+        );
+        await emitEvent(
+          taskId,
+          "generating_code",
+          `Validation failed — escalating to ${refineEscalationMode} mode and retrying…`,
+        );
         const escalatedResult = await runRefinePipeline({
           projectName: project.name,
           projectKind: project.kind,
@@ -1069,12 +1098,19 @@ export async function runJob(input: JobInput): Promise<void> {
       }
 
       // Secrets scan — redact before persisting
-      const { files: sanitisedChangedFiles, findings: refineSecretFindings } = scanForSecrets(refineResult.changedFiles);
+      const { files: sanitisedChangedFiles, findings: refineSecretFindings } = scanForSecrets(
+        refineResult.changedFiles,
+      );
       if (refineSecretFindings.length > 0) {
-        logger.warn({ taskId, projectId, refineSecretFindings }, "Secrets detected and redacted in refined files");
+        logger.warn(
+          { taskId, projectId, refineSecretFindings },
+          "Secrets detected and redacted in refined files",
+        );
         refineResult.report.warnings = [
           ...(refineResult.report.warnings ?? []),
-          ...refineSecretFindings.map((f) => `Secrets Scan: ${f.category} detected in ${f.file} and redacted before saving`),
+          ...refineSecretFindings.map(
+            (f) => `Secrets Scan: ${f.category} detected in ${f.file} and redacted before saving`,
+          ),
         ];
       }
       refineResult = { ...refineResult, changedFiles: sanitisedChangedFiles };
@@ -1083,11 +1119,15 @@ export async function runJob(input: JobInput): Promise<void> {
       const mergedFilesForConsistency = [...existingFiles];
       for (const cf of refineResult.changedFiles) {
         const idx = mergedFilesForConsistency.findIndex((f) => f.path === cf.path);
-        if (idx >= 0) mergedFilesForConsistency[idx] = cf; else mergedFilesForConsistency.push(cf);
+        if (idx >= 0) mergedFilesForConsistency[idx] = cf;
+        else mergedFilesForConsistency.push(cf);
       }
       const refineConsistencyWarnings = validateCrossFileConsistency(mergedFilesForConsistency);
       if (refineConsistencyWarnings.length > 0) {
-        refineResult.report.warnings = [...(refineResult.report.warnings ?? []), ...refineConsistencyWarnings];
+        refineResult.report.warnings = [
+          ...(refineResult.report.warnings ?? []),
+          ...refineConsistencyWarnings,
+        ];
       }
 
       const result = refineResult;
@@ -1248,7 +1288,10 @@ export async function runJob(input: JobInput): Promise<void> {
               "Quality audit complete",
             );
           } catch (err) {
-            logger.warn({ err, projectId, versionId: versionIdForAudit }, "Quality audit failed (non-fatal)");
+            logger.warn(
+              { err, projectId, versionId: versionIdForAudit },
+              "Quality audit failed (non-fatal)",
+            );
           }
         })();
       });
@@ -1364,7 +1407,6 @@ export async function runJob(input: JobInput): Promise<void> {
       planMode: false,
       plan: { kind: "report", report, taskId, ...batchMeta } as unknown as Record<string, unknown>,
     });
-    analyticsOutcome = "success";
     void db
       .insert(buildAnalyticsTable)
       .values({
@@ -1377,7 +1419,7 @@ export async function runJob(input: JobInput): Promise<void> {
         durationMs: Date.now() - jobStartTime,
         correctionPasses: analyticsCorrectionPasses,
         escalated: wasEscalated,
-        outcome: analyticsOutcome,
+        outcome: "success",
         primaryErrorCategory: analyticsErrorCategory,
       })
       .catch((err) => logger.warn({ err, taskId }, "Failed to record build analytics (non-fatal)"));
@@ -1432,7 +1474,9 @@ export async function runJob(input: JobInput): Promise<void> {
         outcome: "failed",
         primaryErrorCategory: analyticsErrorCategory,
       })
-      .catch((analyticsErr) => logger.warn({ analyticsErr, taskId }, "Failed to record failed build analytics"));
+      .catch((analyticsErr) =>
+        logger.warn({ analyticsErr, taskId }, "Failed to record failed build analytics"),
+      );
 
     // Auto-write a diagnostic lesson to the Knowledge Vault
     void autoWriteFailureLesson(userPrompt, message, projectId, project.ownerId);

@@ -1,12 +1,4 @@
-import {
-  pgTable,
-  serial,
-  integer,
-  text,
-  boolean,
-  timestamp,
-  index,
-} from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, boolean, timestamp, index } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export const buildAnalyticsTable = pgTable(
@@ -26,9 +18,7 @@ export const buildAnalyticsTable = pgTable(
     escalated: boolean("escalated").notNull().default(false),
     outcome: text("outcome").notNull(),
     primaryErrorCategory: text("primary_error_category"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("build_analytics_project_id_idx").on(table.projectId),

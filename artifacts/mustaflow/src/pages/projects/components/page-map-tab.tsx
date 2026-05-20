@@ -652,7 +652,7 @@ export function PageMapTab({
       return updated;
     });
     setSelectedNodeId(id);
-  // mapResponseRef and edgesRef are stable refs — intentionally omitted from deps
+    // mapResponseRef and edgesRef are stable refs — intentionally omitted from deps
   }, [projectId, platform, handleNodeClick, handlePreviewClick, setNodes, putPageMap]);
 
   const handleModifyPage = useCallback(

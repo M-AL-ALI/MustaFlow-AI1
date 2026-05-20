@@ -61,15 +61,24 @@ const CATEGORY_LABELS: Record<AuditCategory, string> = {
 
 const CATEGORY_FIX_PROMPTS: Record<AuditCategory, (findings: AuditFinding[]) => string> = {
   accessibility: (findings) => {
-    const issues = findings.map((f) => f.suggestion).slice(0, 5).join("; ");
+    const issues = findings
+      .map((f) => f.suggestion)
+      .slice(0, 5)
+      .join("; ");
     return `Fix all accessibility issues in the generated app. ${issues}. Ensure all images have alt attributes, all form inputs have associated labels, all buttons have accessible text, and the html element has a lang attribute.`;
   },
   seo: (findings) => {
-    const issues = findings.map((f) => f.suggestion).slice(0, 5).join("; ");
+    const issues = findings
+      .map((f) => f.suggestion)
+      .slice(0, 5)
+      .join("; ");
     return `Fix all SEO issues in the generated app. ${issues}. Add or improve meta description, Open Graph tags (og:title, og:description, og:image), and ensure the page title is descriptive.`;
   },
   performance: (findings) => {
-    const issues = findings.map((f) => f.suggestion).slice(0, 5).join("; ");
+    const issues = findings
+      .map((f) => f.suggestion)
+      .slice(0, 5)
+      .join("; ");
     return `Fix all performance issues in the generated app. ${issues}. Add defer or async to scripts in the head, add explicit width and height to images, and add loading="lazy" to below-fold images.`;
   },
   security: (findings) => {
@@ -92,7 +101,8 @@ function scoreBg(score: number): string {
 
 function SeverityIcon({ severity }: { severity: AuditSeverity }) {
   if (severity === "error") return <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />;
-  if (severity === "warning") return <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0" />;
+  if (severity === "warning")
+    return <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0" />;
   return <Info className="h-3.5 w-3.5 text-blue-400 shrink-0" />;
 }
 
@@ -119,7 +129,9 @@ function FindingRow({ finding }: { finding: AuditFinding }) {
         <div className="px-3 pb-3 pt-0 border-t border-border bg-muted/30">
           <div className="flex items-start gap-1.5 pt-2">
             <Wrench className="h-3 w-3 text-primary shrink-0 mt-0.5" />
-            <p className="text-[11px] text-muted-foreground leading-relaxed">{finding.suggestion}</p>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {finding.suggestion}
+            </p>
           </div>
         </div>
       )}
@@ -161,10 +173,14 @@ function CategorySection({
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             {errors > 0 && (
-              <span className="text-[10px] text-red-400">{errors} error{errors !== 1 ? "s" : ""}</span>
+              <span className="text-[10px] text-red-400">
+                {errors} error{errors !== 1 ? "s" : ""}
+              </span>
             )}
             {warnings > 0 && (
-              <span className="text-[10px] text-yellow-400">{warnings} warning{warnings !== 1 ? "s" : ""}</span>
+              <span className="text-[10px] text-yellow-400">
+                {warnings} warning{warnings !== 1 ? "s" : ""}
+              </span>
             )}
             {findings.length === 0 && (
               <span className="text-[10px] text-green-400 flex items-center gap-1">
@@ -245,10 +261,7 @@ export function QualityPanel({
     );
   }
 
-  const noAuditYet =
-    isError ||
-    !audit ||
-    !("findings" in (audit as object));
+  const noAuditYet = isError || !audit || !("findings" in (audit as object));
 
   if (noAuditYet) {
     return (
@@ -259,11 +272,10 @@ export function QualityPanel({
         </div>
         <div className="border border-border rounded-lg p-4 text-center space-y-2">
           <ShieldCheck className="h-8 w-8 text-muted-foreground mx-auto" />
-          <p className="text-sm text-muted-foreground">
-            No audit report yet.
-          </p>
+          <p className="text-sm text-muted-foreground">No audit report yet.</p>
           <p className="text-xs text-muted-foreground">
-            Build or refine your app to generate a quality audit covering accessibility, SEO, performance, and security.
+            Build or refine your app to generate a quality audit covering accessibility, SEO,
+            performance, and security.
           </p>
         </div>
       </div>
@@ -305,7 +317,9 @@ export function QualityPanel({
           <div className="text-2xl font-bold text-foreground">{totalIssues}</div>
           <div className="text-[10px] text-muted-foreground mt-0.5">
             {totalErrors > 0 ? (
-              <span className="text-red-400">{totalErrors} error{totalErrors !== 1 ? "s" : ""}</span>
+              <span className="text-red-400">
+                {totalErrors} error{totalErrors !== 1 ? "s" : ""}
+              </span>
             ) : (
               "Total issues"
             )}
@@ -317,7 +331,10 @@ export function QualityPanel({
         {report.scores.map((s) => {
           const Icon = CATEGORY_ICONS[s.category];
           return (
-            <div key={s.category} className={`border rounded-md p-2 text-center ${scoreBg(s.score)}`}>
+            <div
+              key={s.category}
+              className={`border rounded-md p-2 text-center ${scoreBg(s.score)}`}
+            >
               <Icon className={`h-3.5 w-3.5 mx-auto mb-1 ${scoreColor(s.score)}`} />
               <div className={`text-xs font-bold ${scoreColor(s.score)}`}>{s.score}</div>
               <div className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{s.label}</div>

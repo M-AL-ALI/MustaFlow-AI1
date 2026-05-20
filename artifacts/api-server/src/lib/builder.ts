@@ -975,11 +975,27 @@ export function sanitisePrompt(prompt: string): { cleaned: string; wasModified: 
 
 const SECRET_PATTERNS: Array<{ re: RegExp; category: string; redact: string }> = [
   { re: /sk-[A-Za-z0-9_-]{20,}/g, category: "OpenAI API key", redact: "[REDACTED:openai-key]" },
-  { re: /sk_live_[A-Za-z0-9]{24,}/g, category: "Stripe live secret key", redact: "[REDACTED:stripe-secret]" },
-  { re: /pk_live_[A-Za-z0-9]{24,}/g, category: "Stripe live publishable key", redact: "[REDACTED:stripe-pk]" },
-  { re: /rk_live_[A-Za-z0-9]{24,}/g, category: "Stripe live restricted key", redact: "[REDACTED:stripe-rk]" },
+  {
+    re: /sk_live_[A-Za-z0-9]{24,}/g,
+    category: "Stripe live secret key",
+    redact: "[REDACTED:stripe-secret]",
+  },
+  {
+    re: /pk_live_[A-Za-z0-9]{24,}/g,
+    category: "Stripe live publishable key",
+    redact: "[REDACTED:stripe-pk]",
+  },
+  {
+    re: /rk_live_[A-Za-z0-9]{24,}/g,
+    category: "Stripe live restricted key",
+    redact: "[REDACTED:stripe-rk]",
+  },
   { re: /AKIA[0-9A-Z]{16}/g, category: "AWS access key", redact: "[REDACTED:aws-key]" },
-  { re: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, category: "JWT token", redact: "[REDACTED:jwt]" },
+  {
+    re: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
+    category: "JWT token",
+    redact: "[REDACTED:jwt]",
+  },
 ];
 
 /**
@@ -1031,9 +1047,7 @@ export function scanForSecrets(files: BuilderFile[]): {
 export function validateCrossFileConsistency(files: BuilderFile[]): string[] {
   const warnings: string[] = [];
   try {
-    const cssFiles = files.filter(
-      (f) => f.mimeType === "text/css" || f.path.endsWith(".css"),
-    );
+    const cssFiles = files.filter((f) => f.mimeType === "text/css" || f.path.endsWith(".css"));
     const htmlFiles = files.filter(
       (f) => f.mimeType === "text/html" || f.path.endsWith(".html") || f.path.endsWith(".htm"),
     );
@@ -1049,14 +1063,15 @@ export function validateCrossFileConsistency(files: BuilderFile[]): string[] {
     if (cssFiles.length > 0 && htmlFiles.length > 0) {
       const definedClasses = new Set<string>();
       for (const f of cssFiles) {
-        for (const m of f.content.matchAll(/\.(-?[_a-zA-Z][_a-zA-Z0-9-]*)\s*[{,:\[]/g)) {
+        for (const m of f.content.matchAll(/\.(-?[_a-zA-Z][_a-zA-Z0-9-]*)\s*[{,:[]/g)) {
           definedClasses.add(m[1]!);
         }
       }
 
       if (definedClasses.size > 0) {
         // Tailwind CDN utility prefix heuristic — skip classes that look like Tailwind utilities
-        const TAILWIND_PREFIXES = /^(?:flex|grid|block|inline|hidden|relative|absolute|fixed|static|sticky|overflow|z-|p-|m-|w-|h-|text-|bg-|border|rounded|shadow|font-|items-|justify-|gap-|space-|cursor-|select-|opacity-|transition|duration-|ease-|hover:|focus:|active:|group|sr-only|container|max-w|min-w|min-h|max-h|col-|row-|aspect-|place-|self-|grow|shrink|basis-|order-|decoration-|tracking-|leading-|line-|align-|whitespace-|break-|truncate|visible|invisible|isolate|float-|clear-|object-|ring-|divide-|outline-|scale-|rotate-|translate-|skew-|origin-|animate-)/;
+        const TAILWIND_PREFIXES =
+          /^(?:flex|grid|block|inline|hidden|relative|absolute|fixed|static|sticky|overflow|z-|p-|m-|w-|h-|text-|bg-|border|rounded|shadow|font-|items-|justify-|gap-|space-|cursor-|select-|opacity-|transition|duration-|ease-|hover:|focus:|active:|group|sr-only|container|max-w|min-w|min-h|max-h|col-|row-|aspect-|place-|self-|grow|shrink|basis-|order-|decoration-|tracking-|leading-|line-|align-|whitespace-|break-|truncate|visible|invisible|isolate|float-|clear-|object-|ring-|divide-|outline-|scale-|rotate-|translate-|skew-|origin-|animate-)/;
 
         for (const htmlFile of htmlFiles) {
           for (const attrMatch of htmlFile.content.matchAll(/class="([^"]+)"/g)) {
@@ -1092,9 +1107,25 @@ export function validateCrossFileConsistency(files: BuilderFile[]): string[] {
         const EVENT_ATTR_RE = /on\w+="([^"]+)"/g;
         const CALL_RE = /(\w+)\s*\(/g;
         const BUILTINS = new Set([
-          "if", "for", "while", "function", "return", "alert", "confirm",
-          "console", "document", "window", "Object", "Array", "JSON",
-          "Math", "parseInt", "parseFloat", "Boolean", "String", "Number",
+          "if",
+          "for",
+          "while",
+          "function",
+          "return",
+          "alert",
+          "confirm",
+          "console",
+          "document",
+          "window",
+          "Object",
+          "Array",
+          "JSON",
+          "Math",
+          "parseInt",
+          "parseFloat",
+          "Boolean",
+          "String",
+          "Number",
         ]);
 
         for (const htmlFile of htmlFiles) {
@@ -1878,7 +1909,7 @@ export async function runRefinePipeline(args: {
       f.path.endsWith(".mjs"),
   );
 
-  let correctionFailed = false;
+  const correctionFailed = false;
   let correctionWasAttempted = false;
   let refineErrorCategory: string | null = null;
   let validationWarnings: string[] = [];

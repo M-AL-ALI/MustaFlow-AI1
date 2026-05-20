@@ -40,7 +40,11 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
   {
     name: "tailwindcss",
     displayName: "Tailwind CSS",
-    urlPatterns: [/cdn\.tailwindcss\.com/, /unpkg\.com\/tailwindcss/, /cdn\.jsdelivr\.net\/npm\/tailwindcss/],
+    urlPatterns: [
+      /cdn\.tailwindcss\.com/,
+      /unpkg\.com\/tailwindcss/,
+      /cdn\.jsdelivr\.net\/npm\/tailwindcss/,
+    ],
     versionPattern: /tailwindcss@([\d.]+)/,
     blockedVersions: [],
     minimumRecommendedVersion: "3.0.0",
@@ -56,13 +60,18 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
   {
     name: "chartjs",
     displayName: "Chart.js",
-    urlPatterns: [/cdn\.jsdelivr\.net\/npm\/chart\.js/, /unpkg\.com\/chart\.js/, /cdnjs\.cloudflare\.com\/ajax\/libs\/Chart\.js/],
+    urlPatterns: [
+      /cdn\.jsdelivr\.net\/npm\/chart\.js/,
+      /unpkg\.com\/chart\.js/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/Chart\.js/,
+    ],
     versionPattern: /[Cc]hart\.js@?([\d.]+)|[Cc]hart\.js\/([\d.]+)/,
     blockedVersions: [
       {
         match: (v) => semverLt(v, "3.0.0"),
         cve: "CVE-2019-11358",
-        description: "Chart.js v2 bundles a vulnerable version of jQuery. Prototype pollution risk.",
+        description:
+          "Chart.js v2 bundles a vulnerable version of jQuery. Prototype pollution risk.",
         upgradeTo: "4.x",
       },
     ],
@@ -71,12 +80,17 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
   {
     name: "leaflet",
     displayName: "Leaflet.js",
-    urlPatterns: [/unpkg\.com\/leaflet/, /cdn\.jsdelivr\.net\/npm\/leaflet/, /cdnjs\.cloudflare\.com\/ajax\/libs\/leaflet/],
+    urlPatterns: [
+      /unpkg\.com\/leaflet/,
+      /cdn\.jsdelivr\.net\/npm\/leaflet/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/leaflet/,
+    ],
     versionPattern: /leaflet@([\d.]+)|leaflet\/([\d.]+)/,
     blockedVersions: [
       {
         match: (v) => semverLt(v, "1.7.0"),
-        description: "Leaflet versions before 1.7.0 have a known XSS vulnerability in popup content handling.",
+        description:
+          "Leaflet versions before 1.7.0 have a known XSS vulnerability in popup content handling.",
         upgradeTo: "1.9.4",
       },
     ],
@@ -85,12 +99,17 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
   {
     name: "alpinejs",
     displayName: "Alpine.js",
-    urlPatterns: [/unpkg\.com\/alpinejs/, /cdn\.jsdelivr\.net\/npm\/alpinejs/, /cdn\.skypack\.dev\/alpinejs/],
+    urlPatterns: [
+      /unpkg\.com\/alpinejs/,
+      /cdn\.jsdelivr\.net\/npm\/alpinejs/,
+      /cdn\.skypack\.dev\/alpinejs/,
+    ],
     versionPattern: /alpinejs@([\d.]+)/,
     blockedVersions: [
       {
         match: (v) => semverLt(v, "2.8.2"),
-        description: "Alpine.js versions before 2.8.2 have an XSS vulnerability via x-html directive.",
+        description:
+          "Alpine.js versions before 2.8.2 have an XSS vulnerability via x-html directive.",
         upgradeTo: "3.x",
       },
     ],
@@ -99,7 +118,11 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
   {
     name: "htmx",
     displayName: "htmx",
-    urlPatterns: [/unpkg\.com\/htmx\.org/, /cdn\.jsdelivr\.net\/npm\/htmx\.org/, /cdnjs\.cloudflare\.com\/ajax\/libs\/htmx/],
+    urlPatterns: [
+      /unpkg\.com\/htmx\.org/,
+      /cdn\.jsdelivr\.net\/npm\/htmx\.org/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/htmx/,
+    ],
     versionPattern: /htmx\.org@([\d.]+)|htmx\/([\d.]+)/,
     blockedVersions: [
       {
@@ -113,19 +136,25 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
   {
     name: "axios",
     displayName: "Axios",
-    urlPatterns: [/unpkg\.com\/axios/, /cdn\.jsdelivr\.net\/npm\/axios/, /cdnjs\.cloudflare\.com\/ajax\/libs\/axios/],
+    urlPatterns: [
+      /unpkg\.com\/axios/,
+      /cdn\.jsdelivr\.net\/npm\/axios/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/axios/,
+    ],
     versionPattern: /axios@([\d.]+)|axios\/([\d.]+)/,
     blockedVersions: [
       {
         match: (v) => semverLt(v, "0.21.2"),
         cve: "CVE-2021-3749",
-        description: "Axios versions before 0.21.2 are vulnerable to Regular Expression Denial of Service (ReDoS).",
+        description:
+          "Axios versions before 0.21.2 are vulnerable to Regular Expression Denial of Service (ReDoS).",
         upgradeTo: "1.x",
       },
       {
         match: (v) => semverLt(v, "1.6.0"),
         cve: "CVE-2023-45857",
-        description: "Axios versions before 1.6.0 may expose confidential XSRF tokens to a third party.",
+        description:
+          "Axios versions before 1.6.0 may expose confidential XSRF tokens to a third party.",
         upgradeTo: "1.6.0",
       },
     ],
@@ -134,13 +163,18 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
   {
     name: "lodash",
     displayName: "Lodash",
-    urlPatterns: [/unpkg\.com\/lodash/, /cdn\.jsdelivr\.net\/npm\/lodash/, /cdnjs\.cloudflare\.com\/ajax\/libs\/lodash\.js/],
+    urlPatterns: [
+      /unpkg\.com\/lodash/,
+      /cdn\.jsdelivr\.net\/npm\/lodash/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/lodash\.js/,
+    ],
     versionPattern: /lodash@([\d.]+)|lodash\/([\d.]+)|lodash\.js\/([\d.]+)/,
     blockedVersions: [
       {
         match: (v) => semverLt(v, "4.17.21"),
         cve: "CVE-2021-23337",
-        description: "Lodash versions before 4.17.21 are vulnerable to prototype pollution via the merge, mergeWith, and defaultsDeep functions.",
+        description:
+          "Lodash versions before 4.17.21 are vulnerable to prototype pollution via the merge, mergeWith, and defaultsDeep functions.",
         upgradeTo: "4.17.21",
       },
     ],
@@ -149,7 +183,11 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
   {
     name: "animejs",
     displayName: "Anime.js",
-    urlPatterns: [/unpkg\.com\/animejs/, /cdn\.jsdelivr\.net\/npm\/animejs/, /cdnjs\.cloudflare\.com\/ajax\/libs\/animejs/],
+    urlPatterns: [
+      /unpkg\.com\/animejs/,
+      /cdn\.jsdelivr\.net\/npm\/animejs/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/animejs/,
+    ],
     versionPattern: /animejs@([\d.]+)|animejs\/([\d.]+)/,
     blockedVersions: [],
     minimumRecommendedVersion: "3.2.0",
@@ -157,7 +195,11 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
   {
     name: "gsap",
     displayName: "GSAP",
-    urlPatterns: [/unpkg\.com\/gsap/, /cdn\.jsdelivr\.net\/npm\/gsap/, /cdnjs\.cloudflare\.com\/ajax\/libs\/gsap/],
+    urlPatterns: [
+      /unpkg\.com\/gsap/,
+      /cdn\.jsdelivr\.net\/npm\/gsap/,
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/gsap/,
+    ],
     versionPattern: /gsap@([\d.]+)|gsap\/([\d.]+)/,
     blockedVersions: [],
     minimumRecommendedVersion: "3.0.0",

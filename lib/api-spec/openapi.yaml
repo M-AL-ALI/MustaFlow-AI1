@@ -2377,7 +2377,20 @@ components:
 
     BuildAnalyticRow:
       type: object
-      required: [id, taskId, projectId, model, agentMode, kind, durationMs, correctionPasses, escalated, outcome, createdAt]
+      required:
+        [
+          id,
+          taskId,
+          projectId,
+          model,
+          agentMode,
+          kind,
+          durationMs,
+          correctionPasses,
+          escalated,
+          outcome,
+          createdAt,
+        ]
       properties:
         id: { type: integer }
         taskId: { type: integer }

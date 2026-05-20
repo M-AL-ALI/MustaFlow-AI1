@@ -276,7 +276,11 @@ function ReportCard({
                 <div
                   className={cn(
                     "text-sm font-bold leading-none",
-                    s.score >= 90 ? "text-green-400" : s.score >= 70 ? "text-yellow-400" : "text-red-400",
+                    s.score >= 90
+                      ? "text-green-400"
+                      : s.score >= 70
+                        ? "text-yellow-400"
+                        : "text-red-400",
                   )}
                 >
                   {s.score}
@@ -285,15 +289,19 @@ function ReportCard({
               </div>
             ))}
           </div>
-          {report.auditReport.findings.filter((f) => f.severity === "error").slice(0, 3).map((f, i) => (
-            <div key={i} className="flex items-start gap-1 text-[10px] text-red-400">
-              <AlertTriangle className="h-2.5 w-2.5 shrink-0 mt-0.5" />
-              <span className="truncate">{f.message}</span>
-            </div>
-          ))}
+          {report.auditReport.findings
+            .filter((f) => f.severity === "error")
+            .slice(0, 3)
+            .map((f, i) => (
+              <div key={i} className="flex items-start gap-1 text-[10px] text-red-400">
+                <AlertTriangle className="h-2.5 w-2.5 shrink-0 mt-0.5" />
+                <span className="truncate">{f.message}</span>
+              </div>
+            ))}
           {report.auditReport.findings.filter((f) => f.severity === "warning").length > 0 && (
             <div className="text-[10px] text-muted-foreground">
-              +{report.auditReport.findings.filter((f) => f.severity === "warning").length} warnings — see Quality tab for details
+              +{report.auditReport.findings.filter((f) => f.severity === "warning").length} warnings
+              — see Quality tab for details
             </div>
           )}
         </div>

@@ -38,9 +38,7 @@ export interface AuditReport {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function htmlFiles(files: BuilderFile[]): BuilderFile[] {
-  return files.filter(
-    (f) => f.mimeType === "text/html" || f.path.endsWith(".html"),
-  );
+  return files.filter((f) => f.mimeType === "text/html" || f.path.endsWith(".html"));
 }
 
 /** Extract all attribute values for a given attribute name from an HTML string. */
@@ -67,12 +65,13 @@ function hasAttr(tag: string, attr: string): boolean {
 
 /** Count external resource URLs from script/link/img src/href attributes. */
 function countExternalResources(html: string): number {
-  const scriptSrcs = extractAttr(html, "src").filter((s) =>
-    s.startsWith("http://") || s.startsWith("https://") || s.startsWith("//"),
+  const scriptSrcs = extractAttr(html, "src").filter(
+    (s) => s.startsWith("http://") || s.startsWith("https://") || s.startsWith("//"),
   );
-  const linkHrefs = extractAttr(html, "href").filter((s) =>
-    (s.startsWith("http://") || s.startsWith("https://") || s.startsWith("//")) &&
-    !s.startsWith("//fonts.googleapis"), // Google Fonts doesn't count as blocking
+  const linkHrefs = extractAttr(html, "href").filter(
+    (s) =>
+      (s.startsWith("http://") || s.startsWith("https://") || s.startsWith("//")) &&
+      !s.startsWith("//fonts.googleapis"), // Google Fonts doesn't count as blocking
   );
   return scriptSrcs.length + linkHrefs.length;
 }
@@ -80,10 +79,18 @@ function countExternalResources(html: string): number {
 /** Extract all CDN resource URLs (script src, link href) from HTML. */
 function extractCdnUrls(html: string): string[] {
   const src = extractAttr(html, "src").filter(
-    (s) => s.includes("unpkg.com") || s.includes("cdn.jsdelivr.net") || s.includes("cdnjs.cloudflare.com") || s.includes("cdn.tailwindcss.com") || s.includes("cdn.skypack.dev"),
+    (s) =>
+      s.includes("unpkg.com") ||
+      s.includes("cdn.jsdelivr.net") ||
+      s.includes("cdnjs.cloudflare.com") ||
+      s.includes("cdn.tailwindcss.com") ||
+      s.includes("cdn.skypack.dev"),
   );
   const href = extractAttr(html, "href").filter(
-    (s) => s.includes("unpkg.com") || s.includes("cdn.jsdelivr.net") || s.includes("cdnjs.cloudflare.com"),
+    (s) =>
+      s.includes("unpkg.com") ||
+      s.includes("cdn.jsdelivr.net") ||
+      s.includes("cdnjs.cloudflare.com"),
   );
   return [...src, ...href];
 }
@@ -105,7 +112,8 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
         severity: "error",
         file: file.path,
         message: "The <html> element is missing a lang attribute.",
-        suggestion: 'Add lang="en" (or the appropriate language code) to the <html> tag to help screen readers announce the correct language.',
+        suggestion:
+          'Add lang="en" (or the appropriate language code) to the <html> tag to help screen readers announce the correct language.',
       });
     }
 
@@ -118,7 +126,8 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
           severity: "error",
           file: file.path,
           message: `An <img> tag is missing the alt attribute: ${img.slice(0, 80)}`,
-          suggestion: 'Add alt="descriptive text" to the image. Use alt="" (empty) if the image is purely decorative.',
+          suggestion:
+            'Add alt="descriptive text" to the image. Use alt="" (empty) if the image is purely decorative.',
         });
         break; // Report once per file to avoid spamming
       }
@@ -127,11 +136,6 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
     // 3. Form inputs without associated labels
     const inputTags = html.match(/<input(?:\s[^>]*)?\/?>/gi) ?? [];
     const labelFors = extractAttr(html, "for");
-    const inputIds = extractAttr(html, "id").filter((id) => {
-      // Check if any input has this id
-      return inputTags.some((t) => t.includes(`id="${id}"`) || t.includes(`id='${id}'`));
-    });
-
     const unlabeledInputs = inputTags.filter((tag) => {
       const type = (tag.match(/type\s*=\s*["']([^"']*)["']/i)?.[1] ?? "").toLowerCase();
       if (["hidden", "submit", "button", "reset", "image"].includes(type)) return false;
@@ -149,7 +153,8 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
         severity: "error",
         file: file.path,
         message: `${unlabeledInputs.length} form input(s) lack an associated <label> element.`,
-        suggestion: 'Add a <label for="inputId"> element for each input, or wrap inputs inside a <label> element. This is required for screen reader accessibility.',
+        suggestion:
+          'Add a <label for="inputId"> element for each input, or wrap inputs inside a <label> element. This is required for screen reader accessibility.',
       });
     }
 
@@ -169,7 +174,8 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
         severity: "error",
         file: file.path,
         message: `${iconOnlyButtons.length} button(s) have no visible text or aria-label (icon-only buttons).`,
-        suggestion: 'Add aria-label="Descriptive action" to icon-only buttons so screen readers can announce their purpose.',
+        suggestion:
+          'Add aria-label="Descriptive action" to icon-only buttons so screen readers can announce their purpose.',
       });
     }
 
@@ -182,7 +188,8 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
         severity: "warning",
         file: file.path,
         message: "No skip-navigation link found. Keyboard users cannot bypass repeated navigation.",
-        suggestion: 'Add a skip link as the first element in <body>: <a href="#main-content" class="sr-only focus:not-sr-only">Skip to main content</a>. Target the <main> element with id="main-content".',
+        suggestion:
+          'Add a skip link as the first element in <body>: <a href="#main-content" class="sr-only focus:not-sr-only">Skip to main content</a>. Target the <main> element with id="main-content".',
       });
     }
 
@@ -191,8 +198,15 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
     const suspiciousContrast = inlineColorStyles.filter((s) => {
       const lower = s.toLowerCase();
       // Flag when text color and background color appear to be both light or both dark
-      const hasLightGray = lower.includes("#ccc") || lower.includes("#ddd") || lower.includes("#eee") || lower.includes("#f0f") || lower.includes("lightgray") || lower.includes("silver");
-      const hasWhiteBg = lower.includes("background") && (lower.includes("#fff") || lower.includes("white"));
+      const hasLightGray =
+        lower.includes("#ccc") ||
+        lower.includes("#ddd") ||
+        lower.includes("#eee") ||
+        lower.includes("#f0f") ||
+        lower.includes("lightgray") ||
+        lower.includes("silver");
+      const hasWhiteBg =
+        lower.includes("background") && (lower.includes("#fff") || lower.includes("white"));
       return hasLightGray && !hasWhiteBg;
     });
 
@@ -201,8 +215,10 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
         category: "accessibility",
         severity: "warning",
         file: file.path,
-        message: "Potential low-contrast inline color styles detected. Text on similar-colored backgrounds may fail WCAG contrast requirements.",
-        suggestion: "Ensure body text has at least 4.5:1 contrast ratio and large text has at least 3:1 contrast ratio. Use a tool like https://webaim.org/resources/contrastchecker/ to verify.",
+        message:
+          "Potential low-contrast inline color styles detected. Text on similar-colored backgrounds may fail WCAG contrast requirements.",
+        suggestion:
+          "Ensure body text has at least 4.5:1 contrast ratio and large text has at least 3:1 contrast ratio. Use a tool like https://webaim.org/resources/contrastchecker/ to verify.",
       });
     }
   }
@@ -230,18 +246,30 @@ export function auditSeo(files: BuilderFile[]): AuditFinding[] {
         severity: "error",
         file: file.path,
         message: "No <title> element found.",
-        suggestion: "Add a descriptive <title> tag inside <head>. It should be 50–60 characters and accurately describe the page content.",
+        suggestion:
+          "Add a descriptive <title> tag inside <head>. It should be 50–60 characters and accurately describe the page content.",
       });
     } else {
       const titleText = titleMatch[1]?.trim() ?? "";
-      const genericTitles = ["document", "untitled", "my app", "page", "app", "index", "home page", "my website", "website"];
+      const genericTitles = [
+        "document",
+        "untitled",
+        "my app",
+        "page",
+        "app",
+        "index",
+        "home page",
+        "my website",
+        "website",
+      ];
       if (titleText.length === 0 || genericTitles.some((g) => titleText.toLowerCase() === g)) {
         findings.push({
           category: "seo",
           severity: "warning",
           file: file.path,
           message: `The <title> tag is generic or empty: "${titleText}".`,
-          suggestion: "Replace the generic title with a descriptive, keyword-rich title that reflects the page's unique content.",
+          suggestion:
+            "Replace the generic title with a descriptive, keyword-rich title that reflects the page's unique content.",
         });
       }
     }
@@ -253,8 +281,9 @@ export function auditSeo(files: BuilderFile[]): AuditFinding[] {
         category: "seo",
         severity: "error",
         file: file.path,
-        message: "No <meta name=\"description\"> tag found.",
-        suggestion: 'Add <meta name="description" content="A concise 150–160 character summary of this page."> inside <head>.',
+        message: 'No <meta name="description"> tag found.',
+        suggestion:
+          'Add <meta name="description" content="A concise 150–160 character summary of this page."> inside <head>.',
       });
     }
 
@@ -275,7 +304,8 @@ export function auditSeo(files: BuilderFile[]): AuditFinding[] {
           severity: "warning",
           file: file.path,
           message: `Missing Open Graph tags: ${missing.join(", ")}.`,
-          suggestion: 'Add Open Graph meta tags inside <head> to control how the page appears when shared on social media: <meta property="og:title" content="…">, <meta property="og:description" content="…">, <meta property="og:image" content="…">.',
+          suggestion:
+            'Add Open Graph meta tags inside <head> to control how the page appears when shared on social media: <meta property="og:title" content="…">, <meta property="og:description" content="…">, <meta property="og:image" content="…">.',
         });
       }
     }
@@ -288,19 +318,23 @@ export function auditSeo(files: BuilderFile[]): AuditFinding[] {
         severity: "info",
         file: file.path,
         message: "No canonical link element found.",
-        suggestion: 'Add <link rel="canonical" href="https://yourdomain.com/"> to prevent duplicate content issues if the page can be accessed via multiple URLs.',
+        suggestion:
+          'Add <link rel="canonical" href="https://yourdomain.com/"> to prevent duplicate content issues if the page can be accessed via multiple URLs.',
       });
     }
 
     // 5. No structured data
-    const hasStructuredData = /<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>/i.test(html);
+    const hasStructuredData = /<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>/i.test(
+      html,
+    );
     if (!hasStructuredData && isIndexPage) {
       findings.push({
         category: "seo",
         severity: "info",
         file: file.path,
         message: "No structured data (JSON-LD) found.",
-        suggestion: 'Add <script type="application/ld+json"> with schema.org structured data to enable rich search results (e.g. WebSite, Organization, Product, Article schema).',
+        suggestion:
+          'Add <script type="application/ld+json"> with schema.org structured data to enable rich search results (e.g. WebSite, Organization, Product, Article schema).',
       });
     }
   }
@@ -336,7 +370,8 @@ export function auditPerformance(files: BuilderFile[]): AuditFinding[] {
         severity: "warning",
         file: file.path,
         message: `${blockingScripts.length} render-blocking <script> tag(s) in <head> without defer or async.`,
-        suggestion: 'Add the defer attribute to non-critical scripts in <head>: <script src="…" defer>. Use async for scripts with no dependencies. This prevents the browser from pausing HTML parsing to download and execute scripts.',
+        suggestion:
+          'Add the defer attribute to non-critical scripts in <head>: <script src="…" defer>. Use async for scripts with no dependencies. This prevents the browser from pausing HTML parsing to download and execute scripts.',
       });
     }
 
@@ -354,15 +389,16 @@ export function auditPerformance(files: BuilderFile[]): AuditFinding[] {
         severity: "warning",
         file: file.path,
         message: `${imgsWithoutDimensions.length} image(s) are missing explicit width and height attributes.`,
-        suggestion: 'Add width and height attributes to all <img> tags to prevent Cumulative Layout Shift (CLS). The browser can then reserve space before the image loads: <img src="…" width="800" height="400" alt="…">.',
+        suggestion:
+          'Add width and height attributes to all <img> tags to prevent Cumulative Layout Shift (CLS). The browser can then reserve space before the image loads: <img src="…" width="800" height="400" alt="…">.',
       });
     }
 
     // 3. Images without loading="lazy"
     const aboveFoldLimit = 3;
-    const imgsWithoutLazy = imgTags.slice(aboveFoldLimit).filter(
-      (img) => !img.includes('loading="lazy"') && !img.includes("loading='lazy'"),
-    );
+    const imgsWithoutLazy = imgTags
+      .slice(aboveFoldLimit)
+      .filter((img) => !img.includes('loading="lazy"') && !img.includes("loading='lazy'"));
 
     if (imgsWithoutLazy.length > 0) {
       findings.push({
@@ -370,7 +406,8 @@ export function auditPerformance(files: BuilderFile[]): AuditFinding[] {
         severity: "info",
         file: file.path,
         message: `${imgsWithoutLazy.length} below-the-fold image(s) are missing loading="lazy".`,
-        suggestion: 'Add loading="lazy" to images that appear below the fold to defer their loading until the user scrolls near them, reducing initial page load time.',
+        suggestion:
+          'Add loading="lazy" to images that appear below the fold to defer their loading until the user scrolls near them, reducing initial page load time.',
       });
     }
 
@@ -383,7 +420,8 @@ export function auditPerformance(files: BuilderFile[]): AuditFinding[] {
           severity: "warning",
           file: file.path,
           message: `An inline <style> block is ${Math.round(styleBlock.length / 1024)}KB, exceeding the 5KB recommendation.`,
-          suggestion: "Extract large inline styles into a separate .css file and load it with <link rel=\"stylesheet\">. This allows browsers to cache the stylesheet and improves parse performance.",
+          suggestion:
+            'Extract large inline styles into a separate .css file and load it with <link rel="stylesheet">. This allows browsers to cache the stylesheet and improves parse performance.',
         });
         break; // Report once per file
       }
@@ -397,7 +435,8 @@ export function auditPerformance(files: BuilderFile[]): AuditFinding[] {
         severity: "warning",
         file: file.path,
         message: `${externalCount} external resource requests detected (scripts, stylesheets, images). Exceeds the recommended 10-request limit.`,
-        suggestion: "Reduce external resource requests by combining scripts, using fewer CDN libraries, or loading non-critical resources asynchronously. Each external request adds latency.",
+        suggestion:
+          "Reduce external resource requests by combining scripts, using fewer CDN libraries, or loading non-critical resources asynchronously. Each external request adds latency.",
       });
     }
   }
@@ -468,7 +507,12 @@ export function runAudit(files: BuilderFile[]): AuditReport {
   const performanceFindings = auditPerformance(files);
   const securityFindings = auditCdnVulnerabilities(files);
 
-  const all = [...accessibilityFindings, ...seoFindings, ...performanceFindings, ...securityFindings];
+  const all = [
+    ...accessibilityFindings,
+    ...seoFindings,
+    ...performanceFindings,
+    ...securityFindings,
+  ];
 
   const scores: AuditScore[] = [
     computeScore(all, "accessibility"),
