@@ -324,10 +324,10 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
       queryKey: getListTaskEventsQueryKey(projectId, taskId),
       refetchInterval: (query) => {
         const data = query.state.data;
-        if (!data || !Array.isArray(data)) return 1000;
+        if (!data || !Array.isArray(data)) return 700;
         const last = (data as Array<{ eventType: string }>)[data.length - 1];
         if (last && TERMINAL_STATUSES.has(last.eventType)) return false;
-        return 1000;
+        return 700;
       },
     },
   });
@@ -339,7 +339,7 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
 
   useEffect(() => {
     if (!isTerminal) return;
-    const t = setTimeout(onDismiss, 1500);
+    const t = setTimeout(onDismiss, 2000);
     return () => clearTimeout(t);
   }, [isTerminal, onDismiss]);
 

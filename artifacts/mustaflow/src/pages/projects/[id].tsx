@@ -432,7 +432,7 @@ export default function ProjectWorkspacePage() {
     query: {
       enabled: !!projectId,
       queryKey: getListTasksQueryKey(projectId),
-      refetchInterval: sendMessage.isPending ? 1500 : 15000,
+      refetchInterval: sendMessage.isPending ? 800 : 15000,
     },
   });
 
@@ -761,6 +761,7 @@ export default function ProjectWorkspacePage() {
       opts?: { planMode?: boolean; background?: boolean; agentMode?: AgentMode },
     ) => {
       if (!content.trim()) return;
+      setActiveTaskId(null);
       chatAtBottomRef.current = true;
       setPendingBuildStartedAt(new Date());
       const effectiveMode = opts?.agentMode ?? agentMode;
@@ -1415,28 +1416,35 @@ export default function ProjectWorkspacePage() {
                       });
                     })()}
 
-                    {sendMessage.isPending && activeTaskId === null && (
-                      <div className="flex justify-start">
-                        <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
-                          <div
-                            className={cn(
-                              "animate-pulse w-1.5 h-1.5 rounded-full",
-                              pendingIsPlan ? "bg-secondary" : "bg-primary",
-                            )}
-                          />
-                          <span className="text-muted-foreground">
-                            {pendingIsPlan ? "Thinking through the plan…" : "MustaFlow is working…"}
-                          </span>
+                    {sendMessage.isPending ? (
+                      pendingFeedTaskId !== null ? (
+                        <InlineLiveActivity
+                          projectId={projectId}
+                          taskId={pendingFeedTaskId}
+                          onDismiss={() => {}}
+                        />
+                      ) : (
+                        <div className="flex justify-start">
+                          <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
+                            <div
+                              className={cn(
+                                "animate-pulse w-1.5 h-1.5 rounded-full",
+                                pendingIsPlan ? "bg-secondary" : "bg-primary",
+                              )}
+                            />
+                            <span className="text-muted-foreground">
+                              {pendingIsPlan ? "Thinking through the plan…" : "MustaFlow is working…"}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    {activeTaskId !== null && (
+                      )
+                    ) : activeTaskId !== null ? (
                       <InlineLiveActivity
                         projectId={projectId}
                         taskId={activeTaskId}
                         onDismiss={() => setActiveTaskId(null)}
                       />
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Activity ticker / Status bar */}
