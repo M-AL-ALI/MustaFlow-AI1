@@ -1451,7 +1451,9 @@ export default function ProjectWorkspacePage() {
                               )}
                             />
                             <span className="text-muted-foreground">
-                              {pendingIsPlan ? "Thinking through the plan…" : "MustaFlow is working…"}
+                              {pendingIsPlan
+                                ? "Thinking through the plan…"
+                                : "MustaFlow is working…"}
                             </span>
                           </div>
                         </div>
