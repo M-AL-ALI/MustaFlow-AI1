@@ -11,6 +11,7 @@ import {
   ChevronRight,
   ArrowDown,
   ExternalLink,
+  Lightbulb,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,7 @@ type TaskReport = {
     environment: "test" | "production";
   }>;
   nextRecommendation?: string;
+  codeSmells?: string[];
 };
 
 type StructuredPlan = {
@@ -114,6 +116,7 @@ function InlineReportCard({
   report: TaskReport;
   onViewFile?: (path: string) => void;
 }) {
+  const [smellsOpen, setSmellsOpen] = useState(false);
   return (
     <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
       <div className="flex items-center gap-2 font-semibold text-foreground">
@@ -193,6 +196,34 @@ function InlineReportCard({
           <div className="font-semibold text-yellow-500 flex items-center gap-1 text-[10px]">
             <AlertTriangle className="h-3 w-3" /> {report.warnings.length} warning(s)
           </div>
+        </div>
+      )}
+      {report.codeSmells && report.codeSmells.length > 0 && (
+        <div className="pt-1.5 border-t border-blue-500/20">
+          <button
+            className="w-full flex items-center gap-1.5 text-[10px] font-semibold text-blue-400 hover:text-blue-300 transition-colors"
+            onClick={() => setSmellsOpen((o) => !o)}
+          >
+            <Lightbulb className="h-3 w-3 shrink-0" />
+            <span>Code quality notes ({report.codeSmells.length})</span>
+            {smellsOpen ? (
+              <ChevronDown className="h-3 w-3 ml-auto shrink-0" />
+            ) : (
+              <ChevronRight className="h-3 w-3 ml-auto shrink-0" />
+            )}
+          </button>
+          {smellsOpen && (
+            <ul className="mt-1.5 space-y-1 pl-4">
+              {report.codeSmells.map((smell, i) => (
+                <li
+                  key={i}
+                  className="text-[10px] text-muted-foreground leading-relaxed list-disc"
+                >
+                  {smell}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {report.nextRecommendation && (
