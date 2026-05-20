@@ -154,6 +154,12 @@ MAP / LOCATION APPS:
 - For production apps needing Google Maps, Mapbox, or Apple Maps, populate integrationsNeeded — the static preview always uses Leaflet/OSM regardless.
 - NEVER hardcode real API keys in generated code. Use placeholder comments: /* API_KEY from project secrets */
 
+DATE / TIME LIBRARIES:
+- NEVER use Moment.js — it is End of Life and will not receive security fixes.
+- For date formatting and manipulation, use native JavaScript (Intl.DateTimeFormat, Date methods) — no CDN needed.
+- If a CDN date library is genuinely needed, use Luxon: <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+- Alternatively, use date-fns via CDN: <script src="https://cdn.jsdelivr.net/npm/date-fns@3/cdn.min.js"></script>
+
 BRAND / LOGO GENERATION:
 - When user requests brand assets (logo, icon, favicon, brand kit, color palette, typography):
   Store all brand files in a brand/ subdirectory.

@@ -1371,6 +1371,29 @@ export async function runJob(input: JobInput): Promise<void> {
         report.nativeFeatures && report.nativeFeatures.length > 0
           ? ` Native features used: ${report.nativeFeatures.join(", ")} — these require a real device and cannot be previewed in the web iframe.`
           : "";
+
+      // If Moment.js was detected in this build, write a Knowledge Vault lesson so future
+      // builds actively avoid it and use Luxon or date-fns instead.
+      const hasMomentNotice = (report.securityNotices ?? []).some((n) =>
+        n.packageName.toLowerCase().includes("moment"),
+      );
+      if (hasMomentNotice) {
+        void writeKnowledge({
+          title: "Avoid Moment.js — use Luxon or date-fns instead",
+          content:
+            "Moment.js is End of Life and will not receive security fixes. For all date formatting and manipulation in generated apps, use native JavaScript (Intl.DateTimeFormat, Date methods) where possible. When a CDN library is needed, prefer Luxon (https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js) or date-fns (https://cdn.jsdelivr.net/npm/date-fns@3/cdn.min.js). Never load moment from any CDN.",
+          type: kind,
+          category: "lesson",
+          severity: "warning",
+          projectId,
+          userId: project.ownerId,
+          relatedTaskId: taskId,
+          relatedVersionId: version?.id,
+          tags: ["moment", "date", "security", "eol", "luxon", "date-fns"],
+          approvedForReuse: true,
+        });
+        logger.info({ projectId, taskId }, "Moment.js detected — wrote Knowledge Vault lesson");
+      }
       void writeKnowledge({
         title: `${kind === "build" ? "Build" : "Refinement"} completed: "${userPrompt.slice(0, 60)}"`,
         content: `${assistantSummary.slice(0, 400)} — Files created: ${report.filesCreated.length}, changed: ${report.filesChanged.length}, removed: ${report.filesRemoved.length}. Warnings: ${report.warnings?.length ?? 0}.${nativeFeaturesNote}`,

@@ -19,6 +19,7 @@ export interface KnowledgeWriteOpts {
   relatedVersionId?: number;
   tags?: string[];
   diffSummary?: DiffSummary;
+  approvedForReuse?: boolean;
 }
 
 export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
@@ -34,7 +35,7 @@ export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
       relatedTaskId: opts.relatedTaskId ?? null,
       relatedVersionId: opts.relatedVersionId ?? null,
       tags: opts.tags ? opts.tags.join(",") : null,
-      approvedForReuse: false,
+      approvedForReuse: opts.approvedForReuse ?? false,
       diffSummary: opts.diffSummary ?? null,
     });
   } catch (err) {
