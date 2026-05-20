@@ -1519,7 +1519,7 @@ export default function ProjectWorkspacePage() {
                       {QUICK_ACTIONS.map((chip) => (
                         <button
                           key={chip}
-                          onClick={() => setPrompt(chip)}
+                          onClick={() => send(chip)}
                           className="px-2.5 py-1 rounded-full border border-border bg-muted/40 text-[10px] text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
                         >
                           {chip}

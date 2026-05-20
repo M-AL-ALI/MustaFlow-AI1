@@ -22,6 +22,7 @@ import {
 import { useState } from "react";
 import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 import { TemplatePicker } from "@/components/template-picker";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { type TemplateDefinition } from "@/lib/templates";
@@ -75,6 +76,8 @@ export default function HomePage() {
   const queryClient = useQueryClient();
   const createProject = useCreateProject();
 
+  const { toast } = useToast();
+
   const handleBuild = (kind: string = "web") => {
     if (!prompt.trim()) return;
     const words = prompt.trim().split(/\s+/).slice(0, 5).join(" ");
@@ -92,6 +95,22 @@ export default function HomePage() {
         onSuccess: (project) => {
           void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
           setLocation(`/projects/${project.id}`);
+        },
+        onError: (err: unknown) => {
+          const status = (err as { status?: number })?.status;
+          if (status === 401) {
+            toast({
+              title: "Sign in to build",
+              description: "Create a free account to start building your app.",
+            });
+            setLocation("/sign-in");
+          } else {
+            toast({
+              title: "Something went wrong",
+              description: "Could not create your project. Please try again.",
+              variant: "destructive",
+            });
+          }
         },
       },
     );
