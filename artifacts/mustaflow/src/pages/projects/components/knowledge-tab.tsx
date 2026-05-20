@@ -2,9 +2,10 @@ import { useState, useMemo, useCallback } from "react";
 import {
   useListKnowledge,
   useUpdateKnowledge,
+  useCreateKnowledge,
   getListKnowledgeQueryKey,
 } from "@workspace/api-client-react";
-import type { KnowledgeEntry } from "@workspace/api-client-react";
+import type { KnowledgeEntry, KnowledgeInput } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ import {
   CheckCircle2,
   CheckSquare,
   Square,
+  Plus,
 } from "lucide-react";
 
 function getTypeIcon(type: string) {
@@ -449,6 +451,141 @@ function KnowledgeEntryCard({
   );
 }
 
+const CATEGORY_PRESETS = ["note", "api", "layout", "style", "auth", "data", "performance"];
+
+function NewEntryForm({
+  projectId,
+  onSuccess,
+  onCancel,
+}: {
+  projectId: number;
+  onSuccess: () => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [category, setCategory] = useState("note");
+  const [severity, setSeverity] = useState<"info" | "warning" | "error">("info");
+  const createKnowledge = useCreateKnowledge();
+
+  const canSubmit = title.trim().length > 0 && content.trim().length > 0 && !createKnowledge.isPending;
+
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+    createKnowledge.mutate(
+      {
+        data: {
+          title: title.trim(),
+          content: content.trim(),
+          category: category.trim() || "note",
+          type: "note",
+          severity,
+          projectId,
+        } as KnowledgeInput & { projectId: number },
+      },
+      {
+        onSuccess: () => {
+          onSuccess();
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="border border-primary/30 rounded-lg bg-card p-3 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-foreground">New entry</span>
+        <button
+          onClick={onCancel}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {/* Title */}
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Title (required)"
+        maxLength={200}
+        autoFocus
+        className="w-full bg-muted border border-border rounded px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50"
+      />
+
+      {/* Content */}
+      <textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        placeholder="Content — describe the lesson or note (required)"
+        rows={3}
+        className="w-full bg-muted border border-border rounded px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 resize-none"
+      />
+
+      {/* Category + Severity row */}
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold block mb-1">
+            Category
+          </label>
+          <input
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            list="category-presets"
+            placeholder="e.g. api, layout, note"
+            className="w-full bg-muted border border-border rounded px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50"
+          />
+          <datalist id="category-presets">
+            {CATEGORY_PRESETS.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
+        </div>
+        <div className="w-28">
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold block mb-1">
+            Severity
+          </label>
+          <select
+            value={severity}
+            onChange={(e) => setSeverity(e.target.value as "info" | "warning" | "error")}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary/50"
+          >
+            <option value="info">Info</option>
+            <option value="warning">Warning</option>
+            <option value="error">Error</option>
+          </select>
+        </div>
+      </div>
+
+      {createKnowledge.isError && (
+        <p className="text-[10px] text-destructive">
+          Failed to save entry. Please try again.
+        </p>
+      )}
+
+      <div className="flex items-center gap-2 pt-0.5">
+        <Button
+          size="sm"
+          className="h-7 text-xs px-3"
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+        >
+          {createKnowledge.isPending ? (
+            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+          ) : null}
+          Save entry
+        </Button>
+        <button
+          onClick={onCancel}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function KnowledgeTab({ projectId }: { projectId: number }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -457,6 +594,7 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkPending, setBulkPending] = useState(false);
+  const [showNewEntryForm, setShowNewEntryForm] = useState(false);
   const queryClient = useQueryClient();
   const updateKnowledge = useUpdateKnowledge();
 
@@ -577,6 +715,18 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
                 {approvedCount} global lesson{approvedCount !== 1 ? "s" : ""}
               </div>
             )}
+            <button
+              onClick={() => setShowNewEntryForm((v) => !v)}
+              className={cn(
+                "flex items-center gap-1 text-[10px] px-2 py-1 rounded-md border font-medium transition-colors",
+                showNewEntryForm
+                  ? "bg-primary/10 border-primary/30 text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground hover:border-primary/30",
+              )}
+            >
+              <Plus className="h-3 w-3" />
+              New entry
+            </button>
             {entries.length > 0 && (
               <button
                 onClick={() => {
@@ -707,6 +857,16 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
 
       {/* Entry list */}
       <div className={cn("flex-1 overflow-y-auto p-4 space-y-2", selectedCount > 0 ? "pb-20" : "")}>
+        {showNewEntryForm && (
+          <NewEntryForm
+            projectId={projectId}
+            onSuccess={() => {
+              setShowNewEntryForm(false);
+              invalidate();
+            }}
+            onCancel={() => setShowNewEntryForm(false)}
+          />
+        )}
         {isLoading ? (
           <div className="flex items-center justify-center pt-12 gap-2 text-muted-foreground text-xs">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -725,7 +885,7 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 {entries.length === 0
-                  ? "Entries are created automatically after each build, refine, or publish."
+                  ? "Entries are created automatically after each build. You can also add your own."
                   : "Try clearing your filters."}
               </p>
             </div>
