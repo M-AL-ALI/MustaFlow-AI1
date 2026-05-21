@@ -1,24 +1,40 @@
 /**
  * Per-project database provisioning routes (Phase G).
  *
- * POST   /api/projects/:id/database/provision  — provision Postgres or SQLite, inject DATABASE_URL secret
- * GET    /api/projects/:id/database             — get current DB status
- * DELETE /api/projects/:id/database             — deprovision DB and remove DATABASE_URL secret
- * POST   /api/projects/:id/database/query       — run read-only SQL (SELECT only, 200-row limit)
- * GET    /api/projects/:id/database/schema      — get tables + columns
+ * POST   /api/projects/:id/database/provision              — provision Postgres or SQLite, inject DATABASE_URL secret
+ * GET    /api/projects/:id/database                         — get current DB status
+ * DELETE /api/projects/:id/database                         — deprovision DB and remove DATABASE_URL secret
+ * POST   /api/projects/:id/database/query                   — run read-only SQL (SELECT only, 200-row limit)
+ * GET    /api/projects/:id/database/schema                  — get tables + columns
+ * POST   /api/projects/:id/database/snapshots               — capture a database snapshot
+ * GET    /api/projects/:id/database/snapshots               — list database snapshots
+ * POST   /api/projects/:id/database/snapshots/:sid/restore  — restore a snapshot
+ * DELETE /api/projects/:id/database/snapshots/:sid          — delete a snapshot
  */
 
 import { Router, type IRouter } from "express";
-import { and, eq, isNull } from "drizzle-orm";
-import { db, projectsTable, secretsTable } from "@workspace/db";
+import { and, desc, eq, isNull } from "drizzle-orm";
+import {
+  db,
+  projectsTable,
+  secretsTable,
+  dbSnapshotsTable,
+  projectVersionsTable,
+} from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService, maskValue } from "../lib/encryption";
 import { logger } from "../lib/logger";
+import { execInContainer } from "../lib/container";
+import { restorePostgresDump, restoreSQLiteSnapshot } from "../lib/db-snapshot-restore";
+import {
+  uploadSnapshotBlob,
+  downloadSnapshotBlob,
+  deleteSnapshotBlob,
+} from "../lib/snapshot-storage";
 
 const router: IRouter = Router();
 
 const ROW_LIMIT = 200;
-
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 async function loadProject(projectId: number) {
@@ -70,6 +86,17 @@ async function _verifyPostgresConnection(connectionString: string): Promise<bool
   } catch {
     return false;
   }
+}
+
+/** Returns the latest version id for a project, or null if none exist. */
+async function getLatestVersionId(projectId: number): Promise<number | null> {
+  const [row] = await db
+    .select({ id: projectVersionsTable.id })
+    .from(projectVersionsTable)
+    .where(eq(projectVersionsTable.projectId, projectId))
+    .orderBy(desc(projectVersionsTable.createdAt))
+    .limit(1);
+  return row?.id ?? null;
 }
 
 // ── Neon provisioning (optional — requires NEON_API_KEY env var) ──────────────
@@ -135,6 +162,145 @@ async function deleteNeonDatabase(neonProjectId: string): Promise<void> {
   }
 }
 
+// ── Postgres structured snapshot ──────────────────────────────────────────────
+
+interface TableSnapshot {
+  name: string;
+  ddl: string;
+  columns: string[];
+  rows: unknown[][];
+}
+
+interface PostgresSnapshotData {
+  version: 1;
+  provider: "postgres";
+  generatedAt: string;
+  tables: TableSnapshot[];
+}
+
+/**
+ * Capture a full Postgres snapshot as structured JSON.
+ * No row limit — all rows are captured.
+ * The JSON format is lossless and fully replayable: restore uses parameterised
+ * INSERT queries so semicolons/newlines in string values never break parsing.
+ */
+async function generatePostgresDump(connectionString: string): Promise<string> {
+  const { default: pg } = await import("pg");
+  const client = new pg.Client({ connectionString, connectionTimeoutMillis: 30000 });
+  await client.connect();
+
+  try {
+    const tablesResult = await client.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+      ORDER BY table_name
+    `);
+
+    const tables: TableSnapshot[] = [];
+
+    for (const { table_name: tableName } of tablesResult.rows) {
+      // Column definitions
+      const colResult = await client.query<{
+        column_name: string;
+        data_type: string;
+        character_maximum_length: number | null;
+        is_nullable: string;
+        column_default: string | null;
+      }>(
+        `SELECT column_name, data_type, character_maximum_length, is_nullable, column_default
+         FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = $1
+         ORDER BY ordinal_position`,
+        [tableName],
+      );
+
+      // Primary key columns
+      const pkResult = await client.query<{ column_name: string }>(
+        `SELECT kcu.column_name
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.key_column_usage kcu
+           ON tc.constraint_name = kcu.constraint_name
+           AND tc.table_schema = kcu.table_schema
+         WHERE tc.constraint_type = 'PRIMARY KEY'
+           AND tc.table_schema = 'public'
+           AND tc.table_name = $1
+         ORDER BY kcu.ordinal_position`,
+        [tableName],
+      );
+
+      const pkCols = new Set(pkResult.rows.map((r) => r.column_name));
+
+      const colDefs = colResult.rows.map((c) => {
+        let typeStr = c.data_type;
+        if (c.character_maximum_length) typeStr += `(${c.character_maximum_length})`;
+        const notNull = c.is_nullable === "NO" ? " NOT NULL" : "";
+        const def = c.column_default ? ` DEFAULT ${c.column_default}` : "";
+        return `  "${c.column_name}" ${typeStr}${notNull}${def}`;
+      });
+
+      if (pkCols.size > 0) {
+        const pkList = [...pkCols].map((c) => `"${c}"`).join(", ");
+        colDefs.push(`  PRIMARY KEY (${pkList})`);
+      }
+
+      const ddl = `CREATE TABLE "${tableName}" (\n${colDefs.join(",\n")}\n)`;
+
+      // Fetch all rows — no row limit
+      const dataResult = await client.query(`SELECT * FROM "${tableName}"`);
+      const columns = dataResult.fields.map((f) => f.name);
+      const rows = dataResult.rows.map((row) =>
+        columns.map((col) => {
+          const val = row[col];
+          // Normalise dates to ISO strings so JSON round-trips cleanly
+          return val instanceof Date ? val.toISOString() : val;
+        }),
+      );
+
+      tables.push({ name: tableName, ddl, columns, rows });
+    }
+
+    const snapshot: PostgresSnapshotData = {
+      version: 1,
+      provider: "postgres",
+      generatedAt: new Date().toISOString(),
+      tables,
+    };
+
+    return JSON.stringify(snapshot);
+  } finally {
+    await client.end();
+  }
+}
+
+// ── SQLite snapshot capture via container exec ───────────────────────────────
+
+/**
+ * Capture a SQLite snapshot from the container's /data/db.sqlite via exec.
+ * Returns SQL text dump or null if the container is not running / DB missing.
+ */
+async function captureSQLiteSnapshot(machineId: string, projectId: number): Promise<string | null> {
+  const result = await execInContainer(
+    machineId,
+    ["sh", "-c", "sqlite3 /data/db.sqlite .dump 2>/dev/null || echo '__SQLITE_MISSING__'"],
+    projectId,
+    "/",
+  );
+
+  if (!result.ok || result.output.includes("__SQLITE_MISSING__")) {
+    return null;
+  }
+
+  const header = [
+    "-- MustaFlow SQLite Snapshot",
+    `-- Generated: ${new Date().toISOString()}`,
+    `-- Provider: sqlite`,
+    "",
+  ].join("\n");
+
+  return header + result.output;
+}
+
 // ── POST /api/projects/:id/database/provision ─────────────────────────────────
 router.post(
   "/projects/:id/database/provision",
@@ -173,8 +339,6 @@ router.post(
         connectionString = neon.connectionString;
         dbConnectionId = neon.neonProjectId;
       } else {
-        // Fallback: use a placeholder URL if Neon is not configured.
-        // The DATABASE_URL secret will be injected but users need to replace it.
         connectionString = `postgresql://user:password@localhost:5432/project_${projectId}`;
         dbConnectionId = `local-${projectId}`;
         logger.warn(
@@ -183,13 +347,11 @@ router.post(
         );
       }
     } else {
-      // SQLite — path-based connection that lives inside the container volume
       connectionString = `file:/data/db.sqlite`;
       dbConnectionId = `sqlite-${projectId}`;
     }
 
     try {
-      // Upsert the DATABASE_URL secret (encrypted)
       const existing = await db
         .select()
         .from(secretsTable)
@@ -476,6 +638,265 @@ router.get(
       logger.warn({ err, projectId }, "Database schema fetch failed");
       res.status(400).json({ error: message });
     }
+  },
+);
+
+// ── POST /api/projects/:id/database/snapshots ────────────────────────────────
+router.post(
+  "/projects/:id/database/snapshots",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const { label, versionId: bodyVersionId } = req.body as {
+      label?: string;
+      versionId?: number;
+    };
+
+    const project = await loadProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    if (project.dbStatus !== "connected") {
+      res.status(400).json({ error: "No database provisioned for this project" });
+      return;
+    }
+
+    // Auto-link to latest version if no versionId provided
+    const resolvedVersionId: number | null =
+      bodyVersionId != null ? bodyVersionId : await getLatestVersionId(projectId);
+
+    const snapshotLabel =
+      label?.trim() ||
+      `Snapshot ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
+
+    try {
+      let dumpContent: string;
+
+      if (project.dbProvider === "sqlite") {
+        // SQLite: use container exec to run sqlite3 .dump
+        const machineId = project.containerId;
+        if (!machineId || project.containerStatus !== "running") {
+          res.status(400).json({
+            error:
+              "SQLite snapshots require an active container. Start the container first, then take a snapshot.",
+          });
+          return;
+        }
+
+        const dump = await captureSQLiteSnapshot(machineId, projectId);
+        if (!dump) {
+          res.status(400).json({
+            error:
+              "Could not read SQLite database from the container. Ensure the container is running and the database file exists at /data/db.sqlite.",
+          });
+          return;
+        }
+        dumpContent = dump;
+      } else {
+        // Postgres — structured JSON snapshot, no row limit
+        const connectionString = await getDatabaseUrlSecret(projectId);
+        if (!connectionString || connectionString.includes("localhost:5432")) {
+          res.status(400).json({
+            error:
+              "DATABASE_URL is a placeholder. Replace it with a real Postgres connection string in the Secrets tab.",
+          });
+          return;
+        }
+        dumpContent = await generatePostgresDump(connectionString);
+      }
+
+      const sizeBytes = Buffer.byteLength(dumpContent, "utf8");
+
+      // Prefer GCS for blob storage; fall back to inline DB column
+      const objectKey = await uploadSnapshotBlob(projectId, dumpContent);
+
+      const [snapshot] = await db
+        .insert(dbSnapshotsTable)
+        .values({
+          projectId,
+          versionId: resolvedVersionId,
+          label: snapshotLabel,
+          provider: project.dbProvider,
+          // Store inline only when GCS is not available
+          dumpContent: objectKey ? null : dumpContent,
+          objectKey,
+          isPartial: false,
+          sizeBytes,
+        })
+        .returning({
+          id: dbSnapshotsTable.id,
+          projectId: dbSnapshotsTable.projectId,
+          versionId: dbSnapshotsTable.versionId,
+          label: dbSnapshotsTable.label,
+          provider: dbSnapshotsTable.provider,
+          sizeBytes: dbSnapshotsTable.sizeBytes,
+          isPartial: dbSnapshotsTable.isPartial,
+          createdAt: dbSnapshotsTable.createdAt,
+        });
+
+      res.status(201).json(snapshot);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Snapshot capture failed";
+      logger.error({ err, projectId }, "Database snapshot capture failed");
+      res.status(500).json({ error: message });
+    }
+  },
+);
+
+// ── GET /api/projects/:id/database/snapshots ─────────────────────────────────
+router.get(
+  "/projects/:id/database/snapshots",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const project = await loadProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const snapshots = await db
+      .select({
+        id: dbSnapshotsTable.id,
+        projectId: dbSnapshotsTable.projectId,
+        versionId: dbSnapshotsTable.versionId,
+        label: dbSnapshotsTable.label,
+        provider: dbSnapshotsTable.provider,
+        sizeBytes: dbSnapshotsTable.sizeBytes,
+        isPartial: dbSnapshotsTable.isPartial,
+        createdAt: dbSnapshotsTable.createdAt,
+      })
+      .from(dbSnapshotsTable)
+      .where(eq(dbSnapshotsTable.projectId, projectId))
+      .orderBy(desc(dbSnapshotsTable.createdAt));
+
+    res.json(snapshots);
+  },
+);
+
+// ── POST /api/projects/:id/database/snapshots/:sid/restore ───────────────────
+router.post(
+  "/projects/:id/database/snapshots/:sid/restore",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const snapshotId = Number(req.params.sid);
+    if (!Number.isFinite(snapshotId)) {
+      res.status(400).json({ error: "Invalid snapshot id" });
+      return;
+    }
+
+    const project = await loadProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    if (project.dbStatus !== "connected") {
+      res.status(400).json({ error: "No database provisioned for this project" });
+      return;
+    }
+
+    const [snapshot] = await db
+      .select()
+      .from(dbSnapshotsTable)
+      .where(and(eq(dbSnapshotsTable.id, snapshotId), eq(dbSnapshotsTable.projectId, projectId)));
+
+    if (!snapshot) {
+      res.status(404).json({ error: "Snapshot not found" });
+      return;
+    }
+
+    try {
+      // Resolve dump content: prefer GCS object, fall back to inline column
+      const dumpContent = (await downloadSnapshotBlob(snapshot.objectKey)) ?? snapshot.dumpContent;
+
+      if (!dumpContent) {
+        res.status(500).json({ error: "Snapshot content is missing — cannot restore." });
+        return;
+      }
+
+      let statementsRun: number;
+      let errors: number;
+
+      if (snapshot.provider === "postgres") {
+        const connectionString = await getDatabaseUrlSecret(projectId);
+        if (!connectionString || connectionString.includes("localhost:5432")) {
+          res.status(400).json({
+            error:
+              "DATABASE_URL is a placeholder. Replace it with a real Postgres connection string in the Secrets tab.",
+          });
+          return;
+        }
+        ({ statementsRun, errors } = await restorePostgresDump(connectionString, dumpContent));
+      } else if (snapshot.provider === "sqlite") {
+        const machineId = project.containerId;
+        if (!machineId || project.containerStatus !== "running") {
+          res.status(400).json({
+            error: "SQLite restore requires an active container. Start the container first.",
+          });
+          return;
+        }
+        ({ statementsRun, errors } = await restoreSQLiteSnapshot(
+          machineId,
+          dumpContent,
+          projectId,
+        ));
+      } else {
+        res.status(400).json({ error: `Unsupported snapshot provider: ${snapshot.provider}` });
+        return;
+      }
+
+      logger.info({ projectId, snapshotId, statementsRun, errors }, "Database snapshot restored");
+      res.json({
+        ok: true,
+        snapshotId,
+        label: snapshot.label,
+        statementsRun,
+        errors,
+        isPartial: snapshot.isPartial,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Restore failed";
+      logger.error({ err, projectId, snapshotId }, "Database snapshot restore failed");
+      res.status(500).json({ error: message });
+    }
+  },
+);
+
+// ── DELETE /api/projects/:id/database/snapshots/:sid ─────────────────────────
+router.delete(
+  "/projects/:id/database/snapshots/:sid",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const snapshotId = Number(req.params.sid);
+    if (!Number.isFinite(snapshotId)) {
+      res.status(400).json({ error: "Invalid snapshot id" });
+      return;
+    }
+
+    // Load snapshot first to get objectKey for GCS cleanup
+    const [toDelete] = await db
+      .select({ id: dbSnapshotsTable.id, objectKey: dbSnapshotsTable.objectKey })
+      .from(dbSnapshotsTable)
+      .where(and(eq(dbSnapshotsTable.id, snapshotId), eq(dbSnapshotsTable.projectId, projectId)));
+
+    if (!toDelete) {
+      res.status(404).json({ error: "Snapshot not found" });
+      return;
+    }
+
+    await db
+      .delete(dbSnapshotsTable)
+      .where(and(eq(dbSnapshotsTable.id, snapshotId), eq(dbSnapshotsTable.projectId, projectId)));
+
+    // Best-effort GCS cleanup (non-fatal)
+    void deleteSnapshotBlob(toDelete.objectKey);
+
+    res.json({ ok: true });
   },
 );
 

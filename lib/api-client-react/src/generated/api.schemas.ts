@@ -849,10 +849,20 @@ export interface ProjectFileRename {
   path: string;
 }
 
+export interface RollbackInput {
+  /** If true and the version has a linked database snapshot, restore it along with the files. */
+  restoreDb?: boolean;
+}
+
 export interface RollbackResult {
   restoredFiles: number;
   versionId: number;
   label: string;
+  dbSnapshotRestored?: boolean;
+  /** @nullable */
+  dbSnapshotId?: number | null;
+  /** Set when restoreDb was requested but the database restore could not be completed. Null on success. */
+  dbSnapshotError?: string | null;
 }
 
 export interface DuplicateProjectResult {
@@ -1680,6 +1690,36 @@ export interface DatabaseSchemaResult {
   tables: DatabaseSchemaTable[];
 }
 
+export interface CreateDbSnapshotInput {
+  /** Optional label for the snapshot. Defaults to a timestamped name. */
+  label?: string;
+  /** Optional project version to link this snapshot to. */
+  versionId?: number;
+}
+
+export interface DbSnapshotListItem {
+  id: number;
+  projectId: number;
+  /** @nullable */
+  versionId?: number | null;
+  label: string;
+  provider: string;
+  sizeBytes: number;
+  /** True when some tables were truncated at the per-table row limit. Partial snapshots should not be used for guaranteed schema+data rollback. */
+  isPartial: boolean;
+  createdAt: string;
+}
+
+export interface DbSnapshotRestoreResult {
+  ok: boolean;
+  snapshotId: number;
+  label: string;
+  statementsRun: number;
+  errors: number;
+  /** True when the restored snapshot was partial (row-limited). Some data may have been missing. */
+  isPartial?: boolean;
+}
+
 export type DeleteWorkspace200 = {
   deleted: boolean;
 };
@@ -1873,6 +1913,10 @@ export type DestroyContainer200 = {
 };
 
 export type DeprovisionDatabase200 = {
+  ok: boolean;
+};
+
+export type DeleteDbSnapshot200 = {
   ok: boolean;
 };
 

@@ -10,4 +10,9 @@ export interface RollbackResult {
   restoredFiles: number;
   versionId: number;
   label: string;
+  dbSnapshotRestored?: boolean;
+  /** @nullable */
+  dbSnapshotId?: number | null;
+  /** Set when restoreDb was requested but the database restore could not be completed. Null on success. */
+  dbSnapshotError?: string | null;
 }

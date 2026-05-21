@@ -10,6 +10,7 @@ import {
   agentTasksTable,
   taskEventsTable,
   secretsTable,
+  dbSnapshotsTable,
 } from "@workspace/db";
 import {
   ListVersionsParams,
@@ -26,6 +27,8 @@ import { injectBridge } from "../lib/consoleBridge";
 import { logger } from "../lib/logger";
 import { deployProductionContainer } from "../lib/container";
 import { encryptionService } from "../lib/encryption";
+import { restorePostgresDump, restoreSQLiteSnapshot } from "../lib/db-snapshot-restore";
+import { downloadSnapshotBlob } from "../lib/snapshot-storage";
 
 const router: IRouter = Router();
 
@@ -258,6 +261,8 @@ router.post(
       return;
     }
 
+    const { restoreDb } = (req.body ?? {}) as { restoreDb?: boolean };
+
     const [version] = await db
       .select()
       .from(projectVersionsTable)
@@ -411,11 +416,123 @@ router.post(
       });
     }
 
+    // Optional: restore a linked database snapshot along with the files
+    let dbSnapshotRestored = false;
+    let dbSnapshotId: number | null = null;
+    let dbSnapshotError: string | null = null;
+
+    if (restoreDb) {
+      try {
+        // Find the most recent snapshot linked to this version
+        const [linkedSnapshot] = await db
+          .select()
+          .from(dbSnapshotsTable)
+          .where(
+            and(
+              eq(dbSnapshotsTable.projectId, projectId),
+              eq(dbSnapshotsTable.versionId, versionId),
+            ),
+          )
+          .orderBy(desc(dbSnapshotsTable.createdAt))
+          .limit(1);
+
+        if (!linkedSnapshot) {
+          dbSnapshotError = "No database snapshot is linked to this version.";
+        } else {
+          // Resolve dump content: prefer GCS object, fall back to inline column
+          const dumpContent =
+            (await downloadSnapshotBlob(linkedSnapshot.objectKey)) ?? linkedSnapshot.dumpContent;
+
+          if (!dumpContent) {
+            dbSnapshotError = "Snapshot content is missing from storage and cannot be restored.";
+            logger.error({ projectId, versionId }, "Rollback: DB snapshot content missing");
+          } else if (linkedSnapshot.provider === "postgres") {
+            // Get DATABASE_URL secret and run deterministic DROP+CREATE+INSERT restore
+            const [secretRow] = await db
+              .select()
+              .from(secretsTable)
+              .where(
+                and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")),
+              );
+
+            if (!secretRow) {
+              dbSnapshotError =
+                "DATABASE_URL secret not found. Add the secret in the Secrets tab and retry.";
+            } else {
+              const connectionString = encryptionService.decrypt(secretRow.valueEncrypted);
+              if (!connectionString || connectionString.includes("localhost:5432")) {
+                dbSnapshotError =
+                  "DATABASE_URL is a placeholder. Replace it with a real connection string.";
+              } else {
+                const { statementsRun, errors } = await restorePostgresDump(
+                  connectionString,
+                  dumpContent,
+                );
+                logger.info(
+                  { projectId, versionId, statementsRun, errors },
+                  "Rollback: Postgres snapshot restored",
+                );
+                dbSnapshotRestored = true;
+                dbSnapshotId = linkedSnapshot.id;
+              }
+            }
+          } else if (linkedSnapshot.provider === "sqlite") {
+            // Load container ID for the project and restore SQLite snapshot
+            const [proj] = await db
+              .select({
+                containerId: projectsTable.containerId,
+                containerStatus: projectsTable.containerStatus,
+              })
+              .from(projectsTable)
+              .where(eq(projectsTable.id, projectId));
+
+            if (!proj?.containerId || proj.containerStatus !== "running") {
+              dbSnapshotError =
+                "SQLite restore requires an active container. Start the container and retry.";
+              logger.warn(
+                { projectId, versionId },
+                "Rollback: SQLite snapshot skipped — container not running",
+              );
+            } else {
+              const { statementsRun, errors } = await restoreSQLiteSnapshot(
+                proj.containerId,
+                dumpContent,
+                projectId,
+              );
+              logger.info(
+                { projectId, versionId, statementsRun, errors },
+                "Rollback: SQLite snapshot restored",
+              );
+              dbSnapshotRestored = true;
+              dbSnapshotId = linkedSnapshot.id;
+            }
+          } else {
+            dbSnapshotError = `Unsupported snapshot provider: ${linkedSnapshot.provider}`;
+          }
+
+          if (dbSnapshotRestored) {
+            await emitRollbackEvent(
+              taskId,
+              "db_snapshot_restored",
+              `Database snapshot "${linkedSnapshot.label}" restored.`,
+            );
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        dbSnapshotError = `Database restore failed: ${message}`;
+        logger.error({ err, projectId, versionId }, "DB snapshot restore failed");
+      }
+    }
+
     res.json({
       restoredFiles: snapshot.length,
       versionId,
       label: version.label,
       taskId: rollbackTask?.id ?? null,
+      dbSnapshotRestored,
+      dbSnapshotId,
+      dbSnapshotError,
     });
   },
 );

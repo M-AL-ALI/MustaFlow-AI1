@@ -742,7 +742,7 @@ export async function deployProductionContainer(
 
   await writeLog(projectId, "system", "Starting blue/green production deploy…");
 
-  // Load project runtime so the container uses the correct Docker image
+  // Load project stack so the container uses the correct Docker image
   const [proj] = await db
     .select({ stack: projectsTable.stack })
     .from(projectsTable)

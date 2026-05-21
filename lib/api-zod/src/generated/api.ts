@@ -729,10 +729,17 @@ export const RollbackVersionParams = zod.object({
   "versionId": zod.coerce.number()
 })
 
+export const RollbackVersionBody = zod.object({
+  "restoreDb": zod.boolean().optional().describe('If true and the version has a linked database snapshot, restore it along with the files.')
+})
+
 export const RollbackVersionResponse = zod.object({
   "restoredFiles": zod.number(),
   "versionId": zod.number(),
-  "label": zod.string()
+  "label": zod.string(),
+  "dbSnapshotRestored": zod.boolean().optional(),
+  "dbSnapshotId": zod.number().nullish(),
+  "dbSnapshotError": zod.string().nullish().describe('Set when restoreDb was requested but the database restore could not be completed. Null on success.')
 })
 
 
@@ -2377,6 +2384,70 @@ export const GetDatabaseSchemaResponse = zod.object({
   "isPrimaryKey": zod.boolean().optional()
 }))
 }))
+})
+
+
+/**
+ * @summary Capture a database snapshot (pg_dump equivalent via SQL)
+ */
+export const CreateDbSnapshotParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const CreateDbSnapshotBody = zod.object({
+  "label": zod.string().optional().describe('Optional label for the snapshot. Defaults to a timestamped name.'),
+  "versionId": zod.number().optional().describe('Optional project version to link this snapshot to.')
+})
+
+
+/**
+ * @summary List all database snapshots for a project
+ */
+export const ListDbSnapshotsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListDbSnapshotsResponseItem = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "versionId": zod.number().nullish(),
+  "label": zod.string(),
+  "provider": zod.string(),
+  "sizeBytes": zod.number(),
+  "isPartial": zod.boolean().describe('True when some tables were truncated at the per-table row limit. Partial snapshots should not be used for guaranteed schema+data rollback.'),
+  "createdAt": zod.coerce.date()
+})
+export const ListDbSnapshotsResponse = zod.array(ListDbSnapshotsResponseItem)
+
+
+/**
+ * @summary Restore a database snapshot
+ */
+export const RestoreDbSnapshotParams = zod.object({
+  "id": zod.coerce.number(),
+  "snapshotId": zod.coerce.number()
+})
+
+export const RestoreDbSnapshotResponse = zod.object({
+  "ok": zod.boolean(),
+  "snapshotId": zod.number(),
+  "label": zod.string(),
+  "statementsRun": zod.number(),
+  "errors": zod.number(),
+  "isPartial": zod.boolean().optional().describe('True when the restored snapshot was partial (row-limited). Some data may have been missing.')
+})
+
+
+/**
+ * @summary Delete a database snapshot
+ */
+export const DeleteDbSnapshotParams = zod.object({
+  "id": zod.coerce.number(),
+  "snapshotId": zod.coerce.number()
+})
+
+export const DeleteDbSnapshotResponse = zod.object({
+  "ok": zod.boolean()
 })
 
 

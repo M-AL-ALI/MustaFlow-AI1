@@ -545,6 +545,12 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
         - { name: versionId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RollbackInput"
       responses:
         "200":
           description: Rollback applied
@@ -2162,6 +2168,101 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/database/snapshots:
+    post:
+      operationId: createDbSnapshot
+      tags: [database]
+      summary: Capture a database snapshot (pg_dump equivalent via SQL)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDbSnapshotInput"
+      responses:
+        "201":
+          description: Snapshot captured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DbSnapshotListItem"
+        "400":
+          description: No database provisioned or unsupported provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: listDbSnapshots
+      tags: [database]
+      summary: List all database snapshots for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: List of snapshots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DbSnapshotListItem"
+
+  /projects/{id}/database/snapshots/{snapshotId}/restore:
+    post:
+      operationId: restoreDbSnapshot
+      tags: [database]
+      summary: Restore a database snapshot
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: snapshotId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Snapshot restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DbSnapshotRestoreResult"
+        "400":
+          description: No database provisioned or unsupported provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/database/snapshots/{snapshotId}:
+    delete:
+      operationId: deleteDbSnapshot
+      tags: [database]
+      summary: Delete a database snapshot
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: snapshotId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Snapshot deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+        "404":
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /billing/webhook:
     post:
       operationId: stripeWebhook
@@ -2946,6 +3047,13 @@ components:
       properties:
         path: { type: string }
 
+    RollbackInput:
+      type: object
+      properties:
+        restoreDb:
+          type: boolean
+          description: "If true and the version has a linked database snapshot, restore it along with the files."
+
     RollbackResult:
       type: object
       required: [restoredFiles, versionId, label]
@@ -2953,6 +3061,12 @@ components:
         restoredFiles: { type: integer }
         versionId: { type: integer }
         label: { type: string }
+        dbSnapshotRestored: { type: boolean }
+        dbSnapshotId: { type: ["integer", "null"] }
+        dbSnapshotError:
+          type: string
+          nullable: true
+          description: "Set when restoreDb was requested but the database restore could not be completed. Null on success."
 
     DuplicateProjectResult:
       type: object
@@ -3774,3 +3888,41 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DatabaseSchemaTable"
+
+    CreateDbSnapshotInput:
+      type: object
+      properties:
+        label:
+          type: string
+          description: "Optional label for the snapshot. Defaults to a timestamped name."
+        versionId:
+          type: integer
+          description: "Optional project version to link this snapshot to."
+
+    DbSnapshotListItem:
+      type: object
+      required: [id, projectId, label, provider, sizeBytes, isPartial, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        versionId: { type: ["integer", "null"] }
+        label: { type: string }
+        provider: { type: string }
+        sizeBytes: { type: integer }
+        isPartial:
+          type: boolean
+          description: "True when some tables were truncated at the per-table row limit. Partial snapshots should not be used for guaranteed schema+data rollback."
+        createdAt: { type: string, format: date-time }
+
+    DbSnapshotRestoreResult:
+      type: object
+      required: [ok, snapshotId, label, statementsRun, errors]
+      properties:
+        ok: { type: boolean }
+        snapshotId: { type: integer }
+        label: { type: string }
+        statementsRun: { type: integer }
+        errors: { type: integer }
+        isPartial:
+          type: boolean
+          description: "True when the restored snapshot was partial (row-limited). Some data may have been missing."

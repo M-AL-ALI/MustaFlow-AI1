@@ -44,12 +44,16 @@ import type {
   ContainerExecResult,
   ContainerLog,
   ContainerStatus,
+  CreateDbSnapshotInput,
   CreateGithubBranch200,
   DatabaseProvisionInput,
   DatabaseQueryInput,
   DatabaseQueryResult,
   DatabaseSchemaResult,
   DatabaseStatus,
+  DbSnapshotListItem,
+  DbSnapshotRestoreResult,
+  DeleteDbSnapshot200,
   DeleteKnowledge200,
   DeleteProjectFile200,
   DeleteSecret200,
@@ -122,6 +126,7 @@ import type {
   PublishResult,
   ReadinessResult,
   RevokeAdminRole200,
+  RollbackInput,
   RollbackResult,
   SearchProjectFilesParams,
   SecretAuditEntry,
@@ -2069,14 +2074,16 @@ export const getRollbackVersionUrl = (id: number,
  * @summary Restore the project files to a saved version snapshot
  */
 export const rollbackVersion = async (id: number,
-    versionId: number, options?: RequestInit): Promise<RollbackResult> => {
+    versionId: number,
+    rollbackInput?: RollbackInput, options?: RequestInit): Promise<RollbackResult> => {
 
   return customFetch<RollbackResult>(getRollbackVersionUrl(id,versionId),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      rollbackInput,)
   }
 );}
 
@@ -2084,8 +2091,8 @@ export const rollbackVersion = async (id: number,
 
 
 export const getRollbackVersionMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackVersion>>, TError,{id: number;versionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof rollbackVersion>>, TError,{id: number;versionId: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackVersion>>, TError,{id: number;versionId: number;data?: BodyType<RollbackInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rollbackVersion>>, TError,{id: number;versionId: number;data?: BodyType<RollbackInput>}, TContext> => {
 
 const mutationKey = ['rollbackVersion'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -2097,10 +2104,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rollbackVersion>>, {id: number;versionId: number}> = (props) => {
-          const {id,versionId} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rollbackVersion>>, {id: number;versionId: number;data?: BodyType<RollbackInput>}> = (props) => {
+          const {id,versionId,data} = props ?? {};
 
-          return  rollbackVersion(id,versionId,requestOptions)
+          return  rollbackVersion(id,versionId,data,requestOptions)
         }
 
 
@@ -2111,18 +2118,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type RollbackVersionMutationResult = NonNullable<Awaited<ReturnType<typeof rollbackVersion>>>
-
+    export type RollbackVersionMutationBody = BodyType<RollbackInput> | undefined
     export type RollbackVersionMutationError = ErrorType<unknown>
 
     /**
  * @summary Restore the project files to a saved version snapshot
  */
 export const useRollbackVersion = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackVersion>>, TError,{id: number;versionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackVersion>>, TError,{id: number;versionId: number;data?: BodyType<RollbackInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof rollbackVersion>>,
         TError,
-        {id: number;versionId: number},
+        {id: number;versionId: number;data?: BodyType<RollbackInput>},
         TContext
       > => {
       return useMutation(getRollbackVersionMutationOptions(options));
@@ -7514,6 +7521,299 @@ export function useGetDatabaseSchema<TData = Awaited<ReturnType<typeof getDataba
 
 
 
+
+export const getCreateDbSnapshotUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/database/snapshots`
+}
+
+/**
+ * @summary Capture a database snapshot (pg_dump equivalent via SQL)
+ */
+export const createDbSnapshot = async (id: number,
+    createDbSnapshotInput?: CreateDbSnapshotInput, options?: RequestInit): Promise<DbSnapshotListItem> => {
+
+  return customFetch<DbSnapshotListItem>(getCreateDbSnapshotUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      createDbSnapshotInput,)
+  }
+);}
+
+
+
+
+export const getCreateDbSnapshotMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDbSnapshot>>, TError,{id: number;data?: BodyType<CreateDbSnapshotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createDbSnapshot>>, TError,{id: number;data?: BodyType<CreateDbSnapshotInput>}, TContext> => {
+
+const mutationKey = ['createDbSnapshot'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createDbSnapshot>>, {id: number;data?: BodyType<CreateDbSnapshotInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  createDbSnapshot(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateDbSnapshotMutationResult = NonNullable<Awaited<ReturnType<typeof createDbSnapshot>>>
+    export type CreateDbSnapshotMutationBody = BodyType<CreateDbSnapshotInput> | undefined
+    export type CreateDbSnapshotMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Capture a database snapshot (pg_dump equivalent via SQL)
+ */
+export const useCreateDbSnapshot = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDbSnapshot>>, TError,{id: number;data?: BodyType<CreateDbSnapshotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createDbSnapshot>>,
+        TError,
+        {id: number;data?: BodyType<CreateDbSnapshotInput>},
+        TContext
+      > => {
+      return useMutation(getCreateDbSnapshotMutationOptions(options));
+    }
+
+export const getListDbSnapshotsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/database/snapshots`
+}
+
+/**
+ * @summary List all database snapshots for a project
+ */
+export const listDbSnapshots = async (id: number, options?: RequestInit): Promise<DbSnapshotListItem[]> => {
+
+  return customFetch<DbSnapshotListItem[]>(getListDbSnapshotsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDbSnapshotsQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/database/snapshots`
+    ] as const;
+    }
+
+
+export const getListDbSnapshotsQueryOptions = <TData = Awaited<ReturnType<typeof listDbSnapshots>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDbSnapshots>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDbSnapshotsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDbSnapshots>>> = ({ signal }) => listDbSnapshots(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDbSnapshots>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDbSnapshotsQueryResult = NonNullable<Awaited<ReturnType<typeof listDbSnapshots>>>
+export type ListDbSnapshotsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List all database snapshots for a project
+ */
+
+export function useListDbSnapshots<TData = Awaited<ReturnType<typeof listDbSnapshots>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDbSnapshots>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDbSnapshotsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getRestoreDbSnapshotUrl = (id: number,
+    snapshotId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/database/snapshots/${snapshotId}/restore`
+}
+
+/**
+ * @summary Restore a database snapshot
+ */
+export const restoreDbSnapshot = async (id: number,
+    snapshotId: number, options?: RequestInit): Promise<DbSnapshotRestoreResult> => {
+
+  return customFetch<DbSnapshotRestoreResult>(getRestoreDbSnapshotUrl(id,snapshotId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRestoreDbSnapshotMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreDbSnapshot>>, TError,{id: number;snapshotId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof restoreDbSnapshot>>, TError,{id: number;snapshotId: number}, TContext> => {
+
+const mutationKey = ['restoreDbSnapshot'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof restoreDbSnapshot>>, {id: number;snapshotId: number}> = (props) => {
+          const {id,snapshotId} = props ?? {};
+
+          return  restoreDbSnapshot(id,snapshotId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RestoreDbSnapshotMutationResult = NonNullable<Awaited<ReturnType<typeof restoreDbSnapshot>>>
+
+    export type RestoreDbSnapshotMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Restore a database snapshot
+ */
+export const useRestoreDbSnapshot = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreDbSnapshot>>, TError,{id: number;snapshotId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof restoreDbSnapshot>>,
+        TError,
+        {id: number;snapshotId: number},
+        TContext
+      > => {
+      return useMutation(getRestoreDbSnapshotMutationOptions(options));
+    }
+
+export const getDeleteDbSnapshotUrl = (id: number,
+    snapshotId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/database/snapshots/${snapshotId}`
+}
+
+/**
+ * @summary Delete a database snapshot
+ */
+export const deleteDbSnapshot = async (id: number,
+    snapshotId: number, options?: RequestInit): Promise<DeleteDbSnapshot200> => {
+
+  return customFetch<DeleteDbSnapshot200>(getDeleteDbSnapshotUrl(id,snapshotId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteDbSnapshotMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDbSnapshot>>, TError,{id: number;snapshotId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteDbSnapshot>>, TError,{id: number;snapshotId: number}, TContext> => {
+
+const mutationKey = ['deleteDbSnapshot'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDbSnapshot>>, {id: number;snapshotId: number}> = (props) => {
+          const {id,snapshotId} = props ?? {};
+
+          return  deleteDbSnapshot(id,snapshotId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteDbSnapshotMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDbSnapshot>>>
+
+    export type DeleteDbSnapshotMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Delete a database snapshot
+ */
+export const useDeleteDbSnapshot = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDbSnapshot>>, TError,{id: number;snapshotId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteDbSnapshot>>,
+        TError,
+        {id: number;snapshotId: number},
+        TContext
+      > => {
+      return useMutation(getDeleteDbSnapshotMutationOptions(options));
+    }
 
 export const getStripeWebhookUrl = () => {
 

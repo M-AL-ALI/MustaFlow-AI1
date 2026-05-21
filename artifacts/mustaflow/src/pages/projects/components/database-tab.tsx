@@ -10,6 +10,10 @@ import {
   Loader2,
   ChevronRight,
   ChevronDown,
+  Camera,
+  RotateCcw,
+  Trash2,
+  HardDrive,
 } from "lucide-react";
 import {
   useGetProject,
@@ -18,9 +22,15 @@ import {
   useDeprovisionDatabase,
   useQueryDatabase,
   useGetDatabaseSchema,
+  useCreateDbSnapshot,
+  useListDbSnapshots,
+  useRestoreDbSnapshot,
+  useDeleteDbSnapshot,
   getGetDatabaseStatusQueryKey,
   getGetProjectQueryKey,
+  getListDbSnapshotsQueryKey,
 } from "@workspace/api-client-react";
+import type { DbSnapshotListItem } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface DatabaseTabProps {
@@ -89,9 +99,113 @@ function SchemaTable({
   );
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function relativeTime(date: string | Date): string {
+  const now = Date.now();
+  const then = new Date(date).getTime();
+  const diffSec = Math.floor((now - then) / 1000);
+  if (diffSec < 60) return "just now";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  return `${Math.floor(diffSec / 86400)}d ago`;
+}
+
+function SnapshotRow({
+  snapshot,
+  projectId,
+  onRestored,
+  onDeleted,
+}: {
+  snapshot: DbSnapshotListItem;
+  projectId: number;
+  onRestored: () => void;
+  onDeleted: () => void;
+}) {
+  const { mutate: restore, isPending: restoring } = useRestoreDbSnapshot();
+  const { mutate: deleteSnap, isPending: deleting } = useDeleteDbSnapshot();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  function handleRestore() {
+    restore(
+      { id: projectId, snapshotId: snapshot.id },
+      {
+        onSuccess: () => {
+          onRestored();
+        },
+      },
+    );
+  }
+
+  function handleDelete() {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    deleteSnap(
+      { id: projectId, snapshotId: snapshot.id },
+      {
+        onSuccess: () => {
+          setConfirmDelete(false);
+          onDeleted();
+        },
+      },
+    );
+  }
+
+  return (
+    <div className="border border-border rounded-md px-3 py-3 bg-card flex items-start gap-3">
+      <HardDrive className="h-4 w-4 text-blue-400 flex-shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-foreground truncate">{snapshot.label}</div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-xs text-muted-foreground">
+          <span>{formatBytes(snapshot.sizeBytes)}</span>
+          <span title={new Date(snapshot.createdAt).toLocaleString()}>
+            {relativeTime(snapshot.createdAt)}
+          </span>
+          {snapshot.versionId && (
+            <span className="text-blue-400/80">linked to version #{snapshot.versionId}</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs px-2"
+          onClick={handleRestore}
+          disabled={restoring || deleting}
+        >
+          {restoring ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <RotateCcw className="h-3 w-3" />
+          )}
+          <span className="ml-1">Restore</span>
+        </Button>
+        <Button
+          size="sm"
+          variant={confirmDelete ? "destructive" : "ghost"}
+          className="h-7 text-xs px-2"
+          onClick={handleDelete}
+          disabled={restoring || deleting}
+          onBlur={() => setConfirmDelete(false)}
+        >
+          {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+          {confirmDelete && <span className="ml-1">Confirm</span>}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function DatabaseTab({ projectId }: DatabaseTabProps) {
   const queryClient = useQueryClient();
-  const [activeView, setActiveView] = useState<"schema" | "query">("schema");
+  const [activeView, setActiveView] = useState<"schema" | "query" | "snapshots">("schema");
   const [sql, setSql] = useState("SELECT * FROM ");
   const [queryResult, setQueryResult] = useState<{
     columns: string[];
@@ -99,6 +213,9 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
     rowCount: number;
   } | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [snapshotLabel, setSnapshotLabel] = useState("");
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
 
   const { data: project } = useGetProject(projectId);
   const { data: dbStatus, isLoading: statusLoading } = useGetDatabaseStatus(projectId);
@@ -106,10 +223,17 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
   const { mutate: deleteDb, isPending: deleting } = useDeprovisionDatabase();
   const { mutate: runQuery, isPending: querying } = useQueryDatabase();
   const { data: schemaData, isLoading: schemaLoading } = useGetDatabaseSchema(projectId);
+  const { data: snapshots, isLoading: snapshotsLoading } = useListDbSnapshots(projectId, {
+    query: {
+      enabled: activeView === "snapshots",
+      queryKey: getListDbSnapshotsQueryKey(projectId),
+    },
+  });
+  const { mutate: createSnapshot, isPending: creatingSnapshot } = useCreateDbSnapshot();
 
   const isProvisioned = dbStatus?.dbStatus === "connected";
   const isProvisioning = dbStatus?.dbStatus === "provisioning" || provisioning;
-  const _dbProvider = (project as { dbProvider?: string })?.dbProvider ?? "none";
+  const dbProvider = (project as { dbProvider?: string })?.dbProvider ?? "none";
 
   function handleProvision(provider: "postgres" | "sqlite") {
     provision(
@@ -152,6 +276,22 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
         },
         onError: (err) => {
           setQueryError((err as Error).message ?? "Query failed");
+        },
+      },
+    );
+  }
+
+  function handleCreateSnapshot() {
+    setSnapshotError(null);
+    createSnapshot(
+      { id: projectId, data: { label: snapshotLabel.trim() || undefined } },
+      {
+        onSuccess: () => {
+          setSnapshotLabel("");
+          void queryClient.invalidateQueries({ queryKey: getListDbSnapshotsQueryKey(projectId) });
+        },
+        onError: (err) => {
+          setSnapshotError((err as Error).message ?? "Snapshot failed");
         },
       },
     );
@@ -262,6 +402,16 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
             >
               Query
             </button>
+            <button
+              className={`px-3 py-1.5 text-sm font-medium border-b-2 transition-colors ${
+                activeView === "snapshots"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => setActiveView("snapshots")}
+            >
+              Snapshots
+            </button>
           </div>
 
           {activeView === "schema" && (
@@ -361,6 +511,90 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeView === "snapshots" && (
+            <div className="flex flex-col gap-4 flex-1 overflow-hidden">
+              {/* Take snapshot panel */}
+              <div className="border border-border rounded-lg p-4 bg-card space-y-3">
+                <div className="flex items-start gap-2">
+                  <Camera className="h-4 w-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium">Take a snapshot</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {dbProvider === "sqlite"
+                        ? "Captures the SQLite database via the running container. The container must be started first."
+                        : "Captures the current schema and data as SQL statements. Up to 5,000 rows per table."}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 h-8 rounded-md border border-border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Label (optional)"
+                    value={snapshotLabel}
+                    onChange={(e) => setSnapshotLabel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleCreateSnapshot();
+                    }}
+                  />
+                  <Button size="sm" onClick={handleCreateSnapshot} disabled={creatingSnapshot}>
+                    {creatingSnapshot ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Camera className="h-4 w-4 mr-2" />
+                    )}
+                    {creatingSnapshot ? "Capturing…" : "Take Snapshot"}
+                  </Button>
+                </div>
+                {snapshotError && (
+                  <div className="flex items-start gap-2 text-red-400 text-xs">
+                    <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                    <span>{snapshotError}</span>
+                  </div>
+                )}
+              </div>
+
+              {restoreSuccess && (
+                <div className="border border-green-500/30 rounded-lg p-3 bg-green-500/5 text-green-400 text-sm flex items-center gap-2">
+                  <RotateCcw className="h-4 w-4" />
+                  {restoreSuccess}
+                </div>
+              )}
+
+              {/* Snapshot list */}
+              <div className="flex-1 overflow-y-auto space-y-2">
+                {snapshotsLoading && (
+                  <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading snapshots…
+                  </div>
+                )}
+                {!snapshotsLoading && (!snapshots || snapshots.length === 0) && (
+                  <div className="text-sm text-muted-foreground border border-border rounded-lg p-4 bg-card">
+                    No snapshots yet. Take a snapshot before making risky changes so you can restore
+                    the database state if something goes wrong.
+                  </div>
+                )}
+                {snapshots?.map((snap) => (
+                  <SnapshotRow
+                    key={snap.id}
+                    snapshot={snap}
+                    projectId={projectId}
+                    onRestored={() => {
+                      setRestoreSuccess(`Snapshot "${snap.label}" restored successfully.`);
+                      setTimeout(() => setRestoreSuccess(null), 5000);
+                    }}
+                    onDeleted={() => {
+                      void queryClient.invalidateQueries({
+                        queryKey: getListDbSnapshotsQueryKey(projectId),
+                      });
+                    }}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </>

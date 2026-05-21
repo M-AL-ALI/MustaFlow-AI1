@@ -29,9 +29,12 @@ import {
   getListVersionsQueryKey,
   getListProjectFilesQueryKey,
   useRollbackVersion,
+  useListDbSnapshots,
+  getListDbSnapshotsQueryKey,
 } from "@workspace/api-client-react";
 import type { ProjectVersion, ProjectFileSummary } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 
 type FileSnapshotEntry = { path: string; content: string; mimeType: string };
 
@@ -445,19 +448,56 @@ function RollbackDrawer({
   onSuccess: () => void;
 }) {
   const rollback = useRollbackVersion();
+  const [restoreDb, setRestoreDb] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Check if there's a DB snapshot linked to this version
+  const { data: snapshots } = useListDbSnapshots(projectId, {
+    query: {
+      enabled: open && !!version,
+      queryKey: getListDbSnapshotsQueryKey(projectId),
+    },
+  });
+  const linkedSnapshot = version
+    ? (snapshots ?? []).find((s) => s.versionId === version.id)
+    : undefined;
+
+  const { toast } = useToast();
 
   const handleConfirm = useCallback(() => {
     if (!version) return;
     rollback.mutate(
-      { id: projectId, versionId: version.id },
+      { id: projectId, versionId: version.id, data: { restoreDb: restoreDb && !!linkedSnapshot } },
       {
-        onSuccess: () => {
+        onSuccess: (data) => {
+          void queryClient.invalidateQueries({
+            queryKey: getListDbSnapshotsQueryKey(projectId),
+          });
+          // Surface DB restore failures as a visible warning — the file rollback
+          // succeeded but the DB was not restored.
+          if (restoreDb && data.dbSnapshotError) {
+            toast({
+              title: "Files restored — database restore failed",
+              description: data.dbSnapshotError,
+              variant: "destructive",
+            });
+          }
           onClose();
           onSuccess();
         },
       },
     );
-  }, [version, projectId, rollback, onClose, onSuccess]);
+  }, [
+    version,
+    projectId,
+    rollback,
+    onClose,
+    onSuccess,
+    restoreDb,
+    linkedSnapshot,
+    queryClient,
+    toast,
+  ]);
 
   return (
     <Sheet
@@ -496,11 +536,39 @@ function RollbackDrawer({
           )}
         </div>
 
+        {linkedSnapshot && (
+          <div className="mt-3 rounded-md border border-blue-500/30 bg-blue-500/5 p-3">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border border-border accent-primary cursor-pointer"
+                checked={restoreDb}
+                onChange={(e) => setRestoreDb(e.target.checked)}
+              />
+              <div>
+                <div className="text-sm font-medium text-foreground">
+                  Also restore database snapshot
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Snapshot <strong className="text-foreground">{linkedSnapshot.label}</strong> (
+                  {formatBytes(linkedSnapshot.sizeBytes)}) was saved with this version. Restoring it
+                  will replay the captured SQL against your current database.
+                </div>
+              </div>
+            </label>
+          </div>
+        )}
+
         <div className="mt-3 rounded-md border border-border bg-muted/20 p-3">
           <ul className="text-xs text-muted-foreground space-y-1 list-disc pl-4">
             <li>Secrets and integrations are not affected</li>
             <li>A rollback entry will appear in the build history</li>
-            <li>A new snapshot will be saved after the restore completes</li>
+            {!linkedSnapshot && (
+              <li>
+                No database snapshot is linked to this version — go to Database &gt; Snapshots to
+                save one first
+              </li>
+            )}
           </ul>
         </div>
 
