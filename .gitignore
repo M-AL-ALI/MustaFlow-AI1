@@ -2,6 +2,7 @@
 
 # compiled output
 dist
+build
 tmp
 out-tsc
 *.tsbuildinfo
@@ -10,6 +11,18 @@ out-tsc
 
 # dependencies
 node_modules
+
+# Environment & secrets — NEVER commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
+secrets/
+*.secret
 
 # IDEs and editors
 /.idea
