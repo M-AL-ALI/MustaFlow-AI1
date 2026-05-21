@@ -77,6 +77,7 @@ import { TerminalTab } from "./components/terminal-tab";
 import { DatabaseTab } from "./components/database-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
+import { GettingStartedChecklist } from "./components/getting-started-checklist";
 import { cn } from "@/lib/utils";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -566,6 +567,29 @@ export default function ProjectWorkspacePage() {
     const params = new URLSearchParams(window.location.search);
     return params.get("credits_success") === "1";
   });
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(`mustaflow_onboarding_dismissed_${projectId}`) === "1";
+    } catch {
+      return false;
+    }
+  });
+  // Tracks whether onboarding was ever activated for this project (set when versions === 0 on
+  // first load). Prevents the checklist from appearing on existing projects that already have builds.
+  const [onboardingStarted, setOnboardingStarted] = useState(() => {
+    try {
+      return localStorage.getItem(`mustaflow_onboarding_started_${projectId}`) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [hasViewedPreview, setHasViewedPreview] = useState(() => {
+    try {
+      return localStorage.getItem(`mustaflow_onboarding_previewed_${projectId}`) === "1";
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     if (!creditsSuccess) return;
@@ -573,6 +597,30 @@ export default function ProjectWorkspacePage() {
     url.searchParams.delete("credits_success");
     window.history.replaceState({}, "", url.toString());
   }, [creditsSuccess]);
+
+  useEffect(() => {
+    if (activeTab === "preview" && !hasViewedPreview) {
+      setHasViewedPreview(true);
+      try {
+        localStorage.setItem(`mustaflow_onboarding_previewed_${projectId}`, "1");
+      } catch {
+        // ignore storage errors
+      }
+    }
+  }, [activeTab, hasViewedPreview, projectId]);
+
+  // Activate onboarding the first time we confirm this project has 0 builds.
+  // This ensures the checklist never appears on existing projects.
+  useEffect(() => {
+    if (!onboardingStarted && versions !== undefined && versions.length === 0) {
+      setOnboardingStarted(true);
+      try {
+        localStorage.setItem(`mustaflow_onboarding_started_${projectId}`, "1");
+      } catch {
+        // ignore storage errors
+      }
+    }
+  }, [onboardingStarted, versions, projectId]);
   // ── Container state ────────────────────────────────────────────────────────
   type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
   const [containerStatus, setContainerStatus] = useState<ContainerStatus>("stopped");
@@ -1472,6 +1520,31 @@ export default function ProjectWorkspacePage() {
               {/* Messages + controls (hidden in history mode) */}
               {!showChatHistory && (
                 <>
+                  {/* Getting started checklist — only for projects that started with 0 builds */}
+                  {!onboardingDismissed && onboardingStarted && (
+                    <div className="shrink-0 px-2 pt-2">
+                      <GettingStartedChecklist
+                        projectId={projectId}
+                        hasUserMessage={messages?.some((m) => m.role === "user") ?? false}
+                        hasBuilt={(versions?.length ?? 0) > 0}
+                        hasViewed={hasViewedPreview}
+                        isPublished={project?.status === "published"}
+                        onDismiss={() => {
+                          setOnboardingDismissed(true);
+                          try {
+                            localStorage.setItem(
+                              `mustaflow_onboarding_dismissed_${projectId}`,
+                              "1",
+                            );
+                          } catch {
+                            // ignore storage errors
+                          }
+                        }}
+                        onNavigatePreview={() => setActiveTab("preview")}
+                        onNavigatePublishing={() => setActiveTab("publishing")}
+                      />
+                    </div>
+                  )}
                   <div
                     ref={scrollRef}
                     onScroll={() => {
