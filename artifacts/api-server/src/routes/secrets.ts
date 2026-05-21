@@ -1,6 +1,16 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { db, secretsTable, secretAuditLogTable, type Secret } from "@workspace/db";
+import {
+  db,
+  secretsTable,
+  secretAuditLogTable,
+  projectFilesTable,
+  projectsTable,
+  containerLogsTable,
+  agentTasksTable,
+  taskEventsTable,
+  type Secret,
+} from "@workspace/db";
 import {
   ListSecretsParams,
   ListSecretsResponse,
@@ -10,7 +20,9 @@ import {
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService, maskValue } from "../lib/encryption";
 import { writeKnowledge } from "../lib/knowledge";
-import { restartContainerWithSecrets } from "../lib/container";
+import { restartContainerWithSecrets, execInContainer } from "../lib/container";
+import { logger } from "../lib/logger";
+import { publishTaskEvent } from "../lib/event-bus";
 
 /**
  * Load all secrets for a project as decrypted { name: value } pairs and
@@ -36,6 +48,203 @@ async function triggerContainerSecretRefresh(projectId: number): Promise<void> {
     await restartContainerWithSecrets(projectId, envVars);
   } catch {
     // best-effort — never fail the main secret operation
+  }
+}
+
+/**
+ * Secret names that indicate a database connection string.
+ * When any of these are saved or updated, we attempt to run Drizzle migrations
+ * if the project has a running container and Drizzle config files.
+ */
+const DB_SECRET_NAME_PATTERNS = [
+  /^DATABASE_URL$/i,
+  /^DB_URL$/i,
+  /^POSTGRES(?:_URL|_CONNECTION_STRING|QL_URL)?$/i,
+  /^MYSQL_URL$/i,
+  /^MONGODB_URI$/i,
+  /^REDIS_URL$/i,
+  /^DATABASE_CONNECTION_STRING$/i,
+  /^NEON_DATABASE_URL$/i,
+  /^SUPABASE_DB_URL$/i,
+];
+
+function isDbSecret(name: string): boolean {
+  return DB_SECRET_NAME_PATTERNS.some((re) => re.test(name));
+}
+
+/**
+ * Write a task event to the most recent task for this project (best-effort).
+ * Also publishes to the in-memory event bus so any live SSE subscriber picks it up.
+ * Falls back silently if no task exists or the DB write fails.
+ */
+async function emitMigrationTaskEvent(
+  projectId: number,
+  eventType: string,
+  message: string,
+): Promise<void> {
+  try {
+    const [latestTask] = await db
+      .select({ id: agentTasksTable.id })
+      .from(agentTasksTable)
+      .where(eq(agentTasksTable.projectId, projectId))
+      .orderBy(desc(agentTasksTable.createdAt))
+      .limit(1);
+
+    if (!latestTask) return;
+
+    const [row] = await db
+      .insert(taskEventsTable)
+      .values({ taskId: latestTask.id, eventType, message })
+      .returning();
+
+    if (row) {
+      publishTaskEvent({
+        id: row.id,
+        taskId: row.taskId,
+        eventType: row.eventType,
+        message: row.message,
+        filePath: row.filePath ?? null,
+        createdAt: row.createdAt,
+      });
+    }
+  } catch {
+    // best-effort — never block the migration path
+  }
+}
+
+/**
+ * After a database-related secret is saved/updated, check whether the project
+ * has Drizzle config files and a running container. If so, run migrations
+ * automatically so the new DATABASE_URL takes effect immediately.
+ *
+ * Best-effort — never throws; the secret save always succeeds.
+ */
+async function triggerMigrationsAfterDbSecretChange(
+  projectId: number,
+  secretName: string,
+): Promise<void> {
+  if (!isDbSecret(secretName)) return;
+
+  try {
+    // Check for Drizzle config files in the project
+    const allProjectFiles = await db
+      .select({ path: projectFilesTable.path, content: projectFilesTable.content })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId));
+
+    const hasDrizzleFiles = allProjectFiles.some(
+      (f) =>
+        f.path.startsWith("drizzle/") ||
+        f.path === "drizzle.config.ts" ||
+        f.path === "drizzle.config.js" ||
+        f.path === "drizzle.config.mjs" ||
+        f.path === "drizzle.config.cjs",
+    );
+
+    if (!hasDrizzleFiles) return;
+
+    // Check for a running container
+    const [project] = await db
+      .select({
+        containerId: projectsTable.containerId,
+        containerStatus: projectsTable.containerStatus,
+      })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+
+    if (!project?.containerId || project.containerStatus !== "running") {
+      const skipMsg = `Secret "${secretName}" updated — container is not running, migrations skipped. Start a container to apply schema changes.`;
+      try {
+        await db
+          .insert(containerLogsTable)
+          .values({ projectId, level: "system", message: skipMsg });
+      } catch {
+        /* non-fatal */
+      }
+      void emitMigrationTaskEvent(projectId, "narration", skipMsg);
+      return;
+    }
+
+    const machineId = project.containerId;
+    const startMsg = `Secret "${secretName}" updated — running database migrations automatically…`;
+
+    try {
+      await db.insert(containerLogsTable).values({ projectId, level: "system", message: startMsg });
+    } catch {
+      /* non-fatal */
+    }
+    void emitMigrationTaskEvent(projectId, "narration", startMsg);
+
+    // Sync latest files so the container sees the current schema.
+    // Note: triggerContainerSecretRefresh (called just before this) initiates a
+    // machine restart. We sync files and run migrations independently — the new
+    // DATABASE_URL env var is already baked into the machine config at this point
+    // because restartContainerWithSecrets calls updateContainerEnv before restarting.
+    const { syncFilesToContainer } = await import("../lib/container");
+    await syncFilesToContainer(machineId, projectId, allProjectFiles);
+
+    // Install dependencies if package.json is present (so drizzle-kit is available)
+    const hasPackageJson = allProjectFiles.some((f) => f.path === "package.json");
+    if (hasPackageJson) {
+      await execInContainer(
+        machineId,
+        ["npm", "install", "--prefer-offline", "--no-audit"],
+        projectId,
+      );
+    }
+
+    // Choose migration command: prefer db:push script, otherwise drizzle-kit migrate
+    let migrationCmd: string[];
+    try {
+      const pkgFile = allProjectFiles.find((f) => f.path === "package.json");
+      const pkgJson = pkgFile
+        ? (JSON.parse(pkgFile.content) as { scripts?: Record<string, string> })
+        : null;
+      migrationCmd =
+        pkgJson?.scripts?.["db:push"] != null
+          ? ["npm", "run", "db:push"]
+          : ["npx", "drizzle-kit", "migrate"];
+    } catch {
+      migrationCmd = ["npx", "drizzle-kit", "migrate"];
+    }
+
+    void emitMigrationTaskEvent(
+      projectId,
+      "narration",
+      `Running database migrations: ${migrationCmd.join(" ")}…`,
+    );
+
+    const migrationResult = await execInContainer(machineId, migrationCmd, projectId);
+
+    if (migrationResult.ok) {
+      logger.info({ projectId, secretName }, "Auto-migration after DB secret change succeeded");
+      const successMsg = `Database migrations applied successfully after "${secretName}" update.`;
+      try {
+        await db
+          .insert(containerLogsTable)
+          .values({ projectId, level: "system", message: successMsg });
+      } catch {
+        /* non-fatal */
+      }
+      void emitMigrationTaskEvent(projectId, "narration", successMsg);
+    } else {
+      logger.warn(
+        { projectId, secretName, output: migrationResult.output },
+        "Auto-migration after DB secret change failed",
+      );
+      const failMsg = `Database migration failed after "${secretName}" update: ${migrationResult.output.slice(0, 400)}`;
+      try {
+        await db
+          .insert(containerLogsTable)
+          .values({ projectId, level: "system", message: failMsg });
+      } catch {
+        /* non-fatal */
+      }
+      void emitMigrationTaskEvent(projectId, "failed", failMsg);
+    }
+  } catch (err) {
+    // Best-effort — never propagate to the caller
+    logger.warn({ err, projectId, secretName }, "triggerMigrationsAfterDbSecretChange threw");
   }
 }
 
@@ -163,6 +372,10 @@ router.post("/projects/:id/secrets", requireProjectOwnership, async (req, res): 
   // Restart container (if running) so the new secret is available immediately
   void triggerContainerSecretRefresh(params.data.id);
 
+  // If this is a database URL secret and the project has Drizzle files + a running
+  // container, auto-run migrations so the new connection string takes effect immediately.
+  void triggerMigrationsAfterDbSecretChange(params.data.id, parsed.data.name);
+
   res.status(201).json(toEntry(row));
 });
 
@@ -279,6 +492,12 @@ router.patch(
 
     // Restart container (if running) so the updated secret value is picked up
     void triggerContainerSecretRefresh(projectId);
+
+    // If this is a database URL secret and the value changed, auto-run migrations
+    // so the new connection string takes effect immediately without a rebuild.
+    if (body.value) {
+      void triggerMigrationsAfterDbSecretChange(projectId, row.name);
+    }
 
     res.json(toEntry(row));
   },

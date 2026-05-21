@@ -59,6 +59,15 @@ function stackConfig(stack?: string | null): { image: string; internalPort: numb
   }
 }
 
+/** Kept for backward compatibility — old code may reference CONTAINER_IMAGE or INTERNAL_PORT. */
+const CONTAINER_IMAGE = DEFAULT_NODE_IMAGE;
+const INTERNAL_PORT = DEFAULT_INTERNAL_PORT;
+
+/** Map a runtime/stack string to the appropriate Docker image for production containers. */
+function imageForRuntime(runtime?: string | null): string {
+  return stackConfig(runtime).image;
+}
+
 /** Auto-stop after this many seconds of inactivity */
 const IDLE_SECONDS = 600; // 10 minutes
 
