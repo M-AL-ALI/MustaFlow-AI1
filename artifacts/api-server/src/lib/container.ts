@@ -59,10 +59,6 @@ function stackConfig(stack?: string | null): { image: string; internalPort: numb
   }
 }
 
-/** Kept for backward compatibility — old code may reference CONTAINER_IMAGE or INTERNAL_PORT. */
-const CONTAINER_IMAGE = DEFAULT_NODE_IMAGE;
-const INTERNAL_PORT = DEFAULT_INTERNAL_PORT;
-
 /** Auto-stop after this many seconds of inactivity */
 const IDLE_SECONDS = 600; // 10 minutes
 
@@ -413,7 +409,7 @@ export async function updateContainerEnv(
         config: {
           env: {
             PROJECT_ID: String(projectId),
-            PORT: String(INTERNAL_PORT),
+            PORT: String(DEFAULT_INTERNAL_PORT),
             ...extraEnv,
           },
         },
@@ -629,7 +625,7 @@ export async function createProductionContainer(
     name: machineName,
     region: FLY_REGION,
     config: {
-      image: imageForRuntime(runtime),
+      image: stackConfig(runtime).image,
       env: {
         ...envVars,
         PROJECT_ID: String(projectId),
@@ -748,12 +744,12 @@ export async function deployProductionContainer(
 
   // Load project runtime so the container uses the correct Docker image
   const [proj] = await db
-    .select({ runtime: projectsTable.runtime })
+    .select({ stack: projectsTable.stack })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
 
   // Create new green container
-  const greenInfo = await createProductionContainer(projectId, envVars, proj?.runtime);
+  const greenInfo = await createProductionContainer(projectId, envVars, proj?.stack);
   if (!greenInfo) {
     await writeLog(projectId, "system", "Failed to create new prod container — aborting deploy");
     return null;

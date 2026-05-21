@@ -218,7 +218,7 @@ async function main() {
   // --fix: apply the version bumps
   console.log("\nApplying fixes to cdn-allowlist.ts…\n");
 
-  let source = fs.readFileSync(ALLOWLIST_PATH, "utf-8");
+  const source = fs.readFileSync(ALLOWLIST_PATH, "utf-8");
   let patched = source;
 
   for (const drift of driftEntries) {

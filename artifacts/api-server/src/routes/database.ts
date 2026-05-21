@@ -59,7 +59,7 @@ function buildStatusResponse(project: {
  * Verify the connection string is reachable by attempting a simple query.
  * Returns true if the DB is accessible, false otherwise.
  */
-async function verifyPostgresConnection(connectionString: string): Promise<boolean> {
+async function _verifyPostgresConnection(connectionString: string): Promise<boolean> {
   try {
     const { default: pg } = await import("pg");
     const client = new pg.Client({ connectionString, connectionTimeoutMillis: 8000 });
@@ -165,7 +165,7 @@ router.post(
       .where(eq(projectsTable.id, projectId));
 
     let connectionString: string;
-    let dbConnectionId: string | null = null;
+    let dbConnectionId: string;
 
     if (provider === "postgres") {
       const neon = await provisionNeonDatabase(projectId, project.name);

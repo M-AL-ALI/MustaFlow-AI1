@@ -33,7 +33,7 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 
 /** Load the project or return 404. */
-async function loadProject(projectId: number, userId?: string) {
+async function loadProject(projectId: number, _userId?: string) {
   const [project] = await db
     .select()
     .from(projectsTable)

@@ -995,8 +995,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       let stagingData: Array<{ path: string; content: string; mimeType: string }> = [];
       // Task Agent refine: keep a reference to existing files for building the full merged snapshot
       let existingFilesSnapshot: BuilderFile[] = [];
-      let refineChangedFiles: BuilderFile[] = [];
-      let refineRemovedPaths: string[] = [];
+      let _refineChangedFiles: BuilderFile[] = [];
+      let _refineRemovedPaths: string[] = [];
 
       const isMobileProject = ["mobile-ios", "mobile-android", "mobile-cross"].includes(
         project.kind,
@@ -1042,9 +1042,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             ? "Let me plan the mobile app structure before writing any code."
             : isReactViteProject
               ? "Let me plan the React + Vite project structure before writing any code."
-              : isNodeProject
+              : isNodeApiProject
                 ? "Let me plan the Node.js project structure before writing any code."
-                : isPythonProject
+                : isPythonFlaskProject || isPythonFastapiProject
                   ? "Let me plan the Python project structure before writing any code."
                   : "Let me plan the app structure before writing any code.",
         );
@@ -1056,9 +1056,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             ? "Generating Expo/React Native app with AI…"
             : isReactViteProject
               ? "Generating React + Vite project with AI…"
-              : isNodeProject
+              : isNodeApiProject
                 ? "Generating Node.js / Express project with AI…"
-                : isPythonProject
+                : isPythonFlaskProject || isPythonFastapiProject
                   ? "Generating Python / Flask project with AI…"
                   : "Generating app blueprint and code with AI…",
         );
@@ -1308,9 +1308,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             ? "Applying your changes to the Expo project now."
             : isReactViteProject
               ? "Applying your changes to the React + Vite project now."
-              : isNodeProject
+              : isNodeApiProject
                 ? "Applying your changes to the Node.js project now."
-                : isPythonProject
+                : isPythonFlaskProject || isPythonFastapiProject
                   ? "Applying your changes to the Python project now."
                   : "Applying your requested changes to the codebase now.",
         );
@@ -1321,9 +1321,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             ? "Applying change to Expo project with AI…"
             : isReactViteProject
               ? "Applying change to React + Vite project with AI…"
-              : isNodeProject
+              : isNodeApiProject
                 ? "Applying change to Node.js project with AI…"
-                : isPythonProject
+                : isPythonFlaskProject || isPythonFastapiProject
                   ? "Applying change to Python project with AI…"
                   : "Applying change request with AI…",
         );
@@ -1534,8 +1534,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }
         if (agentIdentity === "task") {
           // Build the full merged file set so the staging snapshot is self-contained
-          refineChangedFiles = result.changedFiles;
-          refineRemovedPaths = result.removedPaths;
+          _refineChangedFiles = result.changedFiles;
+          _refineRemovedPaths = result.removedPaths;
           const merged = [...existingFilesSnapshot];
           for (const cf of result.changedFiles) {
             const idx = merged.findIndex((f) => f.path === cf.path);

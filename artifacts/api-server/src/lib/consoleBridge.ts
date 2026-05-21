@@ -36,4 +36,4 @@ export function injectBridge(html: string, extraHead = ""): string {
 
 /** Extra script injected for the owner preview (not published apps) so that
  *  the service-worker mock interceptor is automatically activated. */
-export const MOCK_FLAG_SCRIPT = `<script>window.__MUSTAFLOW_MOCK__=true;<\/script>`;
+export const MOCK_FLAG_SCRIPT = `<script>window.__MUSTAFLOW_MOCK__=true;</script>`;

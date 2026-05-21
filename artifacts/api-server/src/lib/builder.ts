@@ -4220,7 +4220,10 @@ async function runStackRefinePipeline(
     return { path, content, mimeType: orig?.mimeType ?? guessMime(path) };
   });
   if (failed.length > 0) {
-    logger.warn({ failed, stackLabel }, "Some patches failed to apply — requiring full file resend");
+    logger.warn(
+      { failed, stackLabel },
+      "Some patches failed to apply — requiring full file resend",
+    );
   }
 
   const removedPaths = Array.isArray(parsed.filesRemoved)
