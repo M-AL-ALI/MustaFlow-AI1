@@ -3487,17 +3487,23 @@ const MOBILE_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Builder. You
 
 EXPO PROJECT REQUIREMENTS:
 - Expo SDK 52, Expo Router v3, TypeScript, NativeWind v4
-- File structure:
-  - app.json: Expo configuration (name, slug, version, scheme, ios.bundleIdentifier, android.package)
-  - package.json: All dependencies listed (expo ~52.0.0, react-native, expo-router ~3.5.0, nativewind ~4.0.0, tailwindcss, react, react-dom, @expo/metro-runtime, react-native-safe-area-context, react-native-screens, @react-navigation/native)
-  - tailwind.config.js: NativeWind config with content paths
-  - babel.config.js: Expo preset with NativeWind plugin
-  - app/_layout.tsx: Root Expo Router layout (Stack or Tabs) with SafeAreaProvider
-  - app/index.tsx: Home/main screen
-  - app/(tabs)/_layout.tsx: Tab layout if tabs navigation is used
-  - Screen files in app/* using Expo Router file-based routing
+
+MANDATORY FILES — every build MUST include all of these (missing any will cause validation failure):
+  1. app.json          — Expo config: { "expo": { "name": "<project>", "slug": "<slug>", "version": "1.0.0", "scheme": "<slug>", "platforms": ["ios","android","web"], "ios": { "bundleIdentifier": "com.mustaflow.<slug>" }, "android": { "package": "com.mustaflow.<slug>" } } }
+  2. package.json      — All deps: expo ~52.0.0, react-native, expo-router ~3.5.0, nativewind ~4.0.0, tailwindcss, react, react-dom, @expo/metro-runtime, react-native-safe-area-context, react-native-screens, @react-navigation/native
+  3. babel.config.js   — Expo preset with NativeWind babel plugin
+  4. tailwind.config.js — NativeWind config with content paths covering app/**/*.{js,jsx,ts,tsx}
+  5. app/_layout.tsx   — Root Expo Router layout with SafeAreaProvider wrapping a <Stack> or <Tabs>
+  6. app/index.tsx     — Home/main screen (entry point for Expo Router)
+  7. index.html        — Web preview stub (see MOBILE WEB PREVIEW section below)
+
+ADDITIONAL FILES (include as needed for the requested app):
+  - app/(tabs)/_layout.tsx — Tab layout if tab navigation is used
+  - Additional screen files in app/* using Expo Router file-based routing
   - Shared components in components/*
-  - constants/Colors.ts: Theme color constants
+  - constants/Colors.ts — Theme color constants
+
+CODING RULES:
 - TypeScript throughout: type all props, navigation params, and component interfaces
 - NativeWind className props for all styling (Tailwind utility classes on React Native components)
 - Expo Router file-based routing — all screens are files in the app/ directory
@@ -3530,7 +3536,7 @@ OUTPUT STRICT JSON matching this exact shape:
 }
 
 MIME types: TypeScript/TSX files → "application/typescript", JSON → "application/json", JS → "application/javascript", HTML → "text/html"
-Always include index.html (web preview) and all required Expo files.`;
+The files array MUST contain app.json, package.json, babel.config.js, tailwind.config.js, app/_layout.tsx, app/index.tsx, and index.html as a minimum. Omitting any of these will fail validation.`;
 
 const MOBILE_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Builder in CHANGE MODE. You receive the current Expo/React Native project files and a change request. You modify the affected files and return the FULL updated file contents.
 

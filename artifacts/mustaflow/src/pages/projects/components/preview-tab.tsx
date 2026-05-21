@@ -423,10 +423,6 @@ export function PreviewTab({
     </div>
   );
 
-  // Suppress unused variable warning — platform state reserved for future iOS/Android toggle
-  void platform;
-  void setPlatform;
-
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Preview toolbar */}
@@ -453,6 +449,28 @@ export function PreviewTab({
             );
           })}
         </div>
+
+        {/* iOS / Android platform toggle — mobile projects only */}
+        {isMobile && (
+          <div className="flex items-center bg-muted border border-border rounded-lg p-0.5 gap-0.5 shrink-0">
+            {(["ios", "android"] as Platform[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPlatform(p)}
+                title={p === "ios" ? "iOS frame" : "Android frame"}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1 rounded-md transition-colors text-[11px] font-medium",
+                  platform === p
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Smartphone className="h-3 w-3" />
+                <span className="hidden sm:inline">{p === "ios" ? "iOS" : "Android"}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* QR code panel — shown for mobile projects */}
         {isMobile && hasFiles && (
@@ -1114,18 +1132,44 @@ export function PreviewTab({
             </div>
           ) : device === "mobile" ? (
             /* ── Mobile phone shell ── */
-            <div className="flex items-center justify-center py-4">
+            <div className="flex flex-col items-center justify-start py-4 gap-2">
+              {/* Web simulation label */}
+              {isMobile && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-medium shrink-0">
+                  <Smartphone className="h-3 w-3" />
+                  Mobile preview (web simulation) — {platform === "android"
+                    ? "Android"
+                    : "iOS"}{" "}
+                  frame
+                </div>
+              )}
               <div
-                className="relative flex flex-col rounded-[40px] shadow-2xl border-[6px] border-zinc-800 bg-zinc-800 overflow-hidden"
+                className={cn(
+                  "relative flex flex-col shadow-2xl overflow-hidden",
+                  platform === "android"
+                    ? "rounded-[32px] border-[6px] border-zinc-700 bg-zinc-700"
+                    : "rounded-[40px] border-[6px] border-zinc-800 bg-zinc-800",
+                )}
                 style={{ width: 390, minHeight: 844 }}
               >
-                {/* Dynamic Island / Notch */}
-                <div className="shrink-0 h-12 bg-black flex justify-center items-center">
-                  <div className="w-28 h-7 bg-zinc-900 rounded-full flex items-center justify-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-zinc-700" />
-                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                {/* Dynamic Island (iOS) / Status bar (Android) */}
+                {platform === "android" ? (
+                  <div className="shrink-0 h-10 bg-zinc-900 flex items-center justify-between px-4">
+                    <span className="text-[10px] text-zinc-400 font-medium">9:41</span>
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-2 border border-zinc-500 rounded-sm relative">
+                        <div className="absolute inset-0.5 bg-zinc-400 rounded-sm" />
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="shrink-0 h-12 bg-black flex justify-center items-center">
+                    <div className="w-28 h-7 bg-zinc-900 rounded-full flex items-center justify-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-zinc-700" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                    </div>
+                  </div>
+                )}
                 {/* Screen */}
                 <div className="flex-1 bg-white overflow-hidden relative">
                   {isReactVite &&
@@ -1133,10 +1177,18 @@ export function PreviewTab({
                     renderWcBootOverlay()}
                   {renderIframe(undefined, { height: 780 })}
                 </div>
-                {/* Home bar */}
-                <div className="shrink-0 bg-black flex justify-center py-3">
-                  <div className="w-24 h-1 rounded-full bg-zinc-600" />
-                </div>
+                {/* Home bar (iOS) / Nav bar (Android) */}
+                {platform === "android" ? (
+                  <div className="shrink-0 bg-zinc-900 flex justify-center items-center gap-6 py-2.5">
+                    <div className="w-5 h-5 border border-zinc-600 rounded-sm" />
+                    <div className="w-4 h-4 rounded-full border border-zinc-600" />
+                    <div className="w-0 h-0 border-t-[8px] border-t-zinc-600 border-r-[6px] border-r-transparent border-l-[6px] border-l-transparent" />
+                  </div>
+                ) : (
+                  <div className="shrink-0 bg-black flex justify-center py-3">
+                    <div className="w-24 h-1 rounded-full bg-zinc-600" />
+                  </div>
+                )}
               </div>
             </div>
           ) : (

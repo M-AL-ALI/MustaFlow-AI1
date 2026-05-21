@@ -932,6 +932,171 @@ if __name__ == "__main__":
         mimeType: f.mimeType,
       })),
     );
+  } else if (isMobilePlatform) {
+    const safeName =
+      project.name
+        .replace(/[^a-z0-9]/gi, "")
+        .toLowerCase()
+        .slice(0, 30) || "app";
+    const mobileScaffold = [
+      {
+        path: "app.json",
+        mimeType: "application/json",
+        content: JSON.stringify(
+          {
+            expo: {
+              name: project.name,
+              slug: safeName,
+              version: "1.0.0",
+              scheme: safeName,
+              platforms: ["ios", "android", "web"],
+              ios: { bundleIdentifier: `com.mustaflow.${safeName}` },
+              android: { package: `com.mustaflow.${safeName}` },
+            },
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: "package.json",
+        mimeType: "application/json",
+        content: JSON.stringify(
+          {
+            name: safeName,
+            version: "1.0.0",
+            private: true,
+            main: "expo-router/entry",
+            scripts: {
+              start: "expo start",
+              android: "expo start --android",
+              ios: "expo start --ios",
+              web: "expo start --web",
+            },
+            dependencies: {
+              expo: "~52.0.0",
+              "expo-router": "~3.5.0",
+              "expo-status-bar": "~2.0.0",
+              nativewind: "~4.0.1",
+              "react-native-safe-area-context": "4.12.0",
+              "react-native-screens": "~4.4.0",
+              "@expo/metro-runtime": "~4.0.0",
+              "@react-navigation/native": "^6.1.18",
+              react: "18.3.1",
+              "react-dom": "18.3.1",
+              "react-native": "0.76.7",
+              tailwindcss: "^3.4.0",
+            },
+            devDependencies: {
+              "@babel/core": "^7.24.0",
+              "@types/react": "~18.3.12",
+              "@types/react-native": "~0.76.0",
+              typescript: "~5.3.3",
+            },
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: "babel.config.js",
+        mimeType: "application/javascript",
+        content: `module.exports = function (api) {
+  api.cache(true);
+  return {
+    presets: ['babel-preset-expo'],
+    plugins: ['nativewind/babel'],
+  };
+};
+`,
+      },
+      {
+        path: "tailwind.config.js",
+        mimeType: "application/javascript",
+        content: `/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ['./app/**/*.{js,jsx,ts,tsx}', './components/**/*.{js,jsx,ts,tsx}'],
+  theme: { extend: {} },
+  plugins: [],
+};
+`,
+      },
+      {
+        path: "app/_layout.tsx",
+        mimeType: "application/typescript",
+        content: `import { Stack } from 'expo-router';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+export default function RootLayout() {
+  return (
+    <SafeAreaProvider>
+      <Stack screenOptions={{ headerShown: false }} />
+    </SafeAreaProvider>
+  );
+}
+`,
+      },
+      {
+        path: "app/index.tsx",
+        mimeType: "application/typescript",
+        content: `import { View, Text } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+export default function HomeScreen() {
+  return (
+    <SafeAreaView className="flex-1 bg-gray-950">
+      <View className="flex-1 items-center justify-center gap-4 px-6">
+        <Text className="text-3xl font-bold text-white text-center">
+          ${project.name}
+        </Text>
+        <Text className="text-gray-400 text-center text-base">
+          Describe your app in the AI Builder below and press Send.
+        </Text>
+      </View>
+    </SafeAreaView>
+  );
+}
+`,
+      },
+      {
+        path: "index.html",
+        mimeType: "text/html",
+        content: `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${project.name}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+    <div class="max-w-sm mx-auto text-center space-y-4 px-6">
+      <div class="w-20 h-20 bg-indigo-600 rounded-2xl mx-auto flex items-center justify-center">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a1 1 0 001-1v-1a7 7 0 00-14 0v1a1 1 0 001 1zM12 3a4 4 0 100 8 4 4 0 000-8z" />
+        </svg>
+      </div>
+      <h1 class="text-2xl font-bold">${project.name}</h1>
+      <p class="text-gray-400 text-sm">
+        Describe your mobile app in the AI Builder to generate the full Expo / React Native code.
+      </p>
+      <div class="text-xs text-gray-600 border border-gray-800 rounded-lg px-3 py-2">
+        Mobile preview (web simulation)
+      </div>
+    </div>
+  </body>
+</html>`,
+      },
+    ];
+
+    await db.insert(projectFilesTable).values(
+      mobileScaffold.map((f) => ({
+        projectId: project.id,
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+      })),
+    );
   }
 
   if (initialPrompt && initialPrompt.trim().length > 0) {

@@ -3793,13 +3793,19 @@ export function PublishingTab({
                   <span>All required items complete. Ready to submit to App Store Connect.</span>
                 </div>
               )}
-              <Button className="w-full" disabled>
-                <Smartphone className="h-4 w-4 mr-2" />
-                Submit to TestFlight
-                <span className="ml-2 text-[11px] opacity-60">
-                  (App Store submission — separate flow)
-                </span>
-              </Button>
+              <div className="flex items-start gap-2 text-xs bg-muted border border-border rounded-lg px-3 py-2.5">
+                <Smartphone className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-foreground mb-0.5">
+                    App Store submission — coming soon
+                  </p>
+                  <p className="text-muted-foreground">
+                    Direct submission to TestFlight / App Store Connect is not yet available. Use
+                    the EAS Build panel above to build your IPA, then upload it manually via App
+                    Store Connect.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -4152,13 +4158,18 @@ export function PublishingTab({
                   <span>All required items complete. Ready to upload to Google Play Console.</span>
                 </div>
               )}
-              <Button className="w-full" disabled>
-                <PlaySquare className="h-4 w-4 mr-2" />
-                Upload to Google Play
-                <span className="ml-2 text-[11px] opacity-60">
-                  (Play Store submission — separate flow)
-                </span>
-              </Button>
+              <div className="flex items-start gap-2 text-xs bg-muted border border-border rounded-lg px-3 py-2.5">
+                <PlaySquare className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-foreground mb-0.5">
+                    Google Play submission — coming soon
+                  </p>
+                  <p className="text-muted-foreground">
+                    Direct submission to Google Play is not yet available. Use the EAS Build panel
+                    above to build your AAB, then upload it manually via the Google Play Console.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         )}

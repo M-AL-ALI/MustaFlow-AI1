@@ -14,12 +14,50 @@ function generateReadme(
     description: string | null;
     createdAt: Date;
     projectFormat?: string | null;
+    platform?: string | null;
   },
   files: { path: string }[],
 ): string {
   const isReactVite = project.projectFormat === "react-vite";
-  const gettingStarted = isReactVite
-    ? `## Getting Started
+  const isMobile = ["ios", "android", "cross"].includes(project.platform ?? "");
+
+  let gettingStarted: string;
+  if (isMobile) {
+    gettingStarted = `## Getting Started
+
+This is an Expo / React Native project (SDK 52, Expo Router v3, NativeWind v4).
+
+### Prerequisites
+
+- Node.js 18+
+- Expo CLI: \`npm install -g expo-cli\` (or use \`npx expo\`)
+- Expo Go app on your iOS or Android device (for quick testing)
+
+### Run locally
+
+\`\`\`bash
+npm install
+npx expo start
+\`\`\`
+
+Scan the QR code with the **Expo Go** app to open on a real device,
+or press \`i\` for iOS simulator / \`a\` for Android emulator.
+
+### Web preview
+
+\`\`\`bash
+npx expo start --web
+\`\`\`
+
+### Build for stores (EAS)
+
+\`\`\`bash
+npm install -g eas-cli
+eas build --platform ios      # App Store / TestFlight
+eas build --platform android  # Google Play
+\`\`\``;
+  } else if (isReactVite) {
+    gettingStarted = `## Getting Started
 
 This is a React + Vite project. Install dependencies and run the dev server:
 
@@ -37,8 +75,9 @@ npm run build
 npm run preview
 \`\`\`
 
-The \`dist/\` folder contains the production-ready static files.`
-    : `## Getting Started
+The \`dist/\` folder contains the production-ready static files.`;
+  } else {
+    gettingStarted = `## Getting Started
 
 This is a static web application. Open \`index.html\` in a browser,
 or serve the folder with any static file server:
@@ -48,6 +87,7 @@ npx serve .
 # or
 python3 -m http.server 8080
 \`\`\``;
+  }
 
   const hasDrizzle = files.some(
     (f) => f.path.startsWith("drizzle/") || f.path === "drizzle.config.ts",
@@ -56,17 +96,27 @@ python3 -m http.server 8080
     ? `\n- Database migrations are in the \`drizzle/migrations/\` folder. Run \`npx drizzle-kit migrate\` after setting \`DATABASE_URL\` in \`.env\`.`
     : "";
 
-  const notes = isReactVite
-    ? `## Notes
+  let notes: string;
+  if (isMobile) {
+    notes = `## Notes
+
+- Stack: Expo SDK 52, Expo Router v3, React Native, NativeWind v4 (Tailwind for React Native).
+- Run \`npm install\` before starting.
+- The \`index.html\` file is a web preview stub — it is not the native app entry point.
+- Secrets are not included in this export; add them to \`.env\` (see \`.env.example\`).`;
+  } else if (isReactVite) {
+    notes = `## Notes
 
 - Stack: React 18, Vite 5, TypeScript, Tailwind CSS v3.
 - Run \`npm install\` first — CDN dependencies are not used.
-- Secrets are not included in this export; add them to \`.env\` (see \`.env.example\`).${drizzleNote}`
-    : `## Notes
+- Secrets are not included in this export; add them to \`.env\` (see \`.env.example\`).${drizzleNote}`;
+  } else {
+    notes = `## Notes
 
 - Generated files use Tailwind CSS and Lucide icons via CDN.
 - No build step required for web; mobile targets may need Expo setup.
 - Secrets are not included in this export for security reasons.${drizzleNote}`;
+  }
 
   return `# ${project.name}
 
@@ -74,7 +124,7 @@ python3 -m http.server 8080
 
 ## Project Info
 
-- **Type**: ${project.kind}${isReactVite ? " (React + Vite)" : ""}
+- **Type**: ${project.kind}${isReactVite ? " (React + Vite)" : isMobile ? " (Expo / React Native)" : ""}
 - **Description**: ${project.description ?? "No description provided"}
 - **Created**: ${new Date(project.createdAt).toLocaleDateString()}
 
