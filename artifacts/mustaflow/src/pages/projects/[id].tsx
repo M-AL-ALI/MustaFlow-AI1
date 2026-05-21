@@ -2085,7 +2085,12 @@ export default function ProjectWorkspacePage() {
             )}
             {activeTab === "preview" && !variantComparison && (
               <PreviewTab
-                project={{ ...project, kind: project.kind, projectFormat: project.projectFormat }}
+                project={{
+                  ...project,
+                  kind: project.kind,
+                  projectFormat: project.projectFormat,
+                  publicSlug: project.publicSlug,
+                }}
                 wc={wc}
                 focusMode={focusMode}
                 onToggleFocusMode={() => setFocusMode((f) => !f)}

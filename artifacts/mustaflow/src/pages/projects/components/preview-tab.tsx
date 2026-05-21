@@ -64,6 +64,7 @@ type Project = {
   name?: string;
   kind?: string;
   projectFormat?: string;
+  publicSlug?: string | null;
 };
 
 type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
@@ -469,6 +470,88 @@ export function PreviewTab({
                 <span className="hidden sm:inline">{p === "ios" ? "iOS" : "Android"}</span>
               </button>
             ))}
+          </div>
+        )}
+
+        {/* QR code panel — shown for web projects that are published */}
+        {!isMobile && hasFiles && (
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setQrOpen((o) => !o)}
+              className={cn(
+                "flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors border",
+                qrOpen
+                  ? "bg-primary/15 text-primary border-primary/30"
+                  : project.publicSlug
+                    ? "bg-muted text-muted-foreground border-border hover:text-foreground"
+                    : "bg-muted text-muted-foreground border-border hover:text-foreground",
+              )}
+              title="Scan on phone"
+            >
+              <QrCode className="h-3 w-3" />
+              <span className="hidden sm:inline">Scan on phone</span>
+            </button>
+            {qrOpen && (
+              <div className="absolute top-full left-0 mt-2 z-50 w-80 bg-popover border border-border rounded-xl shadow-2xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="font-semibold text-foreground text-sm flex items-center gap-1.5">
+                    <Smartphone className="h-4 w-4 text-primary" />
+                    Test on a real device
+                  </div>
+                  <button
+                    onClick={() => setQrOpen(false)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {project.publicSlug ? (
+                  <>
+                    <div className="flex justify-center mb-3">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(`${window.location.origin}/api/p/${project.publicSlug}/`)}&size=180x180&bgcolor=ffffff&color=000000&margin=8`}
+                        alt="QR code for published app"
+                        className="rounded-lg border border-border"
+                        width={180}
+                        height={180}
+                      />
+                    </div>
+                    <div className="bg-muted/60 rounded-lg px-3 py-2 mb-2">
+                      <p className="text-[10px] font-mono text-muted-foreground break-all">
+                        {window.location.origin}/api/p/{project.publicSlug}/
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-2 bg-muted/60 rounded-lg p-2.5 text-xs text-muted-foreground">
+                      <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary" />
+                      <p>
+                        Scan with your phone's camera to open the live published app in your mobile
+                        browser.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 py-2">
+                    <div className="w-16 h-16 rounded-xl bg-muted flex items-center justify-center">
+                      <Globe className="h-7 w-7 text-muted-foreground/50" />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-foreground mb-1">Not published yet</p>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Publish your app first to get a public URL you can scan and test on any
+                        device.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setQrOpen(false)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Go to Publishing tab to publish
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
