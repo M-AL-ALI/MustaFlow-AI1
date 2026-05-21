@@ -1919,24 +1919,118 @@ export const SearchProjectFilesResponse = zod.array(SearchProjectFilesResponseIt
 
 
 /**
- * @summary Push project files to a GitHub repository
+ * @summary Get GitHub connection status for a project
  */
-export const PushToGithubParams = zod.object({
+export const GetGithubStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGithubStatusResponse = zod.object({
+  "connected": zod.boolean(),
+  "connection": zod.object({
+  "id": zod.number(),
+  "githubAccountName": zod.string(),
+  "repositoryOwner": zod.string().nullish(),
+  "repositoryName": zod.string().nullish(),
+  "defaultBranch": zod.string(),
+  "lastSyncAt": zod.coerce.date().nullish(),
+  "syncStatus": zod.string(),
+  "createdAt": zod.coerce.date()
+}).optional()
+})
+
+
+/**
+ * @summary Connect GitHub to a project using a personal access token
+ */
+export const ConnectGithubParams = zod.object({
   "id": zod.coerce.number()
 })
 
 
 
+
+export const ConnectGithubBody = zod.object({
+  "token": zod.string().min(1).describe('GitHub personal access token (stored encrypted, never returned)')
+})
+
+export const ConnectGithubResponse = zod.object({
+  "connected": zod.boolean(),
+  "githubAccountName": zod.string()
+})
+
+
+/**
+ * @summary Disconnect GitHub from a project
+ */
+export const DisconnectGithubParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DisconnectGithubResponse = zod.object({
+  "disconnected": zod.boolean()
+})
+
+
+/**
+ * @summary List GitHub repositories accessible to the connected account
+ */
+export const ListGithubRepositoriesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const listGithubRepositoriesQueryPageDefault = 1;
+
+export const ListGithubRepositoriesQueryParams = zod.object({
+  "page": zod.coerce.number().default(listGithubRepositoriesQueryPageDefault)
+})
+
+export const ListGithubRepositoriesResponse = zod.object({
+  "repositories": zod.array(zod.object({
+  "name": zod.string(),
+  "fullName": zod.string(),
+  "private": zod.boolean(),
+  "htmlUrl": zod.string(),
+  "defaultBranch": zod.string(),
+  "description": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Select a repository to associate with the project
+ */
+export const SelectGithubRepositoryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const selectGithubRepositoryBodyDefaultBranchDefault = `main`;
+
+export const SelectGithubRepositoryBody = zod.object({
+  "repositoryOwner": zod.string(),
+  "repositoryName": zod.string(),
+  "defaultBranch": zod.string().default(selectGithubRepositoryBodyDefaultBranchDefault)
+})
+
+export const SelectGithubRepositoryResponse = zod.object({
+  "selected": zod.boolean()
+})
+
+
+/**
+ * @summary Push project files to the connected GitHub repository
+ */
+export const PushToGithubParams = zod.object({
+  "id": zod.coerce.number()
+})
+
 export const pushToGithubBodyBranchDefault = `main`;
-export const pushToGithubBodyPrivateDefault = true;
 
 export const PushToGithubBody = zod.object({
-  "token": zod.string().min(1).describe('GitHub personal access token'),
-  "repo": zod.string().min(1).describe('Repository name (e.g. my-app)'),
-  "owner": zod.string().optional().describe('GitHub owner\/org (defaults to token owner)'),
   "branch": zod.string().default(pushToGithubBodyBranchDefault),
-  "private": zod.boolean().default(pushToGithubBodyPrivateDefault),
-  "commitMessage": zod.string().optional()
+  "commitMessage": zod.string().optional(),
+  "repositoryOwner": zod.string().optional(),
+  "repositoryName": zod.string().optional()
 })
 
 export const PushToGithubResponse = zod.object({
@@ -1944,6 +2038,80 @@ export const PushToGithubResponse = zod.object({
   "commitSha": zod.string(),
   "filesCount": zod.number(),
   "created": zod.boolean().optional().describe('true if the repo was newly created')
+})
+
+
+/**
+ * @summary Create a new branch in the connected repository
+ */
+export const CreateGithubBranchParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+
+
+export const CreateGithubBranchBody = zod.object({
+  "branchName": zod.string().min(1),
+  "fromBranch": zod.string().optional().describe('Base branch (defaults to defaultBranch)')
+})
+
+export const CreateGithubBranchResponse = zod.object({
+  "branchName": zod.string(),
+  "sha": zod.string()
+})
+
+
+/**
+ * @summary Open a pull request in the connected repository
+ */
+export const OpenGithubPrParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+
+
+
+export const OpenGithubPrBody = zod.object({
+  "title": zod.string().min(1),
+  "body": zod.string().optional(),
+  "head": zod.string().min(1).describe('Source branch'),
+  "base": zod.string().optional().describe('Target branch (defaults to defaultBranch)')
+})
+
+export const OpenGithubPrResponse = zod.object({
+  "prUrl": zod.string(),
+  "prNumber": zod.number(),
+  "title": zod.string()
+})
+
+
+/**
+ * @summary Get the current sync status of the GitHub connection
+ */
+export const GetGithubSyncStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGithubSyncStatusResponse = zod.object({
+  "syncStatus": zod.string(),
+  "lastSyncAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary List branches in the connected repository
+ */
+export const ListGithubBranchesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListGithubBranchesResponse = zod.object({
+  "branches": zod.array(zod.object({
+  "name": zod.string(),
+  "sha": zod.string()
+}))
 })
 
 

@@ -1519,15 +1519,131 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
-  /projects/{id}/github/push:
-    post:
-      operationId: pushToGithub
+  /projects/{id}/github/status:
+    get:
+      operationId: getGithubStatus
       tags: [projects]
-      summary: Push project files to a GitHub repository
+      summary: Get GitHub connection status for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: GitHub connection status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubStatusResult"
+
+  /projects/{id}/github/connect:
+    post:
+      operationId: connectGithub
+      tags: [projects]
+      summary: Connect GitHub to a project using a personal access token
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:
         required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GithubConnectInput"
+      responses:
+        "200":
+          description: GitHub connected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connected, githubAccountName]
+                properties:
+                  connected: { type: boolean }
+                  githubAccountName: { type: string }
+        "400":
+          description: Invalid token or connection error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/github/disconnect:
+    post:
+      operationId: disconnectGithub
+      tags: [projects]
+      summary: Disconnect GitHub from a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [disconnected]
+                properties:
+                  disconnected: { type: boolean }
+
+  /projects/{id}/github/repositories:
+    get:
+      operationId: listGithubRepositories
+      tags: [projects]
+      summary: List GitHub repositories accessible to the connected account
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+      responses:
+        "200":
+          description: List of repositories
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubRepositoriesResult"
+        "400":
+          description: GitHub not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/github/select-repository:
+    post:
+      operationId: selectGithubRepository
+      tags: [projects]
+      summary: Select a repository to associate with the project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GithubSelectRepoInput"
+      responses:
+        "200":
+          description: Repository selected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [selected]
+                properties:
+                  selected: { type: boolean }
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/github/push:
+    post:
+      operationId: pushToGithub
+      tags: [projects]
+      summary: Push project files to the connected GitHub repository
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: false
         content:
           application/json:
             schema:
@@ -1540,13 +1656,122 @@ paths:
               schema:
                 $ref: "#/components/schemas/GithubPushResult"
         "400":
+          description: Bad request or GitHub not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/github/create-branch:
+    post:
+      operationId: createGithubBranch
+      tags: [projects]
+      summary: Create a new branch in the connected repository
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GithubCreateBranchInput"
+      responses:
+        "200":
+          description: Branch created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [branchName, sha]
+                properties:
+                  branchName: { type: string }
+                  sha: { type: string }
+        "400":
           description: Bad request
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-        "422":
-          description: GitHub token not configured
+
+  /projects/{id}/github/open-pr:
+    post:
+      operationId: openGithubPr
+      tags: [projects]
+      summary: Open a pull request in the connected repository
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GithubOpenPrInput"
+      responses:
+        "200":
+          description: PR created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [prUrl, prNumber, title]
+                properties:
+                  prUrl: { type: string }
+                  prNumber: { type: integer }
+                  title: { type: string }
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/github/sync-status:
+    get:
+      operationId: getGithubSyncStatus
+      tags: [projects]
+      summary: Get the current sync status of the GitHub connection
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Sync status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubSyncStatusResult"
+        "404":
+          description: GitHub not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/github/branches:
+    get:
+      operationId: listGithubBranches
+      tags: [projects]
+      summary: List branches in the connected repository
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: List of branches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [branches]
+                properties:
+                  branches:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, sha]
+                      properties:
+                        name: { type: string }
+                        sha: { type: string }
+        "400":
+          description: No repository selected
           content:
             application/json:
               schema:
@@ -3164,16 +3389,91 @@ components:
         lineNumber: { type: integer }
         lineContent: { type: string }
 
+    GithubConnectInput:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string, minLength: 1, description: "GitHub personal access token (stored encrypted, never returned)" }
+
+    GithubSelectRepoInput:
+      type: object
+      required: [repositoryOwner, repositoryName]
+      properties:
+        repositoryOwner: { type: string }
+        repositoryName: { type: string }
+        defaultBranch: { type: string, default: main }
+
+    GithubCreateBranchInput:
+      type: object
+      required: [branchName]
+      properties:
+        branchName: { type: string, minLength: 1 }
+        fromBranch: { type: string, description: "Base branch (defaults to defaultBranch)" }
+
+    GithubOpenPrInput:
+      type: object
+      required: [title, head]
+      properties:
+        title: { type: string, minLength: 1 }
+        body: { type: string }
+        head: { type: string, minLength: 1, description: "Source branch" }
+        base: { type: string, description: "Target branch (defaults to defaultBranch)" }
+
+    GithubConnection:
+      type: object
+      required: [id, githubAccountName, defaultBranch, syncStatus, createdAt]
+      properties:
+        id: { type: integer }
+        githubAccountName: { type: string }
+        repositoryOwner: { type: ["string", "null"] }
+        repositoryName: { type: ["string", "null"] }
+        defaultBranch: { type: string }
+        lastSyncAt: { type: ["string", "null"], format: date-time }
+        syncStatus: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    GithubStatusResult:
+      type: object
+      required: [connected]
+      properties:
+        connected: { type: boolean }
+        connection:
+          $ref: "#/components/schemas/GithubConnection"
+
+    GithubRepository:
+      type: object
+      required: [name, fullName, private, htmlUrl, defaultBranch]
+      properties:
+        name: { type: string }
+        fullName: { type: string }
+        private: { type: boolean }
+        htmlUrl: { type: string }
+        defaultBranch: { type: string }
+        description: { type: ["string", "null"] }
+
+    GithubRepositoriesResult:
+      type: object
+      required: [repositories]
+      properties:
+        repositories:
+          type: array
+          items:
+            $ref: "#/components/schemas/GithubRepository"
+
+    GithubSyncStatusResult:
+      type: object
+      required: [syncStatus]
+      properties:
+        syncStatus: { type: string }
+        lastSyncAt: { type: ["string", "null"], format: date-time }
+
     GithubPushInput:
       type: object
-      required: [token, repo]
       properties:
-        token: { type: string, minLength: 1, description: "GitHub personal access token" }
-        repo: { type: string, minLength: 1, description: "Repository name (e.g. my-app)" }
-        owner: { type: string, description: "GitHub owner/org (defaults to token owner)" }
         branch: { type: string, default: main }
-        private: { type: boolean, default: true }
         commitMessage: { type: string }
+        repositoryOwner: { type: string }
+        repositoryName: { type: string }
 
     GithubPushResult:
       type: object

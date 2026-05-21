@@ -24,8 +24,10 @@ import {
   ChevronUp,
   Clock,
   ShieldCheck,
+  Github,
 } from "lucide-react";
 import { IntegrationsRegistry } from "./integrations-registry";
+import { GithubTab } from "./github-tab";
 import { VersionTimeline } from "./version-timeline";
 import { QualityPanel } from "./quality-panel";
 import {
@@ -1089,8 +1091,29 @@ export function ToolsTab({
               </div>
             </TabsContent>
 
-            <TabsContent value="integrations" className="h-full m-0 p-4">
-              <IntegrationsRegistry projectId={projectId} secrets={secrets ?? []} />
+            <TabsContent value="integrations" className="h-full m-0">
+              <Tabs defaultValue="marketplace" className="h-full flex flex-col">
+                <TabsList className="shrink-0 w-full justify-start rounded-none border-b border-border bg-transparent px-4 pt-1 h-9 gap-1">
+                  <TabsTrigger
+                    value="marketplace"
+                    className="h-7 text-xs px-3 rounded-md data-[state=active]:bg-muted"
+                  >
+                    <Blocks className="h-3 w-3 mr-1.5" /> Marketplace
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="github"
+                    className="h-7 text-xs px-3 rounded-md data-[state=active]:bg-muted"
+                  >
+                    <Github className="h-3 w-3 mr-1.5" /> GitHub
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="marketplace" className="flex-1 overflow-y-auto m-0 p-4">
+                  <IntegrationsRegistry projectId={projectId} secrets={secrets ?? []} />
+                </TabsContent>
+                <TabsContent value="github" className="flex-1 overflow-y-auto m-0 p-4">
+                  <GithubTab projectId={projectId} />
+                </TabsContent>
+              </Tabs>
             </TabsContent>
 
             <TabsContent value="quality" className="h-full m-0 p-4">

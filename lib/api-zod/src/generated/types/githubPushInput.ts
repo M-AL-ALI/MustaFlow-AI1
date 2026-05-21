@@ -7,19 +7,8 @@
  */
 
 export interface GithubPushInput {
-  /**
-     * GitHub personal access token
-     * @minLength 1
-     */
-  token: string;
-  /**
-     * Repository name (e.g. my-app)
-     * @minLength 1
-     */
-  repo: string;
-  /** GitHub owner/org (defaults to token owner) */
-  owner?: string;
   branch?: string;
-  private?: boolean;
   commitMessage?: string;
+  repositoryOwner?: string;
+  repositoryName?: string;
 }

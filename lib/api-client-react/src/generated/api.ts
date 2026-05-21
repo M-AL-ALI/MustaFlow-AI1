@@ -39,10 +39,12 @@ import type {
   ChatExchange,
   ChatMessage,
   ChatMessageInput,
+  ConnectGithub200,
   ContainerExecInput,
   ContainerExecResult,
   ContainerLog,
   ContainerStatus,
+  CreateGithubBranch200,
   DatabaseProvisionInput,
   DatabaseQueryInput,
   DatabaseQueryResult,
@@ -55,6 +57,7 @@ import type {
   DeployResult,
   DeprovisionDatabase200,
   DestroyContainer200,
+  DisconnectGithub200,
   DuplicateProjectResult,
   FileSearchResult,
   GetAdminAuditLogParams,
@@ -63,8 +66,15 @@ import type {
   GetContainerLogsParams,
   GetPublishReadinessParams,
   GetSecretAuditLogParams,
+  GithubConnectInput,
+  GithubCreateBranchInput,
+  GithubOpenPrInput,
   GithubPushInput,
   GithubPushResult,
+  GithubRepositoriesResult,
+  GithubSelectRepoInput,
+  GithubStatusResult,
+  GithubSyncStatusResult,
   GrantAdminRole200,
   HealthStatus,
   KnowledgeEntry,
@@ -74,6 +84,8 @@ import type {
   ListBillingTransactions200,
   ListCreditTransactions200,
   ListDeployments200,
+  ListGithubBranches200,
+  ListGithubRepositoriesParams,
   ListKnowledgeParams,
   ListMobileBuilds200,
   ListProjectsParams,
@@ -84,6 +96,7 @@ import type {
   MobileBuildLog,
   MobileBuildLogsResult,
   MobileBuildQueued,
+  OpenGithubPr200,
   PackageInstallInput,
   PackageManagerResult,
   PackageUninstallInput,
@@ -115,6 +128,7 @@ import type {
   SecretEntry,
   SecretInput,
   SecretVerifyResult,
+  SelectGithubRepository200,
   SetProjectSubdomain400,
   StopContainer200,
   StripeWebhook200,
@@ -5487,6 +5501,386 @@ export function useSearchProjectFiles<TData = Awaited<ReturnType<typeof searchPr
 
 
 
+export const getGetGithubStatusUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/github/status`
+}
+
+/**
+ * @summary Get GitHub connection status for a project
+ */
+export const getGithubStatus = async (id: number, options?: RequestInit): Promise<GithubStatusResult> => {
+
+  return customFetch<GithubStatusResult>(getGetGithubStatusUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGithubStatusQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/github/status`
+    ] as const;
+    }
+
+
+export const getGetGithubStatusQueryOptions = <TData = Awaited<ReturnType<typeof getGithubStatus>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGithubStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGithubStatusQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGithubStatus>>> = ({ signal }) => getGithubStatus(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGithubStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGithubStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getGithubStatus>>>
+export type GetGithubStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get GitHub connection status for a project
+ */
+
+export function useGetGithubStatus<TData = Awaited<ReturnType<typeof getGithubStatus>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGithubStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGithubStatusQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getConnectGithubUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/github/connect`
+}
+
+/**
+ * @summary Connect GitHub to a project using a personal access token
+ */
+export const connectGithub = async (id: number,
+    githubConnectInput: GithubConnectInput, options?: RequestInit): Promise<ConnectGithub200> => {
+
+  return customFetch<ConnectGithub200>(getConnectGithubUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      githubConnectInput,)
+  }
+);}
+
+
+
+
+export const getConnectGithubMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectGithub>>, TError,{id: number;data: BodyType<GithubConnectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof connectGithub>>, TError,{id: number;data: BodyType<GithubConnectInput>}, TContext> => {
+
+const mutationKey = ['connectGithub'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof connectGithub>>, {id: number;data: BodyType<GithubConnectInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  connectGithub(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConnectGithubMutationResult = NonNullable<Awaited<ReturnType<typeof connectGithub>>>
+    export type ConnectGithubMutationBody = BodyType<GithubConnectInput>
+    export type ConnectGithubMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Connect GitHub to a project using a personal access token
+ */
+export const useConnectGithub = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectGithub>>, TError,{id: number;data: BodyType<GithubConnectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof connectGithub>>,
+        TError,
+        {id: number;data: BodyType<GithubConnectInput>},
+        TContext
+      > => {
+      return useMutation(getConnectGithubMutationOptions(options));
+    }
+
+export const getDisconnectGithubUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/github/disconnect`
+}
+
+/**
+ * @summary Disconnect GitHub from a project
+ */
+export const disconnectGithub = async (id: number, options?: RequestInit): Promise<DisconnectGithub200> => {
+
+  return customFetch<DisconnectGithub200>(getDisconnectGithubUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getDisconnectGithubMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectGithub>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof disconnectGithub>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['disconnectGithub'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectGithub>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  disconnectGithub(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DisconnectGithubMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectGithub>>>
+
+    export type DisconnectGithubMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Disconnect GitHub from a project
+ */
+export const useDisconnectGithub = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectGithub>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof disconnectGithub>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDisconnectGithubMutationOptions(options));
+    }
+
+export const getListGithubRepositoriesUrl = (id: number,
+    params?: ListGithubRepositoriesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/github/repositories?${stringifiedParams}` : `/api/projects/${id}/github/repositories`
+}
+
+/**
+ * @summary List GitHub repositories accessible to the connected account
+ */
+export const listGithubRepositories = async (id: number,
+    params?: ListGithubRepositoriesParams, options?: RequestInit): Promise<GithubRepositoriesResult> => {
+
+  return customFetch<GithubRepositoriesResult>(getListGithubRepositoriesUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListGithubRepositoriesQueryKey = (id: number,
+    params?: ListGithubRepositoriesParams,) => {
+    return [
+    `/api/projects/${id}/github/repositories`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListGithubRepositoriesQueryOptions = <TData = Awaited<ReturnType<typeof listGithubRepositories>>, TError = ErrorType<ApiError>>(id: number,
+    params?: ListGithubRepositoriesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGithubRepositories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListGithubRepositoriesQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listGithubRepositories>>> = ({ signal }) => listGithubRepositories(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listGithubRepositories>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListGithubRepositoriesQueryResult = NonNullable<Awaited<ReturnType<typeof listGithubRepositories>>>
+export type ListGithubRepositoriesQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List GitHub repositories accessible to the connected account
+ */
+
+export function useListGithubRepositories<TData = Awaited<ReturnType<typeof listGithubRepositories>>, TError = ErrorType<ApiError>>(
+ id: number,
+    params?: ListGithubRepositoriesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGithubRepositories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListGithubRepositoriesQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSelectGithubRepositoryUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/github/select-repository`
+}
+
+/**
+ * @summary Select a repository to associate with the project
+ */
+export const selectGithubRepository = async (id: number,
+    githubSelectRepoInput: GithubSelectRepoInput, options?: RequestInit): Promise<SelectGithubRepository200> => {
+
+  return customFetch<SelectGithubRepository200>(getSelectGithubRepositoryUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      githubSelectRepoInput,)
+  }
+);}
+
+
+
+
+export const getSelectGithubRepositoryMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof selectGithubRepository>>, TError,{id: number;data: BodyType<GithubSelectRepoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof selectGithubRepository>>, TError,{id: number;data: BodyType<GithubSelectRepoInput>}, TContext> => {
+
+const mutationKey = ['selectGithubRepository'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof selectGithubRepository>>, {id: number;data: BodyType<GithubSelectRepoInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  selectGithubRepository(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SelectGithubRepositoryMutationResult = NonNullable<Awaited<ReturnType<typeof selectGithubRepository>>>
+    export type SelectGithubRepositoryMutationBody = BodyType<GithubSelectRepoInput>
+    export type SelectGithubRepositoryMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Select a repository to associate with the project
+ */
+export const useSelectGithubRepository = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof selectGithubRepository>>, TError,{id: number;data: BodyType<GithubSelectRepoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof selectGithubRepository>>,
+        TError,
+        {id: number;data: BodyType<GithubSelectRepoInput>},
+        TContext
+      > => {
+      return useMutation(getSelectGithubRepositoryMutationOptions(options));
+    }
+
 export const getPushToGithubUrl = (id: number,) => {
 
 
@@ -5496,10 +5890,10 @@ export const getPushToGithubUrl = (id: number,) => {
 }
 
 /**
- * @summary Push project files to a GitHub repository
+ * @summary Push project files to the connected GitHub repository
  */
 export const pushToGithub = async (id: number,
-    githubPushInput: GithubPushInput, options?: RequestInit): Promise<GithubPushResult> => {
+    githubPushInput?: GithubPushInput, options?: RequestInit): Promise<GithubPushResult> => {
 
   return customFetch<GithubPushResult>(getPushToGithubUrl(id),
   {
@@ -5515,8 +5909,8 @@ export const pushToGithub = async (id: number,
 
 
 export const getPushToGithubMutationOptions = <TError = ErrorType<ApiError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushToGithub>>, TError,{id: number;data: BodyType<GithubPushInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof pushToGithub>>, TError,{id: number;data: BodyType<GithubPushInput>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushToGithub>>, TError,{id: number;data?: BodyType<GithubPushInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof pushToGithub>>, TError,{id: number;data?: BodyType<GithubPushInput>}, TContext> => {
 
 const mutationKey = ['pushToGithub'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -5528,7 +5922,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pushToGithub>>, {id: number;data: BodyType<GithubPushInput>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pushToGithub>>, {id: number;data?: BodyType<GithubPushInput>}> = (props) => {
           const {id,data} = props ?? {};
 
           return  pushToGithub(id,data,requestOptions)
@@ -5542,22 +5936,320 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type PushToGithubMutationResult = NonNullable<Awaited<ReturnType<typeof pushToGithub>>>
-    export type PushToGithubMutationBody = BodyType<GithubPushInput>
+    export type PushToGithubMutationBody = BodyType<GithubPushInput> | undefined
     export type PushToGithubMutationError = ErrorType<ApiError>
 
     /**
- * @summary Push project files to a GitHub repository
+ * @summary Push project files to the connected GitHub repository
  */
 export const usePushToGithub = <TError = ErrorType<ApiError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushToGithub>>, TError,{id: number;data: BodyType<GithubPushInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushToGithub>>, TError,{id: number;data?: BodyType<GithubPushInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof pushToGithub>>,
         TError,
-        {id: number;data: BodyType<GithubPushInput>},
+        {id: number;data?: BodyType<GithubPushInput>},
         TContext
       > => {
       return useMutation(getPushToGithubMutationOptions(options));
     }
+
+export const getCreateGithubBranchUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/github/create-branch`
+}
+
+/**
+ * @summary Create a new branch in the connected repository
+ */
+export const createGithubBranch = async (id: number,
+    githubCreateBranchInput: GithubCreateBranchInput, options?: RequestInit): Promise<CreateGithubBranch200> => {
+
+  return customFetch<CreateGithubBranch200>(getCreateGithubBranchUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      githubCreateBranchInput,)
+  }
+);}
+
+
+
+
+export const getCreateGithubBranchMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGithubBranch>>, TError,{id: number;data: BodyType<GithubCreateBranchInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createGithubBranch>>, TError,{id: number;data: BodyType<GithubCreateBranchInput>}, TContext> => {
+
+const mutationKey = ['createGithubBranch'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createGithubBranch>>, {id: number;data: BodyType<GithubCreateBranchInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  createGithubBranch(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateGithubBranchMutationResult = NonNullable<Awaited<ReturnType<typeof createGithubBranch>>>
+    export type CreateGithubBranchMutationBody = BodyType<GithubCreateBranchInput>
+    export type CreateGithubBranchMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Create a new branch in the connected repository
+ */
+export const useCreateGithubBranch = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGithubBranch>>, TError,{id: number;data: BodyType<GithubCreateBranchInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createGithubBranch>>,
+        TError,
+        {id: number;data: BodyType<GithubCreateBranchInput>},
+        TContext
+      > => {
+      return useMutation(getCreateGithubBranchMutationOptions(options));
+    }
+
+export const getOpenGithubPrUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/github/open-pr`
+}
+
+/**
+ * @summary Open a pull request in the connected repository
+ */
+export const openGithubPr = async (id: number,
+    githubOpenPrInput: GithubOpenPrInput, options?: RequestInit): Promise<OpenGithubPr200> => {
+
+  return customFetch<OpenGithubPr200>(getOpenGithubPrUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      githubOpenPrInput,)
+  }
+);}
+
+
+
+
+export const getOpenGithubPrMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof openGithubPr>>, TError,{id: number;data: BodyType<GithubOpenPrInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof openGithubPr>>, TError,{id: number;data: BodyType<GithubOpenPrInput>}, TContext> => {
+
+const mutationKey = ['openGithubPr'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof openGithubPr>>, {id: number;data: BodyType<GithubOpenPrInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  openGithubPr(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type OpenGithubPrMutationResult = NonNullable<Awaited<ReturnType<typeof openGithubPr>>>
+    export type OpenGithubPrMutationBody = BodyType<GithubOpenPrInput>
+    export type OpenGithubPrMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Open a pull request in the connected repository
+ */
+export const useOpenGithubPr = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof openGithubPr>>, TError,{id: number;data: BodyType<GithubOpenPrInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof openGithubPr>>,
+        TError,
+        {id: number;data: BodyType<GithubOpenPrInput>},
+        TContext
+      > => {
+      return useMutation(getOpenGithubPrMutationOptions(options));
+    }
+
+export const getGetGithubSyncStatusUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/github/sync-status`
+}
+
+/**
+ * @summary Get the current sync status of the GitHub connection
+ */
+export const getGithubSyncStatus = async (id: number, options?: RequestInit): Promise<GithubSyncStatusResult> => {
+
+  return customFetch<GithubSyncStatusResult>(getGetGithubSyncStatusUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGithubSyncStatusQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/github/sync-status`
+    ] as const;
+    }
+
+
+export const getGetGithubSyncStatusQueryOptions = <TData = Awaited<ReturnType<typeof getGithubSyncStatus>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGithubSyncStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGithubSyncStatusQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGithubSyncStatus>>> = ({ signal }) => getGithubSyncStatus(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGithubSyncStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGithubSyncStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getGithubSyncStatus>>>
+export type GetGithubSyncStatusQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get the current sync status of the GitHub connection
+ */
+
+export function useGetGithubSyncStatus<TData = Awaited<ReturnType<typeof getGithubSyncStatus>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGithubSyncStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGithubSyncStatusQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListGithubBranchesUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/github/branches`
+}
+
+/**
+ * @summary List branches in the connected repository
+ */
+export const listGithubBranches = async (id: number, options?: RequestInit): Promise<ListGithubBranches200> => {
+
+  return customFetch<ListGithubBranches200>(getListGithubBranchesUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListGithubBranchesQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/github/branches`
+    ] as const;
+    }
+
+
+export const getListGithubBranchesQueryOptions = <TData = Awaited<ReturnType<typeof listGithubBranches>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGithubBranches>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListGithubBranchesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listGithubBranches>>> = ({ signal }) => listGithubBranches(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listGithubBranches>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListGithubBranchesQueryResult = NonNullable<Awaited<ReturnType<typeof listGithubBranches>>>
+export type ListGithubBranchesQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List branches in the connected repository
+ */
+
+export function useListGithubBranches<TData = Awaited<ReturnType<typeof listGithubBranches>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGithubBranches>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListGithubBranchesQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetProjectFileRawUrl = (id: number,
     fileId: number,) => {

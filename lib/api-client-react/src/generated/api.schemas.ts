@@ -1291,22 +1291,84 @@ export interface FileSearchResult {
   lineContent: string;
 }
 
-export interface GithubPushInput {
+export interface GithubConnectInput {
   /**
-     * GitHub personal access token
+     * GitHub personal access token (stored encrypted, never returned)
      * @minLength 1
      */
   token: string;
+}
+
+export interface GithubSelectRepoInput {
+  repositoryOwner: string;
+  repositoryName: string;
+  defaultBranch?: string;
+}
+
+export interface GithubCreateBranchInput {
+  /** @minLength 1 */
+  branchName: string;
+  /** Base branch (defaults to defaultBranch) */
+  fromBranch?: string;
+}
+
+export interface GithubOpenPrInput {
+  /** @minLength 1 */
+  title: string;
+  body?: string;
   /**
-     * Repository name (e.g. my-app)
+     * Source branch
      * @minLength 1
      */
-  repo: string;
-  /** GitHub owner/org (defaults to token owner) */
-  owner?: string;
+  head: string;
+  /** Target branch (defaults to defaultBranch) */
+  base?: string;
+}
+
+export interface GithubConnection {
+  id: number;
+  githubAccountName: string;
+  /** @nullable */
+  repositoryOwner?: string | null;
+  /** @nullable */
+  repositoryName?: string | null;
+  defaultBranch: string;
+  /** @nullable */
+  lastSyncAt?: string | null;
+  syncStatus: string;
+  createdAt: string;
+}
+
+export interface GithubStatusResult {
+  connected: boolean;
+  connection?: GithubConnection;
+}
+
+export interface GithubRepository {
+  name: string;
+  fullName: string;
+  private: boolean;
+  htmlUrl: string;
+  defaultBranch: string;
+  /** @nullable */
+  description?: string | null;
+}
+
+export interface GithubRepositoriesResult {
+  repositories: GithubRepository[];
+}
+
+export interface GithubSyncStatusResult {
+  syncStatus: string;
+  /** @nullable */
+  lastSyncAt?: string | null;
+}
+
+export interface GithubPushInput {
   branch?: string;
-  private?: boolean;
   commitMessage?: string;
+  repositoryOwner?: string;
+  repositoryName?: string;
 }
 
 export interface GithubPushResult {
@@ -1747,6 +1809,43 @@ export type SearchProjectFilesParams = {
  * @minLength 1
  */
 q: string;
+};
+
+export type ConnectGithub200 = {
+  connected: boolean;
+  githubAccountName: string;
+};
+
+export type DisconnectGithub200 = {
+  disconnected: boolean;
+};
+
+export type ListGithubRepositoriesParams = {
+page?: number;
+};
+
+export type SelectGithubRepository200 = {
+  selected: boolean;
+};
+
+export type CreateGithubBranch200 = {
+  branchName: string;
+  sha: string;
+};
+
+export type OpenGithubPr200 = {
+  prUrl: string;
+  prNumber: number;
+  title: string;
+};
+
+export type ListGithubBranches200BranchesItem = {
+  name: string;
+  sha: string;
+};
+
+export type ListGithubBranches200 = {
+  branches: ListGithubBranches200BranchesItem[];
 };
 
 export type StopContainer200 = {
