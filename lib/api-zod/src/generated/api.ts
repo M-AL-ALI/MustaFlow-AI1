@@ -1342,7 +1342,7 @@ export const GetPublishReadinessParams = zod.object({
 export const getPublishReadinessQueryEnvDefault = `testing`;
 
 export const GetPublishReadinessQueryParams = zod.object({
-  "env": zod.enum(['testing', 'production']).default(getPublishReadinessQueryEnvDefault)
+  "env": zod.enum(['testing', 'production', 'ios', 'android']).default(getPublishReadinessQueryEnvDefault)
 })
 
 export const GetPublishReadinessResponse = zod.object({

@@ -2050,9 +2050,15 @@ export function PublishingTab({
   const [prodContainerStatus, setProdContainerStatus] = useState<string | null>(null);
   const [prodContainerUrl, setProdContainerUrl] = useState<string | null>(null);
 
-  // Readiness gate state
+  // Readiness gate state (web)
   const [readiness, setReadiness] = useState<ReadinessResult | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(false);
+
+  // Readiness gate state (mobile store)
+  const [iosReadiness, setIosReadiness] = useState<ReadinessResult | null>(null);
+  const [iosReadinessLoading, setIosReadinessLoading] = useState(false);
+  const [andReadiness, setAndReadiness] = useState<ReadinessResult | null>(null);
+  const [andReadinessLoading, setAndReadinessLoading] = useState(false);
 
   // Deployment history state
   const [deployments, setDeployments] = useState<
@@ -2280,6 +2286,32 @@ export function PublishingTab({
     }
   }, [projectId, webEnv, platform]);
 
+  const fetchIosReadiness = useCallback(async () => {
+    if (!isMobile) return;
+    setIosReadinessLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/publish-readiness?env=ios`);
+      if (res.ok) setIosReadiness((await res.json()) as ReadinessResult);
+    } catch {
+      /* ignore */
+    } finally {
+      setIosReadinessLoading(false);
+    }
+  }, [projectId, isMobile]);
+
+  const fetchAndReadiness = useCallback(async () => {
+    if (!isMobile) return;
+    setAndReadinessLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/publish-readiness?env=android`);
+      if (res.ok) setAndReadiness((await res.json()) as ReadinessResult);
+    } catch {
+      /* ignore */
+    } finally {
+      setAndReadinessLoading(false);
+    }
+  }, [projectId, isMobile]);
+
   const fetchDeployments = useCallback(async () => {
     try {
       const res = await fetch(`/api/projects/${projectId}/deployments`);
@@ -2452,17 +2484,23 @@ export function PublishingTab({
     void fetchDeployments();
     void fetchSiteSettings();
     void fetchDomain();
-  }, [fetchReadiness, fetchDeployments, fetchSiteSettings, fetchDomain]);
+    void fetchIosReadiness();
+    void fetchAndReadiness();
+  }, [fetchReadiness, fetchDeployments, fetchSiteSettings, fetchDomain, fetchIosReadiness, fetchAndReadiness]);
 
   const webChecklist = webEnv === "testing" ? WEB_TESTING_CHECKLIST : WEB_PRODUCTION_CHECKLIST;
   const webRequired = webChecklist.flatMap((s) => s.items).filter((i) => i.required);
   const webReadyToPublish = webRequired.every((i) => checked.has(i.id));
 
   const iosRequired = IOS_CHECKLIST.flatMap((s) => s.items).filter((i) => i.required);
-  const iosReady = iosRequired.every((i) => checked.has(i.id));
+  const iosChecklistComplete = iosRequired.every((i) => checked.has(i.id));
+  // Gate on server-side readiness when available; fall back to checklist-only
+  const iosReady = iosReadiness ? iosReadiness.canPublish && iosChecklistComplete : iosChecklistComplete;
 
   const andRequired = ANDROID_CHECKLIST.flatMap((s) => s.items).filter((i) => i.required);
-  const andReady = andRequired.every((i) => checked.has(i.id));
+  const andChecklistComplete = andRequired.every((i) => checked.has(i.id));
+  // Gate on server-side readiness when available; fall back to checklist-only
+  const andReady = andReadiness ? andReadiness.canPublish && andChecklistComplete : andChecklistComplete;
 
   return (
     <div className="h-full overflow-y-auto">
@@ -3897,30 +3935,64 @@ export function PublishingTab({
             <ChecklistGroup sections={IOS_CHECKLIST} checked={checked} onToggle={toggle} />
 
             <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+              {/* Server-side readiness checks */}
+              {iosReadiness && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-foreground">Store Submission Requirements</p>
+                  {iosReadiness.checks.map((check) => (
+                    <ReadinessCheckRow key={check.id} check={check} />
+                  ))}
+                </div>
+              )}
+              {iosReadinessLoading && !iosReadiness && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Checking submission requirements…</span>
+                </div>
+              )}
+              {/* Status banner */}
               {!iosReady ? (
                 <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>Complete all required items before submitting to App Store Connect.</span>
+                  <span>
+                    {iosReadiness && !iosReadiness.canPublish
+                      ? "Complete all required server-side checks and checklist items before submitting."
+                      : "Complete all required checklist items before submitting to App Store Connect."}
+                  </span>
                 </div>
               ) : (
                 <div className="flex items-start gap-2 text-xs text-green-600 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2">
                   <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>All required items complete. Ready to submit to App Store Connect.</span>
+                  <span>All required checks complete. Ready to submit to App Store Connect.</span>
                 </div>
               )}
-              <div className="flex items-start gap-2 text-xs bg-muted border border-border rounded-lg px-3 py-2.5">
-                <Smartphone className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-semibold text-foreground mb-0.5">
-                    App Store submission — coming soon
-                  </p>
-                  <p className="text-muted-foreground">
-                    Direct submission to TestFlight / App Store Connect is not yet available. Use
-                    the EAS Build panel above to build your IPA, then upload it manually via App
-                    Store Connect.
-                  </p>
-                </div>
-              </div>
+              {/* Submit button — gated on server-side canPublish + checklist */}
+              <Button
+                className="w-full"
+                disabled={!iosReady}
+                asChild={iosReady}
+              >
+                {iosReady ? (
+                  <a
+                    href="https://appstoreconnect.apple.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-center gap-2"
+                  >
+                    <Smartphone className="h-4 w-4" />
+                    Open App Store Connect
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </a>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <Smartphone className="h-4 w-4" />
+                    Submit to App Store Connect
+                  </span>
+                )}
+              </Button>
+              <p className="text-[11px] text-muted-foreground text-center">
+                Use the EAS Build panel above to build your IPA, then upload it manually via App Store Connect.
+              </p>
             </div>
           </div>
         )}
@@ -4262,29 +4334,64 @@ export function PublishingTab({
             <ChecklistGroup sections={ANDROID_CHECKLIST} checked={checked} onToggle={toggle} />
 
             <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+              {/* Server-side readiness checks */}
+              {andReadiness && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-foreground">Store Submission Requirements</p>
+                  {andReadiness.checks.map((check) => (
+                    <ReadinessCheckRow key={check.id} check={check} />
+                  ))}
+                </div>
+              )}
+              {andReadinessLoading && !andReadiness && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Checking submission requirements…</span>
+                </div>
+              )}
+              {/* Status banner */}
               {!andReady ? (
                 <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>Complete all required items before uploading to Google Play.</span>
+                  <span>
+                    {andReadiness && !andReadiness.canPublish
+                      ? "Complete all required server-side checks and checklist items before uploading."
+                      : "Complete all required checklist items before uploading to Google Play."}
+                  </span>
                 </div>
               ) : (
                 <div className="flex items-start gap-2 text-xs text-green-600 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2">
                   <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>All required items complete. Ready to upload to Google Play Console.</span>
+                  <span>All required checks complete. Ready to upload to Google Play Console.</span>
                 </div>
               )}
-              <div className="flex items-start gap-2 text-xs bg-muted border border-border rounded-lg px-3 py-2.5">
-                <PlaySquare className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-semibold text-foreground mb-0.5">
-                    Google Play submission — coming soon
-                  </p>
-                  <p className="text-muted-foreground">
-                    Direct submission to Google Play is not yet available. Use the EAS Build panel
-                    above to build your AAB, then upload it manually via the Google Play Console.
-                  </p>
-                </div>
-              </div>
+              {/* Submit button — gated on server-side canPublish + checklist */}
+              <Button
+                className="w-full"
+                disabled={!andReady}
+                asChild={andReady}
+              >
+                {andReady ? (
+                  <a
+                    href="https://play.google.com/console"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-center gap-2"
+                  >
+                    <PlaySquare className="h-4 w-4" />
+                    Open Google Play Console
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </a>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <PlaySquare className="h-4 w-4" />
+                    Upload to Google Play Console
+                  </span>
+                )}
+              </Button>
+              <p className="text-[11px] text-muted-foreground text-center">
+                Use the EAS Build panel above to build your AAB, then upload it manually via the Google Play Console.
+              </p>
             </div>
           </div>
         )}

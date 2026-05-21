@@ -910,7 +910,7 @@ paths:
         - { name: id, in: path, required: true, schema: { type: integer } }
         - in: query
           name: env
-          schema: { type: string, enum: [testing, production], default: testing }
+          schema: { type: string, enum: [testing, production, ios, android], default: testing }
       responses:
         "200":
           description: Readiness result

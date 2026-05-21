@@ -12,4 +12,6 @@ export type GetPublishReadinessEnv = typeof GetPublishReadinessEnv[keyof typeof 
 export const GetPublishReadinessEnv = {
   testing: 'testing',
   production: 'production',
+  ios: 'ios',
+  android: 'android',
 } as const;
