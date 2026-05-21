@@ -674,6 +674,7 @@ type EasBuildEntry = {
 
 type EasState = {
   hasToken: boolean;
+  hasEasJson: boolean;
   appSlug: string | null;
   appName: string | null;
   builds: EasBuildEntry[];
@@ -854,8 +855,6 @@ function EasBuildPanel({
             `The app "${data.fullName ?? ""}" isn't registered in EAS yet. ` +
               `Export your project ZIP, run \`eas init\` in the project folder, then try again.`,
           );
-        } else if (data.hint === "check_eas_json") {
-          setTriggerHint('Add an eas.json with a "preview" profile to your project, then rebuild.');
         }
       } else {
         // Build queued — refresh state to show it in Build History
@@ -1104,6 +1103,20 @@ function EasBuildPanel({
                 </>
               )}
             </Button>
+          </div>
+
+          {/* eas.json status row */}
+          <div className="flex items-center gap-2 text-xs py-0.5">
+            {state?.hasEasJson ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+            ) : (
+              <Info className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            )}
+            <span className={state?.hasEasJson ? "text-green-400" : "text-muted-foreground"}>
+              {state?.hasEasJson
+                ? "eas.json configured (preview + production profiles)"
+                : "eas.json will be auto-generated on first build trigger"}
+            </span>
           </div>
 
           {triggerError && (

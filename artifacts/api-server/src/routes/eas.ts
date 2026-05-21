@@ -223,6 +223,45 @@ async function getAppJson(
   }
 }
 
+const DEFAULT_EAS_JSON = JSON.stringify(
+  {
+    cli: { version: ">= 16.0.0" },
+    build: {
+      preview: { distribution: "internal" },
+      production: { autoIncrement: true },
+    },
+  },
+  null,
+  2,
+);
+
+async function hasEasJson(projectId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ path: projectFilesTable.path })
+    .from(projectFilesTable)
+    .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, "eas.json")))
+    .limit(1);
+  return !!row;
+}
+
+async function ensureEasJson(projectId: number): Promise<void> {
+  // Atomic insert — the unique (projectId, path) constraint means onConflictDoNothing
+  // is safe under concurrent requests; no check-then-insert race.
+  const result = await db
+    .insert(projectFilesTable)
+    .values({
+      projectId,
+      path: "eas.json",
+      content: DEFAULT_EAS_JSON,
+      mimeType: "application/json",
+    })
+    .onConflictDoNothing()
+    .returning({ id: projectFilesTable.id });
+  if (result.length > 0) {
+    logger.info({ projectId }, "Auto-generated eas.json for project");
+  }
+}
+
 // Map EAS status strings → our deployment_logs status
 function easStatusToLogStatus(easStatus: string): "started" | "passed" | "failed" {
   const lower = easStatus.toLowerCase();
@@ -335,7 +374,10 @@ router.post(
     const owner = appInfo.owner ?? userInfo.username;
     const fullName = `@${owner}/${appInfo.slug}`;
 
-    // 4. Look up the EAS app ID
+    // 4. Auto-generate eas.json if it's missing — prevents "profile does not exist" errors
+    await ensureEasJson(projectId);
+
+    // 5. Look up the EAS app ID
     const easAppId = await fetchEasAppId(token, fullName);
     if (!easAppId) {
       res.status(422).json({
@@ -347,7 +389,7 @@ router.post(
       return;
     }
 
-    // 5. Trigger the build via GraphQL
+    // 6. Trigger the build via GraphQL
     const gqlPlatform = platform === "ios" ? "IOS" : "ANDROID";
     const buildResult = await triggerEasGqlBuild(token, easAppId, gqlPlatform, profile);
     if (!buildResult) {
@@ -362,8 +404,8 @@ router.post(
       });
       res.status(502).json({
         error:
-          "EAS build trigger failed. The project may not have an eas.json, or the profile does not exist.",
-        hint: "check_eas_json",
+          "EAS build trigger failed. The app may not be registered with EAS yet — run `eas init` in your exported project folder and try again.",
+        hint: "eas_init_required",
       });
       return;
     }
@@ -428,9 +470,11 @@ router.get("/projects/:id/eas/builds", requireProjectOwnership, async (req, res)
 
   const hasToken = !!(await getEasTokenForProject(projectId));
   const appInfo = await getAppJson(projectId);
+  const easJsonPresent = await hasEasJson(projectId);
 
   res.json({
     hasToken,
+    hasEasJson: easJsonPresent,
     appSlug: appInfo?.slug ?? null,
     appName: appInfo?.name ?? null,
     builds: rows.map((r) => {

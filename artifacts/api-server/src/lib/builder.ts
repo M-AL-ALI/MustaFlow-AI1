@@ -4544,6 +4544,25 @@ export async function runMobileBuildPipeline(args: {
     });
   }
 
+  // Auto-generate eas.json with preview + production profiles so the first EAS build works
+  if (!files.some((f) => f.path === "eas.json")) {
+    files.push({
+      path: "eas.json",
+      content: JSON.stringify(
+        {
+          cli: { version: ">= 16.0.0" },
+          build: {
+            preview: { distribution: "internal" },
+            production: { autoIncrement: true },
+          },
+        },
+        null,
+        2,
+      ),
+      mimeType: "application/json",
+    });
+  }
+
   // Auto-correct package.json to include module dependencies
   if (detectedModuleIds.length > 0) {
     await onEvent?.("validating_output", "Verifying module packages in package.json…");
