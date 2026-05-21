@@ -21,6 +21,8 @@ import {
   Wrench,
   QrCode,
   Info,
+  Copy,
+  Check,
   ShieldAlert,
   Plug,
   FileJson,
@@ -128,6 +130,7 @@ export function PreviewTab({
   const prevNativeFeaturesRef = useRef<string[]>([]);
   const [crashBanner, setCrashBanner] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
   const [mocksOpen, setMocksOpen] = useState(false);
 
   // EAS build status — fetch latest completed build for native QR
@@ -517,10 +520,30 @@ export function PreviewTab({
                         height={180}
                       />
                     </div>
-                    <div className="bg-muted/60 rounded-lg px-3 py-2 mb-2">
-                      <p className="text-[10px] font-mono text-muted-foreground break-all">
+                    <div className="bg-muted/60 rounded-lg px-3 py-2 mb-2 flex items-center gap-2">
+                      <p className="text-[10px] font-mono text-muted-foreground break-all flex-1">
                         {window.location.origin}/api/p/{project.publicSlug}/
                       </p>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard
+                            .writeText(`${window.location.origin}/api/p/${project.publicSlug}/`)
+                            .then(() => {
+                              setCopiedUrl(true);
+                              setTimeout(() => setCopiedUrl(false), 2000);
+                            })
+                            .catch(() => {});
+                        }}
+                        aria-label={copiedUrl ? "Copied" : "Copy link"}
+                        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                        title={copiedUrl ? "Copied" : "Copy link"}
+                      >
+                        {copiedUrl ? (
+                          <Check className="h-3.5 w-3.5 text-green-500" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                      </button>
                     </div>
                     <div className="flex items-start gap-2 bg-muted/60 rounded-lg p-2.5 text-xs text-muted-foreground">
                       <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary" />
