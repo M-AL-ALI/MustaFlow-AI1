@@ -3569,6 +3569,794 @@ const MOBILE_PLAN_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Planner. You 
 }
 "pages" lists screens (e.g. "Home — feed of latest posts", "Profile — user settings and avatar"). Be specific. Empty arrays for sections that don't apply.`;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Next.js 14 App Router builder prompts
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NEXTJS_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready Next.js 14 App Router applications. Your only output is valid JSON — no prose.
+
+TECH STACK — use exactly:
+- Next.js 14 with App Router (src/app/ directory convention)
+- TypeScript 5
+- Tailwind CSS v3 (via PostCSS — NOT a CDN)
+- lucide-react for all icons (no emojis anywhere)
+
+REQUIRED PROJECT STRUCTURE — always include ALL of these files:
+- package.json (name, version, scripts: dev/build/start, dependencies, devDependencies)
+- next.config.js (minimal — { reactStrictMode: true })
+- tailwind.config.js (content: ["./src/**/*.{ts,tsx}"])
+- postcss.config.js
+- tsconfig.json (target ES2017, moduleResolution bundler, jsx preserve, paths @/*)
+- src/app/layout.tsx (RootLayout with <html> and <body> — import globals.css here)
+- src/app/page.tsx (Home page — default export)
+- src/app/globals.css (Tailwind directives: @tailwind base/components/utilities)
+
+ADDITIONAL FILES (as needed):
+- src/app/<route>/page.tsx — additional routes (App Router convention)
+- src/app/api/<route>/route.ts — API routes (GET/POST/etc handlers)
+- src/components/*.tsx — shared UI components
+- src/lib/utils.ts — utility functions
+
+CODE RULES:
+- TypeScript throughout — no .js files except config files
+- Use "use client" directive only for components that need browser APIs or hooks
+- Server Components by default (no "use client" unless necessary)
+- Tailwind utility classes only — no inline styles
+- Never hardcode secrets — use process.env.VARIABLE_NAME (server-side only)
+- Environment variables exposed to client must be prefixed NEXT_PUBLIC_
+- Responsive design using Tailwind breakpoints (mobile-first)
+- Semantic HTML with proper accessibility
+- Use next/link for internal navigation, next/image for optimised images
+
+DEPENDENCIES to include in package.json:
+{
+  "dependencies": {
+    "next": "14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "lucide-react": "^0.447.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.5.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3"
+  }
+}
+
+scripts: { "dev": "next dev -p 3000", "build": "next build", "start": "next start -p 3000" }
+
+OUTPUT STRICT JSON:
+{
+  "blueprint": {
+    "projectName": string,
+    "projectType": string,
+    "targetPlatforms": ["web"],
+    "pages": [{ "name": string, "route": string }],
+    "components": string[],
+    "data": string[],
+    "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+    "theme": string
+  },
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "summary": "One or two plain-English sentences describing what was built. No code, no file paths.",
+  "warnings": string[],
+  "nextRecommendation": string
+}
+
+MIME types: .ts/.tsx → "application/typescript", .json → "application/json", .js → "application/javascript", .css → "text/css"
+The "files" array MUST include every file. package.json, next.config.js, src/app/layout.tsx, src/app/page.tsx, and src/app/globals.css are REQUIRED.`;
+
+const NEXTJS_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Next.js 14 App Router project. You receive current project files and a change request. Return ONLY files that changed (full new content for each changed file).
+
+TECH STACK: Next.js 14 App Router + TypeScript + Tailwind CSS v3 + lucide-react
+
+RULES:
+- TypeScript throughout (.ts / .tsx)
+- Tailwind utility classes only
+- Maintain App Router conventions (src/app/ directory, layout.tsx, page.tsx)
+- "use client" only when truly needed (browser APIs, useState, useEffect, event handlers)
+- Do NOT remove or replace package.json, next.config.js, tsconfig.json, or src/app/globals.css unless explicitly asked
+- Use lucide-react for icons — no emojis
+
+OUTPUT STRICT JSON:
+{
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "filesRemoved": string[],
+  "unchangedFiles": string[],
+  "summary": "One or two plain-English sentences describing what changed. No code, no file paths.",
+  "warnings": string[],
+  "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+  "nextRecommendation": string
+}
+
+"files" = ONLY files created or changed (full new content).
+"unchangedFiles" = every path you deliberately did not touch.
+"filesRemoved" = paths to delete.`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Node.js API (Express) builder prompts
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NODE_API_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready Node.js + Express REST API projects. Your only output is valid JSON — no prose.
+
+TECH STACK — use exactly:
+- Node.js 22 + TypeScript 5
+- Express 4 (web framework)
+- Zod (request validation)
+- ts-node-dev or tsx for dev server hot-reload
+
+REQUIRED PROJECT STRUCTURE — always include ALL of these files:
+- package.json (name, version, scripts: dev/build/start, dependencies, devDependencies)
+- tsconfig.json (target ES2022, module commonjs, outDir dist, strict true)
+- src/index.ts (Express app entry point — creates app, registers routers, listens on PORT env var or 3000)
+- src/routes/index.ts (main router that mounts all sub-routers)
+
+ADDITIONAL FILES (as needed):
+- src/routes/<resource>.ts — resource-specific routers (e.g. users.ts, products.ts)
+- src/middleware/*.ts — auth, error handling, validation middleware
+- src/lib/db.ts — database helpers (use in-memory store if no DB is configured)
+- src/types/*.ts — shared TypeScript types
+- src/lib/validation.ts — Zod schemas for request bodies
+
+CODE RULES:
+- TypeScript throughout
+- RESTful conventions: GET/POST/PUT/PATCH/DELETE with proper status codes
+- JSON responses with consistent shape: { data: ... } for success, { error: string, details?: ... } for errors
+- Input validation with Zod on all POST/PUT/PATCH endpoints
+- Async/await throughout — no callbacks
+- Global error handler middleware as last Express middleware
+- Never hardcode secrets — use process.env.VARIABLE_NAME
+- CORS enabled via cors package when building a public API
+
+DEPENDENCIES to include in package.json:
+{
+  "dependencies": {
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "zod": "^3.23.8",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}
+
+scripts: { "dev": "tsx watch src/index.ts", "build": "tsc", "start": "node dist/index.js" }
+
+OUTPUT STRICT JSON:
+{
+  "blueprint": {
+    "projectName": string,
+    "projectType": string,
+    "targetPlatforms": ["api"],
+    "pages": [{ "name": string, "route": string }],
+    "components": string[],
+    "data": string[],
+    "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+    "theme": "none"
+  },
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "summary": "One or two plain-English sentences describing the API built. No code, no file paths.",
+  "warnings": string[],
+  "nextRecommendation": string
+}
+
+MIME types: .ts → "application/typescript", .json → "application/json", .js → "application/javascript"
+The "files" array MUST include every file. package.json, tsconfig.json, src/index.ts, and src/routes/index.ts are REQUIRED.`;
+
+const NODE_API_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Node.js + Express API project. You receive current project files and a change request. Return ONLY files that changed.
+
+TECH STACK: Node.js 22 + TypeScript + Express 4 + Zod
+
+RULES:
+- TypeScript throughout (.ts)
+- RESTful conventions with proper status codes and JSON responses
+- Maintain project structure (src/routes/, src/middleware/, src/lib/)
+- Input validation with Zod for all mutating endpoints
+- Do NOT remove package.json, tsconfig.json, or src/index.ts unless explicitly asked
+- Async/await throughout — no callbacks
+
+OUTPUT STRICT JSON:
+{
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "filesRemoved": string[],
+  "unchangedFiles": string[],
+  "summary": "One or two plain-English sentences describing what changed. No code, no file paths.",
+  "warnings": string[],
+  "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+  "nextRecommendation": string
+}`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Python Flask builder prompts
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FLASK_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready Python Flask projects. Your only output is valid JSON — no prose.
+
+TECH STACK — use exactly:
+- Python 3.12 + Flask 3.x
+- flask-cors for CORS support
+- python-dotenv for environment variables
+
+REQUIRED PROJECT STRUCTURE — always include ALL of these files:
+- requirements.txt (all Python dependencies, pinned to minor versions)
+- app.py (Flask app factory and entry point — use create_app() pattern; run on 0.0.0.0:5000)
+- .env.example (example env vars — no real values)
+
+ADDITIONAL FILES (as needed):
+- routes/<module>.py — Blueprint modules (e.g. users.py, auth.py)
+- models.py — data models (use in-memory dict or SQLite via sqlite3 module if persistence needed)
+- middleware.py — custom middleware and decorators
+- templates/*.html — Jinja2 templates (if building a web app rather than pure API)
+- static/style.css — custom CSS (if using templates)
+
+CODE RULES:
+- Python 3.12 type hints throughout (use from __future__ import annotations)
+- Blueprints for organising routes (register them in create_app)
+- JSON responses: jsonify({ "data": ... }) for success, jsonify({ "error": str }) for errors
+- Request validation using request.get_json() + manual validation or marshmallow
+- Never hardcode secrets — use os.environ.get("VARIABLE_NAME") or python-dotenv
+- Flask-CORS enabled for all origins in development (configure restrict in production)
+- run with: flask run --host=0.0.0.0 --port=5000 or python app.py
+
+requirements.txt must include:
+Flask==3.0.3
+flask-cors==4.0.1
+python-dotenv==1.0.1
+
+OUTPUT STRICT JSON:
+{
+  "blueprint": {
+    "projectName": string,
+    "projectType": string,
+    "targetPlatforms": ["web"],
+    "pages": [{ "name": string, "route": string }],
+    "components": string[],
+    "data": string[],
+    "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+    "theme": string
+  },
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "summary": "One or two plain-English sentences describing what was built. No code, no file paths.",
+  "warnings": string[],
+  "nextRecommendation": string
+}
+
+MIME types: .py → "text/x-python", .txt → "text/plain", .html → "text/html", .css → "text/css", .json → "application/json"
+The "files" array MUST include every file. requirements.txt and app.py are REQUIRED.`;
+
+const FLASK_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Python Flask project. You receive current project files and a change request. Return ONLY files that changed.
+
+TECH STACK: Python 3.12 + Flask 3.x + flask-cors + python-dotenv
+
+RULES:
+- Python 3.12 type hints throughout
+- Flask Blueprints for route organisation
+- JSON responses: jsonify({...}) for all API responses
+- Never hardcode secrets — use os.environ.get(...)
+- Do NOT remove requirements.txt or app.py unless explicitly asked
+- If you add a new Python package, update requirements.txt
+
+OUTPUT STRICT JSON:
+{
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "filesRemoved": string[],
+  "unchangedFiles": string[],
+  "summary": "One or two plain-English sentences describing what changed. No code, no file paths.",
+  "warnings": string[],
+  "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+  "nextRecommendation": string
+}`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Python FastAPI builder prompts
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FASTAPI_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, production-ready Python FastAPI projects. Your only output is valid JSON — no prose.
+
+TECH STACK — use exactly:
+- Python 3.12 + FastAPI 0.115+
+- Uvicorn (ASGI server)
+- Pydantic v2 (built into FastAPI) for request/response validation
+- python-dotenv for environment variables
+
+REQUIRED PROJECT STRUCTURE — always include ALL of these files:
+- requirements.txt (all Python dependencies, pinned to minor versions)
+- main.py (FastAPI app entry — create app instance, include routers, run with uvicorn on 0.0.0.0:8000)
+- .env.example (example env vars — no real values)
+
+ADDITIONAL FILES (as needed):
+- routers/<module>.py — APIRouter modules (e.g. users.py, items.py)
+- models.py — Pydantic models for request/response schemas
+- database.py — database helpers (use in-memory dict or SQLite if persistence needed)
+- dependencies.py — FastAPI dependency injection helpers
+
+CODE RULES:
+- Python 3.12 type hints throughout
+- Pydantic BaseModel for all request bodies and response models
+- async def for all route handlers
+- Proper HTTP status codes using fastapi.status constants
+- Never hardcode secrets — use os.environ.get("VARIABLE_NAME") or python-dotenv
+- Automatic OpenAPI docs available at /docs (FastAPI default)
+- CORSMiddleware configured for all origins in development
+- Entry point: uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+requirements.txt must include:
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.8.2
+python-dotenv==1.0.1
+
+OUTPUT STRICT JSON:
+{
+  "blueprint": {
+    "projectName": string,
+    "projectType": string,
+    "targetPlatforms": ["api"],
+    "pages": [{ "name": string, "route": string }],
+    "components": string[],
+    "data": string[],
+    "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+    "theme": "none"
+  },
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "summary": "One or two plain-English sentences describing the API built. No code, no file paths.",
+  "warnings": string[],
+  "nextRecommendation": string
+}
+
+MIME types: .py → "text/x-python", .txt → "text/plain", .json → "application/json"
+The "files" array MUST include every file. requirements.txt and main.py are REQUIRED.`;
+
+const FASTAPI_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Python FastAPI project. You receive current project files and a change request. Return ONLY files that changed.
+
+TECH STACK: Python 3.12 + FastAPI 0.115 + Uvicorn + Pydantic v2 + python-dotenv
+
+RULES:
+- Python 3.12 type hints throughout
+- Pydantic BaseModel for all request/response schemas
+- async def for all route handlers with proper HTTP status codes
+- Never hardcode secrets — use os.environ.get(...)
+- Do NOT remove requirements.txt or main.py unless explicitly asked
+- If you add a new Python package, update requirements.txt
+
+OUTPUT STRICT JSON:
+{
+  "files": [{ "path": string, "content": string, "mimeType": string }],
+  "filesRemoved": string[],
+  "unchangedFiles": string[],
+  "summary": "One or two plain-English sentences describing what changed. No code, no file paths.",
+  "warnings": string[],
+  "integrationsNeeded": [{ "name": string, "why": string, "keysNeeded": string[], "environment": "test"|"production" }],
+  "nextRecommendation": string
+}`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generic server-stack pipeline factory
+// Shared by Next.js, Node API, Flask, and FastAPI — avoids massive duplication.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type StackBuildArgs = {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  integrationContext?: string;
+  planContext?: Record<string, unknown> | null;
+  onEvent?: (type: string, message: string) => Promise<void>;
+};
+
+type StackRefineArgs = {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+  existingFiles: BuilderFile[];
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  integrationContext?: string;
+  unchangedFilesHint?: string[];
+  planContext?: Record<string, unknown> | null;
+  onEvent?: (type: string, message: string) => Promise<void>;
+};
+
+async function runStackBuildPipeline(
+  args: StackBuildArgs,
+  systemPrompt: string,
+  stackLabel: string,
+): Promise<BuilderResult> {
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    conversationHistory,
+    knowledgeContext,
+    integrationContext,
+    planContext,
+    onEvent,
+  } = args;
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).` },
+  ];
+
+  if (knowledgeContext) {
+    messages.push({
+      role: "system",
+      content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+    });
+  }
+  if (integrationContext) {
+    messages.push({ role: "system", content: integrationContext });
+  }
+
+  if (planContext) {
+    const { sitemap, dataModel, integrations, goal, approach, fileTree } = planContext as {
+      sitemap?: Array<{ name: string; route: string; purpose: string }>;
+      dataModel?: Array<{ table: string; fields: string[] }>;
+      integrations?: string[];
+      goal?: string;
+      approach?: string;
+      fileTree?: Array<{ path: string; description: string }>;
+    };
+    const planLines = ["STRUCTURED PLAN from Planning Agent — follow this plan exactly:"];
+    if (goal) planLines.push(`Goal: ${goal}`);
+    if (approach) planLines.push(`Approach: ${approach}`);
+    if (sitemap?.length)
+      planLines.push(
+        `Routes:\n${sitemap.map((p) => `  • ${p.name} (${p.route}): ${p.purpose}`).join("\n")}`,
+      );
+    if (fileTree?.length)
+      planLines.push(
+        `Planned files:\n${fileTree.map((f) => `  • ${f.path}: ${f.description}`).join("\n")}`,
+      );
+    if (dataModel?.length)
+      planLines.push(
+        `Data model:\n${dataModel.map((m) => `  • ${m.table}: ${m.fields.join(", ")}`).join("\n")}`,
+      );
+    if (integrations?.length) planLines.push(`Integrations: ${integrations.join(", ")}`);
+    messages.push({ role: "system", content: planLines.join("\n") });
+  }
+
+  messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
+  if (agentMode === "power" || agentMode === "pro") {
+    messages.push({ role: "system", content: SELF_REVIEW_CLAUSE });
+  }
+
+  if (conversationHistory?.length) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  await onEvent?.("generating_code", `Generating ${stackLabel} project with AI…`);
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, `${stackLabel}-build`);
+
+  const blueprint = (parsed.blueprint ?? {
+    projectName,
+    projectType: projectKind,
+    targetPlatforms: ["web"],
+    pages: [],
+    components: [],
+    integrationsNeeded: [],
+  }) as Blueprint;
+
+  const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
+  const files: BuilderFile[] = rawFiles
+    .filter(
+      (f): f is { path: string; content: string; mimeType?: string } =>
+        typeof f === "object" &&
+        f !== null &&
+        typeof (f as { path?: unknown }).path === "string" &&
+        typeof (f as { content?: unknown }).content === "string",
+    )
+    .map((f) => ({
+      path: normalizePath(f.path),
+      content: f.content,
+      mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+    }));
+
+  const aiWarnings = Array.isArray(parsed.warnings)
+    ? parsed.warnings.filter((w): w is string => typeof w === "string")
+    : [];
+
+  const nextRecommendation =
+    typeof parsed.nextRecommendation === "string"
+      ? parsed.nextRecommendation
+      : `Run the dev server locally to preview your ${stackLabel} app.`;
+
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Generated ${files.length} files for ${projectName}.`,
+  );
+
+  const { files: sanitisedFiles } = scanForSecrets(files);
+
+  const report: TaskReport = {
+    userRequest: userPrompt,
+    blueprint: blueprint as unknown as Record<string, unknown>,
+    filesCreated: sanitisedFiles.map((f) => f.path),
+    filesChanged: [],
+    filesRemoved: [],
+    previewUpdated: false,
+    warnings: aiWarnings,
+    integrationsNeeded: blueprint.integrationsNeeded ?? [],
+    nextRecommendation,
+  };
+
+  return {
+    blueprint,
+    files: sanitisedFiles,
+    report,
+    assistantSummary: summary,
+    correctionPasses: 0,
+    correctionFailed: false,
+    primaryErrorCategory: null,
+  };
+}
+
+async function runStackRefinePipeline(
+  args: StackRefineArgs,
+  systemPrompt: string,
+  stackLabel: string,
+): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    existingFiles,
+    conversationHistory,
+    knowledgeContext,
+    integrationContext,
+    unchangedFilesHint,
+    planContext,
+    onEvent,
+  } = args;
+
+  const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    {
+      role: "system",
+      content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}`,
+    },
+  ];
+
+  if (knowledgeContext) {
+    messages.push({
+      role: "system",
+      content: `LEARNED LESSONS — apply these to every change without being asked:\n${knowledgeContext}`,
+    });
+  }
+  if (integrationContext) {
+    messages.push({ role: "system", content: integrationContext });
+  }
+
+  if (planContext) {
+    const { sitemap, dataModel, integrations, goal, approach } = planContext as {
+      sitemap?: Array<{ name: string; route: string; purpose: string }>;
+      dataModel?: Array<{ table: string; fields: string[] }>;
+      integrations?: string[];
+      goal?: string;
+      approach?: string;
+    };
+    const planLines = ["STRUCTURED PLAN — follow this plan exactly when applying changes:"];
+    if (goal) planLines.push(`Goal: ${goal}`);
+    if (approach) planLines.push(`Approach: ${approach}`);
+    if (sitemap?.length)
+      planLines.push(
+        `Routes:\n${sitemap.map((p) => `  • ${p.name} (${p.route}): ${p.purpose}`).join("\n")}`,
+      );
+    if (dataModel?.length)
+      planLines.push(
+        `Data model:\n${dataModel.map((m) => `  • ${m.table}: ${m.fields.join(", ")}`).join("\n")}`,
+      );
+    if (integrations?.length) planLines.push(`Integrations: ${integrations.join(", ")}`);
+    messages.push({ role: "system", content: planLines.join("\n") });
+  }
+
+  messages.push({ role: "system", content: MODE_QUALITY_STANDARDS[agentMode] });
+  if (agentMode === "power" || agentMode === "pro") {
+    messages.push({ role: "system", content: SELF_REVIEW_CLAUSE });
+  }
+
+  if (conversationHistory?.length) {
+    for (const turn of conversationHistory.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  messages.push({ role: "user", content: userPrompt });
+
+  await onEvent?.("generating_code", `Applying change request to ${stackLabel} project…`);
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, `${stackLabel}-refine`);
+
+  const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
+  const changedFiles: BuilderFile[] = rawFiles
+    .filter(
+      (f): f is { path: string; content: string; mimeType?: string } =>
+        typeof f === "object" &&
+        f !== null &&
+        typeof (f as { path?: unknown }).path === "string" &&
+        typeof (f as { content?: unknown }).content === "string",
+    )
+    .map((f) => ({
+      path: normalizePath(f.path),
+      content: f.content,
+      mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+    }));
+
+  const rawPatches = Array.isArray(parsed.patches) ? parsed.patches : [];
+  const { patched, failed } = applyPatches(existingFiles, rawPatches);
+  const patchedAsFiles: BuilderFile[] = [...patched.entries()].map(([path, content]) => {
+    const orig = existingFiles.find((f) => f.path === path);
+    return { path, content, mimeType: orig?.mimeType ?? guessMime(path) };
+  });
+  if (failed.length > 0) {
+    logger.warn({ failed, stackLabel }, "Some patches failed to apply — requiring full file resend");
+  }
+
+  const removedPaths = Array.isArray(parsed.filesRemoved)
+    ? parsed.filesRemoved.filter((p): p is string => typeof p === "string").map(normalizePath)
+    : [];
+  const unchangedFiles = Array.isArray(parsed.unchangedFiles)
+    ? parsed.unchangedFiles.filter((p): p is string => typeof p === "string")
+    : [];
+
+  const mergedChangedMap = new Map<string, BuilderFile>();
+  for (const f of patchedAsFiles) mergedChangedMap.set(f.path, f);
+  for (const f of changedFiles) mergedChangedMap.set(f.path, f);
+  const mergedChanged = [...mergedChangedMap.values()];
+
+  const aiWarnings = Array.isArray(parsed.warnings)
+    ? parsed.warnings.filter((w): w is string => typeof w === "string")
+    : [];
+  const integrationsNeeded = Array.isArray(parsed.integrationsNeeded)
+    ? parsed.integrationsNeeded
+    : [];
+
+  const summary = cleanSummary(
+    typeof parsed.summary === "string" ? parsed.summary : null,
+    `Updated ${mergedChanged.length} file(s) in ${projectName}.`,
+  );
+
+  const nextRecommendation =
+    typeof parsed.nextRecommendation === "string"
+      ? parsed.nextRecommendation
+      : `Review the changes and restart the dev server.`;
+
+  const { files: sanitisedChanged } = scanForSecrets(mergedChanged);
+
+  const report: TaskReport = {
+    userRequest: userPrompt,
+    blueprint: {
+      projectName,
+      projectType: projectKind,
+      targetPlatforms: [],
+      pages: [],
+      components: [],
+      integrationsNeeded: [],
+    } as unknown as Record<string, unknown>,
+    filesCreated: [],
+    filesChanged: sanitisedChanged.map((f) => f.path),
+    filesRemoved: removedPaths,
+    previewUpdated: false,
+    warnings: aiWarnings,
+    integrationsNeeded,
+    nextRecommendation,
+  };
+
+  return {
+    changedFiles: sanitisedChanged,
+    removedPaths,
+    unchangedFiles,
+    report,
+    assistantSummary: summary,
+    correctionPasses: 0,
+    correctionFailed: false,
+    primaryErrorCategory: null,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public pipeline exports — one build + one refine per stack
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function runNextjsBuildPipeline(args: StackBuildArgs): Promise<BuilderResult> {
+  return runStackBuildPipeline(args, NEXTJS_BUILD_SYSTEM_PROMPT, "Next.js");
+}
+
+export async function runNextjsRefinePipeline(args: StackRefineArgs): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  return runStackRefinePipeline(args, NEXTJS_REFINE_SYSTEM_PROMPT, "Next.js");
+}
+
+export async function runNodeApiBuildPipeline(args: StackBuildArgs): Promise<BuilderResult> {
+  return runStackBuildPipeline(args, NODE_API_BUILD_SYSTEM_PROMPT, "Node.js API");
+}
+
+export async function runNodeApiRefinePipeline(args: StackRefineArgs): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  return runStackRefinePipeline(args, NODE_API_REFINE_SYSTEM_PROMPT, "Node.js API");
+}
+
+export async function runFlaskBuildPipeline(args: StackBuildArgs): Promise<BuilderResult> {
+  return runStackBuildPipeline(args, FLASK_BUILD_SYSTEM_PROMPT, "Flask");
+}
+
+export async function runFlaskRefinePipeline(args: StackRefineArgs): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  return runStackRefinePipeline(args, FLASK_REFINE_SYSTEM_PROMPT, "Flask");
+}
+
+export async function runFastapiBuildPipeline(args: StackBuildArgs): Promise<BuilderResult> {
+  return runStackBuildPipeline(args, FASTAPI_BUILD_SYSTEM_PROMPT, "FastAPI");
+}
+
+export async function runFastapiRefinePipeline(args: StackRefineArgs): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  return runStackRefinePipeline(args, FASTAPI_REFINE_SYSTEM_PROMPT, "FastAPI");
+}
+
 export type MobileBlueprint = {
   projectName: string;
   projectType: string;
@@ -4854,6 +5642,9 @@ export function guessMime(path: string): string {
   if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "application/typescript";
   if (lower.endsWith(".json")) return "application/json";
   if (lower.endsWith(".svg")) return "image/svg+xml";
+  if (lower.endsWith(".py")) return "text/x-python";
   if (lower.endsWith(".txt") || lower.endsWith(".md")) return "text/plain";
+  if (lower.endsWith(".toml") || lower.endsWith(".ini") || lower.endsWith(".cfg"))
+    return "text/plain";
   return "text/plain";
 }

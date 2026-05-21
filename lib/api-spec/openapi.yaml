@@ -2274,10 +2274,10 @@ components:
           type: string
           enum: [static-html, react-vite]
           description: "Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects)."
-        runtime:
+        stack:
           type: string
-          enum: [react-vite, node20, node22, python312]
-          description: "Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 / node22 = Node.js backend (Express/Fastify, runs in container). python312 = Python 3.12 backend (Flask/FastAPI, runs in container)."
+          enum: [react-vite, nextjs, node-api, python-flask, python-fastapi]
+          description: "Technology stack chosen at project creation. Immutable — duplicate the project to change stack."
         dbProvider:
           type: string
           enum: [none, postgres, sqlite]
@@ -2316,10 +2316,10 @@ components:
               chatbot,
               spreadsheet,
             ]
-        runtime:
+        stack:
           type: string
-          enum: [react-vite, node20, node22, python312]
-          description: "Server-side runtime. Defaults to react-vite for web projects."
+          enum: [react-vite, nextjs, node-api, python-flask, python-fastapi]
+          description: "Technology stack to use. Defaults to react-vite for web projects."
         initialPrompt: { type: string }
 
     ProjectUpdate:

@@ -36,23 +36,32 @@ const FLY_APP = process.env.FLY_APP_NAME ?? "mustaflow-containers";
 const FLY_ORG = process.env.FLY_ORG_SLUG ?? "personal";
 const FLY_REGION = process.env.FLY_REGION ?? "iad";
 
-/** Docker image per project runtime */
-const RUNTIME_IMAGES: Record<string, string> = {
-  "react-vite": "node:20-alpine",
-  node20: "node:20-alpine",
-  node22: "node:22-alpine",
-  python312: "python:3.12-slim",
-};
+/** Default container image — Node.js 22 LTS. Python stacks override this. */
+const DEFAULT_NODE_IMAGE = "node:22-alpine";
+const PYTHON_IMAGE = "python:3.12-slim";
 
-/** Fallback image when runtime is unrecognised */
-const DEFAULT_CONTAINER_IMAGE = "node:20-alpine";
+/** Default dev server port. Stack-specific ports override this at provision time. */
+const DEFAULT_INTERNAL_PORT = 3000;
 
-function imageForRuntime(runtime: string | null | undefined): string {
-  return RUNTIME_IMAGES[runtime ?? "react-vite"] ?? DEFAULT_CONTAINER_IMAGE;
+/** Derive the container image and dev server port from the project stack. */
+function stackConfig(stack?: string | null): { image: string; internalPort: number } {
+  switch (stack) {
+    case "nextjs":
+      return { image: DEFAULT_NODE_IMAGE, internalPort: 3000 };
+    case "node-api":
+      return { image: DEFAULT_NODE_IMAGE, internalPort: 3000 };
+    case "python-flask":
+      return { image: PYTHON_IMAGE, internalPort: 5000 };
+    case "python-fastapi":
+      return { image: PYTHON_IMAGE, internalPort: 8000 };
+    default:
+      return { image: DEFAULT_NODE_IMAGE, internalPort: DEFAULT_INTERNAL_PORT };
+  }
 }
 
-/** Internal port the dev server listens on inside the container */
-const INTERNAL_PORT = 3000;
+/** Kept for backward compatibility — old code may reference CONTAINER_IMAGE or INTERNAL_PORT. */
+const CONTAINER_IMAGE = DEFAULT_NODE_IMAGE;
+const INTERNAL_PORT = DEFAULT_INTERNAL_PORT;
 
 /** Auto-stop after this many seconds of inactivity */
 const IDLE_SECONDS = 600; // 10 minutes
@@ -101,14 +110,14 @@ async function writeLog(
 
 /**
  * Create a new Fly.io machine for a project and return its ID + proxy URL.
- * The machine image is node:20-alpine; the entrypoint keeps it alive.
+ * The image and internal port are derived from the project's stack.
  * A persistent volume should already exist (managed separately).
  *
  * @param extraEnv  Optional additional env vars (decrypted project secrets) to inject.
  */
 export async function createContainer(
   projectId: number,
-  runtime?: string | null,
+  stack?: string | null,
   extraEnv?: Record<string, string>,
 ): Promise<ContainerInfo | null> {
   if (!isConfigured()) {
@@ -117,7 +126,7 @@ export async function createContainer(
   }
 
   const machineName = `project-${projectId}`;
-  const image = imageForRuntime(runtime);
+  const { image, internalPort } = stackConfig(stack);
 
   const body = {
     name: machineName,
@@ -126,7 +135,7 @@ export async function createContainer(
       image,
       env: {
         PROJECT_ID: String(projectId),
-        PORT: String(INTERNAL_PORT),
+        PORT: String(internalPort),
         ...(extraEnv ?? {}),
       },
       init: {
@@ -144,7 +153,7 @@ export async function createContainer(
             { port: 80, handlers: ["http"] },
           ],
           protocol: "tcp",
-          internal_port: INTERNAL_PORT,
+          internal_port: internalPort,
           autostop: "stop",
           autostart: true,
           min_machines_running: 0,
@@ -487,13 +496,13 @@ export async function provisionContainer(
 ): Promise<ContainerInfo | null> {
   if (!isConfigured()) return null;
 
-  // Load current container state
+  // Load current container state (including stack for image selection)
   const [project] = await db
     .select({
       containerId: projectsTable.containerId,
       containerStatus: projectsTable.containerStatus,
       containerUrl: projectsTable.containerUrl,
-      runtime: projectsTable.runtime,
+      stack: projectsTable.stack,
     })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
@@ -519,9 +528,8 @@ export async function provisionContainer(
   let containerUrl = project.containerUrl;
 
   if (!machineId) {
-    // Create new machine using the project's runtime for the right Docker image,
-    // and inject decrypted project secrets as env vars.
-    const info = await createContainer(projectId, project.runtime, extraEnv);
+    // Create new machine — stack selects the right image; extraEnv injects project secrets
+    const info = await createContainer(projectId, project.stack, extraEnv);
     if (!info) {
       await db
         .update(projectsTable)

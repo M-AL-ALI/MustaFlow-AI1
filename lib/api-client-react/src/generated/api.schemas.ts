@@ -171,16 +171,17 @@ export const ProjectProjectFormat = {
 } as const;
 
 /**
- * Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 / node22 = Node.js backend (Express/Fastify, runs in container). python312 = Python 3.12 backend (Flask/FastAPI, runs in container).
+ * Technology stack chosen at project creation. Immutable — duplicate the project to change stack.
  */
-export type ProjectRuntime = typeof ProjectRuntime[keyof typeof ProjectRuntime];
+export type ProjectStack = typeof ProjectStack[keyof typeof ProjectStack];
 
 
-export const ProjectRuntime = {
+export const ProjectStack = {
   'react-vite': 'react-vite',
-  node20: 'node20',
-  node22: 'node22',
-  python312: 'python312',
+  nextjs: 'nextjs',
+  'node-api': 'node-api',
+  'python-flask': 'python-flask',
+  'python-fastapi': 'python-fastapi',
 } as const;
 
 /**
@@ -268,8 +269,8 @@ export interface Project {
   defaultAgent?: ProjectDefaultAgent;
   /** Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects). */
   projectFormat?: ProjectProjectFormat;
-  /** Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 / node22 = Node.js backend (Express/Fastify, runs in container). python312 = Python 3.12 backend (Flask/FastAPI, runs in container). */
-  runtime?: ProjectRuntime;
+  /** Technology stack chosen at project creation. Immutable — duplicate the project to change stack. */
+  stack?: ProjectStack;
   /** Which database engine is provisioned for this project. none = no DB. */
   dbProvider?: ProjectDbProvider;
   /** Current database lifecycle state. */
@@ -302,16 +303,17 @@ export const ProjectInputKind = {
 } as const;
 
 /**
- * Server-side runtime. Defaults to react-vite for web projects.
+ * Technology stack to use. Defaults to react-vite for web projects.
  */
-export type ProjectInputRuntime = typeof ProjectInputRuntime[keyof typeof ProjectInputRuntime];
+export type ProjectInputStack = typeof ProjectInputStack[keyof typeof ProjectInputStack];
 
 
-export const ProjectInputRuntime = {
+export const ProjectInputStack = {
   'react-vite': 'react-vite',
-  node20: 'node20',
-  node22: 'node22',
-  python312: 'python312',
+  nextjs: 'nextjs',
+  'node-api': 'node-api',
+  'python-flask': 'python-flask',
+  'python-fastapi': 'python-fastapi',
 } as const;
 
 export interface ProjectInput {
@@ -320,8 +322,8 @@ export interface ProjectInput {
   description?: string;
   workspaceId?: number;
   kind: ProjectInputKind;
-  /** Server-side runtime. Defaults to react-vite for web projects. */
-  runtime?: ProjectInputRuntime;
+  /** Technology stack to use. Defaults to react-vite for web projects. */
+  stack?: ProjectInputStack;
   initialPrompt?: string;
 }
 

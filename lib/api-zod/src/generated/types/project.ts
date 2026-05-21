@@ -14,7 +14,7 @@ import type { ProjectKind } from './projectKind';
 import type { ProjectPlatform } from './projectPlatform';
 import type { ProjectProdContainerStatus } from './projectProdContainerStatus';
 import type { ProjectProjectFormat } from './projectProjectFormat';
-import type { ProjectRuntime } from './projectRuntime';
+import type { ProjectStack } from './projectStack';
 import type { ProjectStatus } from './projectStatus';
 
 export interface Project {
@@ -77,8 +77,8 @@ export interface Project {
   defaultAgent?: ProjectDefaultAgent;
   /** Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects). */
   projectFormat?: ProjectProjectFormat;
-  /** Server-side runtime for this project. react-vite = React + Vite static frontend (default). node20 / node22 = Node.js backend (Express/Fastify, runs in container). python312 = Python 3.12 backend (Flask/FastAPI, runs in container). */
-  runtime?: ProjectRuntime;
+  /** Technology stack chosen at project creation. Immutable — duplicate the project to change stack. */
+  stack?: ProjectStack;
   /** Which database engine is provisioned for this project. none = no DB. */
   dbProvider?: ProjectDbProvider;
   /** Current database lifecycle state. */

@@ -11,7 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
+import {
+  useCreateProject,
+  getListProjectsQueryKey,
+  ProjectInputStack,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import {
@@ -27,12 +31,55 @@ import {
   ShoppingCart,
   MessageSquare,
   CreditCard,
+  Layers,
   Server,
   Code2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TemplatePicker } from "@/components/template-picker";
 import { type TemplateDefinition } from "@/lib/templates";
+
+type Stack = "react-vite" | "nextjs" | "node-api" | "python-flask" | "python-fastapi";
+
+const STACK_OPTIONS: Array<{
+  value: Stack;
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badge?: string;
+}> = [
+  {
+    value: "react-vite",
+    label: "React + Vite",
+    description: "Static web app",
+    icon: Layers,
+    badge: "default",
+  },
+  {
+    value: "nextjs",
+    label: "Next.js 14",
+    description: "App Router",
+    icon: Globe,
+  },
+  {
+    value: "node-api",
+    label: "Node.js API",
+    description: "Express + TypeScript",
+    icon: Server,
+  },
+  {
+    value: "python-flask",
+    label: "Python Flask",
+    description: "REST API / web",
+    icon: Code2,
+  },
+  {
+    value: "python-fastapi",
+    label: "FastAPI",
+    description: "Async Python API",
+    icon: Zap,
+  },
+];
 
 const WEB_PROJECT_TYPES = [
   { label: "Website", kind: "web", icon: Monitor },
@@ -122,6 +169,7 @@ export function CreateProjectModal({
 
   const [view, setView] = useState<View>("form");
   const [platformTab, setPlatformTab] = useState<PlatformTab>("web");
+  const [stack, setStack] = useState<Stack>("react-vite");
   const [name, setName] = useState("");
   const [nameDirty, setNameDirty] = useState(false);
   const [kind, setKind] = useState<ProjectKind>("web");
@@ -135,6 +183,7 @@ export function CreateProjectModal({
     if (!open) return;
     setView("form");
     setNameDirty(false);
+    setStack("react-vite");
     if (initialTemplate) {
       setSelectedTemplate(initialTemplate);
       setName(initialTemplate.title);
@@ -193,6 +242,7 @@ export function CreateProjectModal({
       setKind("mobile-cross");
     } else {
       setKind("web");
+      setStack("react-vite");
     }
   }
 
@@ -207,7 +257,7 @@ export function CreateProjectModal({
           description: prompt.trim() || undefined,
           workspaceId: currentWorkspace?.id,
           kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
-          runtime: platformTab === "web" ? runtime : undefined,
+          stack: platformTab === "web" ? (stack as ProjectInputStack) : undefined,
           initialPrompt: prompt.trim() || undefined,
         },
       },
@@ -298,61 +348,40 @@ export function CreateProjectModal({
                 </button>
               </div>
 
-              {/* Runtime selector — web only */}
+              {/* Stack selector — web only */}
               {platformTab === "web" && (
                 <div className="space-y-1.5">
-                  <Label>Runtime</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {WEB_RUNTIMES.map((rt) => {
-                      const Icon = rt.icon;
-                      const isSelected = runtime === rt.value;
+                  <Label>Stack</Label>
+                  <div className="grid grid-cols-5 gap-2">
+                    {STACK_OPTIONS.map((opt) => {
+                      const Icon = opt.icon;
+                      const isSelected = stack === opt.value;
                       return (
                         <button
-                          key={rt.value}
+                          key={opt.value}
                           type="button"
-                          onClick={() => setRuntime(rt.value)}
+                          onClick={() => setStack(opt.value)}
                           className={cn(
-                            "flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                            "flex flex-col items-center gap-1 rounded-xl border px-1.5 py-2.5 text-[10px] font-medium transition-colors text-center",
                             isSelected
-                              ? "border-primary bg-primary/10 text-foreground"
+                              ? "border-primary bg-primary/10 text-primary"
                               : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
                           )}
                         >
-                          <Icon
+                          <Icon className="h-4 w-4 shrink-0" />
+                          <span className="leading-tight">{opt.label}</span>
+                          <span
                             className={cn(
-                              "h-4 w-4 mt-0.5 shrink-0",
-                              isSelected ? "text-primary" : "",
+                              "text-[9px] font-normal leading-tight",
+                              isSelected ? "text-primary/70" : "text-muted-foreground/60",
                             )}
-                          />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-xs font-semibold">{rt.label}</span>
-                              <span
-                                className={cn(
-                                  "text-[10px] px-1.5 py-0.5 rounded font-medium leading-none",
-                                  isSelected
-                                    ? "bg-primary/20 text-primary"
-                                    : "bg-muted-foreground/15 text-muted-foreground",
-                                )}
-                              >
-                                {rt.badge}
-                              </span>
-                            </div>
-                            <p className="text-[10px] mt-0.5 leading-tight opacity-75 line-clamp-2">
-                              {rt.description}
-                            </p>
-                          </div>
+                          >
+                            {opt.description}
+                          </span>
                         </button>
                       );
                     })}
                   </div>
-                  {isServerRuntime && (
-                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <Server className="h-3 w-3 shrink-0" />
-                      {selectedRuntimeDef?.label} projects run in a dedicated container. Start the
-                      container from the workspace to run and preview your server.
-                    </p>
-                  )}
                 </div>
               )}
 

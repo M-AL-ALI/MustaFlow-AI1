@@ -52,12 +52,14 @@ export const projectsTable = pgTable("projects", {
   // "static-html" = single-file HTML/CSS/JS with CDN dependencies (legacy default).
   // "react-vite" = multi-file React + Vite + Tailwind npm project (new default for web).
   projectFormat: text("project_format").notNull().default("static-html"),
-  // runtime: the server-side runtime environment for this project.
-  // "react-vite" = React + Vite frontend (default for web, served statically).
-  // "node20" = Node.js 20 LTS (Express/Fastify backend, runs in container).
-  // "node22" = Node.js 22 LTS (Express/Fastify backend, runs in container).
-  // "python312" = Python 3.12 (Flask/FastAPI backend, runs in container).
-  runtime: text("runtime").notNull().default("react-vite"),
+  // stack: the technology stack chosen at project creation.
+  // react-vite    = React 18 + Vite + Tailwind CSS (default for web)
+  // nextjs        = Next.js 14 App Router + Tailwind CSS
+  // node-api      = Node.js + Express REST API
+  // python-flask  = Python + Flask web app / API
+  // python-fastapi = Python + FastAPI
+  // Immutable after creation — duplicate the project to change stack.
+  stack: text("stack").notNull().default("react-vite"),
   // defaultAgent: user's preferred agent for this project.
   // "planning" = Planning Agent, "task" = Task Agent (staging gate),
   // "main" = Main Agent (direct fast edit). Default "main".

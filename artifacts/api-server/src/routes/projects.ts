@@ -188,18 +188,16 @@ router.post("/projects", async (req, res): Promise<void> => {
   };
   const platform = platformMap[projectInput.kind] ?? "web";
 
-  // Resolve runtime: default to react-vite for web, static-html for mobile.
-  // Non-default runtimes (node20, node22, python312) are supported for web projects.
-  const runtime = projectInput.runtime ?? (platform === "web" ? "react-vite" : "react-vite");
+  // Resolve stack — mobile projects don't use the stack system; web defaults to react-vite.
+  const isMobilePlatform = platform !== "web";
+  const resolvedStack: string = isMobilePlatform
+    ? "react-vite"
+    : (projectInput.stack ?? "react-vite");
 
-  // Derive projectFormat from runtime:
-  // react-vite runtime → multi-file React + Vite pipeline
-  // node20/node22/python312 → static-html preview + server code in container
-  // Mobile projects → static-html (Expo pipelines generate their own preview HTML)
-  const projectFormat =
-    platform === "web" && runtime === "react-vite"
-      ? "react-vite"
-      : "static-html";
+  // projectFormat is only "react-vite" for the react-vite stack.
+  // All other stacks (including nextjs, node-api, python-*) use the server's native tooling,
+  // so they don't go through the browser WebContainer flow.
+  const projectFormat = resolvedStack === "react-vite" && !isMobilePlatform ? "react-vite" : "static-html";
 
   const [project] = await db
     .insert(projectsTable)
@@ -211,7 +209,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       kind: projectInput.kind,
       platform,
       projectFormat,
-      runtime,
+      stack: resolvedStack,
       lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
     })
     .returning();
@@ -568,6 +566,364 @@ createRoot(document.getElementById('root')!).render(
 
     await db.insert(projectFilesTable).values(
       scaffoldFiles.map((f) => ({
+        projectId: project.id,
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+      })),
+    );
+  } else if (resolvedStack === "nextjs") {
+    const safeName = project.name.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+    const nextjsScaffold = [
+      {
+        path: "package.json",
+        mimeType: "application/json",
+        content: JSON.stringify(
+          {
+            name: safeName,
+            version: "0.1.0",
+            private: true,
+            scripts: { dev: "next dev -p 3000", build: "next build", start: "next start -p 3000" },
+            dependencies: {
+              next: "14.2.5",
+              react: "^18.3.1",
+              "react-dom": "^18.3.1",
+              "lucide-react": "^0.447.0",
+              clsx: "^2.1.1",
+              "tailwind-merge": "^2.5.3",
+            },
+            devDependencies: {
+              "@types/node": "^22.0.0",
+              "@types/react": "^18.3.11",
+              "@types/react-dom": "^18.3.1",
+              autoprefixer: "^10.4.20",
+              postcss: "^8.4.47",
+              tailwindcss: "^3.4.14",
+              typescript: "^5.6.3",
+            },
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: "next.config.js",
+        mimeType: "application/javascript",
+        content: `/** @type {import('next').NextConfig} */
+const nextConfig = { reactStrictMode: true }
+module.exports = nextConfig
+`,
+      },
+      {
+        path: "tailwind.config.js",
+        mimeType: "application/javascript",
+        content: `/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ["./src/**/*.{ts,tsx}"],
+  theme: { extend: {} },
+  plugins: [],
+}
+`,
+      },
+      {
+        path: "postcss.config.js",
+        mimeType: "application/javascript",
+        content: `module.exports = { plugins: { tailwindcss: {}, autoprefixer: {} } }
+`,
+      },
+      {
+        path: "tsconfig.json",
+        mimeType: "application/json",
+        content: JSON.stringify(
+          {
+            compilerOptions: {
+              target: "ES2017",
+              lib: ["dom", "dom.iterable", "esnext"],
+              allowJs: true,
+              skipLibCheck: true,
+              strict: true,
+              noEmit: true,
+              esModuleInterop: true,
+              module: "esnext",
+              moduleResolution: "bundler",
+              resolveJsonModule: true,
+              isolatedModules: true,
+              jsx: "preserve",
+              incremental: true,
+              plugins: [{ name: "next" }],
+              paths: { "@/*": ["./src/*"] },
+            },
+            include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+            exclude: ["node_modules"],
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: "src/app/globals.css",
+        mimeType: "text/css",
+        content: `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n`,
+      },
+      {
+        path: "src/app/layout.tsx",
+        mimeType: "application/typescript",
+        content: `import type { Metadata } from 'next'
+import './globals.css'
+
+export const metadata: Metadata = {
+  title: '${project.name}',
+  description: 'Built with MustaFlow AI',
+}
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  )
+}
+`,
+      },
+      {
+        path: "src/app/page.tsx",
+        mimeType: "application/typescript",
+        content: `export default function Home() {
+  return (
+    <main className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">${project.name}</h1>
+        <p className="text-gray-500">Your Next.js app is ready. Describe what to build in the chat.</p>
+      </div>
+    </main>
+  )
+}
+`,
+      },
+    ];
+    await db.insert(projectFilesTable).values(
+      nextjsScaffold.map((f) => ({
+        projectId: project.id,
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+      })),
+    );
+  } else if (resolvedStack === "node-api") {
+    const safeName = project.name.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+    const nodeApiScaffold = [
+      {
+        path: "package.json",
+        mimeType: "application/json",
+        content: JSON.stringify(
+          {
+            name: safeName,
+            version: "1.0.0",
+            private: true,
+            scripts: { dev: "tsx watch src/index.ts", build: "tsc", start: "node dist/index.js" },
+            dependencies: {
+              express: "^4.21.0",
+              cors: "^2.8.5",
+              zod: "^3.23.8",
+              dotenv: "^16.4.5",
+            },
+            devDependencies: {
+              "@types/express": "^4.17.21",
+              "@types/cors": "^2.8.17",
+              "@types/node": "^22.0.0",
+              tsx: "^4.19.1",
+              typescript: "^5.6.3",
+            },
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: "tsconfig.json",
+        mimeType: "application/json",
+        content: JSON.stringify(
+          {
+            compilerOptions: {
+              target: "ES2022",
+              module: "commonjs",
+              lib: ["ES2022"],
+              outDir: "dist",
+              rootDir: "src",
+              strict: true,
+              esModuleInterop: true,
+              skipLibCheck: true,
+              resolveJsonModule: true,
+            },
+            include: ["src"],
+            exclude: ["node_modules", "dist"],
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        path: "src/index.ts",
+        mimeType: "application/typescript",
+        content: `import express from 'express'
+import cors from 'cors'
+import 'dotenv/config'
+import { router } from './routes/index'
+
+const app = express()
+const PORT = process.env.PORT ?? 3000
+
+app.use(cors())
+app.use(express.json())
+app.use('/api', router)
+
+app.get('/healthz', (_req, res) => {
+  res.json({ status: 'ok', project: '${project.name}' })
+})
+
+app.listen(PORT, () => {
+  console.log(\`${project.name} API listening on port \${PORT}\`)
+})
+`,
+      },
+      {
+        path: "src/routes/index.ts",
+        mimeType: "application/typescript",
+        content: `import { Router } from 'express'
+
+export const router = Router()
+
+router.get('/', (_req, res) => {
+  res.json({ message: 'Welcome to the ${project.name} API' })
+})
+`,
+      },
+      {
+        path: ".env.example",
+        mimeType: "text/plain",
+        content: `PORT=3000
+# Add your environment variables here
+`,
+      },
+    ];
+    await db.insert(projectFilesTable).values(
+      nodeApiScaffold.map((f) => ({
+        projectId: project.id,
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+      })),
+    );
+  } else if (resolvedStack === "python-flask") {
+    const flaskScaffold = [
+      {
+        path: "requirements.txt",
+        mimeType: "text/plain",
+        content: `Flask==3.0.3\nflask-cors==4.0.1\npython-dotenv==1.0.1\n`,
+      },
+      {
+        path: "app.py",
+        mimeType: "text/x-python",
+        content: `from __future__ import annotations
+
+import os
+from flask import Flask, jsonify
+from flask_cors import CORS
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def create_app() -> Flask:
+    app = Flask(__name__)
+    CORS(app)
+
+    @app.get("/healthz")
+    def healthz():
+        return jsonify({"status": "ok", "project": "${project.name}"})
+
+    @app.get("/api")
+    def index():
+        return jsonify({"message": "Welcome to the ${project.name} API"})
+
+    return app
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app = create_app()
+    app.run(host="0.0.0.0", port=port, debug=True)
+`,
+      },
+      {
+        path: ".env.example",
+        mimeType: "text/plain",
+        content: `PORT=5000\n# Add your environment variables here\n`,
+      },
+    ];
+    await db.insert(projectFilesTable).values(
+      flaskScaffold.map((f) => ({
+        projectId: project.id,
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+      })),
+    );
+  } else if (resolvedStack === "python-fastapi") {
+    const fastapiScaffold = [
+      {
+        path: "requirements.txt",
+        mimeType: "text/plain",
+        content: `fastapi==0.115.0\nuvicorn[standard]==0.30.6\npydantic==2.8.2\npython-dotenv==1.0.1\n`,
+      },
+      {
+        path: "main.py",
+        mimeType: "text/x-python",
+        content: `from __future__ import annotations
+
+import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = FastAPI(title="${project.name}", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    return {"status": "ok", "project": "${project.name}"}
+
+
+@app.get("/api")
+async def root() -> dict[str, str]:
+    return {"message": "Welcome to the ${project.name} API"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+`,
+      },
+      {
+        path: ".env.example",
+        mimeType: "text/plain",
+        content: `PORT=8000\n# Add your environment variables here\n`,
+      },
+    ];
+    await db.insert(projectFilesTable).values(
+      fastapiScaffold.map((f) => ({
         projectId: project.id,
         path: f.path,
         content: f.content,
