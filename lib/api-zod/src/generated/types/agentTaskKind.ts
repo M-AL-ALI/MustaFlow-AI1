@@ -12,4 +12,5 @@ export type AgentTaskKind = typeof AgentTaskKind[keyof typeof AgentTaskKind];
 export const AgentTaskKind = {
   main: 'main',
   background: 'background',
+  plan: 'plan',
 } as const;

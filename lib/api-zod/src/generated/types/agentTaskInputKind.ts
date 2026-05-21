@@ -12,4 +12,5 @@ export type AgentTaskInputKind = typeof AgentTaskInputKind[keyof typeof AgentTas
 export const AgentTaskInputKind = {
   main: 'main',
   background: 'background',
+  plan: 'plan',
 } as const;

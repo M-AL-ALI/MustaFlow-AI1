@@ -2792,7 +2792,7 @@ components:
         title: { type: string }
         kind:
           type: string
-          enum: [main, background]
+          enum: [main, background, plan]
         status:
           type: string
           enum:
@@ -2862,7 +2862,7 @@ components:
         title: { type: string, minLength: 1 }
         kind:
           type: string
-          enum: [main, background]
+          enum: [main, background, plan]
         prompt: { type: string }
 
     ProjectVersion:

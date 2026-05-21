@@ -518,6 +518,7 @@ export type AgentTaskKind = typeof AgentTaskKind[keyof typeof AgentTaskKind];
 export const AgentTaskKind = {
   main: 'main',
   background: 'background',
+  plan: 'plan',
 } as const;
 
 export type AgentTaskStatus = typeof AgentTaskStatus[keyof typeof AgentTaskStatus];
@@ -629,6 +630,7 @@ export type AgentTaskInputKind = typeof AgentTaskInputKind[keyof typeof AgentTas
 export const AgentTaskInputKind = {
   main: 'main',
   background: 'background',
+  plan: 'plan',
 } as const;
 
 export interface AgentTaskInput {
