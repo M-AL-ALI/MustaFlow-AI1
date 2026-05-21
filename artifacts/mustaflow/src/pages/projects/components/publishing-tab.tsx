@@ -45,6 +45,7 @@ import {
   useCreateSecret,
   useDeleteSecret,
   getListSecretsQueryKey,
+  getGetProjectQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -2027,6 +2028,7 @@ export function PublishingTab({
   onNavigateToSecret?: (secretName: string) => void;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
+  const queryClient = useQueryClient();
   const [platform, setPlatform] = useState<Platform>("web");
   const [webEnv, setWebEnv] = useState<"testing" | "production">("testing");
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -2268,6 +2270,8 @@ export function PublishingTab({
         containerUrl?: string | null;
       };
       setPublishResult(data);
+      // Refresh project query so publicSlug is available immediately (e.g. QR panel in Preview tab)
+      void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
       // Refresh domain info (subdomain url is now available) and deployment logs
       void fetchDomain();
       void fetchDeployments();
