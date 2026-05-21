@@ -398,21 +398,26 @@ function ErrorCard({
   );
 }
 
-const WORKSPACE_TABS = [
+const PRIMARY_TABS = [
   { label: "Preview", value: "preview", icon: Monitor },
   { label: "Code", value: "code", icon: FileCode2 },
+  { label: "Publishing", value: "publishing", icon: Rocket },
+  { label: "Manage", value: "manage", icon: Settings },
+];
+
+const ADVANCED_TABS = [
   { label: "Terminal", value: "terminal", icon: TerminalSquare },
   { label: "Canvas", value: "canvas", icon: Paintbrush2 },
   { label: "Page Map", value: "page-map", icon: Globe },
   { label: "Tools & Files", value: "tools-files", icon: Blocks },
-  { label: "Publishing", value: "publishing", icon: Rocket },
-  { label: "Knowledge", value: "knowledge", icon: BrainCircuit },
+  { label: "AI Memory", value: "knowledge", icon: BrainCircuit },
   { label: "Database", value: "database", icon: DatabaseZap },
   { label: "Logs", value: "logs", icon: Wrench },
   { label: "Resources", value: "resources", icon: BookOpen },
   { label: "Analytics", value: "analytics", icon: Activity },
-  { label: "Manage", value: "manage", icon: Settings },
 ];
+
+const WORKSPACE_TABS = [...PRIMARY_TABS, ...ADVANCED_TABS];
 
 const QUICK_ACTIONS = [
   "Add a login page",
@@ -528,6 +533,13 @@ export default function ProjectWorkspacePage() {
     const stored = localStorage.getItem(`mustaflow_tab_${projectId}`);
     const valid = WORKSPACE_TABS.map((t) => t.value);
     return stored && valid.includes(stored) ? stored : "preview";
+  });
+  const [moreTabsExpanded, setMoreTabsExpanded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("mustaflow_more_tabs") === "true";
+    } catch {
+      return false;
+    }
   });
   const [prefillSecretName, setPrefillSecretName] = useState<string | null>(null);
   const [viewingHistoryPlan, setViewingHistoryPlan] = useState<StructuredPlan | null>(null);
@@ -684,6 +696,14 @@ export default function ProjectWorkspacePage() {
       // ignore
     }
   }, [projectId, leftPanelTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("mustaflow_more_tabs", String(moreTabsExpanded));
+    } catch {
+      // ignore
+    }
+  }, [moreTabsExpanded]);
 
   useEffect(() => {
     try {
@@ -1183,9 +1203,7 @@ export default function ProjectWorkspacePage() {
         <div className="w-px h-5 bg-border shrink-0" />
         <div className="flex-1 overflow-x-auto min-w-0">
           <div className="flex items-stretch h-12">
-            {WORKSPACE_TABS.filter(
-              (tab) => tab.value !== "analytics" || project.status === "published",
-            ).map((tab) => {
+            {PRIMARY_TABS.map((tab) => {
               const Icon = tab.icon;
               return (
                 <button
@@ -1201,15 +1219,53 @@ export default function ProjectWorkspacePage() {
                 >
                   <Icon className="h-3 w-3 shrink-0" />
                   {tab.label}
-                  {tab.value === "page-map" && pageMapSyncing && (
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
-                    </span>
-                  )}
                 </button>
               );
             })}
+            <button
+              onClick={() => setMoreTabsExpanded((v) => !v)}
+              className={cn(
+                "flex items-center gap-1 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
+                ADVANCED_TABS.some((t) => t.value === activeTab)
+                  ? "border-primary text-foreground"
+                  : moreTabsExpanded
+                    ? "border-muted-foreground/30 text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+              title={moreTabsExpanded ? "Hide advanced tabs" : "Show advanced tabs"}
+            >
+              {moreTabsExpanded || ADVANCED_TABS.some((t) => t.value === activeTab)
+                ? "Less"
+                : "More ···"}
+            </button>
+            {(moreTabsExpanded || ADVANCED_TABS.some((t) => t.value === activeTab)) &&
+              ADVANCED_TABS.filter(
+                (tab) => tab.value !== "analytics" || project.status === "published",
+              ).map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.value}
+                    onClick={() => setActiveTab(tab.value)}
+                    data-tab={tab.value}
+                    className={cn(
+                      "relative flex items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors border-b-2 h-full shrink-0",
+                      activeTab === tab.value
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="h-3 w-3 shrink-0" />
+                    {tab.label}
+                    {tab.value === "page-map" && pageMapSyncing && (
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -1293,7 +1349,7 @@ export default function ProjectWorkspacePage() {
                       ? "Files"
                       : t === "history"
                         ? "History"
-                        : "Saved"}
+                        : "Ideas"}
                   {badge !== null && (
                     <span
                       className={cn(
@@ -1782,7 +1838,7 @@ export default function ProjectWorkspacePage() {
               <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2">
                 <Bookmark className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Saved Ideas
+                  Ideas
                 </span>
                 <span className="ml-auto text-[10px] text-muted-foreground/60">Build any time</span>
               </div>
@@ -1878,7 +1934,7 @@ export default function ProjectWorkspacePage() {
             >
               {[
                 { label: "Preview", value: "preview", icon: Monitor },
-                { label: "Code", value: "code", icon: FileCode2 },
+                { label: "Files", value: "tools-files", icon: Blocks },
                 { label: "Publish", value: "publishing", icon: Rocket },
               ].map(({ label, value, icon: Icon }) => (
                 <button
@@ -1906,7 +1962,7 @@ export default function ProjectWorkspacePage() {
                 )}
               >
                 <MessageSquare className="h-4 w-4" />
-                Chat
+                Build
               </button>
             </div>
           )}

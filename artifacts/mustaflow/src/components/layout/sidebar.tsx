@@ -28,7 +28,7 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 const NAV_ITEMS = [
   { name: "Home", href: "/", icon: Home },
   { name: "Projects", href: "/projects", icon: FolderKanban },
-  { name: "Knowledge Vault", href: "/knowledge", icon: BookOpen },
+  { name: "AI Memory", href: "/knowledge", icon: BookOpen },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

@@ -1061,7 +1061,7 @@ export function ToolsTab({
                 <div className="border border-border rounded-lg overflow-hidden bg-card">
                   <div className="px-4 py-2.5 border-b border-border bg-muted/50 flex items-center gap-2">
                     <TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs font-semibold">Container Environment</span>
+                    <span className="text-xs font-semibold">Dev Server Environment</span>
                     <span className="text-xs text-muted-foreground ml-auto">
                       {secrets.length} var{secrets.length !== 1 ? "s" : ""} injected on start
                     </span>

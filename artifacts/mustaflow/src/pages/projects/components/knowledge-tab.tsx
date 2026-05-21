@@ -672,7 +672,7 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BrainCircuit className="h-4 w-4 text-secondary" />
-            <span className="text-sm font-semibold text-foreground">Knowledge Vault</span>
+            <span className="text-sm font-semibold text-foreground">AI Memory</span>
             {!isLoading && entries.length > 0 && (
               <span className="text-xs text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded-full">
                 {entries.length}

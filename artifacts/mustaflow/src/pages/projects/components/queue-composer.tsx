@@ -30,7 +30,7 @@ const AGENT_OPTIONS: {
   {
     value: "planning",
     label: "Planning",
-    description: "Investigate then plan — no files changed",
+    description: "Shows a plan before building — use this for big or complex changes.",
     icon: Navigation,
     className: "text-blue-400 border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/15",
   },
@@ -439,21 +439,40 @@ export function QueueComposer({
               </>
             )}
             <div className="ml-auto flex items-center gap-2">
-              <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
-                {(["lite", "eco", "power", "pro"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => onAgentModeChange(mode)}
-                    className={cn(
-                      "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
-                      agentMode === mode
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {mode}
-                  </button>
-                ))}
+              <div className="flex flex-col items-end gap-0.5">
+                <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
+                  {(
+                    [
+                      { mode: "lite", label: "Lite", desc: "1 credit · fastest" },
+                      { mode: "eco", label: "Eco", desc: "2 credits · fast & lightweight" },
+                      { mode: "power", label: "Power", desc: "5 credits · better quality" },
+                      { mode: "pro", label: "Pro", desc: "10 credits · most capable" },
+                    ] as const
+                  ).map(({ mode, label, desc }) => (
+                    <button
+                      key={mode}
+                      onClick={() => onAgentModeChange(mode)}
+                      title={desc}
+                      className={cn(
+                        "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
+                        agentMode === mode
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[9px] text-muted-foreground/50 pr-0.5">
+                  {agentMode === "lite"
+                    ? "1 credit · fastest"
+                    : agentMode === "eco"
+                      ? "2 credits · fast & lightweight"
+                      : agentMode === "power"
+                        ? "5 credits · better quality"
+                        : "10 credits · most capable"}
+                </span>
               </div>
               <button
                 onClick={() => void handleSend()}

@@ -961,7 +961,7 @@ function EasBuildPanel({
             <Package className="h-4 w-4 text-green-400" />
           </div>
           <div>
-            <h3 className="font-semibold text-sm">EAS Build — Real Device Testing</h3>
+            <h3 className="font-semibold text-sm">Store Build — Real Device Testing</h3>
             <p className="text-xs text-muted-foreground">
               Build a native {platformLabel} binary and install it on your device via Expo Go.
             </p>
@@ -2506,6 +2506,121 @@ export function PublishingTab({
         {/* ── WEB ─────────────────────────────────────────────────────────── */}
         {platform === "web" && (
           <div className="space-y-5">
+            {/* 1-2-3 publish flow */}
+            <div className="border border-border rounded-xl p-4 bg-card">
+              <h3 className="font-semibold text-sm mb-3">How to publish</h3>
+              <div className="grid grid-cols-3 gap-3">
+                {/* Step 1: Check */}
+                <div
+                  className={cn(
+                    "flex flex-col items-center gap-2 p-3 rounded-lg border-2 text-center transition-colors",
+                    readiness?.canPublish
+                      ? "border-green-500/40 bg-green-500/5"
+                      : "border-border bg-muted/30",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
+                      readiness?.canPublish
+                        ? "bg-green-500 text-white"
+                        : "bg-muted text-muted-foreground border border-border",
+                    )}
+                  >
+                    {readiness?.canPublish ? <CheckCircle2 className="h-4 w-4" /> : "1"}
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold">Check</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      {readiness?.canPublish ? "All good" : "Run readiness check"}
+                    </div>
+                  </div>
+                  {!readiness?.canPublish && (
+                    <button
+                      onClick={() => void fetchReadiness()}
+                      disabled={readinessLoading}
+                      className="text-[10px] font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+                    >
+                      {readinessLoading ? "Checking…" : "Run check"}
+                    </button>
+                  )}
+                </div>
+                {/* Step 2: Publish */}
+                <div
+                  className={cn(
+                    "flex flex-col items-center gap-2 p-3 rounded-lg border-2 text-center transition-colors",
+                    publishResult || deployResult
+                      ? "border-green-500/40 bg-green-500/5"
+                      : readiness?.canPublish
+                        ? "border-primary/40 bg-primary/5"
+                        : "border-border bg-muted/30 opacity-60",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
+                      publishResult || deployResult
+                        ? "bg-green-500 text-white"
+                        : readiness?.canPublish
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground border border-border",
+                    )}
+                  >
+                    {publishResult || deployResult ? <CheckCircle2 className="h-4 w-4" /> : "2"}
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold">Publish</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      {publishResult || deployResult ? "Published" : "Make it live"}
+                    </div>
+                  </div>
+                  {readiness?.canPublish &&
+                    !publishResult &&
+                    !deployResult &&
+                    webEnv === "testing" && (
+                      <button
+                        onClick={() => void handlePublish()}
+                        disabled={isPublishing}
+                        className="text-[10px] font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+                      >
+                        {isPublishing ? "Publishing…" : "Publish now"}
+                      </button>
+                    )}
+                </div>
+                {/* Step 3: Share */}
+                <div
+                  className={cn(
+                    "flex flex-col items-center gap-2 p-3 rounded-lg border-2 text-center transition-colors",
+                    publishResult || deployResult
+                      ? "border-green-500/40 bg-green-500/5"
+                      : "border-border bg-muted/30 opacity-40",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
+                      publishResult || deployResult
+                        ? "bg-green-500 text-white"
+                        : "bg-muted text-muted-foreground border border-border",
+                    )}
+                  >
+                    {publishResult || deployResult ? <CheckCircle2 className="h-4 w-4" /> : "3"}
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold">Share</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      Copy your public link
+                    </div>
+                  </div>
+                  {(publishResult || deployResult) && (
+                    <CopyUrlButton
+                      url={deployResult?.publicUrl ?? publishResult?.publicUrl ?? ""}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+
             {/* Environment toggle card */}
             <div className="border border-border rounded-xl p-4 bg-card space-y-4">
               <div className="flex items-center justify-between">
@@ -2594,7 +2709,7 @@ export function PublishingTab({
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground text-xs flex items-center gap-1.5">
                     <Activity className="h-3 w-3" />
-                    Production container
+                    Production server
                   </span>
                   <div className="flex items-center gap-2">
                     {prodContainerStatus === "running" ? (
@@ -3288,7 +3403,7 @@ export function PublishingTab({
                 </div>
                 {deployResult.prodContainerUrl && (
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-muted-foreground">Container:</span>
+                    <span className="text-[11px] text-muted-foreground">Dev Server:</span>
                     <a
                       href={deployResult.prodContainerUrl}
                       target="_blank"
@@ -3310,7 +3425,7 @@ export function PublishingTab({
                     </span>
                   )}
                   {" · "}
-                  {deployResult.containerDeployed ? "Container deployed" : "Snapshot only"}
+                  {deployResult.containerDeployed ? "Server deployed" : "Snapshot only"}
                   {" · "}Deployed {new Date(deployResult.deployedAt).toLocaleString()}
                 </p>
                 {deployResult.note && (
@@ -3341,7 +3456,7 @@ export function PublishingTab({
                 {publishResult.containerDeployed && (
                   <div className="flex items-center gap-2 text-xs bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
                     <Server className="h-3.5 w-3.5 text-primary shrink-0" />
-                    <span className="text-primary font-medium">Container deployed</span>
+                    <span className="text-primary font-medium">Server deployed</span>
                     <span className="text-muted-foreground">
                       — public URL proxies to a live production server
                     </span>
@@ -3361,7 +3476,7 @@ export function PublishingTab({
                 </div>
                 {publishResult.containerDeployed && publishResult.containerUrl && (
                   <p className="text-[11px] text-muted-foreground">
-                    Container URL:{" "}
+                    Server URL:{" "}
                     <span className="font-mono break-all">{publishResult.containerUrl}</span>
                   </p>
                 )}
@@ -3452,7 +3567,7 @@ export function PublishingTab({
             {isMobile && (
               <div className="border border-border rounded-xl bg-card overflow-hidden">
                 <div className="px-4 py-3 border-b border-border space-y-0.5">
-                  <h3 className="font-semibold text-sm">EAS Cloud Build</h3>
+                  <h3 className="font-semibold text-sm">Store Build</h3>
                   <p className="text-xs text-muted-foreground">
                     Triggers an Expo Application Services cloud build. Costs 5 credits per build.
                   </p>
@@ -3834,7 +3949,7 @@ export function PublishingTab({
             {isMobile && (
               <div className="border border-border rounded-xl bg-card overflow-hidden">
                 <div className="px-4 py-3 border-b border-border space-y-0.5">
-                  <h3 className="font-semibold text-sm">EAS Cloud Build</h3>
+                  <h3 className="font-semibold text-sm">Store Build</h3>
                   <p className="text-xs text-muted-foreground">
                     Triggers an Expo Application Services cloud build. Costs 5 credits per build.
                   </p>
