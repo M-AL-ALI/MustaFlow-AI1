@@ -49,7 +49,9 @@ npx serve .
 python3 -m http.server 8080
 \`\`\``;
 
-  const hasDrizzle = files.some((f) => f.path.startsWith("drizzle/") || f.path === "drizzle.config.ts");
+  const hasDrizzle = files.some(
+    (f) => f.path.startsWith("drizzle/") || f.path === "drizzle.config.ts",
+  );
   const drizzleNote = hasDrizzle
     ? `\n- Database migrations are in the \`drizzle/migrations/\` folder. Run \`npx drizzle-kit migrate\` after setting \`DATABASE_URL\` in \`.env\`.`
     : "";

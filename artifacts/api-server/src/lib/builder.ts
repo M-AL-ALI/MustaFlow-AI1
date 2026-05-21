@@ -5163,7 +5163,16 @@ export async function runNodeBuildPipeline(args: {
   planContext?: Record<string, unknown> | null;
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<BuilderResult> {
-  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext, planContext, onEvent } = args;
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    conversationHistory,
+    knowledgeContext,
+    planContext,
+    onEvent,
+  } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: NODE_BUILD_SYSTEM_PROMPT },
@@ -5171,12 +5180,17 @@ export async function runNodeBuildPipeline(args: {
   ];
 
   if (knowledgeContext) {
-    messages.push({ role: "system", content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}` });
+    messages.push({
+      role: "system",
+      content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+    });
   }
 
   if (planContext) {
     const { goal, approach } = planContext as { goal?: string; approach?: string };
-    const planLines = ["STRUCTURED PLAN from Planning Agent — follow this plan exactly when building:"];
+    const planLines = [
+      "STRUCTURED PLAN from Planning Agent — follow this plan exactly when building:",
+    ];
     if (goal) planLines.push(`Goal: ${goal}`);
     if (approach) planLines.push(`Approach: ${approach}`);
     messages.push({ role: "system", content: planLines.join("\n") });
@@ -5212,7 +5226,8 @@ export async function runNodeBuildPipeline(args: {
   const files: BuilderFile[] = rawFiles
     .filter(
       (f): f is { path: string; content: string; mimeType?: string } =>
-        typeof f === "object" && f !== null &&
+        typeof f === "object" &&
+        f !== null &&
         typeof (f as { path?: unknown }).path === "string" &&
         typeof (f as { content?: unknown }).content === "string",
     )
@@ -5282,13 +5297,27 @@ export async function runNodeRefinePipeline(args: {
   correctionFailed: boolean;
   primaryErrorCategory: string | null;
 }> {
-  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext, unchangedFilesHint, planContext, onEvent } = args;
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    existingFiles,
+    conversationHistory,
+    knowledgeContext,
+    unchangedFilesHint,
+    planContext,
+    onEvent,
+  } = args;
 
   const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: NODE_REFINE_SYSTEM_PROMPT },
-    { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}` },
+    {
+      role: "system",
+      content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}`,
+    },
   ];
 
   if (knowledgeContext) {
@@ -5324,7 +5353,8 @@ export async function runNodeRefinePipeline(args: {
   let changedFiles: BuilderFile[] = rawFiles
     .filter(
       (f): f is { path: string; content: string; mimeType?: string } =>
-        typeof f === "object" && f !== null &&
+        typeof f === "object" &&
+        f !== null &&
         typeof (f as { path?: unknown }).path === "string" &&
         typeof (f as { content?: unknown }).content === "string",
     )
@@ -5401,7 +5431,16 @@ export async function runPythonBuildPipeline(args: {
   planContext?: Record<string, unknown> | null;
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<BuilderResult> {
-  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, knowledgeContext, planContext, onEvent } = args;
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    conversationHistory,
+    knowledgeContext,
+    planContext,
+    onEvent,
+  } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: PYTHON_BUILD_SYSTEM_PROMPT },
@@ -5409,12 +5448,17 @@ export async function runPythonBuildPipeline(args: {
   ];
 
   if (knowledgeContext) {
-    messages.push({ role: "system", content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}` });
+    messages.push({
+      role: "system",
+      content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+    });
   }
 
   if (planContext) {
     const { goal, approach } = planContext as { goal?: string; approach?: string };
-    const planLines = ["STRUCTURED PLAN from Planning Agent — follow this plan exactly when building:"];
+    const planLines = [
+      "STRUCTURED PLAN from Planning Agent — follow this plan exactly when building:",
+    ];
     if (goal) planLines.push(`Goal: ${goal}`);
     if (approach) planLines.push(`Approach: ${approach}`);
     messages.push({ role: "system", content: planLines.join("\n") });
@@ -5450,7 +5494,8 @@ export async function runPythonBuildPipeline(args: {
   const files: BuilderFile[] = rawFiles
     .filter(
       (f): f is { path: string; content: string; mimeType?: string } =>
-        typeof f === "object" && f !== null &&
+        typeof f === "object" &&
+        f !== null &&
         typeof (f as { path?: unknown }).path === "string" &&
         typeof (f as { content?: unknown }).content === "string",
     )
@@ -5520,13 +5565,27 @@ export async function runPythonRefinePipeline(args: {
   correctionFailed: boolean;
   primaryErrorCategory: string | null;
 }> {
-  const { projectName, projectKind, userPrompt, agentMode, existingFiles, conversationHistory, knowledgeContext, unchangedFilesHint, planContext, onEvent } = args;
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    existingFiles,
+    conversationHistory,
+    knowledgeContext,
+    unchangedFilesHint,
+    planContext,
+    onEvent,
+  } = args;
 
   const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: PYTHON_REFINE_SYSTEM_PROMPT },
-    { role: "system", content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}` },
+    {
+      role: "system",
+      content: `Project: "${projectName}" (kind: ${projectKind}).\n\nCURRENT PROJECT FILES:\n${fileManifest}`,
+    },
   ];
 
   if (knowledgeContext) {
@@ -5562,7 +5621,8 @@ export async function runPythonRefinePipeline(args: {
   let changedFiles: BuilderFile[] = rawFiles
     .filter(
       (f): f is { path: string; content: string; mimeType?: string } =>
-        typeof f === "object" && f !== null &&
+        typeof f === "object" &&
+        f !== null &&
         typeof (f as { path?: unknown }).path === "string" &&
         typeof (f as { content?: unknown }).content === "string",
     )

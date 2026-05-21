@@ -1681,6 +1681,134 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       await emitEvent(taskId, "updating_preview", "Refreshing preview…");
 
+      // ── Synchronous Drizzle migration (before task completion) ─────────────
+      // Gate: only trigger when THIS build's written files include Drizzle
+      // schema/migration files.  filesToSmellScan = result.files (build) or
+      // changedFiles (refine) — so we only migrate on builds that actually touch
+      // the database schema, not on every refine of an unrelated file.
+      {
+        const drizzleFilesInBuild = filesToSmellScan.filter(
+          (f) =>
+            f.path.startsWith("drizzle/") ||
+            f.path === "drizzle.config.ts" ||
+            f.path === "drizzle.config.js" ||
+            f.path === "drizzle.config.mjs" ||
+            f.path === "drizzle.config.cjs",
+        );
+
+        if (drizzleFilesInBuild.length > 0) {
+          const [containerRow] = await db
+            .select({
+              containerId: projectsTable.containerId,
+              containerStatus: projectsTable.containerStatus,
+            })
+            .from(projectsTable)
+            .where(eq(projectsTable.id, projectId));
+
+          if (!containerRow?.containerId) {
+            // No container provisioned — surface as a prominent report warning so
+            // users know their schema changes won't take effect until a container
+            // is started and migrations are run.
+            const noContainerWarn =
+              "Drizzle schema files were generated but no container is running. Start a container from the Terminal tab to apply database migrations.";
+            logger.warn({ projectId, taskId }, noContainerWarn);
+            report.warnings = [...(report.warnings ?? []), noContainerWarn];
+          } else {
+            const activeContainerId = containerRow.containerId;
+            const { syncFilesToContainer, execInContainer, startContainer, getContainerStatus } =
+              await import("./container");
+
+            // Wake the container if it is not already running.
+            if (containerRow.containerStatus !== "running") {
+              await emitEvent(taskId, "narration", "Waking container for database migrations…");
+              await startContainer(activeContainerId, projectId);
+              // Poll up to 30 s for the container to reach "running".
+              const wakeDeadline = Date.now() + 30_000;
+              while (Date.now() < wakeDeadline) {
+                const liveStatus = await getContainerStatus(activeContainerId);
+                if (liveStatus === "running") break;
+                await new Promise<void>((r) => setTimeout(r, 2000));
+              }
+            }
+
+            // Fetch all current project files so the container has the full picture.
+            const allCurrentFiles = await db
+              .select({ path: projectFilesTable.path, content: projectFilesTable.content })
+              .from(projectFilesTable)
+              .where(eq(projectFilesTable.projectId, projectId));
+
+            // Sync files first so the container sees the latest schema.
+            await emitEvent(taskId, "narration", "Syncing files to container for migration…");
+            await syncFilesToContainer(activeContainerId, projectId, allCurrentFiles);
+
+            // npm install so drizzle-kit is available.
+            const hasPackageJson = allCurrentFiles.some((f) => f.path === "package.json");
+            if (hasPackageJson) {
+              await emitEvent(taskId, "narration", "Running npm install before migration…");
+              await execInContainer(
+                activeContainerId,
+                ["npm", "install", "--prefer-offline", "--no-audit"],
+                projectId,
+              );
+            }
+
+            // Choose the migration command: prefer an explicit db:push npm script,
+            // otherwise fall back to npx drizzle-kit migrate.
+            let migrationCmd: string[];
+            try {
+              const pkgFile = allCurrentFiles.find((f) => f.path === "package.json");
+              const pkgJson = pkgFile
+                ? (JSON.parse(pkgFile.content) as { scripts?: Record<string, string> })
+                : null;
+              migrationCmd =
+                pkgJson?.scripts?.["db:push"] != null
+                  ? ["npm", "run", "db:push"]
+                  : ["npx", "drizzle-kit", "migrate"];
+            } catch {
+              migrationCmd = ["npx", "drizzle-kit", "migrate"];
+            }
+
+            await emitEvent(
+              taskId,
+              "narration",
+              `Running database migrations: ${migrationCmd.join(" ")}…`,
+            );
+
+            const migrationResult = await execInContainer(
+              activeContainerId,
+              migrationCmd,
+              projectId,
+            );
+
+            if (!migrationResult.ok) {
+              const errorMsg = `Database migration failed: ${migrationResult.output.slice(0, 400)}`;
+              logger.warn(
+                { projectId, taskId, output: migrationResult.output },
+                "Drizzle migration failed — marking task as failed",
+              );
+              await emitEvent(taskId, "failed", errorMsg);
+              await db
+                .update(agentTasksTable)
+                .set({
+                  status: "failed",
+                  result: errorMsg,
+                  report: {
+                    ...report,
+                    warnings: [...(report.warnings ?? []), errorMsg],
+                  },
+                  completedAt: sql`now()`,
+                })
+                .where(eq(agentTasksTable.id, taskId));
+              return;
+            }
+
+            await emitEvent(taskId, "narration", "Database migrations completed successfully.");
+            logger.info({ projectId, taskId }, "Drizzle migration completed");
+          }
+        }
+      }
+      // ── End synchronous Drizzle migration ─────────────────────────────────
+
       await db
         .update(agentTasksTable)
         .set({

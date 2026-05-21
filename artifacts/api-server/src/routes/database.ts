@@ -236,27 +236,23 @@ router.post(
 );
 
 // ── GET /api/projects/:id/database ───────────────────────────────────────────
-router.get(
-  "/projects/:id/database",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    const project = await loadProject(projectId);
-    if (!project) {
-      res.status(404).json({ error: "Project not found" });
-      return;
-    }
+router.get("/projects/:id/database", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  const project = await loadProject(projectId);
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
 
-    const response = buildStatusResponse(project);
+  const response = buildStatusResponse(project);
 
-    if (project.dbStatus === "connected") {
-      const url = await getDatabaseUrlSecret(projectId);
-      if (url) response.maskedUrl = maskValue(url);
-    }
+  if (project.dbStatus === "connected") {
+    const url = await getDatabaseUrlSecret(projectId);
+    if (url) response.maskedUrl = maskValue(url);
+  }
 
-    res.json(response);
-  },
-);
+  res.json(response);
+});
 
 // ── DELETE /api/projects/:id/database ────────────────────────────────────────
 router.delete(

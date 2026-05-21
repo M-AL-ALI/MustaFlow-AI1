@@ -29,14 +29,10 @@ interface DatabaseTabProps {
 
 function StatusBadge({ status }: { status: string }) {
   if (status === "connected")
-    return (
-      <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Connected</Badge>
-    );
+    return <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Connected</Badge>;
   if (status === "provisioning")
     return (
-      <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
-        Provisioning
-      </Badge>
+      <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">Provisioning</Badge>
     );
   if (status === "error")
     return <Badge className="bg-red-500/20 text-red-400 border-red-500/30">Error</Badge>;
@@ -46,7 +42,10 @@ function StatusBadge({ status }: { status: string }) {
 function SchemaTable({
   table,
 }: {
-  table: { tableName: string; columns: { name: string; type: string; nullable: boolean; isPrimaryKey?: boolean }[] };
+  table: {
+    tableName: string;
+    columns: { name: string; type: string; nullable: boolean; isPrimaryKey?: boolean }[];
+  };
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -110,7 +109,7 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
 
   const isProvisioned = dbStatus?.dbStatus === "connected";
   const isProvisioning = dbStatus?.dbStatus === "provisioning" || provisioning;
-  const dbProvider = (project as { dbProvider?: string })?.dbProvider ?? "none";
+  const _dbProvider = (project as { dbProvider?: string })?.dbProvider ?? "none";
 
   function handleProvision(provider: "postgres" | "sqlite") {
     provision(
@@ -191,12 +190,7 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
           </div>
         </div>
         {isProvisioned && (
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={handleDelete}
-            disabled={deleting}
-          >
+          <Button size="sm" variant="destructive" onClick={handleDelete} disabled={deleting}>
             {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Remove"}
           </Button>
         )}
@@ -207,14 +201,12 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
         <div className="border border-border rounded-lg p-4 bg-card space-y-3">
           <div className="font-medium text-sm">Add a database to this project</div>
           <p className="text-xs text-muted-foreground">
-            Provision a database and inject <code className="bg-muted px-1 rounded">DATABASE_URL</code> as a project secret automatically. The AI builder will then generate real database-backed code.
+            Provision a database and inject{" "}
+            <code className="bg-muted px-1 rounded">DATABASE_URL</code> as a project secret
+            automatically. The AI builder will then generate real database-backed code.
           </p>
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={() => handleProvision("postgres")}
-              disabled={provisioning}
-            >
+            <Button size="sm" onClick={() => handleProvision("postgres")} disabled={provisioning}>
               {provisioning ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : (
@@ -282,7 +274,8 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
               )}
               {!schemaLoading && (!schemaData?.tables || schemaData.tables.length === 0) && (
                 <div className="text-sm text-muted-foreground border border-border rounded-lg p-4 bg-card">
-                  No tables found. Ask the AI to build your app — it will generate Drizzle schema files and run migrations automatically.
+                  No tables found. Ask the AI to build your app — it will generate Drizzle schema
+                  files and run migrations automatically.
                 </div>
               )}
               {schemaData?.tables?.map((t) => (
@@ -346,7 +339,10 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
                         {queryResult.rows.map((row, ri) => (
                           <tr key={ri} className="border-t border-border/50 hover:bg-muted/20">
                             {(row as unknown[]).map((cell, ci) => (
-                              <td key={ci} className="px-3 py-1 text-foreground whitespace-nowrap max-w-[300px] truncate">
+                              <td
+                                key={ci}
+                                className="px-3 py-1 text-foreground whitespace-nowrap max-w-[300px] truncate"
+                              >
                                 {cell === null ? (
                                   <span className="text-muted-foreground italic">null</span>
                                 ) : (
@@ -359,7 +355,9 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
                       </tbody>
                     </table>
                   ) : (
-                    <div className="p-3 text-sm text-muted-foreground">Query completed with no rows.</div>
+                    <div className="p-3 text-sm text-muted-foreground">
+                      Query completed with no rows.
+                    </div>
                   )}
                 </div>
               )}
