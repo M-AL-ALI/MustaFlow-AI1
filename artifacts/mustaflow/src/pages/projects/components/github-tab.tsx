@@ -87,8 +87,8 @@ function ConnectPanel({ projectId, onConnected }: { projectId: number; onConnect
         <div className="px-4 py-4 space-y-3">
           <p className="text-xs text-muted-foreground leading-relaxed">
             Create a GitHub personal access token with{" "}
-            <code className="bg-muted px-1 py-px rounded text-[11px]">repo</code> scope. Your
-            token is encrypted and stored server-side — it is never returned to the browser.
+            <code className="bg-muted px-1 py-px rounded text-[11px]">repo</code> scope. Your token
+            is encrypted and stored server-side — it is never returned to the browser.
           </p>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">
@@ -138,8 +138,8 @@ function ConnectPanel({ projectId, onConnected }: { projectId: number; onConnect
           <div className="flex items-start gap-2 bg-muted/40 border border-border rounded-lg p-2.5 text-xs text-muted-foreground">
             <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5 text-green-400" />
             <span>
-              Your token is AES-256 encrypted before being stored. It is never logged or returned
-              to the frontend. Only your project&apos;s files are pushed — no MustaFlow platform
+              Your token is AES-256 encrypted before being stored. It is never logged or returned to
+              the frontend. Only your project&apos;s files are pushed — no MustaFlow platform
               credentials are ever included.
             </span>
           </div>
@@ -164,7 +164,12 @@ function RepoSelector({
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  const { data: reposData, isLoading, refetch, isRefetching } = useListGithubRepositories(
+  const {
+    data: reposData,
+    isLoading,
+    refetch,
+    isRefetching,
+  } = useListGithubRepositories(
     projectId,
     {},
     {
@@ -552,8 +557,7 @@ function ConnectedPanel({
               </>
             ) : (
               <>
-                <Upload className="h-3.5 w-3.5 mr-1.5" /> Push to{" "}
-                {connection.defaultBranch}
+                <Upload className="h-3.5 w-3.5 mr-1.5" /> Push to {connection.defaultBranch}
               </>
             )}
           </Button>
@@ -781,8 +785,8 @@ function ConnectedPanel({
                   </button>
                 </div>
                 <p className="text-[10px] text-muted-foreground">
-                  Paste this into Codex after linking your repository. Codex only has access to
-                  your project repo — no MustaFlow platform credentials are shared.
+                  Paste this into Codex after linking your repository. Codex only has access to your
+                  project repo — no MustaFlow platform credentials are shared.
                 </p>
               </div>
             </div>

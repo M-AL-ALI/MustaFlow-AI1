@@ -3507,7 +3507,12 @@ components:
       type: object
       required: [token]
       properties:
-        token: { type: string, minLength: 1, description: "GitHub personal access token (stored encrypted, never returned)" }
+        token:
+          {
+            type: string,
+            minLength: 1,
+            description: "GitHub personal access token (stored encrypted, never returned)",
+          }
 
     GithubSelectRepoInput:
       type: object

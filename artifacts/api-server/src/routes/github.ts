@@ -399,7 +399,12 @@ router.post(
         { projectId, owner, repoName, branch, filesCount: files.length, repoCreated },
         "GitHub push succeeded",
       );
-      res.json({ repoUrl, commitSha: newCommit.sha, filesCount: files.length, created: repoCreated });
+      res.json({
+        repoUrl,
+        commitSha: newCommit.sha,
+        filesCount: files.length,
+        created: repoCreated,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "GitHub push failed";
       logger.error({ err, projectId }, "GitHub push failed");
