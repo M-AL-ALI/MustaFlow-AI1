@@ -2117,28 +2117,40 @@ export default function ProjectWorkspacePage() {
                     })()}
 
                     {/* Live streaming bubble — shown while SSE converse stream is active */}
-                    {isStreaming &&
-                      !sendMessage.isPending &&
-                      (streamingText.length > 0 ? (
-                        <div className="flex justify-start">
-                          <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
-                            <MarkdownMessage content={streamingText} />
-                            <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
-                            <div className="mt-1.5 flex justify-end">
-                              <button
-                                onClick={handleStopStream}
-                                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                                title="Stop generating"
-                              >
-                                <Square className="w-2.5 h-2.5 fill-current" />
-                                Stop
-                              </button>
+                    {isStreaming && !sendMessage.isPending && (
+                      <div className="relative">
+                        {/* Typing indicator: fades out and steps aside when first token arrives */}
+                        <div
+                          className={cn(
+                            "transition-opacity duration-150",
+                            streamingText.length > 0
+                              ? "opacity-0 pointer-events-none absolute top-0 left-0"
+                              : "opacity-100",
+                          )}
+                        >
+                          <TypingIndicator />
+                        </div>
+                        {/* Streaming bubble: fades in as text arrives */}
+                        {streamingText.length > 0 && (
+                          <div className="flex justify-start animate-in fade-in duration-150">
+                            <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
+                              <MarkdownMessage content={streamingText} />
+                              <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
+                              <div className="mt-1.5 flex justify-end">
+                                <button
+                                  onClick={handleStopStream}
+                                  className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                                  title="Stop generating"
+                                >
+                                  <Square className="w-2.5 h-2.5 fill-current" />
+                                  Stop
+                                </button>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ) : (
-                        <TypingIndicator />
-                      ))}
+                        )}
+                      </div>
+                    )}
 
                     {sendMessage.isPending ? (
                       pendingIsConverse ? (
