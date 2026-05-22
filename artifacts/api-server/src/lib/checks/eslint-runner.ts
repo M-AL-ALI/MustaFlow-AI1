@@ -12,6 +12,14 @@
 import { Linter } from "eslint";
 import js from "@eslint/js";
 import tsParser from "@typescript-eslint/parser";
+import tsPlugin from "@typescript-eslint/eslint-plugin";
+// eslint-plugin-react and eslint-plugin-react-hooks ship without TS types here.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - no bundled types
+import reactPlugin from "eslint-plugin-react";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - no bundled types
+import reactHooksPlugin from "eslint-plugin-react-hooks";
 import type { BuilderFile } from "../builder";
 import type { CheckFinding, CheckRunStatus } from "@workspace/db";
 import { logger } from "../logger";
@@ -121,12 +129,32 @@ export function runEslintCheck(files: BuilderFile[]): {
     },
   ];
 
-  // TS/TSX config uses @typescript-eslint/parser. We apply eslint:recommended
-  // rules but skip TS-specific plugin rules — those overlap heavily with tsc,
-  // which already runs as a separate "typescript" check for mobile projects.
+  // TS/TSX config uses @typescript-eslint/parser plus React + React Hooks
+  // plugins so mobile (Expo) projects catch hook-rule violations, missing
+  // deps, unkeyed list items, etc. Type-info-requiring rules are skipped
+  // (no tsconfig project is wired up); tsc runs separately as the "typescript"
+  // check and covers what those would.
+  const tsPluginRules =
+    (
+      tsPlugin as unknown as {
+        configs: Record<string, { rules?: Record<string, unknown> }>;
+      }
+    ).configs.recommended?.rules ?? {};
+  const reactPluginRules =
+    (
+      reactPlugin as unknown as {
+        configs: Record<string, { rules?: Record<string, unknown> }>;
+      }
+    ).configs.recommended?.rules ?? {};
+  const reactHooksPluginRules =
+    (
+      reactHooksPlugin as unknown as {
+        configs: Record<string, { rules?: Record<string, unknown> }>;
+      }
+    ).configs.recommended?.rules ?? {};
+
   const tsConfig = [
     {
-      ...js.configs.recommended,
       languageOptions: {
         parser: tsParser as unknown as Linter.Parser,
         ecmaVersion: 2022 as const,
@@ -144,12 +172,49 @@ export function runEslintCheck(files: BuilderFile[]): {
           global: "readonly",
         },
       },
+      plugins: {
+        "@typescript-eslint": tsPlugin,
+        react: reactPlugin,
+        "react-hooks": reactHooksPlugin,
+      } as unknown as Linter.Config["plugins"],
+      settings: {
+        react: { version: "detect" },
+      },
       rules: {
         ...js.configs.recommended.rules,
+        ...(tsPluginRules as Linter.RulesRecord),
+        ...(reactPluginRules as Linter.RulesRecord),
+        ...(reactHooksPluginRules as Linter.RulesRecord),
         // tsc handles undefined identifiers; ESLint's no-undef misfires on TS types.
         "no-undef": "off" as const,
         // tsc's noUnusedLocals/noUnusedParameters cover this better for TS.
         "no-unused-vars": "off" as const,
+        "@typescript-eslint/no-unused-vars": "off" as const,
+        // Modern React (Expo SDK 52 / React 18+) doesn't need React in scope.
+        "react/react-in-jsx-scope": "off" as const,
+        // TS types replace prop-types in mobile projects.
+        "react/prop-types": "off" as const,
+        // Some hooks v7 recommended rules require type info or are too opinionated
+        // for AI-generated mobile code; keep the two the task explicitly calls out
+        // plus core hooks correctness, drop the experimental ones.
+        "react-hooks/static-components": "off" as const,
+        "react-hooks/use-memo": "off" as const,
+        "react-hooks/preserve-manual-memoization": "off" as const,
+        "react-hooks/incompatible-library": "off" as const,
+        "react-hooks/immutability": "off" as const,
+        "react-hooks/globals": "off" as const,
+        "react-hooks/refs": "off" as const,
+        "react-hooks/set-state-in-effect": "off" as const,
+        "react-hooks/set-state-in-render": "off" as const,
+        "react-hooks/unsupported-syntax": "off" as const,
+        "react-hooks/purity": "off" as const,
+        "react-hooks/error-boundaries": "off" as const,
+        "react-hooks/component-hook-factories": "off" as const,
+        "react-hooks/config": "off" as const,
+        "react-hooks/gating": "off" as const,
+        // Re-assert the two rules the task explicitly requires.
+        "react-hooks/rules-of-hooks": "error" as const,
+        "react-hooks/exhaustive-deps": "warn" as const,
       },
     },
   ] satisfies Linter.Config[];
