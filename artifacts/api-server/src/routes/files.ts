@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
-import { db, projectFilesTable, projectsTable } from "@workspace/db";
+import { db, projectFilesTable, projectsTable, projectVersionsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { guessMime } from "../lib/builder";
 import { isBinaryMime } from "../lib/binary-mime";
@@ -372,6 +372,124 @@ router.post(
 
     const result = runEslintFix({ path: row.path, content, ruleIds });
     res.json(result);
+  },
+);
+
+// Apply ESLint auto-fixes to every lintable file in the project in one shot.
+// Before touching anything, snapshots the current file set into project_versions
+// so the user can roll back from the History tab if they don't like the result.
+// Returns a per-file summary so the UI can show what changed.
+router.post(
+  "/projects/:id/eslint-fix-all",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+
+    const rows = await db
+      .select()
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId))
+      .orderBy(asc(projectFilesTable.path));
+
+    type PerFileResult = {
+      fileId: number;
+      path: string;
+      supported: boolean;
+      changed: boolean;
+      fixedCount: number;
+      remainingCount: number;
+      errorCount: number;
+    };
+
+    const results: PerFileResult[] = [];
+    const updates: Array<{ id: number; output: string }> = [];
+
+    for (const row of rows) {
+      const before = runEslintFix({ path: row.path, content: row.content, ruleIds: [] });
+      if (!before.supported) {
+        // Skip non-JS/TS files silently — no entry in the summary keeps the
+        // UI focused on files the user can actually act on.
+        continue;
+      }
+
+      // Issue count *before* fixing = issues that existed in the original file.
+      const beforeIssues = runEslintFix({
+        path: row.path,
+        content: row.content,
+        // Passing a single-element ruleId list that never matches forces the
+        // fixer into "lint-only" mode so `remaining` reports the full set.
+        ruleIds: ["__mustaflow_noop__"],
+      });
+      const totalBefore = beforeIssues.remaining.length;
+
+      const after = before;
+      const fixedCount = Math.max(0, totalBefore - after.remaining.length);
+      const errorCount = after.remaining.filter((r) => r.severity === "error").length;
+
+      results.push({
+        fileId: row.id,
+        path: row.path,
+        supported: true,
+        changed: after.changed,
+        fixedCount,
+        remainingCount: after.remaining.length,
+        errorCount,
+      });
+
+      if (after.changed) {
+        updates.push({ id: row.id, output: after.output });
+      }
+    }
+
+    let snapshotVersionId: number | null = null;
+    if (updates.length > 0) {
+      // Snapshot the pre-fix file set so the user has a rollback target.
+      const snapshot = rows.map((r) => ({
+        path: r.path,
+        content: r.content,
+        mimeType: r.mimeType,
+      }));
+      const [version] = await db
+        .insert(projectVersionsTable)
+        .values({
+          projectId,
+          label: `Auto-fix (${updates.length} file${updates.length === 1 ? "" : "s"})`,
+          note: "Snapshot taken before project-wide ESLint auto-fix.",
+          changelogEntry: `ESLint auto-fix applied to ${updates.length} file${updates.length === 1 ? "" : "s"}`,
+          filesSnapshot: snapshot,
+        })
+        .returning();
+      snapshotVersionId = version?.id ?? null;
+
+      const now = new Date();
+      for (const u of updates) {
+        await db
+          .update(projectFilesTable)
+          .set({ content: u.output, updatedAt: now })
+          .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, u.id)));
+      }
+    }
+
+    const totals = results.reduce(
+      (acc, r) => {
+        acc.filesScanned += 1;
+        if (r.changed) acc.filesFixed += 1;
+        acc.fixedCount += r.fixedCount;
+        acc.remainingCount += r.remainingCount;
+        return acc;
+      },
+      { filesScanned: 0, filesFixed: 0, fixedCount: 0, remainingCount: 0 },
+    );
+
+    res.json({
+      ...totals,
+      snapshotVersionId,
+      results,
+    });
   },
 );
 

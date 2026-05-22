@@ -45,7 +45,9 @@ import {
   PackageCheck,
   PackageX,
   Loader2,
+  Sparkles,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 type AuditCategory = "accessibility" | "seo" | "performance" | "security";
 type AuditSeverity = "error" | "warning" | "info";
@@ -1085,6 +1087,157 @@ function PrivacyFindingRow({ finding }: { finding: CheckRunFinding }) {
   );
 }
 
+type FixAllResult = {
+  filesScanned: number;
+  filesFixed: number;
+  fixedCount: number;
+  remainingCount: number;
+  snapshotVersionId: number | null;
+  results: Array<{
+    fileId: number;
+    path: string;
+    supported: boolean;
+    changed: boolean;
+    fixedCount: number;
+    remainingCount: number;
+    errorCount: number;
+  }>;
+};
+
+function ProjectAutoFixSection({
+  projectId,
+  onNavigateToFile,
+}: {
+  projectId: number;
+  onNavigateToFile?: (filePath: string, line?: number | null) => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [isFixing, setIsFixing] = useState(false);
+  const [lastResult, setLastResult] = useState<FixAllResult | null>(null);
+
+  const handleFixAll = async () => {
+    if (isFixing) return;
+    setIsFixing(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/eslint-fix-all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        toast({
+          title: "Auto-fix failed",
+          description: "Could not run project-wide ESLint auto-fix. Try again later.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const data = (await res.json()) as FixAllResult;
+      setLastResult(data);
+
+      // Refresh any open file content + version history.
+      void queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "files"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "versions"] });
+
+      if (data.filesFixed === 0) {
+        toast({
+          title: "Nothing to fix",
+          description: `Scanned ${data.filesScanned} file${data.filesScanned === 1 ? "" : "s"} — no auto-fixable issues found.`,
+        });
+      } else {
+        toast({
+          title: "Auto-fixes applied",
+          description: `Fixed ${data.fixedCount} issue${data.fixedCount === 1 ? "" : "s"} across ${data.filesFixed} file${data.filesFixed === 1 ? "" : "s"}. ${data.remainingCount} remain.`,
+        });
+      }
+    } catch {
+      toast({
+        title: "Auto-fix failed",
+        description: "Network error while running auto-fix.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsFixing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium text-foreground">Project auto-fix</span>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleFixAll}
+          disabled={isFixing}
+          title="Run ESLint auto-fix across every file. Saves a version snapshot first so you can roll back."
+        >
+          {isFixing ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Fixing…
+            </>
+          ) : (
+            <>
+              <Wrench className="h-3.5 w-3.5 mr-1.5" />
+              Auto-fix everything
+            </>
+          )}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Applies every safe ESLint fix across all JavaScript and TypeScript files at once. A version
+        snapshot is saved first so you can roll back from History if needed.
+      </p>
+
+      {lastResult && lastResult.results.length > 0 && (
+        <div className="border border-border rounded-lg bg-card">
+          <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+            <span className="text-xs font-medium text-foreground">
+              Fixed {lastResult.fixedCount} issue{lastResult.fixedCount === 1 ? "" : "s"} in{" "}
+              {lastResult.filesFixed} of {lastResult.filesScanned} file
+              {lastResult.filesScanned === 1 ? "" : "s"}
+            </span>
+            {lastResult.snapshotVersionId !== null && (
+              <span className="text-[10px] text-muted-foreground">
+                Snapshot v{lastResult.snapshotVersionId}
+              </span>
+            )}
+          </div>
+          <div className="max-h-48 overflow-y-auto divide-y divide-border">
+            {lastResult.results.map((r) => (
+              <button
+                key={r.fileId}
+                onClick={() => onNavigateToFile?.(r.path)}
+                className="w-full px-3 py-1.5 flex items-center justify-between gap-2 text-left hover:bg-muted/40 transition-colors"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileCode className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                  <span className="text-xs text-foreground truncate font-mono">{r.path}</span>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0 text-[10px]">
+                  {r.fixedCount > 0 && (
+                    <span className="text-emerald-400">+{r.fixedCount} fixed</span>
+                  )}
+                  {r.remainingCount > 0 && (
+                    <span className="text-amber-400">{r.remainingCount} left</span>
+                  )}
+                  {r.fixedCount === 0 && r.remainingCount === 0 && (
+                    <span className="text-muted-foreground">clean</span>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function QualityPanel({
   projectId,
   projectKind,
@@ -1129,6 +1282,8 @@ export function QualityPanel({
 
   return (
     <div className="space-y-6 p-1">
+      <ProjectAutoFixSection projectId={projectId} onNavigateToFile={onNavigateToFile} />
+
       <ChecksSection
         projectId={projectId}
         isMobile={isMobile}
