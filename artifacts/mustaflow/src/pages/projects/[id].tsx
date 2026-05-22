@@ -23,7 +23,12 @@ import {
 } from "@workspace/api-client-react";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { CodeEditorTab } from "./components/code-editor-tab";
-import { ChatHistory, StreamingText, MarkdownMessage } from "./components/chat-history";
+import {
+  ChatHistory,
+  StreamingText,
+  MarkdownMessage,
+  TypingIndicator,
+} from "./components/chat-history";
 import { PageMapTab } from "./components/page-map-tab";
 import { Button } from "@/components/ui/button";
 import {
@@ -2066,58 +2071,32 @@ export default function ProjectWorkspacePage() {
                     })()}
 
                     {/* Live streaming bubble — shown while SSE converse stream is active */}
-                    {isStreaming && !sendMessage.isPending && (
-                      <div className="flex justify-start">
-                        <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
-                          {streamingText.length > 0 ? (
-                            <>
-                              <MarkdownMessage content={streamingText} />
-                              <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
-                            </>
-                          ) : (
-                            <span className="flex items-center gap-2">
-                              <span className="flex gap-0.5">
-                                {[0, 1, 2].map((i) => (
-                                  <span
-                                    key={i}
-                                    className="w-1 h-1 rounded-full bg-blue-400/60 animate-bounce"
-                                    style={{ animationDelay: `${i * 150}ms` }}
-                                  />
-                                ))}
-                              </span>
-                              <span className="text-muted-foreground">Thinking…</span>
-                            </span>
-                          )}
-                          <div className="mt-1.5 flex justify-end">
-                            <button
-                              onClick={handleStopStream}
-                              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                              title="Stop generating"
-                            >
-                              <Square className="w-2.5 h-2.5 fill-current" />
-                              Stop
-                            </button>
+                    {isStreaming &&
+                      !sendMessage.isPending &&
+                      (streamingText.length > 0 ? (
+                        <div className="flex justify-start">
+                          <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
+                            <MarkdownMessage content={streamingText} />
+                            <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
+                            <div className="mt-1.5 flex justify-end">
+                              <button
+                                onClick={handleStopStream}
+                                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                                title="Stop generating"
+                              >
+                                <Square className="w-2.5 h-2.5 fill-current" />
+                                Stop
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      ) : (
+                        <TypingIndicator />
+                      ))}
 
                     {sendMessage.isPending ? (
                       pendingIsConverse ? (
-                        <div className="flex justify-start">
-                          <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
-                            <span className="flex gap-0.5">
-                              {[0, 1, 2].map((i) => (
-                                <span
-                                  key={i}
-                                  className="w-1 h-1 rounded-full bg-blue-400/60 animate-bounce"
-                                  style={{ animationDelay: `${i * 150}ms` }}
-                                />
-                              ))}
-                            </span>
-                            <span className="text-muted-foreground">Thinking…</span>
-                          </div>
-                        </div>
+                        <TypingIndicator />
                       ) : pendingFeedTaskId !== null ? (
                         <AgentThinkingBubble
                           projectId={projectId}

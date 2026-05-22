@@ -279,6 +279,25 @@ const ACTIONABLE_PATTERNS = [
 
 const completedAnimations = new Set<number>();
 
+export function TypingIndicator() {
+  return (
+    <div className="flex justify-start items-end gap-2">
+      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-primary/25 to-primary/10 border border-primary/25 flex items-center justify-center shrink-0">
+        <BrainCircuit className="w-3 h-3 text-primary/80" />
+      </div>
+      <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2.5 flex items-center gap-1">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="w-1.5 h-1.5 rounded-full bg-foreground/35 animate-bounce"
+            style={{ animationDelay: `${i * 160}ms` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function StreamingText({
   content,
   messageId,
