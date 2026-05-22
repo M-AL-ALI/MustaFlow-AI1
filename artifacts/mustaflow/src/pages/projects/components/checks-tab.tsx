@@ -772,9 +772,7 @@ function CvePanel() {
     (a, b) => CVE_SEVERITY_ORDER.indexOf(a.severity) - CVE_SEVERITY_ORDER.indexOf(b.severity),
   );
 
-  const lastScannedAt = scanStatus?.lastScannedAt
-    ? new Date(scanStatus.lastScannedAt)
-    : null;
+  const lastScannedAt = scanStatus?.lastScannedAt ? new Date(scanStatus.lastScannedAt) : null;
 
   const formattedLastScan = lastScannedAt
     ? lastScannedAt.toLocaleString(undefined, {

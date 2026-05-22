@@ -1920,16 +1920,19 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               // Persist to check_runs table
               let insertedCheckRunIds: number[] = [];
               if (runs.length > 0) {
-                const inserted = await db.insert(checkRunsTable).values(
-                  runs.map((r) => ({
-                    projectId,
-                    taskId: taskIdForChecks,
-                    checkName: r.checkName,
-                    status: r.status,
-                    findings: r.findings,
-                    aiReason: r.aiReason,
-                  })),
-                ).returning({ id: checkRunsTable.id });
+                const inserted = await db
+                  .insert(checkRunsTable)
+                  .values(
+                    runs.map((r) => ({
+                      projectId,
+                      taskId: taskIdForChecks,
+                      checkName: r.checkName,
+                      status: r.status,
+                      findings: r.findings,
+                      aiReason: r.aiReason,
+                    })),
+                  )
+                  .returning({ id: checkRunsTable.id });
                 insertedCheckRunIds = inserted.map((r) => r.id);
               }
 

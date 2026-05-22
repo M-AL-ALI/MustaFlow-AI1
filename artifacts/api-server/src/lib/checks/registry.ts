@@ -7,10 +7,14 @@ export type CheckCategory =
   | "performance"
   | "privacy";
 
+export type CheckPlatform = "web" | "mobile" | "any";
+
 export type CheckDefinition = {
   name: string;
   category: CheckCategory;
   trigger: CheckTrigger;
+  /** Restricts the check to a specific project platform. Defaults to "any". */
+  platform?: CheckPlatform;
   description: string;
   fixPrompt: string;
 };
@@ -105,6 +109,26 @@ export const CHECK_REGISTRY: CheckDefinition[] = [
       "Privacy and compliance scan: detects known tracker scripts (Google Analytics, Facebook Pixel, Hotjar, Intercom, Mixpanel, Amplitude, Segment, TikTok Pixel) loaded without a consent mechanism, fetch/XHR calls to external third-party endpoints, sensitive fields (email, password, phone, SSN, card) stored in localStorage/sessionStorage, and missing privacy policy links. Run when the app has forms, external scripts, analytics, or user-facing pages.",
     fixPrompt:
       "Fix all privacy and compliance issues in the generated app: add a cookie consent banner that loads tracker scripts only after the user accepts cookies, add a privacy policy link in the app footer, replace any direct storage of sensitive fields (email, password, phone) in localStorage/sessionStorage with safer alternatives, and document all external data flows in the privacy policy.",
+  },
+  {
+    name: "eslint",
+    category: "quality",
+    trigger: "agent-selected",
+    platform: "web",
+    description:
+      "ESLint with eslint:recommended rules against generated JS files and HTML inline scripts. Catches no-unused-vars, no-undef, no-console, eqeqeq, and other common code quality issues. Run for web projects when JS files were added or changed.",
+    fixPrompt:
+      "Fix all ESLint issues in the generated code: remove or use unused variables, define any undeclared variables, replace == with ===, remove console.log statements left in production code, and address other code quality warnings. Do not change functionality — only fix the flagged issues.",
+  },
+  {
+    name: "typescript",
+    category: "quality",
+    trigger: "always",
+    platform: "mobile",
+    description:
+      "TypeScript type-checker (tsc --noEmit) against generated .ts/.tsx files in a minimal Expo SDK 52 tsconfig. Always runs for mobile projects — TypeScript errors would prevent the Expo app from compiling.",
+    fixPrompt:
+      "Fix all TypeScript type errors in the generated Expo/React Native code. Address each error at the indicated file and line: correct wrong types, add missing imports, fix incompatible prop types, add required type annotations, and resolve module resolution errors. Do not change functionality — only fix the type errors.",
   },
 ];
 

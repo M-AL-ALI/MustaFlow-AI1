@@ -1,12 +1,4 @@
-import {
-  pgTable,
-  serial,
-  integer,
-  text,
-  timestamp,
-  uniqueIndex,
-  index,
-} from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 import { checkRunsTable } from "./check-runs";
 

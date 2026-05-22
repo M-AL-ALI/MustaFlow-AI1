@@ -21,7 +21,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser, useClerk } from "@clerk/react";
-import { useGetSecurityBadgeCount } from "@workspace/api-client-react";
+import {
+  useGetSecurityBadgeCount,
+  getGetSecurityBadgeCountQueryKey,
+} from "@workspace/api-client-react";
 import { useState, useEffect, useCallback } from "react";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
@@ -157,6 +160,7 @@ function SecurityNavItem() {
   const { data } = useGetSecurityBadgeCount({
     query: {
       enabled: !!isSignedIn,
+      queryKey: getGetSecurityBadgeCountQueryKey(),
       refetchInterval: 60000,
     },
   });

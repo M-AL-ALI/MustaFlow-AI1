@@ -1603,9 +1603,8 @@ export default function ProjectWorkspacePage() {
           <div className="flex items-center gap-1.5">
             <ShieldCheck className="h-3 w-3 shrink-0" />
             <span>
-              Scheduled CVE scan found{" "}
-              <strong className="font-semibold">{cveNewCount}</strong> new critical/high{" "}
-              {cveNewCount === 1 ? "vulnerability" : "vulnerabilities"}.{" "}
+              Scheduled CVE scan found <strong className="font-semibold">{cveNewCount}</strong> new
+              critical/high {cveNewCount === 1 ? "vulnerability" : "vulnerabilities"}.{" "}
               <button
                 className="underline underline-offset-2 hover:text-red-300 transition-colors"
                 onClick={() => setActiveTab("checks")}

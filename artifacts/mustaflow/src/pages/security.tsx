@@ -3,6 +3,7 @@ import {
   useGetAccountSecurityFindings,
   useGetSecurityBadgeCount,
   getGetAccountSecurityFindingsQueryKey,
+  getGetSecurityBadgeCountQueryKey,
 } from "@workspace/api-client-react";
 import type { AccountSecurityFinding } from "@workspace/api-client-react";
 import { Link } from "wouter";
@@ -15,9 +16,6 @@ import {
   ShieldAlert,
   AlertTriangle,
   Globe,
-  Lock,
-  KeyRound,
-  ScanSearch,
   ExternalLink,
   FileCode2,
   Clock,
@@ -201,9 +199,7 @@ function FindingRow({ finding }: { finding: AccountSecurityFinding }) {
           <Link href={`/projects/${finding.projectId}?tab=security`}>
             <span className="text-[10px] text-primary hover:underline cursor-pointer flex items-center gap-0.5">
               {finding.projectName}
-              {finding.isPublished && (
-                <Globe className="h-2.5 w-2.5 ml-0.5 text-green-400" />
-              )}
+              {finding.isPublished && <Globe className="h-2.5 w-2.5 ml-0.5 text-green-400" />}
               <ExternalLink className="h-2.5 w-2.5 ml-0.5" />
             </span>
           </Link>
@@ -293,7 +289,7 @@ export default function SecurityPage() {
   });
 
   const { data: badgeData } = useGetSecurityBadgeCount({
-    query: { refetchInterval: 60000 },
+    query: { queryKey: getGetSecurityBadgeCountQueryKey(), refetchInterval: 60000 },
   });
 
   const load = useCallback(async () => {
@@ -360,9 +356,7 @@ export default function SecurityPage() {
           <div className="flex items-center gap-2">
             <ShieldAlert className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold text-foreground">Project Findings</h2>
-            <span className="text-xs text-muted-foreground">
-              Published projects appear first
-            </span>
+            <span className="text-xs text-muted-foreground">Published projects appear first</span>
           </div>
           <div className="flex items-center gap-1 bg-muted/60 rounded-lg p-0.5">
             {(["open", "dismissed", "fixed"] as FindingStatus[]).map((s) => (

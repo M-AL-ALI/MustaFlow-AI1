@@ -29,6 +29,7 @@ import {
   ChevronDown,
   ChevronUp,
   Code2,
+  FileCode,
   KeyRound,
   ScanSearch,
   Globe,
@@ -152,6 +153,18 @@ const CHECK_META: Record<
     Icon: Globe,
     fixPrompt:
       "Update all CDN script and stylesheet URLs to the latest stable secure versions. Replace any vulnerable or outdated library URLs in <script src> and <link href> tags with their current versions from cdnjs.cloudflare.com or jsdelivr.com.",
+  },
+  eslint: {
+    label: "ESLint",
+    Icon: Code2,
+    fixPrompt:
+      "Fix all ESLint issues in the generated code: remove or use unused variables, define any undeclared variables, replace == with ===, remove console.log statements left in production code, and address other code quality warnings.",
+  },
+  typescript: {
+    label: "TypeScript",
+    Icon: FileCode,
+    fixPrompt:
+      "Fix all TypeScript type errors in the generated Expo/React Native code: correct wrong types, add missing imports, fix incompatible prop types, add required type annotations, and resolve module resolution errors.",
   },
 };
 
@@ -426,10 +439,12 @@ function CategorySection({
 
 function ChecksSection({
   projectId,
+  isMobile,
   onSecurityReview,
   onSendMessage,
 }: {
   projectId: number;
+  isMobile?: boolean;
   onSecurityReview: () => void;
   onSendMessage?: (text: string) => void;
 }) {
@@ -483,7 +498,15 @@ function ChecksSection({
     });
   };
 
-  const latestRuns = runs ?? [];
+  const allRuns = runs ?? [];
+
+  // Platform-aware filtering: ESLint only for web, TypeScript only for mobile
+  const latestRuns = allRuns.filter((run) => {
+    if (run.checkName === "eslint" && isMobile) return false;
+    if (run.checkName === "typescript" && !isMobile) return false;
+    return true;
+  });
+
   const autoFixEnabled = project?.autoFixOnCheckFailure ?? false;
 
   const passed = latestRuns.filter((r) => r.status === "pass").length;
@@ -771,12 +794,18 @@ function PrivacyFindingRow({ finding }: { finding: CheckRunFinding }) {
 
 export function QualityPanel({
   projectId,
+  projectKind,
   onSendMessage,
 }: {
   projectId: number;
+  projectKind?: string;
   onSendMessage?: (text: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const isMobile =
+    projectKind === "mobile-cross" ||
+    projectKind === "mobile-ios" ||
+    projectKind === "mobile-android";
 
   const {
     data: audit,
@@ -793,7 +822,7 @@ export function QualityPanel({
   const handleRefresh = () => {
     void queryClient.invalidateQueries({ queryKey: getGetProjectAuditQueryKey(projectId) });
     void queryClient.invalidateQueries({
-      queryKey: getGetCheckRunsQueryKey(projectId, PRIVACY_CHECK_PARAMS),
+      queryKey: getGetCheckRunsQueryKey(projectId),
     });
   };
 
@@ -807,6 +836,7 @@ export function QualityPanel({
     <div className="space-y-6 p-1">
       <ChecksSection
         projectId={projectId}
+        isMobile={isMobile}
         onSecurityReview={() => {
           void queryClient.invalidateQueries({ queryKey: getGetCheckRunsQueryKey(projectId) });
         }}

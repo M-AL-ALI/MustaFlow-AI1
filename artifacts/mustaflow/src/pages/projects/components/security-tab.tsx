@@ -17,7 +17,6 @@ import {
   Search,
   Zap,
   AlertTriangle,
-  XCircle,
   CheckCircle2,
   RefreshCw,
   ChevronDown,
@@ -74,17 +73,16 @@ const SEVERITY_CONFIG: Record<
   },
 };
 
-const CHECK_TYPE_META: Record<string, { label: string; Icon: React.FC<{ className?: string }> }> =
-  {
-    "secret-leak": { label: "Secret Leak", Icon: KeyRound },
-    sast: { label: "SAST", Icon: ScanSearch },
-    "cdn-security": { label: "CDN Security", Icon: Globe },
-    "code-quality": { label: "Code Quality", Icon: Code2 },
-    accessibility: { label: "Accessibility", Icon: Eye },
-    seo: { label: "SEO", Icon: Search },
-    performance: { label: "Performance", Icon: Zap },
-    security: { label: "Security", Icon: ShieldAlert },
-  };
+const CHECK_TYPE_META: Record<string, { label: string; Icon: React.FC<{ className?: string }> }> = {
+  "secret-leak": { label: "Secret Leak", Icon: KeyRound },
+  sast: { label: "SAST", Icon: ScanSearch },
+  "cdn-security": { label: "CDN Security", Icon: Globe },
+  "code-quality": { label: "Code Quality", Icon: Code2 },
+  accessibility: { label: "Accessibility", Icon: Eye },
+  seo: { label: "SEO", Icon: Search },
+  performance: { label: "Performance", Icon: Zap },
+  security: { label: "Security", Icon: ShieldAlert },
+};
 
 function getCheckMeta(checkType: string) {
   return CHECK_TYPE_META[checkType] ?? { label: checkType, Icon: ShieldAlert };
@@ -228,9 +226,7 @@ function SummaryBar({ findings }: { findings: SecurityFinding[] }) {
     <div
       className={cn(
         "flex items-center gap-2 flex-wrap p-3 rounded-lg border",
-        hasCriticalOrHigh
-          ? "bg-red-500/5 border-red-500/20"
-          : "bg-green-500/5 border-green-500/20",
+        hasCriticalOrHigh ? "bg-red-500/5 border-red-500/20" : "bg-green-500/5 border-green-500/20",
       )}
     >
       {hasCriticalOrHigh ? (
@@ -306,9 +302,7 @@ function CheckTypeGroup({
             {openCount} open
           </span>
         )}
-        {openCount === 0 && (
-          <span className="text-[10px] text-green-400">All resolved</span>
-        )}
+        {openCount === 0 && <span className="text-[10px] text-green-400">All resolved</span>}
         {expanded ? (
           <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         ) : (
@@ -389,7 +383,7 @@ export function SecurityTab({ projectId }: { projectId: number }) {
     return 0;
   });
 
-  const dismissedFindings = statusFilter === "dismissed" ? findings : [];
+  const _dismissedFindings = statusFilter === "dismissed" ? findings : [];
 
   return (
     <div className="space-y-4 p-1">

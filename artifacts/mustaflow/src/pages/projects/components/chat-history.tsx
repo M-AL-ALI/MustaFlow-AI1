@@ -460,8 +460,7 @@ function InlineReportCard({
 
   // Show the spinner badge when we're actively waiting (no results yet in either prop or live data).
   const testsPending =
-    couldHaveTests &&
-    (effectiveTestResults === null || effectiveTestResults === undefined);
+    couldHaveTests && (effectiveTestResults === null || effectiveTestResults === undefined);
   return (
     <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
       <div className="flex items-center gap-2 font-semibold text-foreground">

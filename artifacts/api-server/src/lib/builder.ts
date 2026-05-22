@@ -1,6 +1,7 @@
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { parse as acornParse } from "acorn";
 import { checkSyntax, formatSyntaxErrors } from "./checks/syntax-checker";
+import { runTsCheck, formatTsErrors } from "./checks/ts-checker";
 import { logger } from "./logger";
 import type { AgentMode } from "./ai";
 import type { TaskReport } from "@workspace/db";
@@ -4649,10 +4650,83 @@ export async function runMobileBuildPipeline(args: {
     files = autoCorrectPackageJson(files, detectedModuleIds);
   }
 
+  // TypeScript check — blocking for mobile builds. Retry once with errors as context.
+  await onEvent?.("validating_output", "Running TypeScript type-check…");
+  const tsResult = await runTsCheck(files);
+  let tsCheckFailed = false;
+  let tsErrors = tsResult.errors;
+
+  if (tsResult.errors.length > 0) {
+    logger.warn(
+      { errorCount: tsResult.errors.length },
+      "Mobile build: TypeScript errors found — running TS correction pass",
+    );
+    await onEvent?.(
+      "validating_output",
+      `TypeScript: ${tsResult.errors.length} error(s) — running correction…`,
+    );
+
+    const tsErrorText = formatTsErrors(tsResult.errors);
+    const tsCorrection: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      ...messages,
+      { role: "assistant", content: JSON.stringify(parsed) },
+      {
+        role: "user",
+        content: `The generated TypeScript files have type errors that would prevent the app from compiling. Fix all errors below and return ONLY the corrected files with full content:\n\n${tsErrorText}`,
+      },
+    ];
+
+    try {
+      const tsCorrected = await callWithRetry(
+        tsCorrection,
+        modelFor(agentMode),
+        32000,
+        "mobile-ts-correction",
+      );
+      const tsCorrectedRaw = Array.isArray(tsCorrected.files) ? tsCorrected.files : [];
+      const tsCorrectedFiles: BuilderFile[] = tsCorrectedRaw
+        .filter(
+          (f): f is { path: string; content: string; mimeType?: string } =>
+            typeof f === "object" &&
+            f !== null &&
+            typeof (f as { path?: unknown }).path === "string" &&
+            typeof (f as { content?: unknown }).content === "string",
+        )
+        .map((f) => ({
+          path: normalizePath(f.path),
+          content: f.content,
+          mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+        }));
+
+      const mergedMap = new Map(files.map((f) => [f.path, f]));
+      for (const cf of tsCorrectedFiles) mergedMap.set(cf.path, cf);
+      files = [...mergedMap.values()];
+
+      // Re-check after correction — surface remaining errors without blocking further
+      const tsRecheck = await runTsCheck(files);
+      tsErrors = tsRecheck.errors;
+      if (tsRecheck.errors.length > 0) {
+        logger.warn(
+          { remaining: tsRecheck.errors.length },
+          "Mobile build: TypeScript errors remain after correction pass",
+        );
+        tsCheckFailed = true;
+      }
+    } catch (err) {
+      logger.warn({ err }, "Mobile TS correction pass failed — using pre-correction output");
+      tsCheckFailed = true;
+    }
+  }
+
   const aiWarnings = Array.isArray(parsed.warnings)
     ? parsed.warnings.filter((w): w is string => typeof w === "string")
     : [];
-  const warnings = [...aiWarnings, ...mobileValidation.warnings];
+  const tsWarnings = tsCheckFailed
+    ? [
+        `TypeScript check: ${tsErrors.length} error(s) remain after correction. The app may not compile correctly.`,
+      ]
+    : [];
+  const warnings = [...aiWarnings, ...mobileValidation.warnings, ...tsWarnings];
 
   const summary = cleanSummary(
     typeof parsed.summary === "string" ? parsed.summary : null,

@@ -197,7 +197,9 @@ router.get(
         severityFilter &&
         validSeverities.includes(severityFilter as (typeof validSeverities)[number])
       ) {
-        conditions.push(eq(securityFindingsTable.severity, severityFilter as SecurityFindingSeverity));
+        conditions.push(
+          eq(securityFindingsTable.severity, severityFilter as SecurityFindingSeverity),
+        );
       }
 
       const findings = await db
@@ -405,10 +407,7 @@ interface NpmLsOutput {
   dependencies?: Record<string, NpmLsPackage>;
 }
 
-function collectPackages(
-  deps: Record<string, NpmLsPackage>,
-  seen: Map<string, string>,
-): void {
+function collectPackages(deps: Record<string, NpmLsPackage>, seen: Map<string, string>): void {
   for (const [name, pkg] of Object.entries(deps)) {
     if (!pkg.version) continue;
     const key = `${name}@${pkg.version}`;

@@ -1117,7 +1117,11 @@ export function ToolsTab({
             </TabsContent>
 
             <TabsContent value="quality" className="h-full m-0 p-4">
-              <QualityPanel projectId={projectId} onSendMessage={onSendMessage} />
+              <QualityPanel
+                projectId={projectId}
+                projectKind={projectKind}
+                onSendMessage={onSendMessage}
+              />
             </TabsContent>
 
             {isMobile && (

@@ -24,6 +24,8 @@ import {
 } from "./auditor-adapter";
 import { runSemgrepCheck } from "./semgrep";
 import { runPrivacyCheck } from "./privacy";
+import { runEslintCheck } from "./eslint-runner";
+import { runTsCheck } from "./ts-checker";
 
 export type CheckSelectionItem = {
   checkName: string;
@@ -195,6 +197,14 @@ async function runCheckByName(
       const r = runPrivacyCheck(files);
       return { status: r.status, findings: r.findings };
     }
+    case "eslint": {
+      const r = runEslintCheck(files);
+      return { status: r.status, findings: r.findings };
+    }
+    case "typescript": {
+      const r = await runTsCheck(files);
+      return { status: r.status, findings: r.findings };
+    }
     default:
       return { status: "skipped", findings: [] };
   }
@@ -224,6 +234,8 @@ export async function runOrchestration(
     ]),
   ];
 
+  const isMobileProject = ["mobile-ios", "mobile-android", "mobile-cross"].includes(projectKind);
+
   const checkTasks = allCheckNames.map(async (name) => {
     const def = CHECK_REGISTRY.find((c) => c.name === name);
     const selection = selectionMap.get(name);
@@ -234,6 +246,12 @@ export async function runOrchestration(
     if (!def) {
       shouldRun = false;
       reason = "Unknown check — skipped.";
+    } else if (def.platform === "mobile" && !isMobileProject) {
+      shouldRun = false;
+      reason = "Mobile-only check — skipped for web projects.";
+    } else if (def.platform === "web" && isMobileProject) {
+      shouldRun = false;
+      reason = "Web-only check — skipped for mobile projects.";
     } else if (def.trigger === "always") {
       shouldRun = true;
       reason = "Always-on check — runs after every build.";
