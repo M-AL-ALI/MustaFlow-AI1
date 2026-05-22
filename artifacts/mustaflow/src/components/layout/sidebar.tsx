@@ -162,6 +162,7 @@ function SecurityNavItem() {
       enabled: !!isSignedIn,
       queryKey: getGetSecurityBadgeCountQueryKey(),
       refetchInterval: 60000,
+      queryKey: getGetSecurityBadgeCountQueryKey(),
     },
   });
   const count = data?.count ?? 0;

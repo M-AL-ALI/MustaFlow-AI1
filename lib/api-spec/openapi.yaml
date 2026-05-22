@@ -167,6 +167,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/SecurityBadgeCount"
 
+  /security/badge/by-project:
+    get:
+      operationId: getSecurityBadgeCountsByProject
+      tags: [security-findings]
+      summary: Open critical+high findings counts per project for the authenticated user.
+      responses:
+        "200":
+          description: Per-project badge counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecurityBadgeCountsByProject"
+
   /projects/{id}/check-runs:
     get:
       operationId: getCheckRuns
@@ -4682,3 +4695,12 @@ components:
       required: [count]
       properties:
         count: { type: integer }
+
+    SecurityBadgeCountsByProject:
+      type: object
+      required: [counts]
+      properties:
+        counts:
+          type: object
+          description: Map of projectId (as string) → open critical+high finding count.
+          additionalProperties: { type: integer }

@@ -4,6 +4,8 @@ import {
   useGetProjectsSummary,
   useGetRecentActivity,
   useCreateProject,
+  useGetSecurityBadgeCountsByProject,
+  getGetSecurityBadgeCountsByProjectQueryKey,
   getListProjectsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -29,7 +31,21 @@ import {
   Rocket,
   Eye,
   Heart,
+  ShieldAlert,
 } from "lucide-react";
+
+function SecurityFindingsBadge({ count }: { count: number }) {
+  if (!count) return null;
+  return (
+    <span
+      title={`${count} open critical or high security finding${count === 1 ? "" : "s"}`}
+      className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border text-destructive bg-destructive/10 border-destructive/20"
+    >
+      <ShieldAlert className="h-2.5 w-2.5" />
+      {count} critical/high
+    </span>
+  );
+}
 
 function HealthBadge({ score }: { score: number }) {
   const color =
@@ -268,6 +284,9 @@ function GettingStartedChecklist({
 export default function ProjectsPage() {
   const { data: summary } = useGetProjectsSummary();
   const { data: activity } = useGetRecentActivity();
+  const { data: securityCounts } = useGetSecurityBadgeCountsByProject({
+    query: { queryKey: getGetSecurityBadgeCountsByProjectQueryKey() },
+  });
   const [modalOpen, setModalOpen] = useState(false);
 
   const hasProjects = (summary?.recent?.length ?? 0) > 0;
@@ -387,12 +406,17 @@ export default function ProjectsPage() {
                       <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
                         {project.description || "No description provided."}
                       </p>
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center text-xs text-muted-foreground gap-2">
                           <Clock className="h-3 w-3" />
                           Updated {new Date(project.updatedAt).toLocaleDateString()}
                         </div>
-                        <HealthBadge score={project.healthScore ?? 0} />
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                          <SecurityFindingsBadge
+                            count={securityCounts?.counts?.[String(project.id)] ?? 0}
+                          />
+                          <HealthBadge score={project.healthScore ?? 0} />
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

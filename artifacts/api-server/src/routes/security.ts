@@ -396,6 +396,54 @@ router.get("/security/badge", async (req, res): Promise<void> => {
   }
 });
 
+/**
+ * GET /security/badge/by-project
+ * Returns open critical+high finding counts grouped by projectId.
+ */
+router.get("/security/badge/by-project", async (req, res): Promise<void> => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const projects = await db
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.ownerId, userId), isNull(projectsTable.deletedAt)));
+
+    if (projects.length === 0) {
+      res.json({ counts: {} });
+      return;
+    }
+
+    const projectIds = projects.map((p) => p.id);
+
+    const findings = await db
+      .select({ projectId: securityFindingsTable.projectId })
+      .from(securityFindingsTable)
+      .where(
+        and(
+          inArray(securityFindingsTable.projectId, projectIds),
+          eq(securityFindingsTable.status, "open"),
+          inArray(securityFindingsTable.severity, ["critical", "high"]),
+        ),
+      );
+
+    const counts: Record<string, number> = {};
+    for (const f of findings) {
+      const key = String(f.projectId);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+
+    res.json({ counts });
+  } catch (err) {
+    logger.error({ err, userId }, "Failed to fetch per-project security badge counts");
+    res.status(500).json({ error: "Failed to fetch per-project badge counts" });
+  }
+});
+
 interface NpmLsPackage {
   version?: string;
   dependencies?: Record<string, NpmLsPackage>;

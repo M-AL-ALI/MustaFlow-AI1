@@ -150,6 +150,7 @@ import type {
   SecretInput,
   SecretVerifyResult,
   SecurityBadgeCount,
+  SecurityBadgeCountsByProject,
   SecurityFinding,
   SelectGithubRepository200,
   SetProjectSubdomain400,
@@ -644,6 +645,83 @@ export function useGetSecurityBadgeCount<TData = Awaited<ReturnType<typeof getSe
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetSecurityBadgeCountQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetSecurityBadgeCountsByProjectUrl = () => {
+
+
+
+
+  return `/api/security/badge/by-project`
+}
+
+/**
+ * @summary Open critical+high findings counts per project for the authenticated user.
+ */
+export const getSecurityBadgeCountsByProject = async ( options?: RequestInit): Promise<SecurityBadgeCountsByProject> => {
+
+  return customFetch<SecurityBadgeCountsByProject>(getGetSecurityBadgeCountsByProjectUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSecurityBadgeCountsByProjectQueryKey = () => {
+    return [
+    `/api/security/badge/by-project`
+    ] as const;
+    }
+
+
+export const getGetSecurityBadgeCountsByProjectQueryOptions = <TData = Awaited<ReturnType<typeof getSecurityBadgeCountsByProject>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSecurityBadgeCountsByProject>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSecurityBadgeCountsByProjectQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSecurityBadgeCountsByProject>>> = ({ signal }) => getSecurityBadgeCountsByProject({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSecurityBadgeCountsByProject>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSecurityBadgeCountsByProjectQueryResult = NonNullable<Awaited<ReturnType<typeof getSecurityBadgeCountsByProject>>>
+export type GetSecurityBadgeCountsByProjectQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Open critical+high findings counts per project for the authenticated user.
+ */
+
+export function useGetSecurityBadgeCountsByProject<TData = Awaited<ReturnType<typeof getSecurityBadgeCountsByProject>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSecurityBadgeCountsByProject>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSecurityBadgeCountsByProjectQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

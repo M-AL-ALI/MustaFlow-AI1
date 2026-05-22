@@ -247,6 +247,8 @@ export * from './secretInputEnvironment';
 export * from './secretVerifyResult';
 export * from './secretVerifyResultStatus';
 export * from './securityBadgeCount';
+export * from './securityBadgeCountsByProject';
+export * from './securityBadgeCountsByProjectCounts';
 export * from './securityFinding';
 export * from './securityFindingSeverity';
 export * from './securityFindingsSummary';

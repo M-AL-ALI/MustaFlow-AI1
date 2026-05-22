@@ -150,6 +150,14 @@ export const GetSecurityBadgeCountResponse = zod.object({
 
 
 /**
+ * @summary Open critical+high findings counts per project for the authenticated user.
+ */
+export const GetSecurityBadgeCountsByProjectResponse = zod.object({
+  "counts": zod.record(zod.string(), zod.number()).describe('Map of projectId (as string) → open critical+high finding count.')
+})
+
+
+/**
  * @summary List check runs for a project, optionally filtered by taskId.
  */
 export const GetCheckRunsParams = zod.object({

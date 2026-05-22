@@ -2114,6 +2114,16 @@ export interface SecurityBadgeCount {
   count: number;
 }
 
+/**
+ * Map of projectId (as string) → open critical+high finding count.
+ */
+export type SecurityBadgeCountsByProjectCounts = {[key: string]: number};
+
+export interface SecurityBadgeCountsByProject {
+  /** Map of projectId (as string) → open critical+high finding count. */
+  counts: SecurityBadgeCountsByProjectCounts;
+}
+
 export type ListSecurityFindingsParams = {
 status?: ListSecurityFindingsStatus;
 severity?: ListSecurityFindingsSeverity;
