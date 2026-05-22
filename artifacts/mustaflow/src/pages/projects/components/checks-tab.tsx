@@ -343,11 +343,13 @@ function FileContextSnippet({
 
 function FindingItem({
   projectId,
+  checkName,
   finding,
   fileSummaries,
   onNavigateToFile,
 }: {
   projectId: number;
+  checkName: string;
   finding: CheckRunFinding;
   fileSummaries: ProjectFileSummary[];
   onNavigateToFile?: (filePath: string, line?: number) => void;
@@ -400,11 +402,33 @@ function FindingItem({
       </button>
       {expanded && (
         <div className="px-2.5 pb-2.5 pt-0 space-y-1.5 bg-card/30 border-t border-border">
-          {finding.detail && (
-            <p className="text-[10px] text-muted-foreground leading-relaxed pt-2">
-              {finding.detail}
-            </p>
-          )}
+          {finding.detail &&
+            (() => {
+              const RULE_PREFIX = "Rule: ";
+              if (checkName === "semgrep-sast" && finding.detail.startsWith(RULE_PREFIX)) {
+                const ruleId = finding.detail.slice(RULE_PREFIX.length).trim();
+                return (
+                  <p className="text-[10px] text-muted-foreground leading-relaxed pt-2">
+                    Rule:{" "}
+                    <a
+                      href={`https://semgrep.dev/r/${ruleId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline inline-flex items-center gap-0.5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {ruleId}
+                      <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                    </a>
+                  </p>
+                );
+              }
+              return (
+                <p className="text-[10px] text-muted-foreground leading-relaxed pt-2">
+                  {finding.detail}
+                </p>
+              );
+            })()}
           {matchedFile && (
             <FileContextSnippet
               projectId={projectId}
@@ -547,6 +571,7 @@ function CheckDetailCard({
                 <FindingItem
                   key={i}
                   projectId={projectId}
+                  checkName={checkName}
                   finding={f}
                   fileSummaries={fileSummaries}
                   onNavigateToFile={onNavigateToFile}

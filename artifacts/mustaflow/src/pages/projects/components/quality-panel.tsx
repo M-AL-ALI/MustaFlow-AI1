@@ -145,7 +145,7 @@ const CHECK_META: Record<
     label: "Performance",
     Icon: Zap,
     fixPrompt:
-      "Fix all performance issues in the generated app: add defer or async attributes to render-blocking <script> tags in the <head>, add explicit width and height attributes to all images to prevent layout shifts, and add loading=\"lazy\" to below-the-fold images.",
+      'Fix all performance issues in the generated app: add defer or async attributes to render-blocking <script> tags in the <head>, add explicit width and height attributes to all images to prevent layout shifts, and add loading="lazy" to below-the-fold images.',
   },
   "cdn-security": {
     label: "CDN Security",
@@ -222,9 +222,7 @@ function CheckRunCard({
   const Icon = meta.Icon;
   const findings = (run.findings ?? []) as CheckRunFinding[];
   const canFix =
-    (run.status === "fail" || run.status === "warning") &&
-    !!meta.fixPrompt &&
-    !!onSendMessage;
+    (run.status === "fail" || run.status === "warning") && !!meta.fixPrompt && !!onSendMessage;
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">

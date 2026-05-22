@@ -2049,11 +2049,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               // Guard: skip if the triggering task is itself an auto-fix (title
               // starts with "Auto-fix:") to prevent cascading loops.
               const isAutoFixTask = (input.userPrompt ?? "").startsWith("Auto-fix:");
-              if (
-                project.autoFixOnCheckFailure &&
-                checkRunsSummary.failed > 0 &&
-                !isAutoFixTask
-              ) {
+              if (project.autoFixOnCheckFailure && checkRunsSummary.failed > 0 && !isAutoFixTask) {
                 try {
                   const failedRuns = runs.filter((r) => r.status === "fail");
                   const fixParts: string[] = [];
