@@ -6871,19 +6871,79 @@ export type IntentResult = {
 
 const INTENT_CLASSIFIER_SYSTEM = `You are a router for an AI app-builder chat. Given the user's latest message and recent conversation history, classify the user's intent into exactly one of:
 
-- "converse": The user is asking a question, requesting an explanation, asking for advice, or having a general conversation about their app. Examples: "How does my auth flow work?", "What's the difference between X and Y?", "Explain the file structure", "What does this code do?"
+- "converse": The user is asking a question, requesting an explanation, asking for advice, reacting to a previous result, or having a general conversation about their app. Examples: "How does my auth flow work?", "What's the difference between X and Y?", "Explain the file structure", "What does this code do?", "So what happened?", "Why did that fail?", "What do you mean?", "Can you explain that?", "Is this safe?", "Wait, what?", "Hmm", "ok", "thanks", "what's next?", "is it ready?".
 - "plan": The user wants a structured plan, architecture overview, or design spec before building. Examples: "Plan me a dashboard", "Design the data model", "What should I build first?", "Create an architecture plan for..."
-- "build": The user wants to create, modify, add, remove, or fix something in the app. Examples: "Add a dark mode toggle", "Fix the login bug", "Create a settings page", "Remove the sidebar", "Make it mobile-friendly"
+- "build": The user is explicitly requesting a code change — to create, modify, add, remove, fix, or refactor something in the app. The message MUST contain a clear action directed at the app's code. Examples: "Add a dark mode toggle", "Fix the login bug", "Create a settings page", "Remove the sidebar", "Make it mobile-friendly", "Change the header color to blue".
+
+Hard rules (apply BEFORE judging):
+1. If the message is a question (ends with "?", or starts with what/why/how/when/who/where/which/can/could/should/would/is/are/do/does/did) AND does not contain an explicit imperative to change the code → it is "converse", not "build".
+2. Short reactions ("ok", "thanks", "huh?", "hmm", "wait") → always "converse".
+3. Asking about a previous error or task result ("what happened?", "why did it fail?", "what went wrong?") → always "converse". Never treat this as "fix the last error" unless the user explicitly says "fix it" or "try again".
+4. "build" requires an explicit action verb pointed at the code (add/remove/change/fix/build/create/make/update/refactor/style/etc.) — being on-topic about the app is not enough.
 
 Respond with ONLY valid JSON: {"intent": "converse"|"plan"|"build", "confidence": 0.0-1.0}
 
 confidence should reflect how certain you are. Use < 0.7 only when the request is genuinely ambiguous between two intents.`;
+
+// Deterministic fast-path: catch obvious conversational messages without an LLM
+// round-trip. Prevents short questions like "So what happened?" from being
+// misrouted to "build" by gpt-5-nano just because they follow a failed task.
+const BUILD_ACTION_VERBS =
+  /\b(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge|deploy|publish|undo|rollback|try\s*again|retry)\b/i;
+const QUESTION_STARTERS =
+  /^\s*(what|why|how|when|who|where|which|can|could|should|would|is|are|am|do|does|did|will|won't|isn't|aren't|doesn't|didn't)\b/i;
+const SHORT_REACTIONS = new Set([
+  "ok",
+  "okay",
+  "thanks",
+  "thank you",
+  "ty",
+  "huh",
+  "hmm",
+  "wait",
+  "hi",
+  "hello",
+  "yo",
+  "cool",
+  "nice",
+  "got it",
+  "sure",
+  "yes",
+  "no",
+  "lol",
+]);
+
+function fastClassify(userPrompt: string): IntentResult | null {
+  const trimmed = userPrompt.trim();
+  if (!trimmed) return null;
+
+  const normalized = trimmed.toLowerCase().replace(/[.!?…]+$/g, "");
+  if (SHORT_REACTIONS.has(normalized)) {
+    return { intent: "converse", confidence: 0.95 };
+  }
+
+  // If the message contains an explicit build/change action verb, let the LLM decide
+  // (it might still be a question about that verb, e.g. "how do I add auth?").
+  const hasBuildVerb = BUILD_ACTION_VERBS.test(trimmed);
+
+  // Short messages (<= 10 words) that are clearly questions and contain no build
+  // verb are reliably converse.
+  const wordCount = trimmed.split(/\s+/).length;
+  const looksLikeQuestion = trimmed.endsWith("?") || QUESTION_STARTERS.test(trimmed);
+  if (looksLikeQuestion && !hasBuildVerb && wordCount <= 12) {
+    return { intent: "converse", confidence: 0.95 };
+  }
+
+  return null;
+}
 
 export async function runIntentClassifierPipeline(
   userPrompt: string,
   conversationHistory: ConversationTurn[],
   hasFiles: boolean,
 ): Promise<IntentResult> {
+  const fast = fastClassify(userPrompt);
+  if (fast) return fast;
   try {
     const recentHistory = conversationHistory.slice(-4);
     const historyText =
