@@ -91,6 +91,7 @@ import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
 import { WorkspaceTour } from "./components/workspace-tour";
+import { MemoryIndicator } from "./components/memory-indicator";
 import { cn } from "@/lib/utils";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -1866,6 +1867,9 @@ export default function ProjectWorkspacePage() {
                   {showChatHistory ? "Live" : "History"}
                 </button>
               </div>
+
+              {/* Memory indicator — shown when the AI has a conversation summary */}
+              {!showChatHistory && <MemoryIndicator projectId={projectId} />}
 
               {/* Chat History overlay */}
               {showChatHistory && (

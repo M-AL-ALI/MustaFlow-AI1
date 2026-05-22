@@ -186,4 +186,43 @@ router.patch("/knowledge/:id", async (req, res): Promise<void> => {
   res.json(updated);
 });
 
+// DELETE /api/knowledge/:id — hard-delete a knowledge entry.
+// Authorization: requester must own the entry (entry.userId === req.userId) OR be admin.
+// System entries (userId = null) can only be deleted by admin.
+router.delete("/knowledge/:id", async (req, res): Promise<void> => {
+  const entryId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(entryId)) {
+    res.status(400).json({ error: "Invalid entry id" });
+    return;
+  }
+
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  const [existing] = await db
+    .select()
+    .from(knowledgeEntriesTable)
+    .where(eq(knowledgeEntriesTable.id, entryId));
+
+  if (!existing) {
+    res.status(404).json({ error: "Entry not found" });
+    return;
+  }
+
+  const isOwner = existing.userId !== null && existing.userId === userId;
+  const isAdmin = await isAdminUser(userId);
+
+  if (!isOwner && !isAdmin) {
+    res.status(403).json({ error: "You do not have permission to delete this entry" });
+    return;
+  }
+
+  await db.delete(knowledgeEntriesTable).where(eq(knowledgeEntriesTable.id, entryId));
+
+  res.json({ deleted: true });
+});
+
 export default router;
