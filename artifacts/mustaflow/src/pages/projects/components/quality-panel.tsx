@@ -1,5 +1,15 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { unifiedDiff, countChangedLines } from "@/lib/line-diff";
 import {
   useGetProjectAudit,
   getGetProjectAuditQueryKey,
@@ -1104,6 +1114,194 @@ type FixAllResult = {
   }>;
 };
 
+type FixAllProposal = FixAllResult["results"][number] & {
+  before?: string;
+  after?: string;
+};
+
+function DiffPreview({ before, after }: { before: string; after: string }) {
+  const hunks = useMemo(() => unifiedDiff(before, after, 3), [before, after]);
+  if (hunks.length === 0) {
+    return <div className="text-[10px] text-muted-foreground px-3 py-2">No textual changes.</div>;
+  }
+  return (
+    <div className="font-mono text-[11px] leading-snug bg-background border-t border-border max-h-72 overflow-auto">
+      {hunks.map((h, hi) => (
+        <div key={hi}>
+          <div className="px-3 py-1 text-[10px] text-muted-foreground bg-muted/40 border-b border-border">
+            @@ -{h.oldStart},{h.lines.filter((l) => l.type !== "add").length} +{h.newStart},
+            {h.lines.filter((l) => l.type !== "del").length} @@
+          </div>
+          {h.lines.map((l, li) => {
+            const bg =
+              l.type === "add"
+                ? "bg-emerald-500/10 text-emerald-300"
+                : l.type === "del"
+                  ? "bg-red-500/10 text-red-300"
+                  : "text-muted-foreground";
+            const sign = l.type === "add" ? "+" : l.type === "del" ? "-" : " ";
+            return (
+              <div key={li} className={`flex ${bg}`}>
+                <span className="w-5 shrink-0 text-center select-none opacity-60">{sign}</span>
+                <span className="whitespace-pre-wrap break-all flex-1 pr-2">{l.text || " "}</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ReviewDialog({
+  open,
+  onOpenChange,
+  proposals,
+  isApplying,
+  onApply,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  proposals: FixAllProposal[];
+  isApplying: boolean;
+  onApply: (selectedIds: number[]) => void;
+}) {
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  // Initialise selection to all changed files whenever the dialog opens with new proposals.
+  useEffect(() => {
+    if (open) {
+      setSelected(new Set(proposals.filter((p) => p.changed).map((p) => p.fileId)));
+      setExpanded(new Set());
+    }
+  }, [open, proposals]);
+
+  const changed = proposals.filter((p) => p.changed);
+  const allChecked = changed.length > 0 && changed.every((p) => selected.has(p.fileId));
+  const noneChecked = selected.size === 0;
+
+  const toggleAll = () => {
+    if (allChecked) setSelected(new Set());
+    else setSelected(new Set(changed.map((p) => p.fileId)));
+  };
+
+  const toggle = (id: number) => {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleExpanded = (id: number) => {
+    setExpanded((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Review auto-fix changes</DialogTitle>
+          <DialogDescription>
+            {changed.length === 0
+              ? "Nothing to apply — no auto-fixable issues were found."
+              : `${changed.length} file${changed.length === 1 ? "" : "s"} would change. Uncheck any you want to skip, then Apply.`}
+          </DialogDescription>
+        </DialogHeader>
+
+        {changed.length > 0 && (
+          <div className="flex items-center justify-between border-b border-border pb-2">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+              <Checkbox checked={allChecked} onCheckedChange={toggleAll} aria-label="Select all" />
+              Select all ({changed.length})
+            </label>
+            <span className="text-[10px] text-muted-foreground">
+              {selected.size} of {changed.length} selected
+            </span>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+          {changed.map((p) => {
+            const isExpanded = expanded.has(p.fileId);
+            const isChecked = selected.has(p.fileId);
+            const diffCounts =
+              p.before !== undefined && p.after !== undefined
+                ? countChangedLines(p.before, p.after)
+                : { added: 0, removed: 0 };
+            return (
+              <div
+                key={p.fileId}
+                className="border border-border rounded-md overflow-hidden bg-card"
+              >
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <Checkbox
+                    checked={isChecked}
+                    onCheckedChange={() => toggle(p.fileId)}
+                    aria-label={`Include ${p.path}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleExpanded(p.fileId)}
+                    className="flex-1 min-w-0 flex items-center gap-2 text-left"
+                  >
+                    <FileCode className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs font-mono text-foreground truncate">{p.path}</span>
+                    <span className="text-[10px] text-emerald-400 ml-auto shrink-0">
+                      +{diffCounts.added}
+                    </span>
+                    <span className="text-[10px] text-red-400 shrink-0">-{diffCounts.removed}</span>
+                    <span className="text-[10px] text-muted-foreground shrink-0">
+                      {p.fixedCount} fix{p.fixedCount === 1 ? "" : "es"}
+                    </span>
+                    {isExpanded ? (
+                      <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    )}
+                  </button>
+                </div>
+                {isExpanded && p.before !== undefined && p.after !== undefined && (
+                  <DiffPreview before={p.before} after={p.after} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <DialogFooter className="border-t border-border pt-3">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isApplying}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => onApply(Array.from(selected))}
+            disabled={isApplying || noneChecked || changed.length === 0}
+          >
+            {isApplying ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Applying…
+              </>
+            ) : (
+              <>
+                <Wrench className="h-3.5 w-3.5 mr-1.5" />
+                Apply to {selected.size} file{selected.size === 1 ? "" : "s"}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ProjectAutoFixSection({
   projectId,
   onNavigateToFile,
@@ -1113,51 +1311,93 @@ function ProjectAutoFixSection({
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [isFixing, setIsFixing] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [proposals, setProposals] = useState<FixAllProposal[] | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [lastResult, setLastResult] = useState<FixAllResult | null>(null);
 
-  const handleFixAll = async () => {
-    if (isFixing) return;
-    setIsFixing(true);
+  const handlePreview = async () => {
+    if (isPreviewing || isApplying) return;
+    setIsPreviewing(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/eslint-fix-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dryRun: true }),
+      });
+      if (!res.ok) {
+        toast({
+          title: "Auto-fix preview failed",
+          description: "Could not compute proposed changes. Try again later.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const data = (await res.json()) as FixAllResult & {
+        results: FixAllProposal[];
+      };
+      const changed = data.results.filter((r) => r.changed);
+      if (changed.length === 0) {
+        toast({
+          title: "Nothing to fix",
+          description: `Scanned ${data.filesScanned} file${data.filesScanned === 1 ? "" : "s"} — no auto-fixable issues found.`,
+        });
+        setProposals(null);
+        setReviewOpen(false);
+        return;
+      }
+      setProposals(data.results);
+      setReviewOpen(true);
+    } catch {
+      toast({
+        title: "Auto-fix preview failed",
+        description: "Network error while previewing fixes.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
+  const handleApply = async (fileIds: number[]) => {
+    if (isApplying || fileIds.length === 0) return;
+    setIsApplying(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/eslint-fix-all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds }),
       });
       if (!res.ok) {
         toast({
           title: "Auto-fix failed",
-          description: "Could not run project-wide ESLint auto-fix. Try again later.",
+          description: "Could not apply selected fixes. Try again later.",
           variant: "destructive",
         });
         return;
       }
       const data = (await res.json()) as FixAllResult;
       setLastResult(data);
+      setReviewOpen(false);
+      setProposals(null);
 
       // Refresh any open file content + version history.
       void queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "files"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "versions"] });
 
-      if (data.filesFixed === 0) {
-        toast({
-          title: "Nothing to fix",
-          description: `Scanned ${data.filesScanned} file${data.filesScanned === 1 ? "" : "s"} — no auto-fixable issues found.`,
-        });
-      } else {
-        toast({
-          title: "Auto-fixes applied",
-          description: `Fixed ${data.fixedCount} issue${data.fixedCount === 1 ? "" : "s"} across ${data.filesFixed} file${data.filesFixed === 1 ? "" : "s"}. ${data.remainingCount} remain.`,
-        });
-      }
+      toast({
+        title: "Auto-fixes applied",
+        description: `Fixed ${data.fixedCount} issue${data.fixedCount === 1 ? "" : "s"} across ${data.filesFixed} file${data.filesFixed === 1 ? "" : "s"}. ${data.remainingCount} remain.`,
+      });
     } catch {
       toast({
         title: "Auto-fix failed",
-        description: "Network error while running auto-fix.",
+        description: "Network error while applying fixes.",
         variant: "destructive",
       });
     } finally {
-      setIsFixing(false);
+      setIsApplying(false);
     }
   };
 
@@ -1171,14 +1411,14 @@ function ProjectAutoFixSection({
         <Button
           size="sm"
           variant="outline"
-          onClick={handleFixAll}
-          disabled={isFixing}
-          title="Run ESLint auto-fix across every file. Saves a version snapshot first so you can roll back."
+          onClick={handlePreview}
+          disabled={isPreviewing || isApplying}
+          title="Preview every safe ESLint fix before applying. You'll see a per-file diff and can opt out of any change."
         >
-          {isFixing ? (
+          {isPreviewing ? (
             <>
               <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              Fixing…
+              Scanning…
             </>
           ) : (
             <>
@@ -1189,9 +1429,20 @@ function ProjectAutoFixSection({
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Applies every safe ESLint fix across all JavaScript and TypeScript files at once. A version
-        snapshot is saved first so you can roll back from History if needed.
+        Scans every JavaScript and TypeScript file and shows you a before/after diff for each
+        proposed change. You can uncheck files you don't want changed before applying. A version
+        snapshot is saved with the applied set so you can roll back from History.
       </p>
+
+      <ReviewDialog
+        open={reviewOpen}
+        onOpenChange={(v) => {
+          if (!isApplying) setReviewOpen(v);
+        }}
+        proposals={proposals ?? []}
+        isApplying={isApplying}
+        onApply={handleApply}
+      />
 
       {lastResult && lastResult.results.length > 0 && (
         <div className="border border-border rounded-lg bg-card">

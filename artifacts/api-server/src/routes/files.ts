@@ -389,6 +389,13 @@ router.post(
       return;
     }
 
+    const body = (req.body ?? {}) as { dryRun?: unknown; fileIds?: unknown };
+    const dryRun = body.dryRun === true;
+    const requestedFileIds =
+      Array.isArray(body.fileIds) && body.fileIds.every((v) => typeof v === "number")
+        ? new Set(body.fileIds as number[])
+        : null;
+
     const rows = await db
       .select()
       .from(projectFilesTable)
@@ -403,6 +410,8 @@ router.post(
       fixedCount: number;
       remainingCount: number;
       errorCount: number;
+      before?: string;
+      after?: string;
     };
 
     const results: PerFileResult[] = [];
@@ -430,7 +439,7 @@ router.post(
       const fixedCount = Math.max(0, totalBefore - after.remaining.length);
       const errorCount = after.remaining.filter((r) => r.severity === "error").length;
 
-      results.push({
+      const entry: PerFileResult = {
         fileId: row.id,
         path: row.path,
         supported: true,
@@ -438,15 +447,20 @@ router.post(
         fixedCount,
         remainingCount: after.remaining.length,
         errorCount,
-      });
+      };
+      if (dryRun && after.changed) {
+        entry.before = row.content;
+        entry.after = after.output;
+      }
+      results.push(entry);
 
-      if (after.changed) {
+      if (after.changed && (requestedFileIds === null || requestedFileIds.has(row.id))) {
         updates.push({ id: row.id, output: after.output });
       }
     }
 
     let snapshotVersionId: number | null = null;
-    if (updates.length > 0) {
+    if (!dryRun && updates.length > 0) {
       // Snapshot the pre-fix file set so the user has a rollback target.
       const snapshot = rows.map((r) => ({
         path: r.path,
@@ -474,12 +488,24 @@ router.post(
       }
     }
 
+    // Totals reflect the subset that was actually written (or would be written, on dry-run
+    // with no subset filter). filesScanned still tracks every lintable file we considered.
+    const appliedIds = new Set(updates.map((u) => u.id));
+    const consideredAsApplied = !dryRun && requestedFileIds !== null;
     const totals = results.reduce(
       (acc, r) => {
         acc.filesScanned += 1;
-        if (r.changed) acc.filesFixed += 1;
-        acc.fixedCount += r.fixedCount;
-        acc.remainingCount += r.remainingCount;
+        const isApplied = consideredAsApplied ? appliedIds.has(r.fileId) : r.changed;
+        if (isApplied) {
+          acc.filesFixed += 1;
+          acc.fixedCount += r.fixedCount;
+        }
+        if (!isApplied && r.changed) {
+          // Selected-out files still have their remaining (un-applied) issues.
+          acc.remainingCount += r.remainingCount + r.fixedCount;
+        } else {
+          acc.remainingCount += r.remainingCount;
+        }
         return acc;
       },
       { filesScanned: 0, filesFixed: 0, fixedCount: 0, remainingCount: 0 },
