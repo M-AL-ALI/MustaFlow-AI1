@@ -18,6 +18,7 @@ The intended user journey is: Login → create project → build app → preview
 - `pnpm --filter @workspace/db run push` — push DB schema (dev)
 - `pnpm --filter @workspace/scripts run seed` — seed sample projects (no-op if any exist)
 - Required env: `DATABASE_URL`, `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `SESSION_SECRET`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `ENCRYPTION_KEY`
+- Optional env (GitHub OAuth): `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, optional `GITHUB_OAUTH_REDIRECT_URL`. Without them, the "Connect with GitHub" one-click button is hidden and users fall back to the personal access token form. Register an OAuth App at https://github.com/settings/developers; set the Authorization callback URL to `https://<your-domain>/api/projects/0/github/oauth/callback` (any project ID works — GitHub matches by prefix) or use `GITHUB_OAUTH_REDIRECT_URL` to override.
 
 ## Stack
 

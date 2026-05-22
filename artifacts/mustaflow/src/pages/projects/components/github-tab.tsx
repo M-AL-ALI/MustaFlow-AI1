@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Github,
   GitBranch,
@@ -54,10 +54,35 @@ function timeAgo(dateStr: string | null | undefined): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function ConnectPanel({ projectId, onConnected }: { projectId: number; onConnected: () => void }) {
+function ConnectPanel({
+  projectId,
+  onConnected,
+  oauthBanner,
+}: {
+  projectId: number;
+  onConnected: () => void;
+  oauthBanner?: { kind: "success" | "error"; message: string } | null;
+}) {
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showPat, setShowPat] = useState(false);
+  const [oauthEnabled, setOauthEnabled] = useState<boolean | null>(null);
   const connect = useConnectGithub();
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(`/api/projects/${projectId}/github/oauth/config`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { enabled: false }))
+      .then((j: { enabled?: boolean }) => {
+        if (!cancelled) setOauthEnabled(!!j.enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setOauthEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const handleConnect = useCallback(async () => {
     if (!token.trim()) {
@@ -74,8 +99,28 @@ function ConnectPanel({ projectId, onConnected }: { projectId: number; onConnect
     }
   }, [token, connect, projectId, onConnected]);
 
+  const oauthHref = `/api/projects/${projectId}/github/oauth/start`;
+
   return (
     <div className="space-y-4">
+      {oauthBanner && (
+        <div
+          className={cn(
+            "flex items-start gap-2 rounded-lg border px-3 py-2 text-xs",
+            oauthBanner.kind === "success"
+              ? "bg-green-500/10 border-green-500/20 text-green-400"
+              : "bg-destructive/10 border-destructive/20 text-destructive",
+          )}
+        >
+          {oauthBanner.kind === "success" ? (
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          ) : (
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          )}
+          <span>{oauthBanner.message}</span>
+        </div>
+      )}
+
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
@@ -89,6 +134,47 @@ function ConnectPanel({ projectId, onConnected }: { projectId: number; onConnect
           </div>
         </div>
         <div className="px-4 py-4 space-y-3">
+          {oauthEnabled !== false && (
+            <div className="space-y-2">
+              <a
+                href={oauthHref}
+                className={cn(
+                  "w-full inline-flex items-center justify-center gap-2 h-9 rounded-md bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors",
+                  oauthEnabled === null && "opacity-60 pointer-events-none",
+                )}
+              >
+                <Github className="h-4 w-4" />
+                Connect with GitHub
+              </a>
+              <p className="text-[11px] text-muted-foreground text-center">
+                One-click sign-in via GitHub OAuth — no token to manage.
+              </p>
+            </div>
+          )}
+
+          {oauthEnabled !== false && (
+            <div className="flex items-center gap-2 my-1">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">or</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+          )}
+
+          {oauthEnabled === false ? null : (
+            <button
+              type="button"
+              onClick={() => setShowPat((v) => !v)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+            >
+              <ChevronDown
+                className={cn("h-3 w-3 transition-transform", showPat && "rotate-180")}
+              />
+              Use a personal access token instead
+            </button>
+          )}
+
+          {(oauthEnabled === false || showPat) && (
+            <>
           <p className="text-xs text-muted-foreground leading-relaxed">
             Create a GitHub personal access token with{" "}
             <code className="bg-muted px-1 py-px rounded text-[11px]">repo</code> scope. Your token
@@ -147,6 +233,8 @@ function ConnectPanel({ projectId, onConnected }: { projectId: number; onConnect
               credentials are ever included.
             </span>
           </div>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -874,6 +962,9 @@ function ConnectedPanel({
 export function GithubTab({ projectId }: { projectId: number }) {
   const queryClient = useQueryClient();
   const [changingRepo, setChangingRepo] = useState(false);
+  const [oauthBanner, setOauthBanner] = useState<
+    { kind: "success" | "error"; message: string } | null
+  >(null);
 
   const { data, isLoading, refetch } = useGetGithubStatus(projectId, {
     query: { queryKey: getGetGithubStatusQueryKey(projectId) },
@@ -883,6 +974,31 @@ export function GithubTab({ projectId }: { projectId: number }) {
     await queryClient.invalidateQueries({ queryKey: getGetGithubStatusQueryKey(projectId) });
     await refetch();
   }, [queryClient, projectId, refetch]);
+
+  // Read GitHub OAuth callback params (?github=connected|error&reason=...) and
+  // turn them into a banner, then strip them from the URL so a refresh doesn't
+  // re-show the message.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const github = params.get("github");
+    if (!github) return;
+    if (github === "connected") {
+      setOauthBanner({ kind: "success", message: "GitHub connected. Select a repository below." });
+      void invalidate();
+    } else if (github === "error") {
+      setOauthBanner({
+        kind: "error",
+        message: params.get("reason") ?? "GitHub OAuth failed. Please try again.",
+      });
+    }
+    params.delete("github");
+    params.delete("reason");
+    params.delete("tab");
+    const qs = params.toString();
+    const url = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+    window.history.replaceState({}, "", url);
+  }, [invalidate]);
 
   if (isLoading) {
     return (
@@ -896,28 +1012,58 @@ export function GithubTab({ projectId }: { projectId: number }) {
   const connection = data?.connection;
 
   if (!connected) {
-    return <ConnectPanel projectId={projectId} onConnected={() => void invalidate()} />;
-  }
-
-  if (!connection?.repositoryName || changingRepo) {
     return (
-      <RepoSelector
+      <ConnectPanel
         projectId={projectId}
-        connection={connection!}
-        onSelected={() => {
-          setChangingRepo(false);
-          void invalidate();
-        }}
+        onConnected={() => void invalidate()}
+        oauthBanner={oauthBanner}
       />
     );
   }
 
+  const banner = oauthBanner && (
+    <div
+      className={cn(
+        "flex items-start gap-2 rounded-lg border px-3 py-2 text-xs mb-3",
+        oauthBanner.kind === "success"
+          ? "bg-green-500/10 border-green-500/20 text-green-400"
+          : "bg-destructive/10 border-destructive/20 text-destructive",
+      )}
+    >
+      {oauthBanner.kind === "success" ? (
+        <CheckCircle2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+      ) : (
+        <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+      )}
+      <span>{oauthBanner.message}</span>
+    </div>
+  );
+
+  if (!connection?.repositoryName || changingRepo) {
+    return (
+      <>
+        {banner}
+        <RepoSelector
+          projectId={projectId}
+          connection={connection!}
+          onSelected={() => {
+            setChangingRepo(false);
+            void invalidate();
+          }}
+        />
+      </>
+    );
+  }
+
   return (
-    <ConnectedPanel
-      projectId={projectId}
-      connection={connection}
-      onDisconnect={() => void invalidate()}
-      onChangeRepo={() => setChangingRepo(true)}
-    />
+    <>
+      {banner}
+      <ConnectedPanel
+        projectId={projectId}
+        connection={connection}
+        onDisconnect={() => void invalidate()}
+        onChangeRepo={() => setChangingRepo(true)}
+      />
+    </>
   );
 }

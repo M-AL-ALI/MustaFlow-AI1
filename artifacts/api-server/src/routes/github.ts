@@ -1,9 +1,18 @@
 import { Router, type IRouter } from "express";
-import { eq, and } from "drizzle-orm";
-import { db, projectFilesTable, projectGithubConnectionsTable } from "@workspace/db";
+import { eq, and, isNull } from "drizzle-orm";
+import { db, projectsTable, projectFilesTable, projectGithubConnectionsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { logger } from "../lib/logger";
 import { encryptionService } from "../lib/encryption";
+import {
+  buildAuthorizeUrl,
+  buildCallbackUrl,
+  exchangeCodeForToken,
+  getGithubOAuthConfig,
+  isGithubOAuthEnabled,
+  signOAuthState,
+  verifyOAuthState,
+} from "../lib/githubOAuth";
 
 const router: IRouter = Router();
 
@@ -156,6 +165,201 @@ router.post(
       logger.warn({ err, projectId }, "GitHub connect failed");
       res.status(400).json({ error: message });
     }
+  },
+);
+
+// ── GET /api/projects/:id/github/oauth/start ─────────────────────────────────
+// Initiates the GitHub OAuth flow. Redirects the browser to GitHub's
+// authorization page. The user must be signed in and own the project.
+
+router.get(
+  "/projects/:id/github/oauth/start",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const userId = req.userId ?? "";
+
+    const config = getGithubOAuthConfig();
+    if (!config) {
+      res.status(503).json({
+        error:
+          "GitHub OAuth is not configured. Set GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET, or use a personal access token instead.",
+      });
+      return;
+    }
+
+    try {
+      const state = signOAuthState(projectId, userId);
+      const redirectUri = buildCallbackUrl({
+        protocol: (req.get("x-forwarded-proto") ?? req.protocol) || "https",
+        host: req.get("host") ?? "",
+        projectId,
+      });
+      const url = buildAuthorizeUrl({
+        clientId: config.clientId,
+        redirectUri,
+        state,
+      });
+      res.redirect(302, url);
+    } catch (err) {
+      logger.error({ err, projectId }, "GitHub OAuth start failed");
+      res.status(500).json({ error: "Failed to start GitHub OAuth flow" });
+    }
+  },
+);
+
+// ── GET /api/projects/:id/github/oauth/callback ──────────────────────────────
+// GitHub redirects here with ?code & ?state. We verify ownership inline so
+// failures can redirect back to the frontend with an error query string rather
+// than returning JSON 401/403.
+
+function frontendReturnUrl(req: { protocol: string; get(name: string): string | undefined }, projectId: number, params: Record<string, string>): string {
+  const proto = (req.get("x-forwarded-proto") ?? req.protocol) || "https";
+  const host = req.get("host") ?? "";
+  const qs = new URLSearchParams({ tab: "github", ...params }).toString();
+  return `${proto}://${host}/projects/${projectId}?${qs}`;
+}
+
+router.get(
+  "/projects/:id/github/oauth/callback",
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const code = typeof req.query.code === "string" ? req.query.code : "";
+    const stateParam = typeof req.query.state === "string" ? req.query.state : "";
+    const errorParam = typeof req.query.error === "string" ? req.query.error : "";
+
+    // User denied or GitHub-reported error
+    if (errorParam) {
+      const desc = typeof req.query.error_description === "string" ? req.query.error_description : errorParam;
+      res.redirect(302, frontendReturnUrl(req, projectId, { github: "error", reason: desc }));
+      return;
+    }
+
+    if (!code || !stateParam) {
+      res.redirect(302, frontendReturnUrl(req, projectId, { github: "error", reason: "Missing code or state" }));
+      return;
+    }
+
+    const verified = verifyOAuthState(stateParam);
+    if (!verified.ok) {
+      logger.warn({ projectId, reason: verified.reason }, "GitHub OAuth state verification failed");
+      res.redirect(302, frontendReturnUrl(req, projectId, { github: "error", reason: "Invalid or expired sign-in. Please try again." }));
+      return;
+    }
+    if (verified.payload.pid !== projectId) {
+      res.redirect(302, frontendReturnUrl(req, projectId, { github: "error", reason: "State / project mismatch" }));
+      return;
+    }
+
+    // Inline ownership check — the user must still be the project owner.
+    const userId = req.userId ?? "";
+    if (!userId) {
+      // Not signed in — bounce to sign-in, which will return to this URL.
+      const proto = (req.get("x-forwarded-proto") ?? req.protocol) || "https";
+      const host = req.get("host") ?? "";
+      const returnTo = `${proto}://${host}${req.originalUrl}`;
+      res.redirect(302, `/sign-in?redirect_url=${encodeURIComponent(returnTo)}`);
+      return;
+    }
+    if (userId !== verified.payload.uid) {
+      res.redirect(302, frontendReturnUrl(req, projectId, { github: "error", reason: "Signed-in user does not match the original request" }));
+      return;
+    }
+
+    const proj = await db
+      .select({ id: projectsTable.id, ownerId: projectsTable.ownerId })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)))
+      .limit(1);
+    if (!proj[0]) {
+      res.redirect(302, frontendReturnUrl(req, projectId, { github: "error", reason: "Project not found" }));
+      return;
+    }
+    if (proj[0].ownerId !== userId) {
+      res.redirect(302, frontendReturnUrl(req, projectId, { github: "error", reason: "You do not own this project" }));
+      return;
+    }
+
+    const config = getGithubOAuthConfig();
+    if (!config) {
+      res.redirect(302, frontendReturnUrl(req, projectId, { github: "error", reason: "GitHub OAuth is not configured" }));
+      return;
+    }
+
+    try {
+      const redirectUri = buildCallbackUrl({
+        protocol: (req.get("x-forwarded-proto") ?? req.protocol) || "https",
+        host: req.get("host") ?? "",
+        projectId,
+      });
+      const token = await exchangeCodeForToken({
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        code,
+        redirectUri,
+      });
+
+      // Fetch GitHub user info to learn the login name
+      const userRes = await fetch("https://api.github.com/user", {
+        headers: {
+          Authorization: `Bearer ${token.accessToken}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      });
+      const userJson = (await userRes.json()) as { login?: string; message?: string };
+      if (!userRes.ok || !userJson.login) {
+        throw new Error(userJson.message ?? "Could not read GitHub user");
+      }
+
+      const encrypted = encryptionService.encrypt(token.accessToken);
+
+      // Preserve any previously selected repo + branch so re-connecting via
+      // OAuth (e.g. to refresh the token) doesn't wipe their config.
+      const existing = await db
+        .select({
+          repositoryOwner: projectGithubConnectionsTable.repositoryOwner,
+          repositoryName: projectGithubConnectionsTable.repositoryName,
+          defaultBranch: projectGithubConnectionsTable.defaultBranch,
+        })
+        .from(projectGithubConnectionsTable)
+        .where(eq(projectGithubConnectionsTable.projectId, projectId))
+        .limit(1);
+
+      await db
+        .delete(projectGithubConnectionsTable)
+        .where(eq(projectGithubConnectionsTable.projectId, projectId));
+
+      await db.insert(projectGithubConnectionsTable).values({
+        projectId,
+        ownerId: userId,
+        githubAccountName: userJson.login,
+        encryptedToken: encrypted,
+        syncStatus: "idle",
+        repositoryOwner: existing[0]?.repositoryOwner ?? null,
+        repositoryName: existing[0]?.repositoryName ?? null,
+        defaultBranch: existing[0]?.defaultBranch ?? "main",
+      });
+
+      logger.info({ projectId, login: userJson.login }, "GitHub connected via OAuth");
+      res.redirect(302, frontendReturnUrl(req, projectId, { github: "connected" }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "GitHub OAuth callback failed";
+      logger.warn({ err, projectId }, "GitHub OAuth callback failed");
+      res.redirect(302, frontendReturnUrl(req, projectId, { github: "error", reason: message }));
+    }
+  },
+);
+
+// ── GET /api/projects/:id/github/oauth/config ────────────────────────────────
+// Lightweight status endpoint so the frontend can decide whether to show the
+// "Connect with GitHub" button or fall back to the PAT form.
+
+router.get(
+  "/projects/:id/github/oauth/config",
+  requireProjectOwnership,
+  async (_req, res): Promise<void> => {
+    res.json({ enabled: isGithubOAuthEnabled() });
   },
 );
 
