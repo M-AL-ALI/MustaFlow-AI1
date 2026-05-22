@@ -13,6 +13,7 @@ import { requireProjectOwnership } from "../lib/auth";
 import { getAuth } from "@clerk/express";
 import { logger } from "../lib/logger";
 import { runCveAudit } from "../lib/checks/cve-scanner";
+import { getCveScanStatus, recordScanResult, acknowledgeNewFindings } from "../lib/cve-scheduler";
 
 const router: IRouter = Router();
 
@@ -43,6 +44,35 @@ router.get("/security/cve", async (req, res): Promise<void> => {
 });
 
 /**
+ * GET /api/security/cve/scan-status
+ * Returns the last scan timestamp and critical/high counts.
+ * Calling this endpoint acknowledges any pending "new findings" notification.
+ */
+router.get("/security/cve/scan-status", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const status = getCveScanStatus();
+  res.json(status);
+});
+
+/**
+ * POST /api/security/cve/scan-status/acknowledge
+ * Resets the newCriticalHighSinceLastScan counter so the notification clears.
+ */
+router.post("/security/cve/scan-status/acknowledge", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  acknowledgeNewFindings();
+  res.json({ acknowledged: true });
+});
+
+/**
  * POST /api/security/cve/scan
  * Trigger a fresh npm audit scan, upsert results into DB, return findings.
  */
@@ -62,6 +92,7 @@ router.post("/security/cve/scan", async (req, res): Promise<void> => {
       .where(eq(cveFindingsTable.status, "open" as CveStatus));
 
     if (advisories.length === 0) {
+      recordScanResult([]);
       res.json({ scanned: true, findings: [], total: 0 });
       return;
     }
@@ -82,6 +113,7 @@ router.post("/security/cve/scan", async (req, res): Promise<void> => {
       )
       .returning();
 
+    recordScanResult(inserted);
     res.json({ scanned: true, findings: inserted, total: inserted.length });
   } catch (err) {
     logger.error({ err }, "CVE scan failed");

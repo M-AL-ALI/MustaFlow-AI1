@@ -10,6 +10,8 @@ import {
   getListCveFindingsQueryKey,
   useRunCveScan,
   useDismissCveFinding,
+  useGetCveScanStatus,
+  getGetCveScanStatusQueryKey,
   type CheckRun,
   type CheckRunFinding,
   type ProjectFileSummary,
@@ -708,11 +710,21 @@ function CvePanel() {
     },
   });
 
+  const { data: scanStatus } = useGetCveScanStatus({
+    query: {
+      queryKey: getGetCveScanStatusQueryKey(),
+      staleTime: 60_000,
+      retry: false,
+      refetchInterval: 5 * 60_000,
+    },
+  });
+
   const { mutate: runScan, isPending: isScanning } = useRunCveScan({
     mutation: {
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: getListCveFindingsQueryKey(cveParams) });
         void queryClient.invalidateQueries({ queryKey: getListCveFindingsQueryKey() });
+        void queryClient.invalidateQueries({ queryKey: getGetCveScanStatusQueryKey() });
       },
     },
   });
@@ -734,14 +746,27 @@ function CvePanel() {
     (a, b) => CVE_SEVERITY_ORDER.indexOf(a.severity) - CVE_SEVERITY_ORDER.indexOf(b.severity),
   );
 
+  const lastScannedAt = scanStatus?.lastScannedAt
+    ? new Date(scanStatus.lastScannedAt)
+    : null;
+
+  const formattedLastScan = lastScannedAt
+    ? lastScannedAt.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Package className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-xs font-semibold text-foreground">Dependency CVEs</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <Package className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-xs font-semibold text-foreground shrink-0">Dependency CVEs</span>
           {(critical > 0 || high > 0) && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-[9px] font-bold text-red-400">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-[9px] font-bold text-red-400 shrink-0">
               {critical + high} critical/high
             </span>
           )}
@@ -749,7 +774,7 @@ function CvePanel() {
         <Button
           size="sm"
           variant="ghost"
-          className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+          className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground shrink-0"
           onClick={() => runScan()}
           disabled={isScanning}
         >
@@ -761,6 +786,19 @@ function CvePanel() {
           Re-scan
         </Button>
       </div>
+
+      {formattedLastScan && (
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          <RefreshCw className="h-2.5 w-2.5 shrink-0" />
+          <span>Last scanned {formattedLastScan} · updates daily</span>
+        </div>
+      )}
+
+      {!formattedLastScan && !isCveLoading && (
+        <div className="text-[10px] text-muted-foreground">
+          No scan has run yet. Click Re-scan or wait for the daily automatic scan.
+        </div>
+      )}
 
       {isCveLoading && (
         <div className="text-center text-[11px] text-muted-foreground py-3">

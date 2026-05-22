@@ -255,6 +255,35 @@ paths:
                 items:
                   $ref: "#/components/schemas/CveFinding"
 
+  /security/cve/scan-status:
+    get:
+      operationId: getCveScanStatus
+      tags: [security]
+      summary: Get the last CVE scan timestamp and critical/high counts.
+      responses:
+        "200":
+          description: Scan status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CveScanStatus"
+
+  /security/cve/scan-status/acknowledge:
+    post:
+      operationId: acknowledgeCveScan
+      tags: [security]
+      summary: Acknowledge new CVE findings so the notification badge clears.
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [acknowledged]
+                properties:
+                  acknowledged: { type: boolean }
+
   /security/cve/scan:
     post:
       operationId: runCveScan
@@ -4466,6 +4495,14 @@ components:
         dismissedAt: { type: string, format: date-time, nullable: true }
         dismissedBy: { type: string, nullable: true }
 
+    CveScanStatus:
+      type: object
+      required: [criticalHighCount, newCriticalHighSinceLastScan]
+      properties:
+        lastScannedAt: { type: string, format: date-time, nullable: true }
+        criticalHighCount: { type: integer }
+        newCriticalHighSinceLastScan: { type: integer }
+
     CveScanResult:
       type: object
       required: [scanned, findings, total]
@@ -4479,7 +4516,8 @@ components:
 
     SecurityFinding:
       type: object
-      required: [id, projectId, checkType, severity, fingerprint, message, status, firstSeenAt, lastSeenAt]
+      required:
+        [id, projectId, checkType, severity, fingerprint, message, status, firstSeenAt, lastSeenAt]
       properties:
         id: { type: integer }
         projectId: { type: integer }
@@ -4502,7 +4540,21 @@ components:
 
     AccountSecurityFinding:
       type: object
-      required: [id, projectId, projectName, projectStatus, isPublished, checkType, severity, fingerprint, message, status, firstSeenAt, lastSeenAt]
+      required:
+        [
+          id,
+          projectId,
+          projectName,
+          projectStatus,
+          isPublished,
+          checkType,
+          severity,
+          fingerprint,
+          message,
+          status,
+          firstSeenAt,
+          lastSeenAt,
+        ]
       properties:
         id: { type: integer }
         projectId: { type: integer }
@@ -4553,4 +4605,3 @@ components:
       required: [count]
       properties:
         count: { type: integer }
->>>>>>> 1c914fe (feat: Security Center dashboard (Task #402))

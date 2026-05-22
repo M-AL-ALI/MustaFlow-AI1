@@ -88,6 +88,11 @@ import { TerminalTab } from "./components/terminal-tab";
 import { DatabaseTab } from "./components/database-tab";
 import { ChecksTab, useCveCriticalHighCount } from "./components/checks-tab";
 import { SecurityTab } from "./components/security-tab";
+import {
+  useGetCveScanStatus,
+  getGetCveScanStatusQueryKey,
+  useAcknowledgeCveScan,
+} from "@workspace/api-client-react";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
@@ -584,6 +589,23 @@ export default function ProjectWorkspacePage() {
   );
   const pendingSuggestionsCount = allSuggestions.filter((s) => s.status === "pending").length;
   const cveCriticalHighCount = useCveCriticalHighCount();
+
+  const { data: cveScanStatus } = useGetCveScanStatus({
+    query: {
+      queryKey: getGetCveScanStatusQueryKey(),
+      staleTime: 60_000,
+      retry: false,
+      refetchInterval: 5 * 60_000,
+    },
+  });
+  const { mutate: acknowledgeCve } = useAcknowledgeCveScan({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getGetCveScanStatusQueryKey() });
+      },
+    },
+  });
+  const cveNewCount = cveScanStatus?.newCriticalHighSinceLastScan ?? 0;
 
   const prevPendingSuggestionsCountRef = useRef(pendingSuggestionsCount);
   const suggestionsAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1575,6 +1597,32 @@ export default function ProjectWorkspacePage() {
   return (
     <div className="flex flex-col h-full bg-background w-full overflow-hidden text-foreground">
       <CreateProjectModal open={newProjectOpen} onOpenChange={setNewProjectOpen} />
+
+      {cveNewCount > 0 && (
+        <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-1.5 bg-red-500/10 border-b border-red-500/20 text-[11px] text-red-400 z-30">
+          <div className="flex items-center gap-1.5">
+            <ShieldCheck className="h-3 w-3 shrink-0" />
+            <span>
+              Scheduled CVE scan found{" "}
+              <strong className="font-semibold">{cveNewCount}</strong> new critical/high{" "}
+              {cveNewCount === 1 ? "vulnerability" : "vulnerabilities"}.{" "}
+              <button
+                className="underline underline-offset-2 hover:text-red-300 transition-colors"
+                onClick={() => setActiveTab("checks")}
+              >
+                View in Checks tab
+              </button>
+            </span>
+          </div>
+          <button
+            className="shrink-0 text-red-400/60 hover:text-red-400 transition-colors p-0.5 rounded"
+            onClick={() => acknowledgeCve()}
+            title="Dismiss"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
 
       {/* ── Top bar ── */}
       <div className="border-b border-border bg-card shrink-0 flex items-center gap-2 px-4 h-12 z-20 relative">

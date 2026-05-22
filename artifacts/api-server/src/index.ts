@@ -6,6 +6,7 @@ import { logger } from "./lib/logger";
 import { createTerminalServer } from "./lib/terminal";
 import { ensureFlyApp } from "./lib/container";
 import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
+import { startCveScheduler } from "./lib/cve-scheduler";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,6 +37,9 @@ void execFileAsync("semgrep", ["--version"], { timeout: 5000 })
 
 // Ensure the Fly.io app exists for container infrastructure (best-effort)
 void ensureFlyApp();
+
+// Start the daily CVE audit scheduler (fires 30 s after startup, then every 24 h)
+startCveScheduler();
 
 // Create an HTTP server so we can attach WebSocket upgrade handlers alongside Express.
 const server = createServer(app);
