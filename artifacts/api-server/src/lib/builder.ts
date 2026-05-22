@@ -1869,6 +1869,8 @@ export async function runBuildPipeline(args: {
   databaseContext?: string;
   /** Structured plan from the Planning Agent — injected as a system message so the builder honours the plan exactly. */
   planContext?: Record<string, unknown> | null;
+  /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
+  conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<BuilderResult> {
   const {
@@ -1881,6 +1883,7 @@ export async function runBuildPipeline(args: {
     integrationContext,
     databaseContext,
     planContext,
+    conversationSummary,
     onEvent,
   } = args;
 
@@ -1896,6 +1899,13 @@ export async function runBuildPipeline(args: {
     messages.push({
       role: "system",
       content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+    });
+  }
+
+  if (conversationSummary) {
+    messages.push({
+      role: "system",
+      content: `CONVERSATION CONTEXT — summary of earlier exchanges with the user:\n${conversationSummary}`,
     });
   }
 
@@ -2109,6 +2119,8 @@ export async function runRefinePipeline(args: {
   unchangedFilesHint?: string[];
   /** Structured plan from the Planning Agent — injected as a system message so the builder honours the plan exactly. */
   planContext?: Record<string, unknown> | null;
+  /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
+  conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<{
   changedFiles: BuilderFile[];
@@ -2132,6 +2144,7 @@ export async function runRefinePipeline(args: {
     databaseContext,
     unchangedFilesHint,
     planContext,
+    conversationSummary,
     onEvent,
   } = args;
 
@@ -2149,6 +2162,13 @@ export async function runRefinePipeline(args: {
     messages.push({
       role: "system",
       content: `LEARNED LESSONS — apply these to every change without being asked:\n${knowledgeContext}`,
+    });
+  }
+
+  if (conversationSummary) {
+    messages.push({
+      role: "system",
+      content: `CONVERSATION CONTEXT — summary of earlier exchanges with the user:\n${conversationSummary}`,
     });
   }
 
@@ -2501,6 +2521,8 @@ export async function runReactViteBuildPipeline(args: {
   integrationContext?: string;
   databaseContext?: string;
   planContext?: Record<string, unknown> | null;
+  /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
+  conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<BuilderResult> {
   const {
@@ -2513,6 +2535,7 @@ export async function runReactViteBuildPipeline(args: {
     integrationContext,
     databaseContext,
     planContext,
+    conversationSummary,
     onEvent,
   } = args;
 
@@ -2528,6 +2551,13 @@ export async function runReactViteBuildPipeline(args: {
     messages.push({
       role: "system",
       content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+    });
+  }
+
+  if (conversationSummary) {
+    messages.push({
+      role: "system",
+      content: `CONVERSATION CONTEXT — summary of earlier exchanges with the user:\n${conversationSummary}`,
     });
   }
 
@@ -2728,6 +2758,8 @@ export async function runReactViteRefinePipeline(args: {
   databaseContext?: string;
   unchangedFilesHint?: string[];
   planContext?: Record<string, unknown> | null;
+  /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
+  conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
 }): Promise<{
   changedFiles: BuilderFile[];
@@ -2751,6 +2783,7 @@ export async function runReactViteRefinePipeline(args: {
     databaseContext,
     unchangedFilesHint,
     planContext,
+    conversationSummary,
     onEvent,
   } = args;
 
@@ -2768,6 +2801,13 @@ export async function runReactViteRefinePipeline(args: {
     messages.push({
       role: "system",
       content: `LEARNED LESSONS — apply these to every change without being asked:\n${knowledgeContext}`,
+    });
+  }
+
+  if (conversationSummary) {
+    messages.push({
+      role: "system",
+      content: `CONVERSATION CONTEXT — summary of earlier exchanges with the user:\n${conversationSummary}`,
     });
   }
 
@@ -3961,6 +4001,8 @@ type StackBuildArgs = {
   knowledgeContext?: string;
   integrationContext?: string;
   planContext?: Record<string, unknown> | null;
+  /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
+  conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
 };
 
@@ -3975,6 +4017,8 @@ type StackRefineArgs = {
   integrationContext?: string;
   unchangedFilesHint?: string[];
   planContext?: Record<string, unknown> | null;
+  /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
+  conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
 };
 
@@ -3992,6 +4036,7 @@ async function runStackBuildPipeline(
     knowledgeContext,
     integrationContext,
     planContext,
+    conversationSummary,
     onEvent,
   } = args;
 
@@ -4004,6 +4049,12 @@ async function runStackBuildPipeline(
     messages.push({
       role: "system",
       content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+    });
+  }
+  if (conversationSummary) {
+    messages.push({
+      role: "system",
+      content: `CONVERSATION CONTEXT — summary of earlier exchanges with the user:\n${conversationSummary}`,
     });
   }
   if (integrationContext) {
@@ -4142,6 +4193,7 @@ async function runStackRefinePipeline(
     integrationContext,
     unchangedFilesHint,
     planContext,
+    conversationSummary,
     onEvent,
   } = args;
 
@@ -4159,6 +4211,12 @@ async function runStackRefinePipeline(
     messages.push({
       role: "system",
       content: `LEARNED LESSONS — apply these to every change without being asked:\n${knowledgeContext}`,
+    });
+  }
+  if (conversationSummary) {
+    messages.push({
+      role: "system",
+      content: `CONVERSATION CONTEXT — summary of earlier exchanges with the user:\n${conversationSummary}`,
     });
   }
   if (integrationContext) {
@@ -4943,14 +5001,23 @@ export async function runPlanPipeline(args: {
   agentMode: AgentMode;
   conversationHistory?: ConversationTurn[];
   currentFiles?: BuilderFile[];
+  /** Distilled summary of earlier conversation turns — gives the planner long-range context. */
+  conversationSummary?: string;
 }): Promise<{
   summary: string;
   plan: Record<string, unknown> | null;
   currentState: ProjectInvestigationResult | null;
   recommendedAgent: "planning" | "task" | "main";
 }> {
-  const { projectName, projectKind, userPrompt, agentMode, conversationHistory, currentFiles } =
-    args;
+  const {
+    projectName,
+    projectKind,
+    userPrompt,
+    agentMode,
+    conversationHistory,
+    currentFiles,
+    conversationSummary,
+  } = args;
 
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(projectKind);
   const planPrompt = isMobile ? MOBILE_PLAN_SYSTEM_PROMPT : PLAN_SYSTEM_PROMPT;
@@ -4962,6 +5029,13 @@ export async function runPlanPipeline(args: {
       content: `Project: "${projectName}" (kind: ${projectKind}).`,
     },
   ];
+
+  if (conversationSummary) {
+    messages.push({
+      role: "system",
+      content: `CONVERSATION CONTEXT — summary of earlier exchanges with the user:\n${conversationSummary}`,
+    });
+  }
 
   if (conversationHistory && conversationHistory.length > 0) {
     for (const turn of conversationHistory.slice(-4)) {

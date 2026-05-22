@@ -2220,26 +2220,26 @@ export default function ProjectWorkspacePage() {
 
                   {/* Chat / Queue input */}
                   <div data-tour="chat-input">
-                  <QueueComposer
-                    projectId={projectId}
-                    agentMode={agentMode}
-                    onAgentModeChange={setAgentMode}
-                    planMode={planMode}
-                    onPlanModeChange={setPlanMode}
-                    runInBackground={runInBackground}
-                    onRunInBackgroundChange={setRunInBackground}
-                    variantMode={variantMode}
-                    onVariantModeChange={setVariantMode}
-                    disabled={isBusy}
-                    onSingleSend={(content, _intent, attachments) => {
-                      setPrompt("");
-                      send(content, attachments ? { attachments } : undefined);
-                    }}
-                    onBatchStarted={handleBatchStarted}
-                    promptValue={prompt}
-                    onPromptValueChange={setPrompt}
-                    onAgentIdentityChange={setAgentIdentity}
-                  />
+                    <QueueComposer
+                      projectId={projectId}
+                      agentMode={agentMode}
+                      onAgentModeChange={setAgentMode}
+                      planMode={planMode}
+                      onPlanModeChange={setPlanMode}
+                      runInBackground={runInBackground}
+                      onRunInBackgroundChange={setRunInBackground}
+                      variantMode={variantMode}
+                      onVariantModeChange={setVariantMode}
+                      disabled={isBusy}
+                      onSingleSend={(content, _intent, attachments) => {
+                        setPrompt("");
+                        send(content, attachments ? { attachments } : undefined);
+                      }}
+                      onBatchStarted={handleBatchStarted}
+                      promptValue={prompt}
+                      onPromptValueChange={setPrompt}
+                      onAgentIdentityChange={setAgentIdentity}
+                    />
                   </div>
                 </>
               )}

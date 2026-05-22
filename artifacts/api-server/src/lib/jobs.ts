@@ -943,10 +943,28 @@ export async function runJob(input: JobInput): Promise<void> {
       return;
     }
 
-    const { context: knowledgeContext, applied: knowledgeApplied } = await loadKnowledgeContext(
-      projectId,
-      userPrompt,
-    );
+    const [{ context: knowledgeContext, applied: knowledgeApplied }, conversationSummary] =
+      await Promise.all([
+        loadKnowledgeContext(projectId, userPrompt),
+        (async () => {
+          try {
+            const [row] = await db
+              .select({ content: knowledgeEntriesTable.content })
+              .from(knowledgeEntriesTable)
+              .where(
+                and(
+                  eq(knowledgeEntriesTable.projectId, projectId),
+                  eq(knowledgeEntriesTable.type, "conversation_summary"),
+                ),
+              )
+              .orderBy(desc(knowledgeEntriesTable.createdAt))
+              .limit(1);
+            return row?.content ?? undefined;
+          } catch {
+            return undefined;
+          }
+        })(),
+      ]);
 
     // Build database context when the project has a provisioned DB
     let databaseContext: string | undefined;
@@ -1073,6 +1091,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           conversationHistory,
           knowledgeContext: knowledgeContext || undefined,
           planContext: input.planContext ?? null,
+          conversationSummary,
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
         };
 
@@ -1098,6 +1117,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 knowledgeContext: knowledgeContext || undefined,
                 databaseContext,
                 planContext: input.planContext ?? null,
+                conversationSummary,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
               })
             : isNextjsProject
@@ -1117,6 +1137,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         knowledgeContext: knowledgeContext || undefined,
                         databaseContext,
                         planContext: input.planContext ?? null,
+                        conversationSummary,
                       });
 
         analyticsCorrectionPasses = result.correctionPasses;
@@ -1142,6 +1163,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             conversationHistory,
             knowledgeContext: knowledgeContext || undefined,
             planContext: input.planContext ?? null,
+            conversationSummary,
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
           };
           const escalatedResult = isReactViteProject
@@ -1154,6 +1176,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 knowledgeContext: knowledgeContext || undefined,
                 databaseContext,
                 planContext: input.planContext ?? null,
+                conversationSummary,
               })
             : isNextjsProject
               ? await runNextjsBuildPipeline(escalatedStackBuildArgs)
@@ -1172,6 +1195,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         knowledgeContext: knowledgeContext || undefined,
                         databaseContext,
                         planContext: input.planContext ?? null,
+                        conversationSummary,
                       });
           wasEscalated = true;
           agentMode = buildEscalationMode;
@@ -1340,6 +1364,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           knowledgeContext: knowledgeContext || undefined,
           unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
           planContext: input.planContext ?? null,
+          conversationSummary,
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
         };
 
@@ -1368,6 +1393,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 databaseContext,
                 unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                 planContext: input.planContext ?? null,
+                conversationSummary,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
               })
             : isNextjsProject
@@ -1390,6 +1416,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         unchangedFilesHint:
                           unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                         planContext: input.planContext ?? null,
+                        conversationSummary,
                       });
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
@@ -1417,6 +1444,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             knowledgeContext: knowledgeContext || undefined,
             unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
             planContext: input.planContext ?? null,
+            conversationSummary,
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
           };
           const escalatedResult = isReactViteProject
@@ -1431,6 +1459,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 databaseContext,
                 unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                 planContext: input.planContext ?? null,
+                conversationSummary,
               })
             : isNextjsProject
               ? await runNextjsRefinePipeline(escalatedStackRefineArgs)
@@ -1452,6 +1481,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         unchangedFilesHint:
                           unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                         planContext: input.planContext ?? null,
+                        conversationSummary,
                       });
           wasEscalated = true;
           agentMode = refineEscalationMode;
