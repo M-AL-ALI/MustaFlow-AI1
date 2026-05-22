@@ -511,7 +511,44 @@ router.get(
         : "No description set. Add one in Manage or Published Site Settings.",
     });
 
-    // ── Check 7: security findings gate (BLOCKING when blockPublishOnCritical is on) ─────
+    // ── Check 7: privacy policy link (WARNING for production) ─────────────────
+    if (isProduction) {
+      const latestPrivacyRuns = await db
+        .select({ findings: checkRunsTable.findings, ranAt: checkRunsTable.ranAt })
+        .from(checkRunsTable)
+        .where(
+          and(eq(checkRunsTable.projectId, projectId), eq(checkRunsTable.checkName, "privacy")),
+        )
+        .orderBy(desc(checkRunsTable.ranAt))
+        .limit(1);
+
+      const privacyFindings =
+        (latestPrivacyRuns[0]?.findings as import("@workspace/db").CheckFinding[] | undefined) ??
+        [];
+      const noPrivacyLink = privacyFindings.some(
+        (f) => f.message === "No privacy policy link found",
+      );
+      const hasTrackerWithoutConsent = privacyFindings.some(
+        (f) => f.severity === "warning" && f.message.startsWith("Tracker loaded without consent"),
+      );
+
+      if (noPrivacyLink || hasTrackerWithoutConsent) {
+        const messages: string[] = [];
+        if (noPrivacyLink) messages.push("no privacy policy link found");
+        if (hasTrackerWithoutConsent) messages.push("tracker(s) loaded without consent mechanism");
+        checks.push({
+          id: "privacy_compliance",
+          label: "Privacy compliance",
+          description:
+            "Published apps should include a privacy policy link and load trackers only after user consent.",
+          severity: "warning",
+          status: "warning",
+          message: `Privacy concerns: ${messages.join(", ")}. Add a privacy policy and cookie consent banner.`,
+        });
+      }
+    }
+
+    // ── Check 8: security findings gate (BLOCKING when blockPublishOnCritical is on) ─────
     if (project.blockPublishOnCritical) {
       const dismissed = (project.dismissedFindingHashes as string[] | null) ?? [];
       const criticalFindings = await getUnresolvedCriticalFindings(projectId, dismissed);

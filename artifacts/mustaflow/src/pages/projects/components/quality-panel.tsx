@@ -35,6 +35,7 @@ import {
   SkipForward,
   BadgeCheck,
   Bolt,
+  Cookie,
 } from "lucide-react";
 
 type AuditCategory = "accessibility" | "seo" | "performance" | "security";
@@ -597,6 +598,179 @@ function ChecksSection({
   );
 }
 
+const PRIVACY_CHECK_PARAMS = { limit: 5 };
+
+function PrivacySection({
+  projectId,
+  onFix,
+}: {
+  projectId: number;
+  onFix: (prompt: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const { data: privacyRuns } = useGetCheckRuns(projectId, PRIVACY_CHECK_PARAMS, {
+    query: {
+      enabled: !!projectId,
+      queryKey: getGetCheckRunsQueryKey(projectId, PRIVACY_CHECK_PARAMS),
+      retry: false,
+    },
+  });
+
+  const privacyRun = Array.isArray(privacyRuns)
+    ? privacyRuns.find((r) => r.checkName === "privacy")
+    : undefined;
+
+  const findings = (privacyRun?.findings as CheckRunFinding[] | undefined) ?? [];
+  const errors = findings.filter((f) => f.severity === "error").length;
+  const warnings = findings.filter((f) => f.severity === "warning").length;
+
+  const s = findings.length === 0 ? 100 : errors > 0 ? 40 : warnings > 0 ? 65 : 100;
+
+  const buildFixPrompt = (): string => {
+    const trackerFindings = findings.filter((f) =>
+      f.message.startsWith("Tracker loaded without consent"),
+    );
+    const noPrivacyLink = findings.some((f) => f.message === "No privacy policy link found");
+    const parts: string[] = [];
+    if (trackerFindings.length > 0) {
+      const trackers = trackerFindings
+        .map((f) => f.message.replace("Tracker loaded without consent mechanism: ", ""))
+        .join(", ");
+      parts.push(
+        `add a cookie consent banner that defers loading these trackers until the user accepts: ${trackers}`,
+      );
+    }
+    if (noPrivacyLink) {
+      parts.push("add a privacy policy link in the app footer");
+    }
+    const otherIssues = findings
+      .filter(
+        (f) =>
+          !f.message.startsWith("Tracker loaded without consent") &&
+          f.message !== "No privacy policy link found",
+      )
+      .map((f) => f.message)
+      .slice(0, 3)
+      .join("; ");
+    if (otherIssues) parts.push(otherIssues);
+    return parts.length > 0
+      ? `Fix all privacy and compliance issues in the generated app: ${parts.join("; ")}.`
+      : "Review the generated app for privacy and compliance best practices.";
+  };
+
+  if (!privacyRun) return null;
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full text-left p-3 flex items-center gap-3 hover:bg-muted/30 transition-colors"
+      >
+        <div className={`p-1.5 rounded-md border ${scoreBg(s)}`}>
+          <Cookie className={`h-3.5 w-3.5 ${scoreColor(s)}`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-foreground">Privacy</span>
+            <span className={`text-xs font-bold ${scoreColor(s)}`}>{s}</span>
+          </div>
+          <div className="flex items-center gap-2 mt-0.5">
+            {errors > 0 && (
+              <span className="text-[10px] text-red-400">
+                {errors} error{errors !== 1 ? "s" : ""}
+              </span>
+            )}
+            {warnings > 0 && (
+              <span className="text-[10px] text-yellow-400">
+                {warnings} warning{warnings !== 1 ? "s" : ""}
+              </span>
+            )}
+            {findings.length === 0 && (
+              <span className="text-[10px] text-green-400 flex items-center gap-1">
+                <CheckCircle2 className="h-2.5 w-2.5" /> All checks passed
+              </span>
+            )}
+          </div>
+        </div>
+        {expanded ? (
+          <ChevronUp className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border p-3 space-y-2 bg-card/50">
+          {findings.length === 0 ? (
+            <div className="flex items-center gap-2 text-xs text-green-400 py-1">
+              <CheckCircle2 className="h-4 w-4" />
+              No privacy issues found.
+            </div>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                {findings.map((f, i) => (
+                  <PrivacyFindingRow key={i} finding={f} />
+                ))}
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full mt-2 text-xs h-8 gap-1.5"
+                onClick={() => onFix(buildFixPrompt())}
+              >
+                <Wrench className="h-3.5 w-3.5" />
+                Fix privacy issues
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PrivacyFindingRow({ finding }: { finding: CheckRunFinding }) {
+  const [expanded, setExpanded] = useState(false);
+  const isTracker = finding.message.startsWith("Tracker loaded without consent");
+  return (
+    <div className="border border-border rounded-md overflow-hidden text-xs">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full text-left p-2.5 flex items-start gap-2 hover:bg-muted/50 transition-colors"
+      >
+        <SeverityIcon severity={(finding.severity as "error" | "warning" | "info") ?? "info"} />
+        <div className="flex-1 min-w-0">
+          <div className="text-foreground leading-snug">{finding.message}</div>
+          {finding.file && (
+            <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{finding.file}</div>
+          )}
+        </div>
+        {expanded ? (
+          <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+        )}
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3 pt-0 border-t border-border bg-muted/30">
+          <div className="flex items-start gap-1.5 pt-2">
+            {isTracker ? (
+              <ShieldAlert className="h-3 w-3 text-yellow-500 shrink-0 mt-0.5" />
+            ) : (
+              <Wrench className="h-3 w-3 text-primary shrink-0 mt-0.5" />
+            )}
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {finding.detail ?? "Review this finding and address it before publishing."}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function QualityPanel({
   projectId,
   onSendMessage,
@@ -620,6 +794,9 @@ export function QualityPanel({
 
   const handleRefresh = () => {
     void queryClient.invalidateQueries({ queryKey: getGetProjectAuditQueryKey(projectId) });
+    void queryClient.invalidateQueries({
+      queryKey: getGetCheckRunsQueryKey(projectId, PRIVACY_CHECK_PARAMS),
+    });
   };
 
   const handleFix = (prompt: string) => {
@@ -735,6 +912,7 @@ export function QualityPanel({
                       onFix={handleFix}
                     />
                   ))}
+                  <PrivacySection projectId={projectId} onFix={handleFix} />
                 </div>
 
                 <div className="text-[10px] text-muted-foreground text-center pt-1">

@@ -1,5 +1,11 @@
 export type CheckTrigger = "always" | "agent-selected" | "on-demand";
-export type CheckCategory = "security" | "quality" | "accessibility" | "seo" | "performance";
+export type CheckCategory =
+  | "security"
+  | "quality"
+  | "accessibility"
+  | "seo"
+  | "performance"
+  | "privacy";
 
 export type CheckDefinition = {
   name: string;
@@ -90,6 +96,15 @@ export const CHECK_REGISTRY: CheckDefinition[] = [
       "CDN vulnerability check: compares every CDN URL (script src, link href) against known vulnerable versions for popular libraries (jQuery, Bootstrap, lodash, Moment.js, etc.). Run when a new CDN script or stylesheet was added.",
     fixPrompt:
       "Update all CDN script and stylesheet URLs to the latest stable versions. Replace any vulnerable or outdated library URLs found in <script src> and <link href> tags with their current secure CDN links from trusted sources like cdnjs.cloudflare.com, jsdelivr.com, or unpkg.com.",
+  },
+  {
+    name: "privacy",
+    category: "privacy",
+    trigger: "agent-selected",
+    description:
+      "Privacy and compliance scan: detects known tracker scripts (Google Analytics, Facebook Pixel, Hotjar, Intercom, Mixpanel, Amplitude, Segment, TikTok Pixel) loaded without a consent mechanism, fetch/XHR calls to external third-party endpoints, sensitive fields (email, password, phone, SSN, card) stored in localStorage/sessionStorage, and missing privacy policy links. Run when the app has forms, external scripts, analytics, or user-facing pages.",
+    fixPrompt:
+      "Fix all privacy and compliance issues in the generated app: add a cookie consent banner that loads tracker scripts only after the user accepts cookies, add a privacy policy link in the app footer, replace any direct storage of sensitive fields (email, password, phone) in localStorage/sessionStorage with safer alternatives, and document all external data flows in the privacy policy.",
   },
 ];
 

@@ -147,6 +147,39 @@ const CHECK_META: Record<
       return `Fix the following security issues in the generated app: ${issues}. Review and fix any insecure patterns, missing Content Security Policy headers, or vulnerable dependencies.`;
     },
   },
+  privacy: {
+    label: "Privacy",
+    Icon: ShieldAlert,
+    fixPrompt: (findings) => {
+      const trackerFindings = findings.filter((f) =>
+        f.message.startsWith("Tracker loaded without consent"),
+      );
+      const noPrivacyLink = findings.some((f) => f.message === "No privacy policy link found");
+      const parts: string[] = [];
+      if (trackerFindings.length > 0) {
+        const trackers = trackerFindings
+          .map((f) => f.message.replace("Tracker loaded without consent mechanism: ", ""))
+          .join(", ");
+        parts.push(
+          `add a cookie consent banner that defers loading these trackers until the user accepts: ${trackers}`,
+        );
+      }
+      if (noPrivacyLink) {
+        parts.push("add a privacy policy link in the app footer");
+      }
+      const otherIssues = findings
+        .filter(
+          (f) =>
+            !f.message.startsWith("Tracker loaded without consent") &&
+            f.message !== "No privacy policy link found",
+        )
+        .map((f) => f.message)
+        .slice(0, 3)
+        .join("; ");
+      if (otherIssues) parts.push(otherIssues);
+      return `Fix all privacy and compliance issues in the generated app: ${parts.join("; ")}.`;
+    },
+  },
 };
 
 const ALL_CHECK_NAMES = Object.keys(CHECK_META);

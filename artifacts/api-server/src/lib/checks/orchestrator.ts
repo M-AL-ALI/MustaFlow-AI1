@@ -23,6 +23,7 @@ import {
   runCdnSecurityCheck,
 } from "./auditor-adapter";
 import { runSemgrepCheck } from "./semgrep";
+import { runPrivacyCheck } from "./privacy";
 
 export type CheckSelectionItem = {
   checkName: string;
@@ -188,6 +189,10 @@ async function runCheckByName(
     }
     case "cdn-security": {
       const r = runCdnSecurityCheck(files);
+      return { status: r.status, findings: r.findings };
+    }
+    case "privacy": {
+      const r = runPrivacyCheck(files);
       return { status: r.status, findings: r.findings };
     }
     default:
