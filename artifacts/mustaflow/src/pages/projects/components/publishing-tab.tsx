@@ -2496,6 +2496,26 @@ export function PublishingTab({
     void fetchMobileBuilds();
   }, [fetchMobileBuilds]);
 
+  // Re-fetch store readiness whenever a build transitions to "passed"
+  const prevPassedBuildIds = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    const currentPassed = new Set(
+      mobileBuilds.filter((b) => b.status === "passed").map((b) => b.id),
+    );
+    const newlyPassed = mobileBuilds.filter(
+      (b) => b.status === "passed" && !prevPassedBuildIds.current.has(b.id),
+    );
+    if (newlyPassed.length > 0) {
+      if (newlyPassed.some((b) => b.platform === "ios" || b.platform === null)) {
+        void fetchIosReadiness();
+      }
+      if (newlyPassed.some((b) => b.platform === "android" || b.platform === null)) {
+        void fetchAndReadiness();
+      }
+    }
+    prevPassedBuildIds.current = currentPassed;
+  }, [mobileBuilds, fetchIosReadiness, fetchAndReadiness]);
+
   useEffect(() => {
     const inProgress = mobileBuilds.some((b) =>
       ["queued", "building", "submitting"].includes(b.status),
@@ -2565,7 +2585,11 @@ export function PublishingTab({
             return (
               <button
                 key={p}
-                onClick={() => setPlatform(p)}
+                onClick={() => {
+                  setPlatform(p);
+                  if (p === "ios") void fetchIosReadiness();
+                  if (p === "android") void fetchAndReadiness();
+                }}
                 className={cn(
                   "flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors",
                   platform === p
@@ -3975,11 +3999,21 @@ export function PublishingTab({
 
             <div className="border border-border rounded-xl p-4 bg-card space-y-3">
               {/* Server-side readiness checks */}
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-foreground">
+                  Store Submission Requirements
+                </p>
+                <button
+                  onClick={() => void fetchIosReadiness()}
+                  disabled={iosReadinessLoading}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("h-3 w-3", iosReadinessLoading && "animate-spin")} />
+                  Re-check
+                </button>
+              </div>
               {iosReadiness && (
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-foreground">
-                    Store Submission Requirements
-                  </p>
                   {iosReadiness.checks.map((check) => (
                     <ReadinessCheckRow
                       key={check.id}
@@ -4383,11 +4417,21 @@ export function PublishingTab({
 
             <div className="border border-border rounded-xl p-4 bg-card space-y-3">
               {/* Server-side readiness checks */}
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-foreground">
+                  Store Submission Requirements
+                </p>
+                <button
+                  onClick={() => void fetchAndReadiness()}
+                  disabled={andReadinessLoading}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("h-3 w-3", andReadinessLoading && "animate-spin")} />
+                  Re-check
+                </button>
+              </div>
               {andReadiness && (
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-foreground">
-                    Store Submission Requirements
-                  </p>
                   {andReadiness.checks.map((check) => (
                     <ReadinessCheckRow
                       key={check.id}
