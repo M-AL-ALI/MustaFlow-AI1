@@ -1,9 +1,21 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useGetProjectAudit, getGetProjectAuditQueryKey } from "@workspace/api-client-react";
+import {
+  useGetProjectAudit,
+  getGetProjectAuditQueryKey,
+  useGetCheckRuns,
+  getGetCheckRunsQueryKey,
+  useTriggerCheckRuns,
+  useGetProject,
+  getGetProjectQueryKey,
+  useUpdateProject,
+  type CheckRun,
+  type CheckRunFinding,
+} from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import {
   ShieldCheck,
+  ShieldAlert,
   Eye,
   Search,
   Zap,
@@ -16,6 +28,13 @@ import {
   Wrench,
   ChevronDown,
   ChevronUp,
+  Code2,
+  KeyRound,
+  ScanSearch,
+  Globe,
+  SkipForward,
+  BadgeCheck,
+  Bolt,
 } from "lucide-react";
 
 type AuditCategory = "accessibility" | "seo" | "performance" | "security";
@@ -87,6 +106,54 @@ const CATEGORY_FIX_PROMPTS: Record<AuditCategory, (findings: AuditFinding[]) => 
   },
 };
 
+const CHECK_META: Record<
+  string,
+  { label: string; Icon: React.FC<{ className?: string }>; fixPrompt?: string }
+> = {
+  "secret-leak": {
+    label: "Secret Leak",
+    Icon: KeyRound,
+    fixPrompt:
+      "Remove all hardcoded API keys, tokens, and secrets from the generated code. Do NOT delete the surrounding functionality — instead replace each hardcoded value with a placeholder comment like /* TODO: Load from environment */ or a descriptive constant like YOUR_API_KEY_HERE. If the secret is used to call an API, keep the call intact but remove only the literal credential value.",
+  },
+  "code-quality": {
+    label: "Code Quality",
+    Icon: Code2,
+    fixPrompt:
+      "Fix all code quality issues in the generated app: replace eval() calls with safer alternatives, replace document.write() with proper DOM manipulation, fix innerHTML string concatenation with safe DOM methods, remove console.log statements, and add missing semicolons.",
+  },
+  sast: {
+    label: "SAST",
+    Icon: ScanSearch,
+    fixPrompt:
+      "Fix all SAST security issues in the generated app: sanitise innerHTML assignments that use user-controlled data to prevent XSS, remove prototype pollution patterns, move sensitive values out of localStorage/sessionStorage, and replace hardcoded internal endpoint URLs with configurable values.",
+  },
+  accessibility: {
+    label: "Accessibility",
+    Icon: Eye,
+    fixPrompt:
+      "Fix all accessibility issues in the generated app: add the lang attribute to the <html> element, add descriptive alt attributes to all images, add associated <label> elements to all form inputs, add accessible text to all buttons (visible text or aria-label), and add a skip-navigation link at the top of the page.",
+  },
+  seo: {
+    label: "SEO",
+    Icon: Search,
+    fixPrompt:
+      "Fix all SEO issues in the generated app: add or improve the <title> tag, add a meta description, add Open Graph tags (og:title, og:description, og:image), add a canonical link tag, and add basic structured data (JSON-LD) for the page.",
+  },
+  performance: {
+    label: "Performance",
+    Icon: Zap,
+    fixPrompt:
+      "Fix all performance issues in the generated app: add defer or async attributes to render-blocking <script> tags in the <head>, add explicit width and height attributes to all images to prevent layout shifts, and add loading=\"lazy\" to below-the-fold images.",
+  },
+  "cdn-security": {
+    label: "CDN Security",
+    Icon: Globe,
+    fixPrompt:
+      "Update all CDN script and stylesheet URLs to the latest stable secure versions. Replace any vulnerable or outdated library URLs in <script src> and <link href> tags with their current versions from cdnjs.cloudflare.com or jsdelivr.com.",
+  },
+};
+
 function scoreColor(score: number): string {
   if (score >= 80) return "text-green-500";
   if (score >= 60) return "text-yellow-500";
@@ -104,6 +171,137 @@ function SeverityIcon({ severity }: { severity: AuditSeverity | "error" | "warni
   if (severity === "warning")
     return <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0" />;
   return <Info className="h-3.5 w-3.5 text-blue-400 shrink-0" />;
+}
+
+function CheckStatusBadge({ status }: { status: CheckRun["status"] }) {
+  if (status === "pass")
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-400 bg-green-500/10 border border-green-500/20 rounded px-1.5 py-0.5">
+        <BadgeCheck className="h-2.5 w-2.5" /> pass
+      </span>
+    );
+  if (status === "warning")
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 rounded px-1.5 py-0.5">
+        <AlertTriangle className="h-2.5 w-2.5" /> warnings
+      </span>
+    );
+  if (status === "fail")
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-400 bg-red-500/10 border border-red-500/20 rounded px-1.5 py-0.5">
+        <XCircle className="h-2.5 w-2.5" /> failed
+      </span>
+    );
+  if (status === "skipped")
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground bg-muted border border-border rounded px-1.5 py-0.5">
+        <SkipForward className="h-2.5 w-2.5" /> skipped
+      </span>
+    );
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-400 bg-red-500/10 border border-red-500/20 rounded px-1.5 py-0.5">
+      <XCircle className="h-2.5 w-2.5" /> error
+    </span>
+  );
+}
+
+function CheckRunCard({
+  run,
+  onSendMessage,
+}: {
+  run: CheckRun;
+  onSendMessage?: (text: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const meta = CHECK_META[run.checkName] ?? {
+    label: run.checkName,
+    Icon: ShieldCheck,
+    fixPrompt: undefined,
+  };
+  const Icon = meta.Icon;
+  const findings = (run.findings ?? []) as CheckRunFinding[];
+  const canFix =
+    (run.status === "fail" || run.status === "warning") &&
+    !!meta.fixPrompt &&
+    !!onSendMessage;
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full text-left p-3 flex items-center gap-2.5 hover:bg-muted/30 transition-colors"
+      >
+        <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        <span className="text-sm font-medium text-foreground flex-1 min-w-0 text-left">
+          {meta.label}
+        </span>
+        <CheckStatusBadge status={run.status} />
+        {findings.length > 0 && (
+          <span className="text-[10px] text-muted-foreground ml-1">
+            {findings.length} finding{findings.length !== 1 ? "s" : ""}
+          </span>
+        )}
+        {expanded ? (
+          <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border bg-card/50 p-3 space-y-2">
+          {run.aiReason && (
+            <p className="text-[11px] text-muted-foreground italic leading-relaxed">
+              {run.aiReason}
+            </p>
+          )}
+          {findings.length === 0 ? (
+            <div className="flex items-center gap-2 text-xs text-green-400 py-1">
+              <CheckCircle2 className="h-3.5 w-3.5" /> No issues found.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {findings.slice(0, 10).map((f, i) => (
+                <div key={i} className="border border-border rounded-md p-2.5 text-xs space-y-0.5">
+                  <div className="flex items-start gap-2">
+                    <SeverityIcon severity={f.severity} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-foreground leading-snug">{f.message}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                        {f.file}
+                        {f.line ? `:${f.line}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  {f.detail && (
+                    <div className="pl-5 text-[10px] text-muted-foreground leading-relaxed">
+                      {f.detail}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {findings.length > 10 && (
+                <div className="text-[10px] text-muted-foreground text-center">
+                  +{findings.length - 10} more findings
+                </div>
+              )}
+            </div>
+          )}
+          {canFix && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full mt-1 text-xs h-8 gap-1.5"
+              onClick={() => onSendMessage!(meta.fixPrompt!)}
+            >
+              <Wrench className="h-3.5 w-3.5" />
+              Fix with AI
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function FindingRow({ finding }: { finding: AuditFinding }) {
@@ -227,6 +425,178 @@ function CategorySection({
   );
 }
 
+function ChecksSection({
+  projectId,
+  onSecurityReview,
+  onSendMessage,
+}: {
+  projectId: number;
+  onSecurityReview: () => void;
+  onSendMessage?: (text: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const { data: runs, isLoading } = useGetCheckRuns(projectId, undefined, {
+    query: {
+      enabled: !!projectId,
+      queryKey: getGetCheckRunsQueryKey(projectId),
+      retry: false,
+      staleTime: 30_000,
+    },
+  });
+
+  const { data: project } = useGetProject(projectId, {
+    query: {
+      enabled: !!projectId,
+      queryKey: getGetProjectQueryKey(projectId),
+      staleTime: 60_000,
+    },
+  });
+
+  const { mutate: updateProject, isPending: isUpdatingProject } = useUpdateProject({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+      },
+    },
+  });
+
+  const { mutate: triggerChecks, isPending: isTriggering } = useTriggerCheckRuns({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getGetCheckRunsQueryKey(projectId) });
+      },
+    },
+  });
+
+  const handleSecurityReview = () => {
+    triggerChecks({ id: projectId, data: { onDemand: true } });
+    onSecurityReview();
+  };
+
+  const handleRefresh = () => {
+    void queryClient.invalidateQueries({ queryKey: getGetCheckRunsQueryKey(projectId) });
+  };
+
+  const handleAutoFixToggle = () => {
+    updateProject({
+      id: projectId,
+      data: { autoFixOnCheckFailure: !project?.autoFixOnCheckFailure },
+    });
+  };
+
+  const latestRuns = runs ?? [];
+  const autoFixEnabled = project?.autoFixOnCheckFailure ?? false;
+
+  const passed = latestRuns.filter((r) => r.status === "pass").length;
+  const warnings = latestRuns.filter((r) => r.status === "warning").length;
+  const failed = latestRuns.filter((r) => r.status === "fail").length;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ScanSearch className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium text-foreground">Checks</span>
+          {latestRuns.length > 0 && (
+            <div className="flex items-center gap-1.5 text-[10px]">
+              {passed > 0 && <span className="text-green-400">{passed} passed</span>}
+              {warnings > 0 && <span className="text-yellow-400">{warnings} warnings</span>}
+              {failed > 0 && <span className="text-red-400">{failed} failed</span>}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleRefresh}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
+            title="Refresh checks"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      <button
+        onClick={handleAutoFixToggle}
+        disabled={isUpdatingProject}
+        className={`w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+          autoFixEnabled
+            ? "border-primary/40 bg-primary/5 hover:bg-primary/10"
+            : "border-border bg-card hover:bg-muted/30"
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <Bolt
+            className={`h-3.5 w-3.5 shrink-0 ${autoFixEnabled ? "text-primary" : "text-muted-foreground"}`}
+          />
+          <div className="min-w-0">
+            <div className="text-xs font-medium text-foreground leading-tight">
+              Auto-fix on failure
+            </div>
+            <div className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+              {autoFixEnabled
+                ? "Automatically fixes failing checks after each build"
+                : "Enable to auto-fix failing checks after each build"}
+            </div>
+          </div>
+        </div>
+        <div
+          className={`relative shrink-0 h-4 w-7 rounded-full transition-colors ${
+            autoFixEnabled ? "bg-primary" : "bg-muted"
+          }`}
+        >
+          <div
+            className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+              autoFixEnabled ? "translate-x-3.5" : "translate-x-0.5"
+            }`}
+          />
+        </div>
+      </button>
+
+      <Button
+        size="sm"
+        variant="outline"
+        className="w-full gap-1.5 text-xs h-8"
+        onClick={handleSecurityReview}
+        disabled={isTriggering}
+      >
+        {isTriggering ? (
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <ShieldAlert className="h-3.5 w-3.5" />
+        )}
+        Run security review
+      </Button>
+
+      {isLoading && (
+        <div className="text-center text-xs text-muted-foreground py-2">
+          <RefreshCw className="h-3.5 w-3.5 animate-spin mx-auto mb-1" />
+          Loading checks…
+        </div>
+      )}
+
+      {!isLoading && latestRuns.length === 0 && (
+        <div className="border border-border rounded-lg p-4 text-center space-y-1.5">
+          <ScanSearch className="h-6 w-6 text-muted-foreground mx-auto" />
+          <p className="text-xs text-muted-foreground">No check runs yet.</p>
+          <p className="text-[10px] text-muted-foreground">
+            Checks run automatically after each build. Click "Run security review" for an on-demand
+            scan.
+          </p>
+        </div>
+      )}
+
+      {latestRuns.length > 0 && (
+        <div className="space-y-1.5">
+          {latestRuns.map((run) => (
+            <CheckRunCard key={run.id} run={run} onSendMessage={onSendMessage} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function QualityPanel({
   projectId,
   onSendMessage,
@@ -259,111 +629,122 @@ export function QualityPanel({
   const noAuditYet = isError || !audit || !("findings" in (audit as object));
 
   return (
-    <div className="space-y-4 p-1">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium text-foreground">Quality Audit</span>
+    <div className="space-y-6 p-1">
+      <ChecksSection
+        projectId={projectId}
+        onSecurityReview={() => {
+          void queryClient.invalidateQueries({ queryKey: getGetCheckRunsQueryKey(projectId) });
+        }}
+        onSendMessage={onSendMessage}
+      />
+
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">Quality Audit</span>
+          </div>
+          <button
+            onClick={handleRefresh}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
+            title="Refresh audit"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
         </div>
-        <button
-          onClick={handleRefresh}
-          className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-          title="Refresh audit"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-        </button>
-      </div>
 
-      {isLoading && (
-        <div className="p-4 text-center text-sm text-muted-foreground">
-          <RefreshCw className="h-4 w-4 animate-spin mx-auto mb-2" />
-          Loading audit report…
-        </div>
-      )}
+        {isLoading && (
+          <div className="p-4 text-center text-sm text-muted-foreground">
+            <RefreshCw className="h-4 w-4 animate-spin mx-auto mb-2" />
+            Loading audit report…
+          </div>
+        )}
 
-      {!isLoading && noAuditYet && (
-        <div className="border border-border rounded-lg p-4 text-center space-y-2">
-          <ShieldCheck className="h-8 w-8 text-muted-foreground mx-auto" />
-          <p className="text-sm text-muted-foreground">No audit report yet.</p>
-          <p className="text-xs text-muted-foreground">
-            Build or refine your app to generate a quality audit covering accessibility, SEO,
-            performance, and security.
-          </p>
-        </div>
-      )}
+        {!isLoading && noAuditYet && (
+          <div className="border border-border rounded-lg p-4 text-center space-y-2">
+            <ShieldCheck className="h-8 w-8 text-muted-foreground mx-auto" />
+            <p className="text-sm text-muted-foreground">No audit report yet.</p>
+            <p className="text-xs text-muted-foreground">
+              Build or refine your app to generate a quality audit covering accessibility, SEO,
+              performance, and security.
+            </p>
+          </div>
+        )}
 
-      {!isLoading &&
-        !noAuditYet &&
-        (() => {
-          const report = audit as AuditReport;
-          const categories: AuditCategory[] = ["accessibility", "seo", "performance", "security"];
-          const totalIssues = report.findings.length;
-          const totalErrors = report.findings.filter((f) => f.severity === "error").length;
-          const overallScore = Math.round(
-            report.scores.reduce((sum, s) => sum + s.score, 0) / Math.max(report.scores.length, 1),
-          );
-          const relativeDate = new Date(report.auditedAt).toLocaleString();
+        {!isLoading &&
+          !noAuditYet &&
+          (() => {
+            const report = audit as AuditReport;
+            const categories: AuditCategory[] = ["accessibility", "seo", "performance", "security"];
+            const totalIssues = report.findings.length;
+            const totalErrors = report.findings.filter((f) => f.severity === "error").length;
+            const overallScore = Math.round(
+              report.scores.reduce((sum, s) => sum + s.score, 0) /
+                Math.max(report.scores.length, 1),
+            );
+            const relativeDate = new Date(report.auditedAt).toLocaleString();
 
-          return (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <div className={`border rounded-lg p-3 text-center ${scoreBg(overallScore)}`}>
-                  <div className={`text-2xl font-bold ${scoreColor(overallScore)}`}>
-                    {overallScore}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground mt-0.5">Overall Score</div>
-                </div>
-                <div className="border border-border rounded-lg p-3 text-center bg-card">
-                  <div className="text-2xl font-bold text-foreground">{totalIssues}</div>
-                  <div className="text-[10px] text-muted-foreground mt-0.5">
-                    {totalErrors > 0 ? (
-                      <span className="text-red-400">
-                        {totalErrors} error{totalErrors !== 1 ? "s" : ""}
-                      </span>
-                    ) : (
-                      "Total issues"
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-4 gap-1.5">
-                {report.scores.map((s) => {
-                  const Icon = CATEGORY_ICONS[s.category];
-                  return (
-                    <div
-                      key={s.category}
-                      className={`border rounded-md p-2 text-center ${scoreBg(s.score)}`}
-                    >
-                      <Icon className={`h-3.5 w-3.5 mx-auto mb-1 ${scoreColor(s.score)}`} />
-                      <div className={`text-xs font-bold ${scoreColor(s.score)}`}>{s.score}</div>
-                      <div className="text-[9px] text-muted-foreground mt-0.5 leading-tight">
-                        {s.label}
-                      </div>
+            return (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className={`border rounded-lg p-3 text-center ${scoreBg(overallScore)}`}>
+                    <div className={`text-2xl font-bold ${scoreColor(overallScore)}`}>
+                      {overallScore}
                     </div>
-                  );
-                })}
-              </div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">Overall Score</div>
+                  </div>
+                  <div className="border border-border rounded-lg p-3 text-center bg-card">
+                    <div className="text-2xl font-bold text-foreground">{totalIssues}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      {totalErrors > 0 ? (
+                        <span className="text-red-400">
+                          {totalErrors} error{totalErrors !== 1 ? "s" : ""}
+                        </span>
+                      ) : (
+                        "Total issues"
+                      )}
+                    </div>
+                  </div>
+                </div>
 
-              <div className="space-y-2">
-                {categories.map((cat) => (
-                  <CategorySection
-                    key={cat}
-                    category={cat}
-                    score={report.scores.find((s) => s.category === cat)}
-                    findings={report.findings.filter((f) => f.category === cat)}
-                    onFix={handleFix}
-                  />
-                ))}
-              </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {report.scores.map((s) => {
+                    const Icon = CATEGORY_ICONS[s.category];
+                    return (
+                      <div
+                        key={s.category}
+                        className={`border rounded-md p-2 text-center ${scoreBg(s.score)}`}
+                      >
+                        <Icon className={`h-3.5 w-3.5 mx-auto mb-1 ${scoreColor(s.score)}`} />
+                        <div className={`text-xs font-bold ${scoreColor(s.score)}`}>{s.score}</div>
+                        <div className="text-[9px] text-muted-foreground mt-0.5 leading-tight">
+                          {s.label}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
 
-              <div className="text-[10px] text-muted-foreground text-center pt-1">
-                Audited {report.fileCount} HTML file{report.fileCount !== 1 ? "s" : ""} ·{" "}
-                {relativeDate}
-              </div>
-            </>
-          );
-        })()}
+                <div className="space-y-2">
+                  {categories.map((cat) => (
+                    <CategorySection
+                      key={cat}
+                      category={cat}
+                      score={report.scores.find((s) => s.category === cat)}
+                      findings={report.findings.filter((f) => f.category === cat)}
+                      onFix={handleFix}
+                    />
+                  ))}
+                </div>
+
+                <div className="text-[10px] text-muted-foreground text-center pt-1">
+                  Audited {report.fileCount} HTML file{report.fileCount !== 1 ? "s" : ""} ·{" "}
+                  {relativeDate}
+                </div>
+              </>
+            );
+          })()}
+      </div>
     </div>
   );
 }

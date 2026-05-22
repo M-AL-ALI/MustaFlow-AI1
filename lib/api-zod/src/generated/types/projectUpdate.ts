@@ -21,4 +21,5 @@ export interface ProjectUpdate {
   themeColor?: string;
   /** Enable or disable the critical-findings publish gate for this project. */
   blockPublishOnCritical?: boolean;
+  autoFixOnCheckFailure?: boolean;
 }

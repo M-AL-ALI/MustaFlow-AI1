@@ -284,6 +284,8 @@ export interface Project {
   blockPublishOnCritical?: boolean;
   /** Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate. */
   dismissedFindingHashes?: string[] | null;
+  /** When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves. */
+  autoFixOnCheckFailure?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -376,6 +378,7 @@ export interface ProjectUpdate {
   themeColor?: string;
   /** Enable or disable the critical-findings publish gate for this project. */
   blockPublishOnCritical?: boolean;
+  autoFixOnCheckFailure?: boolean;
 }
 
 export interface MobileAppSettingsInput {

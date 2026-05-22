@@ -2851,6 +2851,9 @@ components:
           items: { type: string }
           description: "Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate."
           nullable: true
+        autoFixOnCheckFailure:
+          type: boolean
+          description: "When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -2905,6 +2908,7 @@ components:
         blockPublishOnCritical:
           type: boolean
           description: "Enable or disable the critical-findings publish gate for this project."
+        autoFixOnCheckFailure: { type: boolean }
 
     MobileAppSettingsInput:
       type: object

@@ -93,6 +93,10 @@ export const projectsTable = pgTable("projects", {
   // user has explicitly dismissed in the Quality panel. Dismissed findings are excluded from
   // the publish security gate check so the block is cleared without rebuilding.
   dismissedFindingHashes: jsonb("dismissed_finding_hashes").$type<string[]>().default([]),
+  // autoFixOnCheckFailure: when true, the server automatically enqueues a refine
+  // task using the failed checks' fixPrompts after every build that has failing checks.
+  // Auto-fix only fires once per build (not on auto-fix tasks themselves).
+  autoFixOnCheckFailure: boolean("auto_fix_on_check_failure").notNull().default(false),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

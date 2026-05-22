@@ -364,6 +364,7 @@ export const ListProjectsResponseItem = zod.object({
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
+  "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -426,6 +427,7 @@ export const GetProjectResponse = zod.object({
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
+  "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -444,7 +446,8 @@ export const UpdateProjectBody = zod.object({
   "siteTitle": zod.string().optional(),
   "metaDescription": zod.string().optional(),
   "themeColor": zod.string().optional(),
-  "blockPublishOnCritical": zod.boolean().optional().describe('Enable or disable the critical-findings publish gate for this project.')
+  "blockPublishOnCritical": zod.boolean().optional().describe('Enable or disable the critical-findings publish gate for this project.'),
+  "autoFixOnCheckFailure": zod.boolean().optional()
 })
 
 export const updateProjectResponseHealthScoreMin = 0;
@@ -483,6 +486,7 @@ export const UpdateProjectResponse = zod.object({
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
+  "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -536,6 +540,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
+  "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))

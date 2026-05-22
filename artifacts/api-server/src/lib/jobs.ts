@@ -49,6 +49,7 @@ import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
 import { runAudit } from "./auditor";
 import { runOrchestration } from "./checks/orchestrator";
+import { getCheckByName } from "./checks/registry";
 import {
   triggerEasBuild,
   getEasBuildStatus,
@@ -2027,6 +2028,98 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 { projectId, taskId: taskIdForChecks, checkCount: runs.length, checkSummary },
                 "Orchestrated checks complete",
               );
+
+              // ── Auto-fix on check failure ─────────────────────────────────
+              // When project.autoFixOnCheckFailure is enabled and one or more
+              // checks failed, automatically enqueue a single background refine
+              // task that addresses each failed check.
+              // Guard: skip if the triggering task is itself an auto-fix (title
+              // starts with "Auto-fix:") to prevent cascading loops.
+              const isAutoFixTask = (input.userPrompt ?? "").startsWith("Auto-fix:");
+              if (
+                project.autoFixOnCheckFailure &&
+                checkRunsSummary.failed > 0 &&
+                !isAutoFixTask
+              ) {
+                try {
+                  const failedRuns = runs.filter((r) => r.status === "fail");
+                  const fixParts: string[] = [];
+                  for (const run of failedRuns) {
+                    const checkDef = getCheckByName(run.checkName);
+                    if (checkDef?.fixPrompt) {
+                      fixParts.push(checkDef.fixPrompt);
+                    }
+                  }
+                  if (fixParts.length > 0) {
+                    const checkNames = failedRuns.map((r) => r.checkName).join(", ");
+                    const autoFixPrompt = fixParts.join(" Additionally, ");
+                    const autoFixTitle = `Auto-fix: ${checkNames}`;
+
+                    const autoFixResult = await pool.query<{ id: number }>(
+                      `INSERT INTO agent_tasks (project_id, title, kind, status, prompt)
+                       VALUES ($1, $2, 'background', 'queued', $3)
+                       ON CONFLICT (project_id, title)
+                       WHERE kind = 'background' AND status IN ('queued', 'building', 'planning')
+                       DO NOTHING
+                       RETURNING id`,
+                      [projectId, autoFixTitle, autoFixPrompt],
+                    );
+
+                    if (autoFixResult.rows.length === 0) {
+                      logger.info(
+                        { projectId, taskId: taskIdForChecks },
+                        "Auto-fix on check failure already queued — skipping duplicate enqueue",
+                      );
+                    } else {
+                      const followUpTask = autoFixResult.rows[0];
+                      if (followUpTask) {
+                        await db.insert(chatMessagesTable).values([
+                          {
+                            projectId,
+                            role: "user",
+                            content: autoFixPrompt,
+                            agentMode,
+                            planMode: false,
+                          },
+                          {
+                            projectId,
+                            role: "assistant",
+                            content: `${failedRuns.length} check${failedRuns.length !== 1 ? "s" : ""} failed (${checkNames}). Auto-fix is enabled — I've queued a targeted fix (Task #${followUpTask.id}) that will run in the background and post a report here when complete.`,
+                            agentMode,
+                            planMode: false,
+                            plan: {
+                              kind: "task-queued",
+                              taskId: followUpTask.id,
+                            } as unknown as Record<string, unknown>,
+                          },
+                        ]);
+                        enqueueJob({
+                          taskId: followUpTask.id,
+                          projectId,
+                          kind: "refine",
+                          userPrompt: autoFixPrompt,
+                          agentMode,
+                        });
+                        logger.info(
+                          {
+                            projectId,
+                            taskId: taskIdForChecks,
+                            followUpTaskId: followUpTask.id,
+                            checkNames,
+                          },
+                          "Auto-fix on check failure enqueued",
+                        );
+                      }
+                    }
+                  }
+                } catch (autoFixErr) {
+                  logger.warn(
+                    { err: autoFixErr, projectId, taskId: taskIdForChecks },
+                    "Auto-fix on check failure enqueue failed (non-fatal)",
+                  );
+                }
+              }
+              // ── End auto-fix on check failure ─────────────────────────────
             } catch (err) {
               logger.warn(
                 { err, projectId, versionId: versionIdForChecks },
