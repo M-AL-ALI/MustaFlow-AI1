@@ -653,6 +653,7 @@ export default function ProjectWorkspacePage() {
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [historyFocusVersionId, setHistoryFocusVersionId] = useState<number | null>(null);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
+  const [selectedCodeFileLine, setSelectedCodeFileLine] = useState<number | null>(null);
   const [scrollManageToMobileSettings, setScrollManageToMobileSettings] = useState(false);
   const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
   const [creditsSuccess, setCreditsSuccess] = useState(() => {
@@ -1871,6 +1872,7 @@ export default function ProjectWorkspacePage() {
                       const f = files.find((x) => x.path === path);
                       if (f) {
                         setSelectedCodeFileId(f.id);
+                        setSelectedCodeFileLine(null);
                         setActiveTab("code");
                       }
                     }}
@@ -2057,6 +2059,7 @@ export default function ProjectWorkspacePage() {
                                             const f = files.find((x) => x.path === path);
                                             if (f) {
                                               setSelectedCodeFileId(f.id);
+                                              setSelectedCodeFileLine(null);
                                               setActiveTab("code");
                                             }
                                           }}
@@ -2340,6 +2343,7 @@ export default function ProjectWorkspacePage() {
                       key={file.path}
                       onClick={() => {
                         setSelectedCodeFileId(file.id);
+                        setSelectedCodeFileLine(null);
                         setActiveTab("code");
                       }}
                       className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-left text-muted-foreground hover:bg-muted hover:text-foreground transition-colors group"
@@ -2660,6 +2664,7 @@ export default function ProjectWorkspacePage() {
                 }}
                 onOpenFileInEditor={(fileId) => {
                   setSelectedCodeFileId(fileId);
+                  setSelectedCodeFileLine(null);
                   setActiveTab("code");
                 }}
                 containerStatus={containerStatus}
@@ -2671,6 +2676,7 @@ export default function ProjectWorkspacePage() {
               <CodeEditorTab
                 projectId={projectId}
                 initialFileId={selectedCodeFileId}
+                initialLine={selectedCodeFileLine}
                 onHtmlFileSaved={handleHtmlFileSaved}
                 onSnippetInsert={(prompt) => {
                   switchLeftPanel("chat");
@@ -2754,6 +2760,16 @@ export default function ProjectWorkspacePage() {
                 files={files}
                 onSendMessage={(text) => {
                   setPrompt(text);
+                }}
+                onNavigateToFile={(filePath, line) => {
+                  const f = files.find(
+                    (x) => x.path === filePath || x.path.endsWith("/" + filePath),
+                  );
+                  if (f) {
+                    setSelectedCodeFileId(f.id);
+                    setSelectedCodeFileLine(line ?? null);
+                    setActiveTab("code");
+                  }
                 }}
               />
             )}

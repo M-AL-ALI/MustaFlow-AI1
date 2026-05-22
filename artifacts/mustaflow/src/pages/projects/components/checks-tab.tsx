@@ -76,6 +76,17 @@ const CHECK_META: Record<
       return `Fix the following security vulnerabilities found by static analysis: ${issues}. Sanitize all user inputs, avoid eval() and innerHTML with untrusted data, and follow OWASP secure coding guidelines.`;
     },
   },
+  "semgrep-sast": {
+    label: "Semgrep SAST",
+    Icon: ShieldCheck,
+    fixPrompt: (findings) => {
+      const issues = findings
+        .map((f) => `${f.message} at ${f.file}${f.line ? `:${f.line}` : ""}`)
+        .slice(0, 5)
+        .join("; ");
+      return `Fix the following security vulnerabilities detected by Semgrep AST-aware analysis: ${issues}. Address each finding at the exact file and line indicated — sanitize user inputs before DOM operations, avoid eval() and dynamic Function() calls, prevent prototype pollution by validating object keys, and follow OWASP secure coding guidelines.`;
+    },
+  },
   accessibility: {
     label: "Accessibility",
     Icon: Eye,
@@ -290,15 +301,22 @@ function FindingItem({
   projectId,
   finding,
   fileSummaries,
+  onNavigateToFile,
 }: {
   projectId: number;
   finding: CheckRunFinding;
   fileSummaries: ProjectFileSummary[];
+  onNavigateToFile?: (filePath: string, line?: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const matchedFile = fileSummaries.find(
     (f) => f.path === finding.file || f.path.endsWith("/" + finding.file),
   );
+
+  const handleOpenInEditor = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onNavigateToFile?.(finding.file, finding.line ?? undefined);
+  };
 
   return (
     <div className="border border-border rounded-md overflow-hidden text-xs">
@@ -309,9 +327,21 @@ function FindingItem({
         <SeverityIcon severity={finding.severity} />
         <div className="flex-1 min-w-0">
           <div className="text-foreground leading-snug">{finding.message}</div>
-          <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
-            {finding.file}
-            {finding.line ? `:${finding.line}` : ""}
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[10px] text-muted-foreground font-mono">
+              {finding.file}
+              {finding.line ? `:${finding.line}` : ""}
+            </span>
+            {onNavigateToFile && matchedFile && (
+              <button
+                onClick={handleOpenInEditor}
+                className="text-[10px] text-primary/70 hover:text-primary transition-colors flex items-center gap-0.5 shrink-0"
+                title="Open in code editor"
+              >
+                <FileCode2 className="h-2.5 w-2.5" />
+                open
+              </button>
+            )}
           </div>
         </div>
         {(matchedFile || finding.detail) && (
@@ -351,12 +381,14 @@ function CheckDetailCard({
   projectId,
   fileSummaries,
   onFix,
+  onNavigateToFile,
 }: {
   checkName: string;
   history: CheckRun[];
   projectId: number;
   fileSummaries: ProjectFileSummary[];
   onFix?: (prompt: string) => void;
+  onNavigateToFile?: (filePath: string, line?: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const meta = CHECK_META[checkName] ?? {
@@ -473,6 +505,7 @@ function CheckDetailCard({
                   projectId={projectId}
                   finding={f}
                   fileSummaries={fileSummaries}
+                  onNavigateToFile={onNavigateToFile}
                 />
               ))}
               {findings.length > 20 && (
@@ -504,10 +537,12 @@ export function ChecksTab({
   projectId,
   files = [],
   onSendMessage,
+  onNavigateToFile,
 }: {
   projectId: number;
   files?: ProjectFileSummary[];
   onSendMessage?: (text: string) => void;
+  onNavigateToFile?: (filePath: string, line?: number) => void;
 }) {
   const queryClient = useQueryClient();
 
@@ -649,6 +684,7 @@ export function ChecksTab({
                   projectId={projectId}
                   fileSummaries={files}
                   onFix={handleFix}
+                  onNavigateToFile={onNavigateToFile}
                 />
               ))}
             </div>
@@ -669,6 +705,7 @@ export function ChecksTab({
                   projectId={projectId}
                   fileSummaries={files}
                   onFix={handleFix}
+                  onNavigateToFile={onNavigateToFile}
                 />
               ))}
             </div>

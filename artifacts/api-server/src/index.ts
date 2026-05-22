@@ -1,8 +1,12 @@
 import { createServer } from "node:http";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { createTerminalServer } from "./lib/terminal";
 import { ensureFlyApp } from "./lib/container";
+
+const execFileAsync = promisify(execFile);
 
 const rawPort = process.env["PORT"];
 
@@ -15,6 +19,17 @@ const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
+
+// Verify semgrep is available for the semgrep-sast check (best-effort startup probe)
+void execFileAsync("semgrep", ["--version"], { timeout: 5000 })
+  .then(({ stdout }) => {
+    logger.info({ version: stdout.trim().split("\n")[0] }, "semgrep available for SAST scanning");
+  })
+  .catch(() => {
+    logger.warn(
+      "semgrep not found in PATH — semgrep-sast check will be skipped. Install semgrep to enable AST-aware security scanning.",
+    );
+  });
 
 // Ensure the Fly.io app exists for container infrastructure (best-effort)
 void ensureFlyApp();

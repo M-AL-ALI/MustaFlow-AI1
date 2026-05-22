@@ -38,6 +38,15 @@ export const CHECK_REGISTRY: CheckDefinition[] = [
       "Fix all SAST security issues in the generated app: sanitise all innerHTML assignments that use user-controlled data to prevent XSS, remove prototype pollution patterns, move any sensitive values out of localStorage/sessionStorage into more appropriate storage, and replace hardcoded internal endpoint URLs with configurable values.",
   },
   {
+    name: "semgrep-sast",
+    category: "security",
+    trigger: "always",
+    description:
+      "AST-aware security scanner powered by Semgrep OSS. Uses the p/javascript and p/security-audit rule packs to detect SQL injection, XSS, prototype pollution, insecure patterns, and hundreds of other vulnerability classes that regex-based checks miss. Always runs after every build.",
+    fixPrompt:
+      "Fix all security vulnerabilities found by Semgrep static analysis. Address each finding at the indicated file and line: sanitize user inputs before using them in DOM operations, avoid eval() and Function() with dynamic strings, prevent prototype pollution by validating object keys, and follow OWASP secure coding guidelines for JavaScript. Do not remove functionality — only fix the insecure patterns.",
+  },
+  {
     name: "accessibility",
     category: "accessibility",
     trigger: "agent-selected",

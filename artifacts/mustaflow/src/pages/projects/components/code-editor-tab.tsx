@@ -768,11 +768,13 @@ const EDITOR_LS_KEY = (projectId: number) => `mf-editor-file-${projectId}`;
 export function CodeEditorTab({
   projectId,
   initialFileId,
+  initialLine,
   onHtmlFileSaved,
   onSnippetInsert,
 }: {
   projectId: number;
   initialFileId?: number | null;
+  initialLine?: number | null;
   onHtmlFileSaved?: () => void;
   onSnippetInsert?: (prompt: string) => void;
 }) {
@@ -809,7 +811,7 @@ export function CodeEditorTab({
   const [confirmDeleteFileId, setConfirmDeleteFileId] = useState<number | null>(null);
 
   const editorRef = useRef<MonacoEditor | null>(null);
-  const pendingRevealLineRef = useRef<number | null>(null);
+  const pendingRevealLineRef = useRef<number | null>(initialLine ?? null);
 
   const { data: files = [] } = useListProjectFiles(projectId, {
     query: { queryKey: getListProjectFilesQueryKey(projectId) },

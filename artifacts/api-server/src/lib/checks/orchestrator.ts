@@ -21,6 +21,7 @@ import {
   runPerformanceCheck,
   runCdnSecurityCheck,
 } from "./auditor-adapter";
+import { runSemgrepCheck } from "./semgrep";
 
 export type CheckSelectionItem = {
   checkName: string;
@@ -147,10 +148,10 @@ function buildCheckSummary(runs: RunResult[]): string {
   return parts.join(" · ") || "No checks ran";
 }
 
-function runCheckByName(
+async function runCheckByName(
   name: string,
   files: BuilderFile[],
-): { status: CheckRunStatus; findings: CheckFinding[] } {
+): Promise<{ status: CheckRunStatus; findings: CheckFinding[] }> {
   switch (name) {
     case "secret-leak": {
       const r = runSecretLeakCheck(files);
@@ -162,6 +163,10 @@ function runCheckByName(
     }
     case "sast": {
       const r = runSastCheck(files);
+      return { status: r.status, findings: r.findings };
+    }
+    case "semgrep-sast": {
+      const r = await runSemgrepCheck(files);
       return { status: r.status, findings: r.findings };
     }
     case "accessibility": {
@@ -243,7 +248,7 @@ export async function runOrchestration(
     }
 
     try {
-      const result = runCheckByName(name, files);
+      const result = await runCheckByName(name, files);
       return {
         checkName: name,
         status: result.status,
@@ -276,7 +281,7 @@ export async function runOnDemandChecks(
 ): Promise<RunResult[]> {
   const tasks = checkNames.map(async (name) => {
     try {
-      const result = runCheckByName(name, files);
+      const result = await runCheckByName(name, files);
       return {
         checkName: name,
         status: result.status,

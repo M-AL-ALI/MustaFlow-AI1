@@ -113,7 +113,7 @@ router.post(
     const validCheckNames = new Set(CHECK_REGISTRY.map((c) => c.name));
 
     const checksToRun: string[] = isOnDemand
-      ? ["sast", "secret-leak", "cdn-security"]
+      ? ["semgrep-sast", "sast", "secret-leak", "cdn-security"]
       : requestedChecks.filter((c) => validCheckNames.has(c));
 
     if (checksToRun.length === 0) {
