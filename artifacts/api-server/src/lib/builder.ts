@@ -1,5 +1,6 @@
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { parse as acornParse } from "acorn";
+import { checkSyntax, formatSyntaxErrors } from "./checks/syntax-checker";
 import { logger } from "./logger";
 import type { AgentMode } from "./ai";
 import type { TaskReport } from "@workspace/db";
@@ -2077,6 +2078,15 @@ export async function runBuildPipeline(args: {
   );
   const securityNotices = scanFilesForCdnIssues(files);
 
+  // Run syntax check on the final (post-correction) files to get a definitive result
+  const finalSyntaxErrors = checkSyntax(files);
+  if (finalSyntaxErrors.length > 0) {
+    logger.warn(
+      { errors: finalSyntaxErrors.map((e) => `${e.file}: ${e.message}`) },
+      "Syntax errors remain in final build output after correction pass",
+    );
+  }
+
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: blueprint as unknown as Record<string, unknown>,
@@ -2087,6 +2097,7 @@ export async function runBuildPipeline(args: {
     warnings,
     integrationsNeeded: blueprint.integrationsNeeded ?? [],
     nextRecommendation,
+    syntaxValid: finalSyntaxErrors.length === 0,
     ...(cdnUpgrades.length > 0 ? { cdnUpgrades } : {}),
     ...(securityNotices.length > 0 ? { securityNotices } : {}),
   };
@@ -2419,6 +2430,15 @@ export async function runRefinePipeline(args: {
   ];
   const securityNotices = scanFilesForCdnIssues(mergedFiles);
 
+  // Run syntax check on the final changed files to record pass/fail in the report
+  const refineSyntaxErrors = checkSyntax(cdnUpgradedFiles);
+  if (refineSyntaxErrors.length > 0) {
+    logger.warn(
+      { errors: refineSyntaxErrors.map((e) => `${e.file}: ${e.message}`) },
+      "Syntax errors remain in final refine output after correction pass",
+    );
+  }
+
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: null,
@@ -2429,6 +2449,7 @@ export async function runRefinePipeline(args: {
     warnings,
     integrationsNeeded,
     nextRecommendation,
+    syntaxValid: refineSyntaxErrors.length === 0,
     ...(refineCdnUpgrades.length > 0 ? { cdnUpgrades: refineCdnUpgrades } : {}),
     ...(securityNotices.length > 0 ? { securityNotices } : {}),
   };

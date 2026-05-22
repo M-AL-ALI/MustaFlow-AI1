@@ -80,6 +80,7 @@ export type TaskReport = {
   testResults?: TestResult[] | null;
   testScript?: string | null;
   testRanAt?: string | null;
+  syntaxValid?: boolean;
 };
 
 export const agentTasksTable = pgTable(

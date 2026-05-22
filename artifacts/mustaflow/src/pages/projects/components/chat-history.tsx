@@ -27,6 +27,7 @@ import {
   FlaskConical,
   RefreshCw,
   XCircle,
+  FileCode,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -96,6 +97,7 @@ type TaskReport = {
   }> | null;
   testScript?: string | null;
   testRanAt?: string | null;
+  syntaxValid?: boolean;
 };
 
 type StructuredPlan = {
@@ -554,6 +556,25 @@ function InlineReportCard({
               ))}
             </ul>
           )}
+        </div>
+      )}
+      {report.syntaxValid !== undefined && (
+        <div className="pt-1.5 border-t border-border">
+          <div className="flex items-center gap-1.5 text-[10px]">
+            <FileCode className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="font-semibold text-foreground/80">Syntax</span>
+            {report.syntaxValid ? (
+              <span className="flex items-center gap-1 text-green-400">
+                <CheckCircle2 className="h-3 w-3" />
+                All files valid
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-yellow-400">
+                <AlertTriangle className="h-3 w-3" />
+                Errors detected
+              </span>
+            )}
+          </div>
         </div>
       )}
       {report.codeSmells && report.codeSmells.length > 0 && (

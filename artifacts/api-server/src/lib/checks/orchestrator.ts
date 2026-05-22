@@ -15,6 +15,7 @@ import { CHECK_REGISTRY, getAlwaysOnChecks, getAgentSelectedChecks } from "./reg
 import { runSecretLeakCheck } from "./secret-leak";
 import { runCodeQualityCheck } from "./code-quality";
 import { runSastCheck } from "./sast";
+import { runSyntaxCheck } from "./syntax-checker";
 import {
   runAccessibilityCheck,
   runSeoCheck,
@@ -153,6 +154,10 @@ async function runCheckByName(
   files: BuilderFile[],
 ): Promise<{ status: CheckRunStatus; findings: CheckFinding[] }> {
   switch (name) {
+    case "syntax": {
+      const r = runSyntaxCheck(files);
+      return { status: r.status, findings: r.findings };
+    }
     case "secret-leak": {
       const r = runSecretLeakCheck(files);
       return { status: r.status, findings: r.findings };

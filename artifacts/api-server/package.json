@@ -27,6 +27,7 @@
     "express": "^5.2.1",
     "fflate": "^0.8.3",
     "google-auth-library": "^10.6.2",
+    "htmlparser2": "^12.0.0",
     "http-proxy-middleware": "^4.0.0",
     "openai": "^6.38.0",
     "pg": "^8.20.0",

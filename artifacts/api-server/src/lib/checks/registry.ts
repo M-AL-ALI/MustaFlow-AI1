@@ -11,6 +11,15 @@ export type CheckDefinition = {
 
 export const CHECK_REGISTRY: CheckDefinition[] = [
   {
+    name: "syntax",
+    category: "quality",
+    trigger: "always",
+    description:
+      "Parses every .js file with Acorn and every .html file with htmlparser2 before files are saved. A syntax error in any file blocks the save and triggers an automatic correction pass. Always runs — invalid syntax would break the preview.",
+    fixPrompt:
+      "Fix all JavaScript and HTML syntax errors in the generated code. Ensure every .js file is valid ECMAScript 2020 and every .html file has correctly nested, closed tags and well-formed attributes. Do not remove functionality — only correct the broken syntax.",
+  },
+  {
     name: "secret-leak",
     category: "security",
     trigger: "always",
