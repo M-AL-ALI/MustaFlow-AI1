@@ -121,9 +121,10 @@ interface ProjectFile {
   mimeType: string | null;
 }
 
-function buildCdnComponents(
-  files: ProjectFile[],
-): { components: SbomComponent[]; vulnerabilities: SbomVulnerability[] } {
+function buildCdnComponents(files: ProjectFile[]): {
+  components: SbomComponent[];
+  vulnerabilities: SbomVulnerability[];
+} {
   const allUrls = new Set<string>();
 
   for (const file of files) {
@@ -143,10 +144,9 @@ function buildCdnComponents(
       if (!entry.urlPatterns.some((p) => p.test(url))) continue;
 
       const versionMatch = url.match(entry.versionPattern);
-      const version =
-        versionMatch
-          ? (versionMatch[1] ?? versionMatch[2] ?? versionMatch[3] ?? "unknown")
-          : "unknown";
+      const version = versionMatch
+        ? (versionMatch[1] ?? versionMatch[2] ?? versionMatch[3] ?? "unknown")
+        : "unknown";
 
       const key = `${entry.name}@${version}`;
       if (seen.has(key)) continue;
@@ -162,11 +162,7 @@ function buildCdnComponents(
         name: entry.displayName,
         version,
         purl: `pkg:npm/${entry.name}@${version}`,
-        licenses: [
-          isSpdx
-            ? { license: { id: licenseId } }
-            : { license: { name: licenseId } },
-        ],
+        licenses: [isSpdx ? { license: { id: licenseId } } : { license: { name: licenseId } }],
         externalReferences: [{ type: "distribution", url }],
       });
 
@@ -178,21 +174,17 @@ function buildCdnComponents(
   for (const finding of cdnFindings) {
     if (!finding.cve) continue;
 
-    const affectedEntry = CDN_ALLOWLIST.find((e) =>
-      e.urlPatterns.some((p) => p.test(finding.url)),
-    );
+    const affectedEntry = CDN_ALLOWLIST.find((e) => e.urlPatterns.some((p) => p.test(finding.url)));
     const versionMatch = finding.url.match(affectedEntry?.versionPattern ?? /$/);
-    const version =
-      versionMatch
-        ? (versionMatch[1] ?? versionMatch[2] ?? versionMatch[3] ?? finding.version ?? "unknown")
-        : (finding.version ?? "unknown");
+    const version = versionMatch
+      ? (versionMatch[1] ?? versionMatch[2] ?? versionMatch[3] ?? finding.version ?? "unknown")
+      : (finding.version ?? "unknown");
 
-    const bomRef = affectedEntry ? `cdn-${affectedEntry.name}-${version}` : `cdn-unknown-${version}`;
+    const bomRef = affectedEntry
+      ? `cdn-${affectedEntry.name}-${version}`
+      : `cdn-unknown-${version}`;
 
-    const severity =
-      finding.severity === "error"
-        ? ("high" as const)
-        : ("medium" as const);
+    const severity = finding.severity === "error" ? ("high" as const) : ("medium" as const);
 
     vulnerabilities.push({
       id: finding.cve,
@@ -298,7 +290,9 @@ function buildNpmComponents(): SbomComponent[] {
     } catch {
       const pkgJson = readPackageJson(resolve(process.cwd(), "artifacts/api-server/package.json"));
       if (pkgJson?.["dependencies"] && typeof pkgJson["dependencies"] === "object") {
-        for (const [name, ver] of Object.entries(pkgJson["dependencies"] as Record<string, string>)) {
+        for (const [name, ver] of Object.entries(
+          pkgJson["dependencies"] as Record<string, string>,
+        )) {
           if (!name.startsWith("@workspace/")) {
             depMap.set(name, ver.replace(/^[\^~>=]/, ""));
           }
@@ -320,11 +314,7 @@ function buildNpmComponents(): SbomComponent[] {
       name,
       version: cleanVersion,
       purl: `pkg:npm/${name}@${cleanVersion}`,
-      licenses: [
-        isSpdx
-          ? { license: { id: license } }
-          : { license: { name: license } },
-      ],
+      licenses: [isSpdx ? { license: { id: license } } : { license: { name: license } }],
       externalReferences: [
         {
           type: "distribution",
@@ -339,17 +329,11 @@ function buildNpmComponents(): SbomComponent[] {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function generateSbom(
-  projectName: string,
-  files: ProjectFile[],
-): CycloneDxDocument {
+export function generateSbom(projectName: string, files: ProjectFile[]): CycloneDxDocument {
   const { components: cdnComponents, vulnerabilities } = buildCdnComponents(files);
   const npmComponents = buildNpmComponents();
 
-  const allComponents: SbomComponent[] = [
-    ...cdnComponents,
-    ...npmComponents,
-  ];
+  const allComponents: SbomComponent[] = [...cdnComponents, ...npmComponents];
 
   return {
     bomFormat: "CycloneDX",
@@ -358,9 +342,7 @@ export function generateSbom(
     version: 1,
     metadata: {
       timestamp: new Date().toISOString(),
-      tools: [
-        { vendor: "MustaFlow", name: "SBOM Generator", version: "1.0.0" },
-      ],
+      tools: [{ vendor: "MustaFlow", name: "SBOM Generator", version: "1.0.0" }],
       component: {
         type: "application",
         name: projectName,

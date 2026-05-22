@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db, projectsTable, projectFilesTable, secretsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { isBinaryMime } from "../lib/binary-mime";
+import { generateSbom } from "../lib/sbom";
 
 const router: IRouter = Router();
 
@@ -132,6 +133,10 @@ python3 -m http.server 8080
 
 ${files.map((f) => `- \`${f.path}\``).join("\n")}
 
+## Software Bill of Materials (SBOM)
+
+This export includes a \`sbom.json\` file at the project root — a [CycloneDX 1.5](https://cyclonedx.org/) document listing all CDN libraries and npm dependencies (with known CVEs) used to produce this project. Use it for compliance audits, license review, or supply-chain handoff.
+
 ${gettingStarted}
 
 ## Environment Variables
@@ -196,6 +201,13 @@ router.get("/projects/:id/export", requireProjectOwnership, async (req, res): Pr
   }
   zipFiles["README.md"] = strToU8(generateReadme(project, files));
   zipFiles[".env.example"] = strToU8(generateEnvExample(secrets.map((s) => s.name)));
+
+  try {
+    const sbom = generateSbom(project.name, files);
+    zipFiles["sbom.json"] = strToU8(JSON.stringify(sbom, null, 2));
+  } catch (err) {
+    req.log.warn({ err, projectId }, "Failed to generate SBOM for export; continuing without it");
+  }
 
   const zipped = zipSync(zipFiles, { level: 9 });
 

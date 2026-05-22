@@ -592,10 +592,7 @@ router.get("/projects/:id/sbom", requireProjectOwnership, async (req, res): Prom
     const sbom = generateSbom(project.name, files);
 
     res.setHeader("Content-Type", "application/json");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="sbom-${projectId}.json"`,
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="sbom-${projectId}.json"`);
     res.json(sbom);
   } catch (err) {
     logger.error({ err, projectId }, "Failed to generate SBOM");
