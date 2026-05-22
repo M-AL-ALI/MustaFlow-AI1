@@ -6,9 +6,14 @@ import {
   useTriggerCheckRuns,
   useGetProjectFile,
   getGetProjectFileQueryKey,
+  useListCveFindings,
+  getListCveFindingsQueryKey,
+  useRunCveScan,
+  useDismissCveFinding,
   type CheckRun,
   type CheckRunFinding,
   type ProjectFileSummary,
+  type CveFinding,
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +38,9 @@ import {
   ShieldCheck,
   MessageSquarePlus,
   FileCode2,
+  Package,
+  ExternalLink,
+  Ban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -533,6 +541,229 @@ function CheckDetailCard({
   );
 }
 
+const CVE_SEVERITY_ORDER: CveFinding["severity"][] = [
+  "critical",
+  "high",
+  "moderate",
+  "low",
+  "info",
+];
+
+function cveSeverityColor(severity: CveFinding["severity"]): string {
+  if (severity === "critical") return "text-red-500";
+  if (severity === "high") return "text-orange-500";
+  if (severity === "moderate") return "text-yellow-500";
+  if (severity === "low") return "text-blue-400";
+  return "text-muted-foreground";
+}
+
+function cveSeverityBg(severity: CveFinding["severity"]): string {
+  if (severity === "critical") return "bg-red-500/10 border-red-500/30";
+  if (severity === "high") return "bg-orange-500/10 border-orange-500/30";
+  if (severity === "moderate") return "bg-yellow-500/10 border-yellow-500/30";
+  if (severity === "low") return "bg-blue-500/10 border-blue-500/30";
+  return "bg-muted border-border";
+}
+
+function CveRow({
+  finding,
+  onDismiss,
+  isDismissing,
+}: {
+  finding: CveFinding;
+  onDismiss: (id: number) => void;
+  isDismissing: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const dismissed = finding.status === "dismissed";
+
+  return (
+    <div
+      className={cn(
+        "border rounded-md overflow-hidden text-xs",
+        dismissed ? "opacity-50 border-border" : "border-border",
+      )}
+    >
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full text-left p-2.5 flex items-start gap-2 hover:bg-muted/30 transition-colors"
+      >
+        <span
+          className={cn(
+            "shrink-0 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border",
+            cveSeverityBg(finding.severity),
+            cveSeverityColor(finding.severity),
+          )}
+        >
+          {finding.severity}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="text-foreground leading-snug font-medium">{finding.packageName}</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">
+            {finding.title ?? `Vulnerability in ${finding.packageName}`}
+          </div>
+        </div>
+        {expanded ? (
+          <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="px-2.5 pb-2.5 pt-0 border-t border-border bg-card/30 space-y-2">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-2 text-[10px] text-muted-foreground">
+            {finding.currentVersion && (
+              <span>
+                Current: <span className="font-mono text-foreground">{finding.currentVersion}</span>
+              </span>
+            )}
+            {finding.patchedVersion && (
+              <span>
+                Patched:{" "}
+                <span className="font-mono text-green-400">{finding.patchedVersion}</span>
+              </span>
+            )}
+            {finding.cveId && (
+              <span>
+                CVE ID: <span className="font-mono text-foreground">{finding.cveId}</span>
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {finding.advisoryUrl && (
+              <a
+                href={finding.advisoryUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="h-2.5 w-2.5" />
+                Advisory
+              </a>
+            )}
+            {!dismissed && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDismiss(finding.id);
+                }}
+                disabled={isDismissing}
+                className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <Ban className="h-2.5 w-2.5" />
+                Dismiss
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CvePanel() {
+  const queryClient = useQueryClient();
+  const cveParams = { status: "open" as const };
+
+  const { data: findings, isLoading: isCveLoading } = useListCveFindings(cveParams, {
+    query: {
+      queryKey: getListCveFindingsQueryKey(cveParams),
+      staleTime: 60_000,
+      retry: false,
+    },
+  });
+
+  const { mutate: runScan, isPending: isScanning } = useRunCveScan({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getListCveFindingsQueryKey(cveParams) });
+        void queryClient.invalidateQueries({ queryKey: getListCveFindingsQueryKey() });
+      },
+    },
+  });
+
+  const { mutate: dismiss, isPending: isDismissing } = useDismissCveFinding({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getListCveFindingsQueryKey(cveParams) });
+        void queryClient.invalidateQueries({ queryKey: getListCveFindingsQueryKey() });
+      },
+    },
+  });
+
+  const openFindings = (findings ?? []).filter((f) => f.status === "open");
+  const critical = openFindings.filter((f) => f.severity === "critical").length;
+  const high = openFindings.filter((f) => f.severity === "high").length;
+
+  const sorted = [...openFindings].sort(
+    (a, b) =>
+      CVE_SEVERITY_ORDER.indexOf(a.severity) - CVE_SEVERITY_ORDER.indexOf(b.severity),
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Package className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-semibold text-foreground">Dependency CVEs</span>
+          {(critical > 0 || high > 0) && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-[9px] font-bold text-red-400">
+              {critical + high} critical/high
+            </span>
+          )}
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+          onClick={() => runScan()}
+          disabled={isScanning}
+        >
+          {isScanning ? (
+            <RefreshCw className="h-3 w-3 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3 w-3" />
+          )}
+          Re-scan
+        </Button>
+      </div>
+
+      {isCveLoading && (
+        <div className="text-center text-[11px] text-muted-foreground py-3">
+          <RefreshCw className="h-3.5 w-3.5 animate-spin mx-auto mb-1" />
+          Loading CVE data…
+        </div>
+      )}
+
+      {!isCveLoading && sorted.length === 0 && (
+        <div className="border border-border rounded-lg p-3 text-center space-y-1">
+          <CheckCircle2 className="h-5 w-5 text-green-400 mx-auto" />
+          <p className="text-[11px] text-muted-foreground">No open CVEs found.</p>
+          <p className="text-[10px] text-muted-foreground">
+            Click Re-scan to check for new vulnerabilities.
+          </p>
+        </div>
+      )}
+
+      {!isCveLoading && sorted.length > 0 && (
+        <div className="space-y-1.5">
+          {sorted.map((f) => (
+            <CveRow
+              key={f.id}
+              finding={f}
+              onDismiss={(id) => dismiss({ id })}
+              isDismissing={isDismissing}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChecksTab({
   projectId,
   files = [],
@@ -711,7 +942,28 @@ export function ChecksTab({
             </div>
           </div>
         )}
+
+        <div className="border-t border-border pt-4">
+          <CvePanel />
+        </div>
       </div>
     </div>
   );
+}
+
+/**
+ * Exported helper so the workspace layout can show a badge count
+ * on the Checks tab without rendering the full panel.
+ */
+export function useCveCriticalHighCount(): number {
+  const params = { status: "open" as const };
+  const { data } = useListCveFindings(params, {
+    query: {
+      queryKey: getListCveFindingsQueryKey(params),
+      staleTime: 120_000,
+      retry: false,
+    },
+  });
+  if (!data) return 0;
+  return data.filter((f) => f.severity === "critical" || f.severity === "high").length;
 }

@@ -144,6 +144,79 @@ export const TriggerCheckRunsResponse = zod.object({
 
 
 /**
+ * @summary List stored CVE findings from the last npm audit scan.
+ */
+export const ListCveFindingsQueryParams = zod.object({
+  "status": zod.enum(['open', 'dismissed', 'fixed']).optional()
+})
+
+export const ListCveFindingsResponseItem = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number().nullish(),
+  "severity": zod.enum(['critical', 'high', 'moderate', 'low', 'info']),
+  "packageName": zod.string(),
+  "currentVersion": zod.string().nullish(),
+  "patchedVersion": zod.string().nullish(),
+  "cveId": zod.string().nullish(),
+  "title": zod.string().nullish(),
+  "advisoryUrl": zod.string().nullish(),
+  "detectedAt": zod.coerce.date(),
+  "status": zod.enum(['open', 'dismissed', 'fixed']),
+  "dismissedAt": zod.coerce.date().nullish(),
+  "dismissedBy": zod.string().nullish()
+})
+export const ListCveFindingsResponse = zod.array(ListCveFindingsResponseItem)
+
+
+/**
+ * @summary Trigger a fresh npm audit scan and upsert findings into the database.
+ */
+export const RunCveScanResponse = zod.object({
+  "scanned": zod.boolean(),
+  "findings": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number().nullish(),
+  "severity": zod.enum(['critical', 'high', 'moderate', 'low', 'info']),
+  "packageName": zod.string(),
+  "currentVersion": zod.string().nullish(),
+  "patchedVersion": zod.string().nullish(),
+  "cveId": zod.string().nullish(),
+  "title": zod.string().nullish(),
+  "advisoryUrl": zod.string().nullish(),
+  "detectedAt": zod.coerce.date(),
+  "status": zod.enum(['open', 'dismissed', 'fixed']),
+  "dismissedAt": zod.coerce.date().nullish(),
+  "dismissedBy": zod.string().nullish()
+})),
+  "total": zod.number()
+})
+
+
+/**
+ * @summary Dismiss a specific CVE finding.
+ */
+export const DismissCveFindingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DismissCveFindingResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number().nullish(),
+  "severity": zod.enum(['critical', 'high', 'moderate', 'low', 'info']),
+  "packageName": zod.string(),
+  "currentVersion": zod.string().nullish(),
+  "patchedVersion": zod.string().nullish(),
+  "cveId": zod.string().nullish(),
+  "title": zod.string().nullish(),
+  "advisoryUrl": zod.string().nullish(),
+  "detectedAt": zod.coerce.date(),
+  "status": zod.enum(['open', 'dismissed', 'fixed']),
+  "dismissedAt": zod.coerce.date().nullish(),
+  "dismissedBy": zod.string().nullish()
+})
+
+
+/**
  * @summary Generate an image with gpt-image-1 and attach it to the project.
  */
 export const GenerateImageParams = zod.object({

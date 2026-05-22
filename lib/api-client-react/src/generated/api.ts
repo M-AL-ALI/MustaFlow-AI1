@@ -48,6 +48,8 @@ import type {
   ContainerStatus,
   CreateDbSnapshotInput,
   CreateGithubBranch200,
+  CveFinding,
+  CveScanResult,
   DatabaseProvisionInput,
   DatabaseQueryInput,
   DatabaseQueryResult,
@@ -93,6 +95,7 @@ import type {
   ListAdminRoles200,
   ListBillingTransactions200,
   ListCreditTransactions200,
+  ListCveFindingsParams,
   ListDeployments200,
   ListGithubBranches200,
   ListGithubRepositoriesParams,
@@ -571,6 +574,230 @@ export const useTriggerCheckRuns = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getTriggerCheckRunsMutationOptions(options));
+    }
+
+export const getListCveFindingsUrl = (params?: ListCveFindingsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/security/cve?${stringifiedParams}` : `/api/security/cve`
+}
+
+/**
+ * @summary List stored CVE findings from the last npm audit scan.
+ */
+export const listCveFindings = async (params?: ListCveFindingsParams, options?: RequestInit): Promise<CveFinding[]> => {
+
+  return customFetch<CveFinding[]>(getListCveFindingsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCveFindingsQueryKey = (params?: ListCveFindingsParams,) => {
+    return [
+    `/api/security/cve`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListCveFindingsQueryOptions = <TData = Awaited<ReturnType<typeof listCveFindings>>, TError = ErrorType<unknown>>(params?: ListCveFindingsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCveFindings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCveFindingsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCveFindings>>> = ({ signal }) => listCveFindings(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCveFindings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCveFindingsQueryResult = NonNullable<Awaited<ReturnType<typeof listCveFindings>>>
+export type ListCveFindingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List stored CVE findings from the last npm audit scan.
+ */
+
+export function useListCveFindings<TData = Awaited<ReturnType<typeof listCveFindings>>, TError = ErrorType<unknown>>(
+ params?: ListCveFindingsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCveFindings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCveFindingsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getRunCveScanUrl = () => {
+
+
+
+
+  return `/api/security/cve/scan`
+}
+
+/**
+ * @summary Trigger a fresh npm audit scan and upsert findings into the database.
+ */
+export const runCveScan = async ( options?: RequestInit): Promise<CveScanResult> => {
+
+  return customFetch<CveScanResult>(getRunCveScanUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRunCveScanMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runCveScan>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof runCveScan>>, TError,void, TContext> => {
+
+const mutationKey = ['runCveScan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof runCveScan>>, void> = () => {
+
+
+          return  runCveScan(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RunCveScanMutationResult = NonNullable<Awaited<ReturnType<typeof runCveScan>>>
+
+    export type RunCveScanMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Trigger a fresh npm audit scan and upsert findings into the database.
+ */
+export const useRunCveScan = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runCveScan>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof runCveScan>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRunCveScanMutationOptions(options));
+    }
+
+export const getDismissCveFindingUrl = (id: number,) => {
+
+
+
+
+  return `/api/security/cve/${id}/dismiss`
+}
+
+/**
+ * @summary Dismiss a specific CVE finding.
+ */
+export const dismissCveFinding = async (id: number, options?: RequestInit): Promise<CveFinding> => {
+
+  return customFetch<CveFinding>(getDismissCveFindingUrl(id),
+  {
+    ...options,
+    method: 'PATCH'
+
+
+  }
+);}
+
+
+
+
+export const getDismissCveFindingMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissCveFinding>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof dismissCveFinding>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['dismissCveFinding'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof dismissCveFinding>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  dismissCveFinding(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DismissCveFindingMutationResult = NonNullable<Awaited<ReturnType<typeof dismissCveFinding>>>
+
+    export type DismissCveFindingMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Dismiss a specific CVE finding.
+ */
+export const useDismissCveFinding = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissCveFinding>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof dismissCveFinding>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDismissCveFindingMutationOptions(options));
     }
 
 export const getGenerateImageUrl = (id: number,) => {

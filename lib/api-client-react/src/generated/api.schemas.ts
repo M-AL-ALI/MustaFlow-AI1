@@ -1917,6 +1917,48 @@ export interface TriggerChecksResult {
   runs: CheckRun[];
 }
 
+export type CveFindingSeverity = typeof CveFindingSeverity[keyof typeof CveFindingSeverity];
+
+
+export const CveFindingSeverity = {
+  critical: 'critical',
+  high: 'high',
+  moderate: 'moderate',
+  low: 'low',
+  info: 'info',
+} as const;
+
+export type CveFindingStatus = typeof CveFindingStatus[keyof typeof CveFindingStatus];
+
+
+export const CveFindingStatus = {
+  open: 'open',
+  dismissed: 'dismissed',
+  fixed: 'fixed',
+} as const;
+
+export interface CveFinding {
+  id: number;
+  projectId?: number | null;
+  severity: CveFindingSeverity;
+  packageName: string;
+  currentVersion?: string | null;
+  patchedVersion?: string | null;
+  cveId?: string | null;
+  title?: string | null;
+  advisoryUrl?: string | null;
+  detectedAt: string;
+  status: CveFindingStatus;
+  dismissedAt?: string | null;
+  dismissedBy?: string | null;
+}
+
+export interface CveScanResult {
+  scanned: boolean;
+  findings: CveFinding[];
+  total: number;
+}
+
 export type GetCheckRunsParams = {
 taskId?: number;
 /**
@@ -1933,6 +1975,20 @@ export type GetCheckRunTrendsParams = {
  */
 window?: number;
 };
+
+export type ListCveFindingsParams = {
+status?: ListCveFindingsStatus;
+};
+
+export type ListCveFindingsStatus = typeof ListCveFindingsStatus[keyof typeof ListCveFindingsStatus];
+
+
+export const ListCveFindingsStatus = {
+  open: 'open',
+  dismissed: 'dismissed',
+  fixed: 'fixed',
+} as const;
+
 
 export type DeleteWorkspace200 = {
   deleted: boolean;

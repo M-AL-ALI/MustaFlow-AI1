@@ -86,7 +86,7 @@ import { KnowledgeTab } from "./components/knowledge-tab";
 import { HistoryTab } from "./components/history-tab";
 import { TerminalTab } from "./components/terminal-tab";
 import { DatabaseTab } from "./components/database-tab";
-import { ChecksTab } from "./components/checks-tab";
+import { ChecksTab, useCveCriticalHighCount } from "./components/checks-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
@@ -580,6 +580,7 @@ export default function ProjectWorkspacePage() {
     },
   );
   const pendingSuggestionsCount = allSuggestions.filter((s) => s.status === "pending").length;
+  const cveCriticalHighCount = useCveCriticalHighCount();
 
   const prevPendingSuggestionsCountRef = useRef(pendingSuggestionsCount);
   const suggestionsAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1657,6 +1658,11 @@ export default function ProjectWorkspacePage() {
                       <span className="relative flex h-1.5 w-1.5">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
                         <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                      </span>
+                    )}
+                    {tab.value === "checks" && cveCriticalHighCount > 0 && (
+                      <span className="ml-0.5 min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[8px] font-bold leading-none inline-flex items-center justify-center">
+                        {cveCriticalHighCount}
                       </span>
                     )}
                   </button>

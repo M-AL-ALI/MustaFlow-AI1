@@ -18,3 +18,4 @@ export * from "./db-snapshots";
 export * from "./github";
 export * from "./user-preferences";
 export * from "./check-runs";
+export * from "./cve-findings";

@@ -46,6 +46,8 @@ tags:
     description: AI image generation for chat and project assets
   - name: checks
     description: AI-orchestrated quality and security check runs
+  - name: security
+    description: CVE dependency scanning and findings management
 paths:
   /healthz:
     get:
@@ -144,6 +146,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TriggerChecksResult"
+
+  /security/cve:
+    get:
+      operationId: listCveFindings
+      tags: [security]
+      summary: List stored CVE findings from the last npm audit scan.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, dismissed, fixed]
+      responses:
+        "200":
+          description: CVE findings list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CveFinding"
+
+  /security/cve/scan:
+    post:
+      operationId: runCveScan
+      tags: [security]
+      summary: Trigger a fresh npm audit scan and upsert findings into the database.
+      responses:
+        "200":
+          description: Scan complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CveScanResult"
+
+  /security/cve/{id}/dismiss:
+    patch:
+      operationId: dismissCveFinding
+      tags: [security]
+      summary: Dismiss a specific CVE finding.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Finding dismissed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CveFinding"
+        "404":
+          description: Finding not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /projects/{id}/generate-image:
     post:
@@ -4284,3 +4342,36 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CheckRun"
+
+    CveFinding:
+      type: object
+      required: [id, severity, packageName, detectedAt, status]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer, nullable: true }
+        severity:
+          type: string
+          enum: [critical, high, moderate, low, info]
+        packageName: { type: string }
+        currentVersion: { type: string, nullable: true }
+        patchedVersion: { type: string, nullable: true }
+        cveId: { type: string, nullable: true }
+        title: { type: string, nullable: true }
+        advisoryUrl: { type: string, nullable: true }
+        detectedAt: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [open, dismissed, fixed]
+        dismissedAt: { type: string, format: date-time, nullable: true }
+        dismissedBy: { type: string, nullable: true }
+
+    CveScanResult:
+      type: object
+      required: [scanned, findings, total]
+      properties:
+        scanned: { type: boolean }
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/CveFinding"
+        total: { type: integer }
