@@ -13,6 +13,7 @@ import {
   deploymentLogsTable,
   buildAnalyticsTable,
   projectSuggestionsTable,
+  checkRunsTable,
   type TaskReport,
   type FileSnapshotEntry,
 } from "@workspace/db";
@@ -47,6 +48,7 @@ import { getOrCreateCredits, deductCredits } from "../routes/credits";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
 import { runAudit } from "./auditor";
+import { runOrchestration } from "./checks/orchestrator";
 import {
   triggerEasBuild,
   getEasBuildStatus,
@@ -1842,15 +1844,26 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         });
       }
 
-      // Fire-and-forget quality audit — accessibility, SEO, performance, CDN vulnerability.
-      // Runs asynchronously after task completion so it never delays the pipeline.
-      // Results are stored on the project_versions row AND merged into the task report
-      // so that audit findings surface in the chat report card.
-      // We read the latest task report from DB before merging to avoid clobbering
-      // codeSmells (or any other field) written by the concurrent code-smell setImmediate.
+      // Fire-and-forget orchestrated checks — secret-leak, code-quality, SAST,
+      // accessibility, SEO, performance, CDN security. The AI selects which checks
+      // to run based on what changed. Always-on checks (secret-leak, code-quality)
+      // always run. Results are persisted to check_runs and merged into the task report.
+      // An AuditReport is also derived for backward-compat with the existing Quality tab.
       if (version && filesToSmellScan.length > 0) {
-        const versionIdForAudit = version.id;
-        const taskIdForAudit = taskId;
+        const versionIdForChecks = version.id;
+        const taskIdForChecks = taskId;
+        const diffForOrchestrator: {
+          filesAdded: string[];
+          filesModified: string[];
+          filesRemoved: string[];
+        } = {
+          filesAdded: diffSummary?.filesAdded ?? [],
+          filesModified: diffSummary?.filesModified ?? [],
+          filesRemoved: diffSummary?.filesRemoved ?? [],
+        };
+        const summaryForOrchestrator = assistantSummary;
+        const kindForOrchestrator = project.kind;
+
         setImmediate(() => {
           void (async () => {
             try {
@@ -1858,40 +1871,134 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 .select()
                 .from(projectFilesTable)
                 .where(eq(projectFilesTable.projectId, projectId));
-              const auditFiles = allProjectFiles.map((f) => ({
+              const checkFiles = allProjectFiles.map((f) => ({
                 path: f.path,
                 content: f.content,
                 mimeType: f.mimeType,
               }));
-              const auditReport = runAudit(auditFiles.length > 0 ? auditFiles : filesToSmellScan);
+              const filesToCheck = checkFiles.length > 0 ? checkFiles : filesToSmellScan;
 
-              // Persist on the version row so GET /api/projects/:id/audit can fetch it
+              const { runs, checkSummary } = await runOrchestration(
+                filesToCheck,
+                diffForOrchestrator,
+                summaryForOrchestrator,
+                kindForOrchestrator,
+              );
+
+              // Persist to check_runs table
+              if (runs.length > 0) {
+                await db.insert(checkRunsTable).values(
+                  runs.map((r) => ({
+                    projectId,
+                    taskId: taskIdForChecks,
+                    checkName: r.checkName,
+                    status: r.status,
+                    findings: r.findings,
+                    aiReason: r.aiReason,
+                  })),
+                );
+              }
+
+              // Summary stats for the task report
+              const checkRunsSummary = {
+                passed: runs.filter((r) => r.status === "pass").length,
+                warnings: runs.filter((r) => r.status === "warning").length,
+                failed: runs.filter((r) => r.status === "fail").length,
+                skipped: runs.filter((r) => r.status === "skipped").length,
+              };
+
+              // Build backward-compat AuditReport from check results
+              const AUDIT_CHECK_MAP: Record<
+                string,
+                "accessibility" | "seo" | "performance" | "security"
+              > = {
+                accessibility: "accessibility",
+                seo: "seo",
+                performance: "performance",
+                "cdn-security": "security",
+              };
+              const auditFindings: Array<{
+                category: "accessibility" | "seo" | "performance" | "security";
+                severity: "error" | "warning" | "info";
+                file: string;
+                message: string;
+                suggestion: string;
+              }> = [];
+              for (const run of runs) {
+                const category = AUDIT_CHECK_MAP[run.checkName];
+                if (!category) continue;
+                for (const f of run.findings) {
+                  auditFindings.push({
+                    category,
+                    severity: f.severity,
+                    file: f.file,
+                    message: f.message,
+                    suggestion: f.detail ?? f.message,
+                  });
+                }
+              }
+
+              const auditCategories = ["accessibility", "seo", "performance", "security"] as const;
+              const CHECKS_PER_CATEGORY = 6;
+              const auditScores = auditCategories.map((cat) => {
+                const catFindings = auditFindings.filter((f) => f.category === cat);
+                const failures = catFindings.filter((f) => f.severity === "error").length;
+                const warnings = catFindings.filter((f) => f.severity === "warning").length;
+                const penalty = failures * 2 + warnings;
+                const pass = Math.max(0, CHECKS_PER_CATEGORY - Math.ceil(catFindings.length));
+                const score = Math.max(0, Math.round(100 - (penalty / CHECKS_PER_CATEGORY) * 100));
+                const LABELS = {
+                  accessibility: "Accessibility",
+                  seo: "SEO",
+                  performance: "Performance",
+                  security: "Security",
+                };
+                return { category: cat, label: LABELS[cat], pass, warnings, failures, score };
+              });
+
+              const htmlFileCount = filesToCheck.filter(
+                (f) => f.mimeType === "text/html" || f.path.endsWith(".html"),
+              ).length;
+
+              const auditReport = {
+                findings: auditFindings,
+                scores: auditScores,
+                auditedAt: new Date().toISOString(),
+                fileCount: htmlFileCount,
+              };
+
+              // Persist AuditReport on the version row (backward compat with GET /api/projects/:id/audit)
               await db
                 .update(projectVersionsTable)
                 .set({ auditReport })
-                .where(eq(projectVersionsTable.id, versionIdForAudit));
+                .where(eq(projectVersionsTable.id, versionIdForChecks));
 
-              // Read the latest report from DB before merging so we don't overwrite
-              // fields (e.g. codeSmells) written by the concurrent code-smell scan.
+              // Read latest task report from DB before merging (avoids clobbering concurrent code-smell scan)
               const [latestTask] = await db
                 .select({ report: agentTasksTable.report })
                 .from(agentTasksTable)
-                .where(eq(agentTasksTable.id, taskIdForAudit))
+                .where(eq(agentTasksTable.id, taskIdForChecks))
                 .limit(1);
-              const latestReport = latestTask?.report ?? report;
+              const latestReport = (latestTask?.report ?? report) as TaskReport;
+              const updatedReport: TaskReport = {
+                ...latestReport,
+                auditReport,
+                checkSummary,
+                checkRunsSummary,
+              };
               await db
                 .update(agentTasksTable)
-                .set({ report: { ...latestReport, auditReport } })
-                .where(eq(agentTasksTable.id, taskIdForAudit));
+                .set({ report: updatedReport })
+                .where(eq(agentTasksTable.id, taskIdForChecks));
 
               logger.info(
-                { projectId, versionId: versionIdForAudit, findings: auditReport.findings.length },
-                "Quality audit complete",
+                { projectId, taskId: taskIdForChecks, checkCount: runs.length, checkSummary },
+                "Orchestrated checks complete",
               );
             } catch (err) {
               logger.warn(
-                { err, projectId, versionId: versionIdForAudit },
-                "Quality audit failed (non-fatal)",
+                { err, projectId, versionId: versionIdForChecks },
+                "Orchestrated checks failed (non-fatal)",
               );
             }
           })();

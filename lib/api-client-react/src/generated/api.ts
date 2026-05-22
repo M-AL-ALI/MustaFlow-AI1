@@ -39,6 +39,7 @@ import type {
   ChatExchange,
   ChatMessage,
   ChatMessageInput,
+  CheckRun,
   ConnectGithub200,
   ContainerExecInput,
   ContainerExecResult,
@@ -69,6 +70,7 @@ import type {
   GetAdminAuditLogParams,
   GetAgentRouting200,
   GetAgentRoutingParams,
+  GetCheckRunsParams,
   GetContainerLogsParams,
   GetPublishReadinessParams,
   GetSecretAuditLogParams,
@@ -144,6 +146,8 @@ import type {
   SuggestionAcceptResult,
   TaskEvent,
   TaskFeedbackInput,
+  TriggerChecksInput,
+  TriggerChecksResult,
   UnpublishContainer200,
   UnpublishProject200,
   UpdatePreferencesBody,
@@ -314,6 +318,167 @@ export const useRequestUploadUrl = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRequestUploadUrlMutationOptions(options));
+    }
+
+export const getGetCheckRunsUrl = (id: number,
+    params?: GetCheckRunsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/check-runs?${stringifiedParams}` : `/api/projects/${id}/check-runs`
+}
+
+/**
+ * @summary List check runs for a project, optionally filtered by taskId.
+ */
+export const getCheckRuns = async (id: number,
+    params?: GetCheckRunsParams, options?: RequestInit): Promise<CheckRun[]> => {
+
+  return customFetch<CheckRun[]>(getGetCheckRunsUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCheckRunsQueryKey = (id: number,
+    params?: GetCheckRunsParams,) => {
+    return [
+    `/api/projects/${id}/check-runs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetCheckRunsQueryOptions = <TData = Awaited<ReturnType<typeof getCheckRuns>>, TError = ErrorType<unknown>>(id: number,
+    params?: GetCheckRunsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCheckRuns>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCheckRunsQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCheckRuns>>> = ({ signal }) => getCheckRuns(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCheckRuns>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCheckRunsQueryResult = NonNullable<Awaited<ReturnType<typeof getCheckRuns>>>
+export type GetCheckRunsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List check runs for a project, optionally filtered by taskId.
+ */
+
+export function useGetCheckRuns<TData = Awaited<ReturnType<typeof getCheckRuns>>, TError = ErrorType<unknown>>(
+ id: number,
+    params?: GetCheckRunsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCheckRuns>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCheckRunsQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getTriggerCheckRunsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/check-runs/trigger`
+}
+
+/**
+ * @summary Manually trigger one or more checks (or a full on-demand security review).
+ */
+export const triggerCheckRuns = async (id: number,
+    triggerChecksInput: TriggerChecksInput, options?: RequestInit): Promise<TriggerChecksResult> => {
+
+  return customFetch<TriggerChecksResult>(getTriggerCheckRunsUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      triggerChecksInput,)
+  }
+);}
+
+
+
+
+export const getTriggerCheckRunsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof triggerCheckRuns>>, TError,{id: number;data: BodyType<TriggerChecksInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof triggerCheckRuns>>, TError,{id: number;data: BodyType<TriggerChecksInput>}, TContext> => {
+
+const mutationKey = ['triggerCheckRuns'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof triggerCheckRuns>>, {id: number;data: BodyType<TriggerChecksInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  triggerCheckRuns(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TriggerCheckRunsMutationResult = NonNullable<Awaited<ReturnType<typeof triggerCheckRuns>>>
+    export type TriggerCheckRunsMutationBody = BodyType<TriggerChecksInput>
+    export type TriggerCheckRunsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Manually trigger one or more checks (or a full on-demand security review).
+ */
+export const useTriggerCheckRuns = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof triggerCheckRuns>>, TError,{id: number;data: BodyType<TriggerChecksInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof triggerCheckRuns>>,
+        TError,
+        {id: number;data: BodyType<TriggerChecksInput>},
+        TContext
+      > => {
+      return useMutation(getTriggerCheckRunsMutationOptions(options));
     }
 
 export const getGenerateImageUrl = (id: number,) => {

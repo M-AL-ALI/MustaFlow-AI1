@@ -123,6 +123,8 @@ type TaskReport = {
     auditedAt: string;
     fileCount: number;
   } | null;
+  checkSummary?: string;
+  checkRunsSummary?: { passed: number; warnings: number; failed: number; skipped: number };
 };
 
 type ChatPlanPayload =
@@ -283,6 +285,33 @@ function ReportCard({
       {report.nextRecommendation && (
         <div className="pt-1.5 border-t border-border text-muted-foreground italic text-[10px]">
           {report.nextRecommendation}
+        </div>
+      )}
+      {report.checkRunsSummary && (
+        <div className="pt-1.5 border-t border-border">
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <ShieldCheck className="h-3 w-3 shrink-0 text-primary/70" />
+            <span className="font-semibold text-foreground/80">Checks</span>
+            {report.checkRunsSummary.passed > 0 && (
+              <span className="text-green-400">{report.checkRunsSummary.passed} passed</span>
+            )}
+            {report.checkRunsSummary.warnings > 0 && (
+              <span className="text-yellow-400">{report.checkRunsSummary.warnings} warnings</span>
+            )}
+            {report.checkRunsSummary.failed > 0 && (
+              <span className="text-red-400">{report.checkRunsSummary.failed} failed</span>
+            )}
+            {report.checkRunsSummary.skipped > 0 && (
+              <span className="text-muted-foreground/60">
+                {report.checkRunsSummary.skipped} skipped
+              </span>
+            )}
+          </div>
+          {report.checkSummary && (
+            <p className="text-[10px] text-muted-foreground mt-0.5 pl-5 leading-relaxed">
+              {report.checkSummary}
+            </p>
+          )}
         </div>
       )}
       {report.auditReport && report.auditReport.findings.length > 0 && (

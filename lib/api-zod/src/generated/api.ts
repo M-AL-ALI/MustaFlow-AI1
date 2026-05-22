@@ -47,6 +47,69 @@ export const RequestUploadUrlResponse = zod.object({
 
 
 /**
+ * @summary List check runs for a project, optionally filtered by taskId.
+ */
+export const GetCheckRunsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetCheckRunsQueryParams = zod.object({
+  "taskId": zod.coerce.number().optional()
+})
+
+export const GetCheckRunsResponseItem = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "taskId": zod.number().nullish(),
+  "checkName": zod.string(),
+  "status": zod.enum(['pass', 'warning', 'fail', 'skipped', 'error']),
+  "findings": zod.array(zod.object({
+  "file": zod.string(),
+  "line": zod.number().optional(),
+  "message": zod.string(),
+  "detail": zod.string().optional(),
+  "severity": zod.enum(['error', 'warning', 'info'])
+})).optional(),
+  "aiReason": zod.string().nullish(),
+  "ranAt": zod.coerce.date()
+})
+export const GetCheckRunsResponse = zod.array(GetCheckRunsResponseItem)
+
+
+/**
+ * @summary Manually trigger one or more checks (or a full on-demand security review).
+ */
+export const TriggerCheckRunsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const TriggerCheckRunsBody = zod.object({
+  "checks": zod.array(zod.string()).optional().describe('List of check names to run (e.g. sast, accessibility, seo). Ignored when onDemand is true.'),
+  "taskId": zod.number().optional(),
+  "onDemand": zod.boolean().optional().describe('When true, runs a preset security review (sast, secret-leak, cdn-security).')
+})
+
+export const TriggerCheckRunsResponse = zod.object({
+  "runs": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "taskId": zod.number().nullish(),
+  "checkName": zod.string(),
+  "status": zod.enum(['pass', 'warning', 'fail', 'skipped', 'error']),
+  "findings": zod.array(zod.object({
+  "file": zod.string(),
+  "line": zod.number().optional(),
+  "message": zod.string(),
+  "detail": zod.string().optional(),
+  "severity": zod.enum(['error', 'warning', 'info'])
+})).optional(),
+  "aiReason": zod.string().nullish(),
+  "ranAt": zod.coerce.date()
+}))
+})
+
+
+/**
  * @summary Generate an image with gpt-image-1 and attach it to the project.
  */
 export const GenerateImageParams = zod.object({

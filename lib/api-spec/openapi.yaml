@@ -44,6 +44,8 @@ tags:
     description: Object storage upload and serving endpoints
   - name: images
     description: AI image generation for chat and project assets
+  - name: checks
+    description: AI-orchestrated quality and security check runs
 paths:
   /healthz:
     get:
@@ -76,6 +78,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UploadUrlResponse"
+
+  /projects/{id}/check-runs:
+    get:
+      operationId: getCheckRuns
+      tags: [checks]
+      summary: List check runs for a project, optionally filtered by taskId.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: taskId, in: query, required: false, schema: { type: integer } }
+      responses:
+        "200":
+          description: Check runs list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CheckRun"
+
+  /projects/{id}/check-runs/trigger:
+    post:
+      operationId: triggerCheckRuns
+      tags: [checks]
+      summary: Manually trigger one or more checks (or a full on-demand security review).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TriggerChecksInput"
+      responses:
+        "200":
+          description: Triggered check run results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerChecksResult"
 
   /projects/{id}/generate-image:
     post:
@@ -4096,3 +4137,54 @@ components:
       required: [attachment]
       properties:
         attachment: { $ref: "#/components/schemas/ChatAttachment" }
+
+    CheckRunFinding:
+      type: object
+      required: [message, severity, file]
+      properties:
+        file: { type: string }
+        line: { type: integer }
+        message: { type: string }
+        detail: { type: string }
+        severity:
+          type: string
+          enum: [error, warning, info]
+
+    CheckRun:
+      type: object
+      required: [id, projectId, checkName, status, ranAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        taskId: { type: integer, nullable: true }
+        checkName: { type: string }
+        status:
+          type: string
+          enum: [pass, warning, fail, skipped, error]
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckRunFinding"
+        aiReason: { type: string, nullable: true }
+        ranAt: { type: string, format: date-time }
+
+    TriggerChecksInput:
+      type: object
+      properties:
+        checks:
+          type: array
+          items: { type: string }
+          description: "List of check names to run (e.g. sast, accessibility, seo). Ignored when onDemand is true."
+        taskId: { type: integer }
+        onDemand:
+          type: boolean
+          description: "When true, runs a preset security review (sast, secret-leak, cdn-security)."
+
+    TriggerChecksResult:
+      type: object
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckRun"

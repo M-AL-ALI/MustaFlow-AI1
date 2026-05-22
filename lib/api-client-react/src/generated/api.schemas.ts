@@ -1827,6 +1827,61 @@ export interface GenerateImageResponse {
   attachment: ChatAttachment;
 }
 
+export type CheckRunFindingSeverity = typeof CheckRunFindingSeverity[keyof typeof CheckRunFindingSeverity];
+
+
+export const CheckRunFindingSeverity = {
+  error: 'error',
+  warning: 'warning',
+  info: 'info',
+} as const;
+
+export interface CheckRunFinding {
+  file: string;
+  line?: number;
+  message: string;
+  detail?: string;
+  severity: CheckRunFindingSeverity;
+}
+
+export type CheckRunStatus = typeof CheckRunStatus[keyof typeof CheckRunStatus];
+
+
+export const CheckRunStatus = {
+  pass: 'pass',
+  warning: 'warning',
+  fail: 'fail',
+  skipped: 'skipped',
+  error: 'error',
+} as const;
+
+export interface CheckRun {
+  id: number;
+  projectId: number;
+  taskId?: number | null;
+  checkName: string;
+  status: CheckRunStatus;
+  findings?: CheckRunFinding[];
+  aiReason?: string | null;
+  ranAt: string;
+}
+
+export interface TriggerChecksInput {
+  /** List of check names to run (e.g. sast, accessibility, seo). Ignored when onDemand is true. */
+  checks?: string[];
+  taskId?: number;
+  /** When true, runs a preset security review (sast, secret-leak, cdn-security). */
+  onDemand?: boolean;
+}
+
+export interface TriggerChecksResult {
+  runs: CheckRun[];
+}
+
+export type GetCheckRunsParams = {
+taskId?: number;
+};
+
 export type DeleteWorkspace200 = {
   deleted: boolean;
 };

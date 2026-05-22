@@ -38,6 +38,7 @@ import databaseRouter from "./database";
 import storageRouter from "./storage";
 import imagesRouter from "./images";
 import preferencesRouter from "./preferences";
+import checkRunsRouter from "./check-runs";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -80,6 +81,7 @@ const KNOWN_PREFIXES = [
   "/container",
   "/database",
   "/storage",
+  "/check-runs",
 ];
 
 router.use((req, res, next) => {
@@ -143,6 +145,7 @@ router.use(databaseRouter);
 router.use(storageRouter);
 router.use(imagesRouter);
 router.use(preferencesRouter);
+router.use(checkRunsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {
