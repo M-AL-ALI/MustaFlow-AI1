@@ -2748,6 +2748,7 @@ export default function ProjectWorkspacePage() {
                   setScrollManageToMobileSettings(true);
                   setActiveTab("manage");
                 }}
+                onNavigateToChecks={() => setActiveTab("checks")}
               />
             )}
             {activeTab === "logs" && (

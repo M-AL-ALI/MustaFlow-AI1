@@ -280,6 +280,10 @@ export interface Project {
      * @nullable
      */
   dbConnectionId?: string | null;
+  /** When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true. */
+  blockPublishOnCritical?: boolean;
+  /** Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate. */
+  dismissedFindingHashes?: string[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -370,6 +374,8 @@ export interface ProjectUpdate {
   siteTitle?: string;
   metaDescription?: string;
   themeColor?: string;
+  /** Enable or disable the critical-findings publish gate for this project. */
+  blockPublishOnCritical?: boolean;
 }
 
 export interface MobileAppSettingsInput {

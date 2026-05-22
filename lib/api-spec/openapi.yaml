@@ -2843,6 +2843,14 @@ components:
         dbConnectionId:
           type: ["string", "null"]
           description: "Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned."
+        blockPublishOnCritical:
+          type: boolean
+          description: "When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true."
+        dismissedFindingHashes:
+          type: array
+          items: { type: string }
+          description: "Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate."
+          nullable: true
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -2894,6 +2902,9 @@ components:
         siteTitle: { type: string }
         metaDescription: { type: string }
         themeColor: { type: string }
+        blockPublishOnCritical:
+          type: boolean
+          description: "Enable or disable the critical-findings publish gate for this project."
 
     MobileAppSettingsInput:
       type: object

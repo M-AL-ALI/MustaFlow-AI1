@@ -1,10 +1,17 @@
 import { Router, type IRouter } from "express";
-import { eq, and, desc } from "drizzle-orm";
-import { db, checkRunsTable, projectFilesTable, agentTasksTable } from "@workspace/db";
+import { eq, and, desc, sql } from "drizzle-orm";
+import {
+  db,
+  checkRunsTable,
+  projectFilesTable,
+  agentTasksTable,
+  projectsTable,
+} from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { logger } from "../lib/logger";
 import { runOnDemandChecks } from "../lib/checks/orchestrator";
 import { CHECK_REGISTRY } from "../lib/checks/registry";
+import { findingKey } from "./readiness";
 
 const router: IRouter = Router();
 
@@ -175,5 +182,98 @@ router.post(
     }
   },
 );
+
+// ── POST /api/projects/:id/findings/dismiss ───────────────────────────────────
+// Adds a finding key to the project's dismissedFindingHashes list.
+// The key must be the stable finding identifier: `${file}:${line ?? 0}:${message}`.
+// After dismissal the publish readiness gate will no longer consider that finding blocking.
+router.post(
+  "/projects/:id/findings/dismiss",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+
+    const body = req.body as { findingKey?: string };
+    if (typeof body.findingKey !== "string" || body.findingKey.trim().length === 0) {
+      res.status(400).json({ error: "findingKey is required" });
+      return;
+    }
+
+    const key = body.findingKey.trim();
+
+    try {
+      // Append the key to the dismissed_finding_hashes jsonb array (idempotent — only add if not present).
+      await db
+        .update(projectsTable)
+        .set({
+          dismissedFindingHashes: sql`
+            CASE
+              WHEN dismissed_finding_hashes @> ${JSON.stringify([key])}::jsonb
+              THEN dismissed_finding_hashes
+              ELSE dismissed_finding_hashes || ${JSON.stringify([key])}::jsonb
+            END
+          `,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(projectsTable.id, projectId));
+
+      res.json({ ok: true, dismissedKey: key });
+    } catch (err) {
+      logger.error({ err, projectId }, "Failed to dismiss finding");
+      res.status(500).json({ error: "Failed to dismiss finding" });
+    }
+  },
+);
+
+// ── POST /api/projects/:id/findings/restore ────────────────────────────────────
+// Removes a dismissed finding key so it becomes active again.
+router.post(
+  "/projects/:id/findings/restore",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+
+    const body = req.body as { findingKey?: string };
+    if (typeof body.findingKey !== "string" || body.findingKey.trim().length === 0) {
+      res.status(400).json({ error: "findingKey is required" });
+      return;
+    }
+
+    const key = body.findingKey.trim();
+
+    try {
+      // Remove key from the dismissed_finding_hashes array.
+      await db
+        .update(projectsTable)
+        .set({
+          dismissedFindingHashes: sql`
+            (
+              SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+              FROM jsonb_array_elements_text(dismissed_finding_hashes) AS elem
+              WHERE elem <> ${key}
+            )
+          `,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(projectsTable.id, projectId));
+
+      res.json({ ok: true, restoredKey: key });
+    } catch (err) {
+      logger.error({ err, projectId }, "Failed to restore finding");
+      res.status(500).json({ error: "Failed to restore finding" });
+    }
+  },
+);
+
+// Suppress unused-import — findingKey is re-exported for use in readiness.ts and tests.
+void findingKey;
 
 export default router;

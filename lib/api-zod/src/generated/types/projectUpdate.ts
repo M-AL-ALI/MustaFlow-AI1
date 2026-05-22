@@ -19,4 +19,6 @@ export interface ProjectUpdate {
   siteTitle?: string;
   metaDescription?: string;
   themeColor?: string;
+  /** Enable or disable the critical-findings publish gate for this project. */
+  blockPublishOnCritical?: boolean;
 }

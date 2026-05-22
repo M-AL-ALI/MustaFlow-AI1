@@ -544,6 +544,14 @@ function CustomSubdomainPicker({
 
 // ── Readiness gate types & components ────────────────────────────────────────
 
+type CriticalFindingMeta = {
+  key: string;
+  checkName: string;
+  file: string;
+  line?: number;
+  message: string;
+};
+
 type ReadinessCheck = {
   id: string;
   label: string;
@@ -551,6 +559,8 @@ type ReadinessCheck = {
   status: "pass" | "fail" | "warning" | "info";
   severity: "blocking" | "warning" | "info";
   message?: string;
+  criticalFindingCount?: number;
+  criticalFindings?: CriticalFindingMeta[];
 };
 
 type ReadinessResult = {
@@ -600,11 +610,19 @@ function ReadinessGate({
   readiness,
   loading,
   onRefresh,
+  projectId,
+  onFindingDismissed,
+  onNavigateToSecurity,
 }: {
   readiness: ReadinessResult | null;
   loading: boolean;
   onRefresh: () => void;
+  projectId: number;
+  onFindingDismissed?: () => void;
+  onNavigateToSecurity?: () => void;
 }) {
+  const [dismissing, setDismissing] = useState<string | null>(null);
+
   if (loading && !readiness) {
     return (
       <div className="border border-border rounded-xl p-4 bg-card flex items-center gap-2 text-xs text-muted-foreground animate-pulse">
@@ -619,6 +637,27 @@ function ReadinessGate({
     (c) => c.severity === "blocking" && c.status === "fail",
   );
   const warnings = readiness.checks.filter((c) => c.status === "warning");
+  const securityCheck = readiness.checks.find((c) => c.id === "no_critical_findings");
+  const securityBlocked =
+    securityCheck?.status === "fail" &&
+    securityCheck.criticalFindings &&
+    securityCheck.criticalFindings.length > 0;
+
+  const dismissFinding = async (key: string) => {
+    setDismissing(key);
+    try {
+      await fetch(`/api/projects/${projectId}/findings/dismiss`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ findingKey: key }),
+      });
+      onFindingDismissed?.();
+    } catch {
+      /* ignore */
+    } finally {
+      setDismissing(null);
+    }
+  };
 
   return (
     <div className="border border-border rounded-xl p-4 bg-card space-y-3">
@@ -637,7 +676,66 @@ function ReadinessGate({
           <ReadinessCheckRow key={check.id} check={check} />
         ))}
       </div>
-      {!readiness.canPublish && blockingFailed.length > 0 && (
+
+      {/* Security findings detail panel — shown when the gate is blocked by critical findings */}
+      {securityBlocked && securityCheck?.criticalFindings && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-semibold text-destructive">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Blocked by {securityCheck.criticalFindings.length} critical finding
+              {securityCheck.criticalFindings.length !== 1 ? "s" : ""}
+            </div>
+            {onNavigateToSecurity && (
+              <button
+                onClick={onNavigateToSecurity}
+                className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 font-medium transition-colors shrink-0"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Go to Security tab
+              </button>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            {securityCheck.criticalFindings.map((f) => (
+              <div
+                key={f.key}
+                className="flex items-start gap-2 bg-background/60 rounded-md px-2.5 py-2 border border-border"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-medium text-foreground truncate">
+                    {f.message}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground font-mono">
+                    {f.file}
+                    {f.line != null ? `:${f.line}` : ""}
+                    <span className="ml-1.5 text-muted-foreground/60">[{f.checkName}]</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => void dismissFinding(f.key)}
+                  disabled={dismissing === f.key}
+                  className="shrink-0 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 rounded px-1.5 py-1 hover:bg-muted whitespace-nowrap"
+                  title="Dismiss this finding — it will no longer block publishing"
+                >
+                  {dismissing === f.key ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <XCircle className="h-3 w-3" />
+                  )}
+                  Dismiss
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            Dismissing a finding removes it from the publish block. Fix the underlying issue or
+            rebuild to clear it permanently.
+          </p>
+        </div>
+      )}
+
+      {!readiness.canPublish && blockingFailed.length > 0 && !securityBlocked && (
         <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
           <span>
@@ -2030,6 +2128,7 @@ export function PublishingTab({
   containerUrl: _containerUrl,
   onNavigateToSecret,
   onNavigateToMobileSettings,
+  onNavigateToChecks,
 }: {
   projectId: number;
   kind?: string;
@@ -2037,6 +2136,7 @@ export function PublishingTab({
   containerUrl?: string | null;
   onNavigateToSecret?: (secretName: string) => void;
   onNavigateToMobileSettings?: () => void;
+  onNavigateToChecks?: () => void;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
   const queryClient = useQueryClient();
@@ -2145,6 +2245,10 @@ export function PublishingTab({
   const [metaDescription, setMetaDescription] = useState("");
   const [themeColor, setThemeColor] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
+
+  // Security gate toggle state
+  const [blockPublishOnCritical, setBlockPublishOnCritical] = useState(true);
+  const [savingSecurityGate, setSavingSecurityGate] = useState(false);
 
   // Domain management state
   type DomainInfo = {
@@ -2371,12 +2475,14 @@ export function PublishingTab({
           themeColor?: string | null;
           prodContainerStatus?: string | null;
           prodContainerUrl?: string | null;
+          blockPublishOnCritical?: boolean | null;
         };
         setSiteTitle(data.siteTitle ?? "");
         setMetaDescription(data.metaDescription ?? "");
         setThemeColor(data.themeColor ?? "");
         setProdContainerStatus(data.prodContainerStatus ?? null);
         setProdContainerUrl(data.prodContainerUrl ?? null);
+        setBlockPublishOnCritical(data.blockPublishOnCritical ?? true);
       }
     } catch {
       /* ignore */
@@ -2461,6 +2567,22 @@ export function PublishingTab({
       });
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const saveSecurityGate = async (value: boolean) => {
+    setBlockPublishOnCritical(value);
+    setSavingSecurityGate(true);
+    try {
+      await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blockPublishOnCritical: value }),
+      });
+      // Re-run readiness check so gate status updates immediately
+      void fetchReadiness();
+    } finally {
+      setSavingSecurityGate(false);
     }
   };
 
@@ -3294,6 +3416,50 @@ export function PublishingTab({
               </div>
             </div>
 
+            {/* Advanced settings — security gate toggle */}
+            <div className="border border-border rounded-xl p-4 bg-card space-y-4">
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                Advanced
+              </h3>
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">Block publish on critical findings</div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    When on, publishing is blocked if any unresolved critical security findings
+                    exist from the latest quality scan. Disable to publish despite open findings.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void saveSecurityGate(!blockPublishOnCritical)}
+                  disabled={savingSecurityGate}
+                  className="shrink-0 flex items-center gap-1.5 mt-0.5 disabled:opacity-50"
+                  title={
+                    blockPublishOnCritical
+                      ? "Click to disable the security gate"
+                      : "Click to enable the security gate"
+                  }
+                >
+                  {savingSecurityGate ? (
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  ) : blockPublishOnCritical ? (
+                    <ToggleRight className="h-6 w-6 text-primary" />
+                  ) : (
+                    <ToggleLeft className="h-6 w-6 text-muted-foreground" />
+                  )}
+                </button>
+              </div>
+              {!blockPublishOnCritical && (
+                <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    Security gate is disabled. Critical findings will not block publishing.
+                  </span>
+                </div>
+              )}
+            </div>
+
             {/* Deployment logs — includes EAS build entries (env="eas-ios"/"eas-android") */}
             <div className="border border-border rounded-xl overflow-hidden bg-card">
               <button
@@ -3402,6 +3568,9 @@ export function PublishingTab({
                 readiness={readiness}
                 loading={readinessLoading}
                 onRefresh={() => void fetchReadiness()}
+                projectId={projectId}
+                onFindingDismissed={() => void fetchReadiness()}
+                onNavigateToSecurity={onNavigateToChecks}
               />
             )}
 
@@ -3616,19 +3785,34 @@ export function PublishingTab({
             {webEnv === "testing" && (
               <div className="space-y-2">
                 {publishError && <p className="text-xs text-destructive">{publishError}</p>}
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  disabled={!webReadyToPublish || isPublishing}
-                  onClick={() => void handlePublish()}
-                >
-                  {isPublishing ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Server className="h-4 w-4 mr-2" />
-                  )}
-                  {isPublishing ? "Publishing…" : "Publish to Testing"}
-                </Button>
+                {(() => {
+                  const secCheck = readiness?.checks.find(
+                    (c) => c.id === "no_critical_findings" && c.status === "fail",
+                  );
+                  const secCount = secCheck?.criticalFindingCount ?? 0;
+                  const isSecBlocked = Boolean(secCheck) && blockPublishOnCritical;
+                  return (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      disabled={!webReadyToPublish || isPublishing || isSecBlocked}
+                      onClick={() => void handlePublish()}
+                    >
+                      {isPublishing ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : isSecBlocked ? (
+                        <ShieldCheck className="h-4 w-4 mr-2 text-destructive" />
+                      ) : (
+                        <Server className="h-4 w-4 mr-2" />
+                      )}
+                      {isPublishing
+                        ? "Publishing…"
+                        : isSecBlocked
+                          ? `Blocked by ${secCount} critical finding${secCount !== 1 ? "s" : ""}`
+                          : "Publish to Testing"}
+                    </Button>
+                  );
+                })()}
               </div>
             )}
           </div>

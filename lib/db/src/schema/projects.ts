@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, jsonb, boolean } from "drizzle-orm/pg-core";
 import { workspacesTable } from "./workspaces";
 
 export const projectsTable = pgTable("projects", {
@@ -85,6 +85,14 @@ export const projectsTable = pgTable("projects", {
   dbProvider: text("db_provider").notNull().default("none"),
   dbStatus: text("db_status").notNull().default("none"),
   dbConnectionId: text("db_connection_id"),
+  // blockPublishOnCritical: when true, the publish readiness gate blocks publish if any
+  // unresolved critical (error-severity) security findings exist from the latest check run.
+  // Default true — matches Replit's "block on critical vulnerabilities" opt-in model.
+  blockPublishOnCritical: boolean("block_publish_on_critical").notNull().default(true),
+  // dismissedFindingHashes: array of opaque finding keys (file:line:message hashes) that the
+  // user has explicitly dismissed in the Quality panel. Dismissed findings are excluded from
+  // the publish security gate check so the block is cleared without rebuilding.
+  dismissedFindingHashes: jsonb("dismissed_finding_hashes").$type<string[]>().default([]),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

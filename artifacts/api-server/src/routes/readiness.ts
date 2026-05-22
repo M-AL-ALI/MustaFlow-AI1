@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { eq, count, and } from "drizzle-orm";
+import { eq, count, and, desc } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -14,8 +14,88 @@ import {
   projectVersionsTable,
   secretsTable,
   deploymentLogsTable,
+  checkRunsTable,
 } from "@workspace/db";
+import type { CheckFinding } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+
+// ─── Security finding helpers ─────────────────────────────────────────────────
+
+/** Stable key identifying a finding — used to match against dismissedFindingHashes. */
+export function findingKey(f: CheckFinding): string {
+  return `${f.file}:${f.line ?? 0}:${f.message}`;
+}
+
+/**
+ * Check names that are considered security-relevant for the publish gate.
+ * Only findings from these checks will block publishing.
+ */
+const SECURITY_CHECK_NAMES = new Set([
+  "sast",
+  "secret-scan",
+  "secret-leak",
+  "secrets",
+  "security",
+  "cdn-security",
+  "dependency-audit",
+  "vulnerability-scan",
+]);
+
+function isSecurityCheckName(checkName: string): boolean {
+  const lower = checkName.toLowerCase();
+  return (
+    SECURITY_CHECK_NAMES.has(lower) ||
+    lower.includes("security") ||
+    lower.includes("secret") ||
+    lower.includes("vuln") ||
+    lower.includes("sast")
+  );
+}
+
+/**
+ * Query the most recent check run rows for a project and return all unresolved
+ * critical (error-severity) findings from security-related checks only,
+ * filtered against the project's dismissed list.
+ */
+export async function getUnresolvedCriticalFindings(
+  projectId: number,
+  dismissedHashes: string[],
+): Promise<Array<{ checkName: string; finding: CheckFinding }>> {
+  // Fetch the latest run per check name (ordered by ranAt desc, dedup by checkName).
+  const rows = await db
+    .select({
+      checkName: checkRunsTable.checkName,
+      findings: checkRunsTable.findings,
+      ranAt: checkRunsTable.ranAt,
+    })
+    .from(checkRunsTable)
+    .where(eq(checkRunsTable.projectId, projectId))
+    .orderBy(desc(checkRunsTable.ranAt))
+    .limit(200);
+
+  // Keep only the most recent run per check name.
+  const latestByName = new Map<string, { findings: CheckFinding[] }>();
+  for (const row of rows) {
+    if (!latestByName.has(row.checkName)) {
+      latestByName.set(row.checkName, { findings: (row.findings as CheckFinding[]) ?? [] });
+    }
+  }
+
+  const dismissed = new Set(dismissedHashes);
+  const critical: Array<{ checkName: string; finding: CheckFinding }> = [];
+
+  for (const [checkName, { findings }] of latestByName) {
+    // Only count findings from security-related check runs
+    if (!isSecurityCheckName(checkName)) continue;
+    for (const f of findings) {
+      if (f.severity === "error" && !dismissed.has(findingKey(f))) {
+        critical.push({ checkName, finding: f });
+      }
+    }
+  }
+
+  return critical;
+}
 
 export type CheckStatus = "pass" | "fail" | "warning" | "info";
 export type CheckSeverity = "blocking" | "warning" | "info";
@@ -302,7 +382,12 @@ router.get(
     const isProduction = env === "production";
 
     const [project] = await db
-      .select({ name: projectsTable.name, description: projectsTable.description })
+      .select({
+        name: projectsTable.name,
+        description: projectsTable.description,
+        blockPublishOnCritical: projectsTable.blockPublishOnCritical,
+        dismissedFindingHashes: projectsTable.dismissedFindingHashes,
+      })
       .from(projectsTable)
       .where(eq(projectsTable.id, projectId));
 
@@ -425,6 +510,42 @@ router.get(
         ? "Description present"
         : "No description set. Add one in Manage or Published Site Settings.",
     });
+
+    // ── Check 7: security findings gate (BLOCKING when blockPublishOnCritical is on) ─────
+    if (project.blockPublishOnCritical) {
+      const dismissed = (project.dismissedFindingHashes as string[] | null) ?? [];
+      const criticalFindings = await getUnresolvedCriticalFindings(projectId, dismissed);
+      const hasCritical = criticalFindings.length > 0;
+      const findingMessages = criticalFindings
+        .slice(0, 5)
+        .map(({ checkName, finding }) => `[${checkName}] ${finding.file}: ${finding.message}`)
+        .join("; ");
+
+      checks.push({
+        id: "no_critical_findings",
+        label: "No unresolved critical security findings",
+        description:
+          "Publishing is blocked when critical (error-severity) security findings are open. Dismiss findings in the Quality tab or rebuild to fix them.",
+        severity: "blocking",
+        status: hasCritical ? "fail" : "pass",
+        message: hasCritical
+          ? `${criticalFindings.length} critical finding${criticalFindings.length !== 1 ? "s" : ""} must be resolved or dismissed: ${findingMessages}`
+          : "No critical security findings.",
+        ...(hasCritical
+          ? {
+              // Extra metadata for the frontend to render per-finding details
+              criticalFindingCount: criticalFindings.length,
+              criticalFindings: criticalFindings.slice(0, 10).map(({ checkName, finding }) => ({
+                key: findingKey(finding),
+                checkName,
+                file: finding.file,
+                line: finding.line,
+                message: finding.message,
+              })),
+            }
+          : {}),
+      });
+    }
 
     const blockingFailed = checks.some((c) => c.severity === "blocking" && c.status === "fail");
 

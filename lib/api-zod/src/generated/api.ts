@@ -362,6 +362,8 @@ export const ListProjectsResponseItem = zod.object({
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
   "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
+  "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -422,6 +424,8 @@ export const GetProjectResponse = zod.object({
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
   "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
+  "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -439,7 +443,8 @@ export const UpdateProjectBody = zod.object({
   "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project.'),
   "siteTitle": zod.string().optional(),
   "metaDescription": zod.string().optional(),
-  "themeColor": zod.string().optional()
+  "themeColor": zod.string().optional(),
+  "blockPublishOnCritical": zod.boolean().optional().describe('Enable or disable the critical-findings publish gate for this project.')
 })
 
 export const updateProjectResponseHealthScoreMin = 0;
@@ -476,6 +481,8 @@ export const UpdateProjectResponse = zod.object({
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
   "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
+  "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -527,6 +534,8 @@ export const GetProjectsSummaryResponse = zod.object({
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
   "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
+  "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))

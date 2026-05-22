@@ -23,6 +23,7 @@ import { writeKnowledge } from "../lib/knowledge";
 import { generateOgSvg } from "../lib/ogImage";
 import { deployProductionContainer, destroyContainer } from "../lib/container";
 import { encryptionService } from "../lib/encryption";
+import { getUnresolvedCriticalFindings } from "./readiness";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
@@ -53,6 +54,25 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   if (!project) {
     res.status(404).json({ error: "Project not found" });
     return;
+  }
+
+  // ── Security gate: block publish when blockPublishOnCritical is on and findings exist ──
+  if (project.blockPublishOnCritical) {
+    const dismissed = (project.dismissedFindingHashes as string[] | null) ?? [];
+    const criticalFindings = await getUnresolvedCriticalFindings(projectId, dismissed);
+    if (criticalFindings.length > 0) {
+      res.status(422).json({
+        error: `Publish blocked by ${criticalFindings.length} critical security finding${criticalFindings.length !== 1 ? "s" : ""}. Resolve or dismiss them in the Quality tab before publishing.`,
+        code: "critical_findings",
+        findings: criticalFindings.slice(0, 10).map(({ checkName, finding }) => ({
+          checkName,
+          file: finding.file,
+          line: finding.line,
+          message: finding.message,
+        })),
+      });
+      return;
+    }
   }
 
   const files = await db

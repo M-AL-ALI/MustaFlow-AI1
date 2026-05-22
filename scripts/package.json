@@ -12,6 +12,7 @@
     "migrate-prod-containers": "tsx ./src/migrate-prod-containers.ts",
     "migrate-db-snapshots": "tsx ./src/migrate-db-snapshots.ts",
     "migrate-check-runs": "tsx ./src/migrate-check-runs.ts",
+    "migrate-security-gate": "tsx ./src/migrate-security-gate.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },
