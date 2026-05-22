@@ -1974,6 +1974,40 @@ export interface CveScanResult {
   total: number;
 }
 
+export interface SbomComponent {
+  type: string;
+  name: string;
+  version: string;
+  purl: string;
+}
+
+export interface SbomMetadataComponent {
+  type: string;
+  name: string;
+  version?: string | null;
+}
+
+export interface SbomMetadataTool {
+  vendor: string;
+  name: string;
+  version: string;
+}
+
+export interface SbomMetadata {
+  timestamp: string;
+  tools: SbomMetadataTool[];
+  component: SbomMetadataComponent;
+}
+
+export interface SbomDocument {
+  bomFormat: string;
+  specVersion: string;
+  serialNumber: string;
+  version: number;
+  metadata: SbomMetadata;
+  components: SbomComponent[];
+}
+
 export type SecurityFindingSeverity = typeof SecurityFindingSeverity[keyof typeof SecurityFindingSeverity];
 
 

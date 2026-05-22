@@ -143,6 +143,7 @@ import type {
   RevokeAdminRole200,
   RollbackInput,
   RollbackResult,
+  SbomDocument,
   SearchProjectFilesParams,
   SecretAuditEntry,
   SecretEntry,
@@ -1275,6 +1276,83 @@ export const useDismissCveFinding = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getDismissCveFindingMutationOptions(options));
     }
+
+export const getDownloadSbomUrl = () => {
+
+
+
+
+  return `/api/security/sbom`
+}
+
+/**
+ * @summary Download a CycloneDX SBOM listing all workspace dependencies for compliance audits.
+ */
+export const downloadSbom = async ( options?: RequestInit): Promise<SbomDocument> => {
+
+  return customFetch<SbomDocument>(getDownloadSbomUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadSbomQueryKey = () => {
+    return [
+    `/api/security/sbom`
+    ] as const;
+    }
+
+
+export const getDownloadSbomQueryOptions = <TData = Awaited<ReturnType<typeof downloadSbom>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadSbom>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadSbomQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadSbom>>> = ({ signal }) => downloadSbom({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadSbom>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type DownloadSbomQueryResult = NonNullable<Awaited<ReturnType<typeof downloadSbom>>>
+export type DownloadSbomQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Download a CycloneDX SBOM listing all workspace dependencies for compliance audits.
+ */
+
+export function useDownloadSbom<TData = Awaited<ReturnType<typeof downloadSbom>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadSbom>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getDownloadSbomQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGenerateImageUrl = (id: number,) => {
 

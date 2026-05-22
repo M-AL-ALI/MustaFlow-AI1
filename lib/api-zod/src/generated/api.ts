@@ -338,6 +338,36 @@ export const DismissCveFindingResponse = zod.object({
 
 
 /**
+ * @summary Download a CycloneDX SBOM listing all workspace dependencies for compliance audits.
+ */
+export const DownloadSbomResponse = zod.object({
+  "bomFormat": zod.string(),
+  "specVersion": zod.string(),
+  "serialNumber": zod.string(),
+  "version": zod.number(),
+  "metadata": zod.object({
+  "timestamp": zod.coerce.date(),
+  "tools": zod.array(zod.object({
+  "vendor": zod.string(),
+  "name": zod.string(),
+  "version": zod.string()
+})),
+  "component": zod.object({
+  "type": zod.string(),
+  "name": zod.string(),
+  "version": zod.string().nullish()
+})
+}),
+  "components": zod.array(zod.object({
+  "type": zod.string(),
+  "name": zod.string(),
+  "version": zod.string(),
+  "purl": zod.string()
+}))
+})
+
+
+/**
  * @summary Generate an image with gpt-image-1 and attach it to the project.
  */
 export const GenerateImageParams = zod.object({
