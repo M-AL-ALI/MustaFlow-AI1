@@ -5819,6 +5819,7 @@ export async function runConversePipeline(args: {
   agentMode: AgentMode;
   isAmbiguous?: boolean;
   imageAttachments?: ConverseImageAttachment[];
+  conversationSummary?: string;
 }): Promise<ConverseResult> {
   const {
     projectName,
@@ -5828,6 +5829,7 @@ export async function runConversePipeline(args: {
     agentMode,
     isAmbiguous,
     imageAttachments,
+    conversationSummary,
   } = args;
 
   if (isAmbiguous) {
@@ -5884,6 +5886,13 @@ export async function runConversePipeline(args: {
     },
   ];
 
+  if (conversationSummary) {
+    messages.push({
+      role: "system",
+      content: `Earlier conversation context (summary of prior exchanges):\n${conversationSummary}`,
+    });
+  }
+
   for (const turn of conversationHistory.slice(-6)) {
     messages.push({ role: turn.role, content: turn.content });
   }
@@ -5913,6 +5922,36 @@ export async function runConversePipeline(args: {
     logger.error({ err }, "Converse pipeline failed");
     throw err instanceof Error ? err : new Error(String(err));
   }
+}
+
+/**
+ * Summarises older conversation turns into a concise bullet-point context
+ * block that can be stored in the Knowledge Vault and injected back into
+ * the converse pipeline so the AI feels consistent across long sessions.
+ */
+export async function runConversationSummarizePipeline(
+  projectName: string,
+  turns: ConversationTurn[],
+): Promise<string> {
+  const turnText = turns
+    .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.content.slice(0, 800)}`)
+    .join("\n\n");
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-5-mini",
+    max_completion_tokens: 600,
+    messages: [
+      {
+        role: "system",
+        content: `Summarize the following conversation history for the project "${projectName}".
+Focus on: decisions made, user preferences expressed, features discussed, problems solved, and any important context established.
+Write 3–6 concise bullet points in plain text. Be factual and specific — this will be used as memory context for future AI responses.`,
+      },
+      { role: "user", content: turnText },
+    ],
+  });
+
+  return response.choices[0]?.message?.content?.trim() ?? "";
 }
 
 export function normalizePath(p: string): string {

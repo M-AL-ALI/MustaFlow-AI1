@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { asc, and, eq, inArray, sql } from "drizzle-orm";
+import { asc, and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -7,6 +7,7 @@ import {
   chatMessagesTable,
   agentTasksTable,
   taskEventsTable,
+  knowledgeEntriesTable,
 } from "@workspace/db";
 import {
   ListMessagesParams,
@@ -16,11 +17,17 @@ import {
   SendMessageResponse,
 } from "@workspace/api-zod";
 import { type AgentMode } from "../lib/ai";
-import { runPlanPipeline, runConversePipeline, runIntentClassifierPipeline } from "../lib/builder";
+import {
+  runPlanPipeline,
+  runConversePipeline,
+  runConversationSummarizePipeline,
+  runIntentClassifierPipeline,
+} from "../lib/builder";
 import type { ConversationTurn, ConverseImageAttachment } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
 import { enqueueJob, runJob, resolveAgentIdentity, type AgentIdentity } from "../lib/jobs";
 import { logger } from "../lib/logger";
+import { writeKnowledge } from "../lib/knowledge";
 import { fetchAttachmentAsDataUri } from "./images";
 
 const router: IRouter = Router();
@@ -192,6 +199,21 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
     const taskId = converseTask?.id ?? 0;
 
+    // Load the most recent conversation summary (if any) to give the AI
+    // long-range context that was distilled from older exchanges.
+    const [summaryEntry] = await db
+      .select({ content: knowledgeEntriesTable.content })
+      .from(knowledgeEntriesTable)
+      .where(
+        and(
+          eq(knowledgeEntriesTable.projectId, project.id),
+          eq(knowledgeEntriesTable.type, "conversation_summary"),
+        ),
+      )
+      .orderBy(desc(knowledgeEntriesTable.createdAt))
+      .limit(1);
+    const conversationSummary = summaryEntry?.content;
+
     try {
       const visionParts: ConverseImageAttachment[] = [];
       for (const att of imageAttachments) {
@@ -207,6 +229,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         agentMode: mode,
         isAmbiguous,
         imageAttachments: visionParts.length > 0 ? visionParts : undefined,
+        conversationSummary,
       });
 
       if (converseTask) {
@@ -239,6 +262,56 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       assistantContent = `I wasn't able to answer that: ${msg}`;
       plan = { kind: "error", message: msg } as unknown as Record<string, unknown>;
     }
+
+    // Background summarization: after every 20 user messages, distil the
+    // older turns into a Knowledge Vault entry so future converse calls
+    // have long-range context without bloating the prompt.
+    setImmediate(() => {
+      void (async () => {
+        try {
+          const [countRow] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(chatMessagesTable)
+            .where(
+              and(eq(chatMessagesTable.projectId, project.id), eq(chatMessagesTable.role, "user")),
+            );
+          const userMsgCount = countRow?.count ?? 0;
+
+          if (userMsgCount > 0 && userMsgCount % 20 === 0) {
+            const allMessages = await db
+              .select({ role: chatMessagesTable.role, content: chatMessagesTable.content })
+              .from(chatMessagesTable)
+              .where(eq(chatMessagesTable.projectId, project.id))
+              .orderBy(asc(chatMessagesTable.createdAt));
+
+            const turns: ConversationTurn[] = allMessages
+              .filter((m) => m.role === "user" || m.role === "assistant")
+              .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+
+            // Summarise all turns except the last 16 (8 user+assistant pairs)
+            // which are already loaded fresh into the prompt.
+            const olderTurns = turns.slice(0, -16);
+            if (olderTurns.length < 4) return;
+
+            const summary = await runConversationSummarizePipeline(project.name, olderTurns);
+            if (!summary) return;
+
+            await writeKnowledge({
+              title: `Conversation summary — ${project.name}`,
+              content: summary,
+              type: "conversation_summary",
+              category: "note",
+              severity: "info",
+              projectId: project.id,
+              userId: project.ownerId ?? undefined,
+              tags: ["conversation", "context", "summary"],
+            });
+          }
+        } catch (err) {
+          logger.warn({ err }, "Background conversation summarization failed — non-fatal");
+        }
+      })();
+    });
   } else if (resolvedIntent === "plan") {
     // Create a task row so plan mode is tracked in Build History with live events
     const [planTask] = await db

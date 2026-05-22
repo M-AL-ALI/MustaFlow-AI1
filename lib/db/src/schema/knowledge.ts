@@ -13,6 +13,7 @@ export const KNOWLEDGE_TYPES = [
   "test_report",
   "manual_edit",
   "note",
+  "conversation_summary",
 ] as const;
 export type KnowledgeType = (typeof KNOWLEDGE_TYPES)[number];
 
