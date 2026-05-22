@@ -59,7 +59,10 @@ function isLintableTs(file: BuilderFile): boolean {
 
 /**
  * Extract and lint inline <script> blocks from HTML files.
- * Skips type="text/babel", type="module" (may contain JSX / TS), and external src=.
+ * Skips type="text/babel" (contains JSX the plain JS parser can't read) and
+ * external src=. Inline `type="module"` blocks are included and flagged as
+ * `isModule` so callers can lint them with ES module semantics
+ * (import/export allowed).
  *
  * Returns each block's raw inner content along with the [innerStart, innerEnd)
  * byte offsets inside the HTML so callers can splice fixed code back in.
@@ -71,28 +74,32 @@ function extractInlineScripts(html: string): Array<{
   innerStart: number;
   innerEnd: number;
   lineOffset: number;
+  isModule: boolean;
 }> {
   const scripts: Array<{
     code: string;
     innerStart: number;
     innerEnd: number;
     lineOffset: number;
+    isModule: boolean;
   }> = [];
   const scriptPattern =
-    /<script(?![^>]*type=["']text\/babel["'])(?![^>]*type=["']module["'])(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/gi;
+    /<script(?![^>]*type=["']text\/babel["'])(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/gi;
   let match: RegExpExecArray | null;
   while ((match = scriptPattern.exec(html)) !== null) {
     const fullMatch = match[0];
     const openTagLen = fullMatch.indexOf(">") + 1;
     const closeIdx = fullMatch.toLowerCase().lastIndexOf("</script");
     if (openTagLen <= 0 || closeIdx < 0) continue;
+    const openTag = fullMatch.slice(0, openTagLen);
+    const isModule = /type=["']module["']/i.test(openTag);
     const innerStart = match.index + openTagLen;
     const innerEnd = match.index + closeIdx;
     const code = html.slice(innerStart, innerEnd);
     if (!code.trim()) continue;
     const before = html.slice(0, innerStart);
     const lineOffset = (before.match(/\n/g) ?? []).length;
-    scripts.push({ code, innerStart, innerEnd, lineOffset });
+    scripts.push({ code, innerStart, innerEnd, lineOffset, isModule });
   }
   return scripts;
 }
@@ -104,6 +111,7 @@ function extractInlineScripts(html: string): Array<{
  */
 function buildEslintConfigs(): {
   jsConfig: Linter.Config[];
+  jsModuleConfig: Linter.Config[];
   tsConfig: Linter.Config[];
 } {
   const sharedGlobals = {
@@ -173,6 +181,24 @@ function buildEslintConfigs(): {
       languageOptions: {
         ecmaVersion: 2020 as const,
         sourceType: "script" as const,
+        globals: sharedGlobals,
+      },
+      rules: {
+        ...js.configs.recommended.rules,
+        ...jsStricterRules,
+      },
+    },
+  ];
+
+  // Same rules as jsConfig but with module semantics so inline
+  // <script type="module"> blocks (and .mjs-style modern generated apps)
+  // can use import/export without parser errors.
+  const jsModuleConfig = [
+    {
+      ...js.configs.recommended,
+      languageOptions: {
+        ecmaVersion: 2022 as const,
+        sourceType: "module" as const,
         globals: sharedGlobals,
       },
       rules: {
@@ -272,7 +298,7 @@ function buildEslintConfigs(): {
     },
   ] satisfies Linter.Config[];
 
-  return { jsConfig, tsConfig };
+  return { jsConfig, jsModuleConfig, tsConfig };
 }
 
 /**
@@ -284,7 +310,7 @@ export function runEslintCheck(files: BuilderFile[]): {
   findings: CheckFinding[];
 } {
   const linter = new Linter({ configType: "flat" });
-  const { jsConfig, tsConfig } = buildEslintConfigs();
+  const { jsConfig, jsModuleConfig, tsConfig } = buildEslintConfigs();
 
   const allFindings: CheckFinding[] = [];
 
@@ -313,7 +339,7 @@ export function runEslintCheck(files: BuilderFile[]): {
           code: s.code,
           path: file.path,
           lineOffset: s.lineOffset,
-          config: jsConfig,
+          config: s.isModule ? jsModuleConfig : jsConfig,
         });
       }
     }
@@ -395,7 +421,7 @@ export function runEslintFix(opts: { path: string; content: string; ruleIds?: st
   }
 
   const linter = new Linter({ configType: "flat" });
-  const { jsConfig, tsConfig } = buildEslintConfigs();
+  const { jsConfig, jsModuleConfig, tsConfig } = buildEslintConfigs();
 
   const ruleFilter = opts.ruleIds && opts.ruleIds.length > 0 ? new Set(opts.ruleIds) : null;
   const fixOption: Linter.FixOptions = {
@@ -409,6 +435,7 @@ export function runEslintFix(opts: { path: string; content: string; ruleIds?: st
     return runEslintFixHtml({
       linter,
       jsConfig,
+      jsModuleConfig,
       content: opts.content,
       path: opts.path,
       fixOption,
@@ -458,6 +485,7 @@ export function runEslintFix(opts: { path: string; content: string; ruleIds?: st
 function runEslintFixHtml(args: {
   linter: Linter;
   jsConfig: Linter.Config[];
+  jsModuleConfig: Linter.Config[];
   content: string;
   path: string;
   fixOption: Linter.FixOptions;
@@ -467,7 +495,7 @@ function runEslintFixHtml(args: {
   changed: boolean;
   remaining: EslintFixableIssue[];
 } {
-  const { linter, jsConfig, content, path, fixOption } = args;
+  const { linter, jsConfig, jsModuleConfig, content, path, fixOption } = args;
   const blocks = extractInlineScripts(content);
   if (blocks.length === 0) {
     return { supported: true, output: content, changed: false, remaining: [] };
@@ -484,9 +512,10 @@ function runEslintFixHtml(args: {
   const results: BlockResult[] = [];
 
   for (const block of blocks) {
+    const blockConfig = block.isModule ? jsModuleConfig : jsConfig;
     let res: ReturnType<Linter["verifyAndFix"]>;
     try {
-      res = linter.verifyAndFix(block.code, jsConfig, fixOption);
+      res = linter.verifyAndFix(block.code, blockConfig, fixOption);
     } catch (err) {
       logger.warn({ err, path }, "ESLint: verifyAndFix threw on inline <script>");
       results.push({
