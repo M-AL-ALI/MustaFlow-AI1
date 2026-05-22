@@ -14,6 +14,7 @@ import {
   buildAnalyticsTable,
   projectSuggestionsTable,
   checkRunsTable,
+  appTestRunsTable,
   type TaskReport,
   type FileSnapshotEntry,
 } from "@workspace/db";
@@ -3095,7 +3096,23 @@ export async function runAppTestingJob(
 
   logger.info({ projectId, taskId, passed, failed }, "Browser tests complete");
 
-  // Persist results into the task report
+  const ranAt = new Date();
+  const testScriptJson = JSON.stringify(testPlan, null, 2);
+
+  // Persist results into the dedicated app_test_runs table.
+  await db.insert(appTestRunsTable).values({
+    projectId,
+    taskId,
+    ranAt,
+    testScript: testScriptJson,
+    results: testResults,
+    passed,
+    failed,
+  });
+
+  logger.info({ projectId, taskId, passed, failed }, "Test results saved to app_test_runs");
+
+  // Also update the task report so the existing InlineReportCard continues to work.
   const [latestTask] = await db
     .select({ report: agentTasksTable.report })
     .from(agentTasksTable)
@@ -3108,8 +3125,8 @@ export async function runAppTestingJob(
   const updatedReport: import("@workspace/db").TaskReport = {
     ...latestReport,
     testResults,
-    testScript: JSON.stringify(testPlan, null, 2),
-    testRanAt: new Date().toISOString(),
+    testScript: testScriptJson,
+    testRanAt: ranAt.toISOString(),
   };
 
   await db

@@ -40,6 +40,7 @@ import imagesRouter from "./images";
 import preferencesRouter from "./preferences";
 import checkRunsRouter from "./check-runs";
 import securityRouter from "./security";
+import testRunsRouter from "./test-runs";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -84,6 +85,7 @@ const KNOWN_PREFIXES = [
   "/storage",
   "/check-runs",
   "/security",
+  "/test-runs",
 ];
 
 router.use((req, res, next) => {
@@ -149,6 +151,7 @@ router.use(imagesRouter);
 router.use(preferencesRouter);
 router.use(checkRunsRouter);
 router.use(securityRouter);
+router.use(testRunsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

@@ -1852,6 +1852,17 @@ export interface TestResult {
   durationMs: number;
 }
 
+export interface AppTestRun {
+  id: number;
+  projectId: number;
+  taskId?: number | null;
+  ranAt: string;
+  testScript?: string | null;
+  results: TestResult[];
+  passed: number;
+  failed: number;
+}
+
 export interface RerunTestsResult {
   queued: boolean;
   taskId: number;
@@ -2169,6 +2180,14 @@ export const GetAccountSecurityFindingsStatus = {
   dismissed: 'dismissed',
   fixed: 'fixed',
 } as const;
+
+export type ListTestRunsParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+};
 
 export type GetCheckRunsParams = {
 taskId?: number;

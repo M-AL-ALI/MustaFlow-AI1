@@ -35,6 +35,7 @@ import type {
   AnalyticsSummary,
   AnalyzePageMapParams,
   ApiError,
+  AppTestRun,
   BillingCheckoutInput,
   BillingCheckoutResult,
   BillingPackagesResult,
@@ -108,6 +109,7 @@ import type {
   ListProjectsParams,
   ListSecurityFindingsParams,
   ListSuggestionsParams,
+  ListTestRunsParams,
   MobileAppSettings,
   MobileAppSettingsInput,
   MobileBuildInput,
@@ -723,6 +725,95 @@ export function useGetSecurityBadgeCountsByProject<TData = Awaited<ReturnType<ty
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetSecurityBadgeCountsByProjectQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListTestRunsUrl = (id: number,
+    params?: ListTestRunsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/test-runs?${stringifiedParams}` : `/api/projects/${id}/test-runs`
+}
+
+/**
+ * @summary List persisted browser test run history for a project.
+ */
+export const listTestRuns = async (id: number,
+    params?: ListTestRunsParams, options?: RequestInit): Promise<AppTestRun[]> => {
+
+  return customFetch<AppTestRun[]>(getListTestRunsUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTestRunsQueryKey = (id: number,
+    params?: ListTestRunsParams,) => {
+    return [
+    `/api/projects/${id}/test-runs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListTestRunsQueryOptions = <TData = Awaited<ReturnType<typeof listTestRuns>>, TError = ErrorType<unknown>>(id: number,
+    params?: ListTestRunsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTestRuns>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTestRunsQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTestRuns>>> = ({ signal }) => listTestRuns(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTestRuns>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListTestRunsQueryResult = NonNullable<Awaited<ReturnType<typeof listTestRuns>>>
+export type ListTestRunsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List persisted browser test run history for a project.
+ */
+
+export function useListTestRuns<TData = Awaited<ReturnType<typeof listTestRuns>>, TError = ErrorType<unknown>>(
+ id: number,
+    params?: ListTestRunsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTestRuns>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListTestRunsQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

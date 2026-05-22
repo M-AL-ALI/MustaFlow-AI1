@@ -46,6 +46,8 @@ import {
   getListVersionsQueryKey,
   useRerunTaskTests,
   useListTasks,
+  useListTestRuns,
+  getListTestRunsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -428,8 +430,16 @@ function InlineReportCard({
   const [securityOpen, setSecurityOpen] = useState(false);
   const [testsOpen, setTestsOpen] = useState(false);
   const [testScreenshot, setTestScreenshot] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const rerunTests = useRerunTaskTests();
   const queryClient = useQueryClient();
+
+  const { data: testRunHistory } = useListTestRuns(projectId ?? 0, undefined, {
+    query: {
+      enabled: historyOpen && !!projectId,
+      queryKey: getListTestRunsQueryKey(projectId ?? 0),
+    },
+  });
 
   // Determine if we should poll for pending test results.
   // "Could have tests" means: no results in the static prop, taskId is known,
@@ -746,6 +756,21 @@ function InlineReportCard({
                     <ChevronRight className="h-3 w-3 ml-auto shrink-0" />
                   )}
                 </button>
+                {projectId && (
+                  <button
+                    onClick={() => setHistoryOpen((o) => !o)}
+                    className={cn(
+                      "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-border/50 hover:border-border transition-colors",
+                      historyOpen
+                        ? "text-foreground border-border"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    title="View test run history"
+                  >
+                    <FileCode className="h-2.5 w-2.5" />
+                    History
+                  </button>
+                )}
                 {taskId && projectId && (
                   <button
                     onClick={() => {
@@ -826,6 +851,62 @@ function InlineReportCard({
                     </li>
                   ))}
                 </ul>
+              )}
+              {historyOpen && (
+                <div className="mt-2 pt-1.5 border-t border-border/30">
+                  <div className="text-[10px] font-semibold text-muted-foreground mb-1.5 flex items-center gap-1">
+                    <FileCode className="h-3 w-3" />
+                    Test run history
+                  </div>
+                  {!testRunHistory ? (
+                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Loading...
+                    </div>
+                  ) : testRunHistory.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground">No history yet.</p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {testRunHistory.map((run) => {
+                        const runAllPassed = run.failed === 0;
+                        const runAt = new Date(run.ranAt);
+                        const isCurrentTask = run.taskId === taskId;
+                        return (
+                          <li
+                            key={run.id}
+                            className={cn(
+                              "flex items-center gap-2 text-[10px] px-1.5 py-1 rounded",
+                              isCurrentTask ? "bg-muted/60" : "bg-muted/30",
+                            )}
+                          >
+                            {runAllPassed ? (
+                              <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+                            ) : (
+                              <XCircle className="h-3 w-3 text-red-400 shrink-0" />
+                            )}
+                            <span
+                              className={
+                                runAllPassed
+                                  ? "text-green-400 font-medium"
+                                  : "text-red-400 font-medium"
+                              }
+                            >
+                              {run.passed}P / {run.failed}F
+                            </span>
+                            <span className="text-muted-foreground/60 text-[9px]">
+                              {format(runAt, "MMM d, HH:mm")}
+                            </span>
+                            {isCurrentTask && (
+                              <span className="ml-auto text-[9px] text-primary/60 font-medium">
+                                this build
+                              </span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
           );

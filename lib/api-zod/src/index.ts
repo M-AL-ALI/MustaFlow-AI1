@@ -19,3 +19,4 @@ export { GetCheckRunTrendsParams } from "./generated/api";
 export { ListSecurityFindingsParams } from "./generated/api";
 export { UpdateTaskBody } from "./generated/api";
 export { UpdateTaskParams } from "./generated/api";
+export { ListTestRunsParams } from "./generated/api";

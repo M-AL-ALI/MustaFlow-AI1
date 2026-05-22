@@ -158,6 +158,41 @@ export const GetSecurityBadgeCountsByProjectResponse = zod.object({
 
 
 /**
+ * @summary List persisted browser test run history for a project.
+ */
+export const ListTestRunsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const listTestRunsQueryLimitDefault = 20;
+export const listTestRunsQueryLimitMax = 100;
+
+
+
+export const ListTestRunsQueryParams = zod.object({
+  "limit": zod.coerce.number().min(1).max(listTestRunsQueryLimitMax).default(listTestRunsQueryLimitDefault)
+})
+
+export const ListTestRunsResponseItem = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "taskId": zod.number().nullish(),
+  "ranAt": zod.coerce.date(),
+  "testScript": zod.string().nullish(),
+  "results": zod.array(zod.object({
+  "name": zod.string(),
+  "passed": zod.boolean(),
+  "message": zod.string(),
+  "screenshotBase64": zod.string().nullish(),
+  "durationMs": zod.number()
+})),
+  "passed": zod.number(),
+  "failed": zod.number()
+})
+export const ListTestRunsResponse = zod.array(ListTestRunsResponseItem)
+
+
+/**
  * @summary List check runs for a project, optionally filtered by taskId.
  */
 export const GetCheckRunsParams = zod.object({
