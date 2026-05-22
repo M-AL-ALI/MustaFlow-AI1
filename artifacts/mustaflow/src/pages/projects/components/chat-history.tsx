@@ -196,7 +196,7 @@ function extractCodeText(node: React.ReactNode): string {
   return "";
 }
 
-function MarkdownMessage({
+export function MarkdownMessage({
   content,
   onApply,
 }: {

@@ -23,7 +23,7 @@ import {
 } from "@workspace/api-client-react";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { CodeEditorTab } from "./components/code-editor-tab";
-import { ChatHistory, StreamingText } from "./components/chat-history";
+import { ChatHistory, StreamingText, MarkdownMessage } from "./components/chat-history";
 import { PageMapTab } from "./components/page-map-tab";
 import { Button } from "@/components/ui/button";
 import {
@@ -800,6 +800,16 @@ export default function ProjectWorkspacePage() {
   const [pendingIsPlan, setPendingIsPlan] = useState(false);
   const pendingIsConverseRef = useRef(false);
   const [pendingIsConverse, setPendingIsConverse] = useState(false);
+
+  // Streaming converse state — text accumulated as SSE tokens arrive
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingText, setStreamingText] = useState<string>("");
+  const streamAbortRef = useRef<AbortController | null>(null);
+
+  // Combined busy state — true when either the regular mutation or the streaming fetch is active.
+  // Declared early so query refetchInterval options can reference it without a forward-reference.
+  const isBusy = sendMessage.isPending || isStreaming;
+
   const seenPageMapEventIdsRef = useRef<Set<number>>(new Set());
   // Whether chat was scrolled to (or near) the bottom — controls auto-scroll behaviour
   const chatAtBottomRef = useRef(true);
@@ -988,7 +998,7 @@ export default function ProjectWorkspacePage() {
       autoAnalyzedRef.current = true;
       return;
     }
-    if (sendMessage.isPending) return;
+    if (isBusy) return;
     autoAnalyzedRef.current = true;
     pendingIsPlanRef.current = true;
     setPendingIsPlan(true);
@@ -1014,9 +1024,11 @@ export default function ProjectWorkspacePage() {
         },
       },
     );
-  }, [project, messages, projectId, sendMessage, queryClient]);
+  }, [project, messages, projectId, sendMessage, queryClient, isBusy]);
 
-  const send = useCallback(
+  // Helper that runs the regular (non-streaming) sendMessage mutation.
+  // Used for build/plan intents and as a streaming fallback.
+  const sendRegular = useCallback(
     (
       content: string,
       opts?: {
@@ -1024,33 +1036,12 @@ export default function ProjectWorkspacePage() {
         background?: boolean;
         agentMode?: AgentMode;
         agentIntent?: "converse" | "plan" | "build";
-        attachments?: Array<{
-          kind: "image";
-          url: string;
-          alt?: string;
-          generated?: boolean;
-        }>;
+        attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
       },
     ) => {
-      if (!content.trim()) return;
-      setActiveTaskId(null);
-      chatAtBottomRef.current = true;
-      setPendingBuildStartedAt(new Date());
-      if (opts?.background ?? runInBackground) setBackgroundPanelOpen(true);
       const effectiveMode = opts?.agentMode ?? agentMode;
       const effectivePlanMode = opts?.planMode ?? planMode;
       const effectiveAgentIntent = opts?.agentIntent;
-      pendingIsPlanRef.current = effectivePlanMode;
-      setPendingIsPlan(effectivePlanMode);
-      // Local heuristic for display: show conversational indicator when content looks like a
-      // question or explicit agentIntent=converse. Does NOT affect server classification.
-      const converseKeywords =
-        /^(what|how|why|when|where|who|can you|tell me|explain|does|is there|will|should|could|help me|is it|are there|what is|what are|what does)/i;
-      const isLikelyConverse =
-        effectiveAgentIntent === "converse" ||
-        (converseKeywords.test(content.trim()) && !effectivePlanMode);
-      pendingIsConverseRef.current = isLikelyConverse;
-      setPendingIsConverse(isLikelyConverse);
       sendMessage.mutate(
         {
           id: projectId,
@@ -1102,6 +1093,176 @@ export default function ProjectWorkspacePage() {
       );
     },
     [projectId, agentMode, planMode, runInBackground, sendMessage, queryClient, agentIdentity],
+  );
+
+  const send = useCallback(
+    (
+      content: string,
+      opts?: {
+        planMode?: boolean;
+        background?: boolean;
+        agentMode?: AgentMode;
+        agentIntent?: "converse" | "plan" | "build";
+        attachments?: Array<{
+          kind: "image";
+          url: string;
+          alt?: string;
+          generated?: boolean;
+        }>;
+      },
+    ) => {
+      if (!content.trim()) return;
+      setActiveTaskId(null);
+      chatAtBottomRef.current = true;
+      setPendingBuildStartedAt(new Date());
+      if (opts?.background ?? runInBackground) setBackgroundPanelOpen(true);
+      const effectiveMode = opts?.agentMode ?? agentMode;
+      const effectivePlanMode = opts?.planMode ?? planMode;
+      const effectiveBackground = opts?.background ?? runInBackground;
+      const effectiveAgentIntent = opts?.agentIntent;
+      pendingIsPlanRef.current = effectivePlanMode;
+      setPendingIsPlan(effectivePlanMode);
+      // Local heuristic for display: show conversational indicator when content looks like a
+      // question or explicit agentIntent=converse. Does NOT affect server classification.
+      const converseKeywords =
+        /^(what|how|why|when|where|who|can you|tell me|explain|does|is there|will|should|could|help me|is it|are there|what is|what are|what does)/i;
+      const isLikelyConverse =
+        effectiveAgentIntent === "converse" ||
+        (converseKeywords.test(content.trim()) && !effectivePlanMode);
+      pendingIsConverseRef.current = isLikelyConverse;
+      setPendingIsConverse(isLikelyConverse);
+
+      // For plan/build or background tasks skip streaming and go straight to the regular path
+      if (
+        effectivePlanMode ||
+        effectiveBackground ||
+        effectiveAgentIntent === "plan" ||
+        effectiveAgentIntent === "build"
+      ) {
+        sendRegular(content, opts);
+        return;
+      }
+
+      // Streaming path — cancel any in-progress stream first
+      if (streamAbortRef.current) {
+        streamAbortRef.current.abort();
+      }
+      const ctrl = new AbortController();
+      streamAbortRef.current = ctrl;
+
+      setIsStreaming(true);
+      setStreamingText("");
+
+      void (async () => {
+        try {
+          const body = JSON.stringify({
+            content,
+            agentMode: effectiveMode,
+            planMode: effectivePlanMode,
+            background: false,
+            agentIdentity,
+            ...(effectiveAgentIntent ? { agentIntent: effectiveAgentIntent } : {}),
+            ...(opts?.attachments && opts.attachments.length > 0
+              ? { attachments: opts.attachments }
+              : {}),
+          });
+
+          const resp = await fetch(`/api/projects/${projectId}/messages/stream`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+            signal: ctrl.signal,
+          });
+
+          if (!resp.ok || !resp.body) {
+            // Non-2xx or no body — fall back to regular
+            setIsStreaming(false);
+            setStreamingText("");
+            setPendingIsConverse(false);
+            pendingIsConverseRef.current = false;
+            sendRegular(content, opts);
+            return;
+          }
+
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          let accText = "";
+          let finished = false;
+
+          while (!finished) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split("\n");
+            buf = lines.pop() ?? "";
+
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              let event: Record<string, unknown>;
+              try {
+                event = JSON.parse(line.slice(6)) as Record<string, unknown>;
+              } catch {
+                continue;
+              }
+
+              if (event.type === "token") {
+                accText += (event.content as string) ?? "";
+                setStreamingText(accText);
+              } else if (event.type === "done") {
+                finished = true;
+                setIsStreaming(false);
+                setStreamingText("");
+                setPendingBuildStartedAt(null);
+                pendingIsPlanRef.current = false;
+                setPendingIsPlan(false);
+                pendingIsConverseRef.current = false;
+                setPendingIsConverse(false);
+                void queryClient.invalidateQueries({
+                  queryKey: getListMessagesQueryKey(projectId),
+                });
+                void queryClient.invalidateQueries({
+                  queryKey: getGetProjectQueryKey(projectId),
+                });
+              } else if (event.type === "fallback") {
+                // Server says it's a build/plan — use the regular path
+                finished = true;
+                setIsStreaming(false);
+                setStreamingText("");
+                const fallbackIntent = event.intent as "build" | "plan" | undefined;
+                sendRegular(content, {
+                  ...opts,
+                  agentMode: effectiveMode,
+                  planMode: effectivePlanMode,
+                  ...(fallbackIntent ? { agentIntent: fallbackIntent } : {}),
+                });
+              } else if (event.type === "error") {
+                finished = true;
+                setIsStreaming(false);
+                setStreamingText("");
+                setPendingBuildStartedAt(null);
+                pendingIsPlanRef.current = false;
+                setPendingIsPlan(false);
+                pendingIsConverseRef.current = false;
+                setPendingIsConverse(false);
+                void queryClient.invalidateQueries({
+                  queryKey: getListMessagesQueryKey(projectId),
+                });
+              }
+            }
+          }
+        } catch (err) {
+          if ((err as { name?: string }).name === "AbortError") return;
+          // Network or parse error — fall back to regular mutation
+          setIsStreaming(false);
+          setStreamingText("");
+          setPendingIsConverse(false);
+          pendingIsConverseRef.current = false;
+          sendRegular(content, opts);
+        }
+      })();
+    },
+    [projectId, agentMode, planMode, runInBackground, sendRegular, queryClient, agentIdentity],
   );
 
   const handleAddKey = useCallback((keyName: string) => {
@@ -1572,7 +1733,7 @@ export default function ProjectWorkspacePage() {
                     setPrefillSecretName(keyName);
                     setActiveTab("tools-files");
                   }}
-                  disabled={sendMessage.isPending}
+                  disabled={isBusy}
                   readOnly
                 />
               </div>
@@ -1591,7 +1752,7 @@ export default function ProjectWorkspacePage() {
                 <span
                   className={cn(
                     "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-                    sendMessage.isPending
+                    isBusy
                       ? pendingIsConverse
                         ? "bg-blue-500/15 text-blue-400"
                         : pendingIsPlan
@@ -1600,7 +1761,7 @@ export default function ProjectWorkspacePage() {
                       : "bg-green-500/15 text-green-400",
                   )}
                 >
-                  {sendMessage.isPending
+                  {isBusy
                     ? pendingIsConverse
                       ? "Answering…"
                       : pendingIsPlan
@@ -1765,7 +1926,7 @@ export default function ProjectWorkspacePage() {
 
                                 {/* Clarifying quick-reply chips — clickable in live chat */}
                                 {payloadKind === "clarifying" &&
-                                  !sendMessage.isPending &&
+                                  !isBusy &&
                                   (() => {
                                     const opts = (planPayload as { options?: string[] }).options;
                                     if (!opts?.length) return null;
@@ -1821,7 +1982,7 @@ export default function ProjectWorkspacePage() {
                                           }}
                                           onViewHistory={() => switchLeftPanel("history")}
                                         />
-                                        {isLastReport && rp.taskId && !sendMessage.isPending && (
+                                        {isLastReport && rp.taskId && !isBusy && (
                                           <SuggestionChips
                                             projectId={projectId}
                                             taskId={rp.taskId}
@@ -1850,7 +2011,7 @@ export default function ProjectWorkspacePage() {
                                     initialAgentMode={agentMode}
                                     onBuild={runPlanned}
                                     onAddKey={handleAddKey}
-                                    disabled={sendMessage.isPending}
+                                    disabled={isBusy}
                                     messageId={msg.id}
                                   />
                                 )}
@@ -1860,6 +2021,33 @@ export default function ProjectWorkspacePage() {
                         );
                       });
                     })()}
+
+                    {/* Live streaming bubble — shown while SSE converse stream is active */}
+                    {isStreaming && !sendMessage.isPending && (
+                      <div className="flex justify-start">
+                        <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
+                          {streamingText.length > 0 ? (
+                            <>
+                              <MarkdownMessage content={streamingText} />
+                              <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
+                            </>
+                          ) : (
+                            <span className="flex items-center gap-2">
+                              <span className="flex gap-0.5">
+                                {[0, 1, 2].map((i) => (
+                                  <span
+                                    key={i}
+                                    className="w-1 h-1 rounded-full bg-blue-400/60 animate-bounce"
+                                    style={{ animationDelay: `${i * 150}ms` }}
+                                  />
+                                ))}
+                              </span>
+                              <span className="text-muted-foreground">Thinking…</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {sendMessage.isPending ? (
                       pendingIsConverse ? (
@@ -1924,7 +2112,7 @@ export default function ProjectWorkspacePage() {
                     <>
                       {/* Bottom status bar */}
                       <div className="px-3 py-1.5 flex items-center gap-2 border-b border-border/30 bg-muted/20">
-                        {sendMessage.isPending ? (
+                        {isBusy ? (
                           <>
                             <span className="relative flex h-1.5 w-1.5 shrink-0">
                               <span
@@ -2016,7 +2204,7 @@ export default function ProjectWorkspacePage() {
                   </div>
 
                   {/* Quick action chips */}
-                  {!sendMessage.isPending && !activeBatchId && prompt === "" && (
+                  {!isBusy && !activeBatchId && prompt === "" && (
                     <div className="shrink-0 px-3 pt-2 pb-1 flex flex-wrap gap-1.5">
                       {QUICK_ACTIONS.map((chip) => (
                         <button
@@ -2042,7 +2230,7 @@ export default function ProjectWorkspacePage() {
                     onRunInBackgroundChange={setRunInBackground}
                     variantMode={variantMode}
                     onVariantModeChange={setVariantMode}
-                    disabled={sendMessage.isPending}
+                    disabled={isBusy}
                     onSingleSend={(content, _intent, attachments) => {
                       setPrompt("");
                       send(content, attachments ? { attachments } : undefined);

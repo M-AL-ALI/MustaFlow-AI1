@@ -5954,6 +5954,128 @@ Write 3–6 concise bullet points in plain text. Be factual and specific — thi
   return response.choices[0]?.message?.content?.trim() ?? "";
 }
 
+/**
+ * Streaming variant of runConversePipeline.
+ * Calls `onToken` for each incremental text chunk. Returns the full assembled markdown.
+ * The ambiguous/clarifying path uses JSON mode (no streaming) and calls onToken once
+ * with the full question text so the caller always gets a consistent stream.
+ */
+export async function runConverseStreamPipeline(
+  args: {
+    projectName: string;
+    userPrompt: string;
+    conversationHistory: ConversationTurn[];
+    currentFiles: { path: string; content: string; mimeType: string }[];
+    agentMode: AgentMode;
+    isAmbiguous?: boolean;
+    imageAttachments?: ConverseImageAttachment[];
+  },
+  onToken: (token: string) => void,
+): Promise<ConverseResult> {
+  const {
+    projectName,
+    userPrompt,
+    conversationHistory,
+    currentFiles,
+    agentMode,
+    isAmbiguous,
+    imageAttachments,
+  } = args;
+
+  // Ambiguous path uses JSON mode — not streamable; call onToken once with full text.
+  if (isAmbiguous) {
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5-nano",
+        max_completion_tokens: 200,
+        messages: [
+          { role: "system", content: CLARIFY_SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: { type: "json_object" },
+      });
+      const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
+      const parsed = JSON.parse(raw) as { question?: string; options?: unknown[] };
+      const question =
+        typeof parsed.question === "string" && parsed.question.trim()
+          ? parsed.question.trim()
+          : "Could you clarify what you'd like to do?";
+      const options = Array.isArray(parsed.options)
+        ? parsed.options.filter((o): o is string => typeof o === "string").slice(0, 3)
+        : ["Explain how it works", "Build something new", "Create a plan first"];
+      onToken(question);
+      return { markdown: question, clarifying: { question, options } };
+    } catch (err) {
+      logger.warn({ err }, "Clarify call failed, falling through to converse stream");
+    }
+  }
+
+  const fileContext =
+    currentFiles.length > 0
+      ? currentFiles
+          .slice(0, 12)
+          .map((f) => {
+            const snippet = f.content.slice(0, 400).replace(/\n/g, " ").trim();
+            return `- ${f.path}: ${snippet}${f.content.length > 400 ? "…" : ""}`;
+          })
+          .join("\n")
+      : "No files yet — the app hasn't been built.";
+
+  const model = modelFor(agentMode);
+
+  type TextPart = { type: "text"; text: string };
+  type ImagePart = { type: "image_url"; image_url: { url: string } };
+  type ChatMsg =
+    | { role: "system" | "assistant"; content: string }
+    | { role: "user"; content: string | Array<TextPart | ImagePart> };
+
+  const messages: ChatMsg[] = [
+    { role: "system", content: CONVERSE_SYSTEM_PROMPT },
+    {
+      role: "system",
+      content: `Project: "${projectName}"\n\nCurrent files:\n${fileContext}`,
+    },
+  ];
+
+  for (const turn of conversationHistory.slice(-6)) {
+    messages.push({ role: turn.role, content: turn.content });
+  }
+
+  if (imageAttachments && imageAttachments.length > 0) {
+    const parts: Array<TextPart | ImagePart> = [{ type: "text", text: userPrompt }];
+    for (const att of imageAttachments) {
+      parts.push({ type: "image_url", image_url: { url: att.dataUri } });
+    }
+    messages.push({ role: "user", content: parts });
+  } else {
+    messages.push({ role: "user", content: userPrompt });
+  }
+
+  try {
+    const stream = await openai.chat.completions.create({
+      model,
+      max_completion_tokens: 1200,
+      stream: true,
+      messages: messages as Parameters<typeof openai.chat.completions.create>[0]["messages"],
+    });
+
+    let markdown = "";
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content;
+      if (delta) {
+        markdown += delta;
+        onToken(delta);
+      }
+    }
+
+    if (!markdown) markdown = "I couldn't generate a response. Please try again.";
+    return { markdown };
+  } catch (err) {
+    logger.error({ err }, "Converse stream pipeline failed");
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
 export function normalizePath(p: string): string {
   let clean = p.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
   if (clean.includes("..")) {

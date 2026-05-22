@@ -21,6 +21,7 @@ import {
   runPlanPipeline,
   runConversePipeline,
   runConversationSummarizePipeline,
+  runConverseStreamPipeline,
   runIntentClassifierPipeline,
 } from "../lib/builder";
 import type { ConversationTurn, ConverseImageAttachment } from "../lib/builder";
@@ -499,5 +500,272 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     }),
   );
 });
+
+/**
+ * POST /projects/:id/messages/stream
+ *
+ * SSE endpoint for conversational (converse-intent) messages.
+ * Streams OpenAI tokens word-by-word so the UI feels instant.
+ *
+ * Event types emitted:
+ *   {"type":"token","content":"…"}   — incremental text chunk
+ *   {"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}  — stream complete
+ *   {"type":"fallback","intent":"build"|"plan"}  — not a converse message; client should
+ *                                                    re-send via the regular POST endpoint
+ *   {"type":"error","message":"…"}   — something went wrong
+ */
+router.post(
+  "/projects/:id/messages/stream",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = SendMessageParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    const parsed = SendMessageBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const [project] = await db
+      .select()
+      .from(projectsTable)
+      .where(eq(projectsTable.id, params.data.id));
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const {
+      content,
+      agentMode,
+      planMode,
+      agentIntent: explicitAgentIntent,
+      attachments: rawAttachments,
+    } = parsed.data;
+    const mode = agentMode as AgentMode;
+    const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
+    const imageAttachments = attachments.filter(
+      (a) => a.kind === "image" && typeof a.url === "string",
+    );
+
+    // Set SSE headers before any await so the client sees the stream start quickly
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const sendEvent = (data: Record<string, unknown>): void => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // Load project files + recent conversation history
+    const currentProjectFiles = await db
+      .select({
+        path: projectFilesTable.path,
+        content: projectFilesTable.content,
+        mimeType: projectFilesTable.mimeType,
+      })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, project.id));
+
+    const recentMessages = await db
+      .select({ role: chatMessagesTable.role, content: chatMessagesTable.content })
+      .from(chatMessagesTable)
+      .where(eq(chatMessagesTable.projectId, project.id))
+      .orderBy(asc(chatMessagesTable.createdAt));
+
+    const conversationHistory: ConversationTurn[] = recentMessages
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+      .slice(-8);
+
+    // Intent detection
+    let resolvedIntent: "converse" | "plan" | "build" = "build";
+    let intentConfidence = 1.0;
+
+    if (
+      explicitAgentIntent === "converse" ||
+      explicitAgentIntent === "plan" ||
+      explicitAgentIntent === "build"
+    ) {
+      resolvedIntent = explicitAgentIntent;
+    } else if (planMode) {
+      resolvedIntent = "plan";
+    } else {
+      const hasFiles = currentProjectFiles.length > 0;
+      try {
+        const classified = await runIntentClassifierPipeline(
+          content,
+          conversationHistory,
+          hasFiles,
+        );
+        resolvedIntent = classified.intent;
+        intentConfidence = classified.confidence;
+      } catch (err) {
+        logger.warn({ err }, "Intent classifier failed in stream route, defaulting");
+        resolvedIntent = hasFiles ? "build" : "converse";
+      }
+      if (intentConfidence < 0.7) {
+        resolvedIntent = "converse";
+      }
+    }
+
+    // Non-converse: tell client to fall back to the regular endpoint
+    if (resolvedIntent !== "converse") {
+      sendEvent({ type: "fallback", intent: resolvedIntent });
+      res.end();
+      return;
+    }
+
+    const effectivePlanMode = planMode;
+    const isAmbiguous = intentConfidence < 0.7;
+
+    // Save user message
+    let userMessageId: number;
+    try {
+      const [userMessage] = await db
+        .insert(chatMessagesTable)
+        .values({
+          projectId: project.id,
+          role: "user",
+          content,
+          agentMode: mode,
+          planMode: effectivePlanMode,
+          attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
+        })
+        .returning();
+      if (!userMessage) throw new Error("Failed to save user message");
+      userMessageId = userMessage.id;
+    } catch (err) {
+      sendEvent({ type: "error", message: "Failed to save message" });
+      res.end();
+      return;
+    }
+
+    // Create a converse task record
+    const [converseTask] = await db
+      .insert(agentTasksTable)
+      .values({
+        projectId: project.id,
+        title: `Chat: ${content.slice(0, 60)}`,
+        kind: "converse",
+        status: "building",
+        prompt: content,
+        agentIdentity: "main",
+      })
+      .returning();
+
+    const taskId = converseTask?.id ?? 0;
+
+    try {
+      const visionParts: ConverseImageAttachment[] = [];
+      for (const att of imageAttachments) {
+        const dataUri = await fetchAttachmentAsDataUri(att.url);
+        if (dataUri) visionParts.push({ dataUri, alt: att.alt });
+      }
+
+      // Stream tokens directly to the client
+      const converseResult = await runConverseStreamPipeline(
+        {
+          projectName: project.name,
+          userPrompt: content,
+          conversationHistory,
+          currentFiles: currentProjectFiles,
+          agentMode: mode,
+          isAmbiguous,
+          imageAttachments: visionParts.length > 0 ? visionParts : undefined,
+        },
+        (token) => {
+          sendEvent({ type: "token", content: token });
+        },
+      );
+
+      // Update task status
+      if (converseTask) {
+        await db
+          .update(agentTasksTable)
+          .set({ status: "completed", result: converseResult.markdown, completedAt: sql`now()` })
+          .where(eq(agentTasksTable.id, converseTask.id));
+      }
+
+      // Build the plan payload
+      let plan: Record<string, unknown>;
+      if (converseResult.clarifying) {
+        plan = {
+          kind: "clarifying",
+          question: converseResult.clarifying.question,
+          options: converseResult.clarifying.options,
+          taskId,
+        };
+      } else {
+        plan = { kind: "converse", taskId };
+      }
+
+      // Save the assistant message
+      const [assistantMessage] = await db
+        .insert(chatMessagesTable)
+        .values({
+          projectId: project.id,
+          role: "assistant",
+          content: converseResult.markdown,
+          agentMode: mode,
+          planMode: effectivePlanMode,
+          plan,
+        })
+        .returning();
+
+      if (!assistantMessage) throw new Error("Failed to save assistant message");
+
+      // Update project activity timestamp
+      await db
+        .update(projectsTable)
+        .set({ updatedAt: sql`now()`, lastTaskSummary: content.slice(0, 140), agentMode: mode })
+        .where(eq(projectsTable.id, project.id));
+
+      sendEvent({
+        type: "done",
+        userMessageId,
+        assistantMessageId: assistantMessage.id,
+        plan,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Conversation failed";
+      if (converseTask) {
+        await db
+          .update(agentTasksTable)
+          .set({ status: "failed", result: msg, completedAt: sql`now()` })
+          .where(eq(agentTasksTable.id, converseTask.id));
+      }
+      // Save a fallback error message to the DB
+      try {
+        const [errMsg] = await db
+          .insert(chatMessagesTable)
+          .values({
+            projectId: project.id,
+            role: "assistant",
+            content: `I wasn't able to answer that: ${msg}`,
+            agentMode: mode,
+            planMode: effectivePlanMode,
+            plan: { kind: "error", message: msg },
+          })
+          .returning();
+        sendEvent({
+          type: "error",
+          message: msg,
+          userMessageId,
+          assistantMessageId: errMsg?.id,
+        });
+      } catch {
+        sendEvent({ type: "error", message: msg, userMessageId });
+      }
+    }
+
+    res.end();
+  },
+);
 
 export default router;
