@@ -4,18 +4,21 @@ import {
   db,
   cveFindingsTable,
   securityFindingsTable,
+  projectFilesTable,
+  projectVersionsTable,
   projectsTable,
   projectFilesTable,
   type SecurityFindingStatus,
   type SecurityFindingSeverity,
 } from "@workspace/db";
-import type { CveSeverity, CveStatus } from "@workspace/db";
+import type { CveSeverity, CveStatus, CvePatchStatus } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { generateSbom } from "../lib/sbom";
 import { getAuth } from "@clerk/express";
 import { logger } from "../lib/logger";
 import { runCveAudit } from "../lib/checks/cve-scanner";
 import { getCveScanStatus, recordScanResult, acknowledgeNewFindings } from "../lib/cve-scheduler";
+import { enqueueCveAutoProtectJob } from "../lib/jobs";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { randomUUID } from "crypto";
@@ -83,6 +86,7 @@ router.post("/security/cve/scan-status/acknowledge", async (req, res): Promise<v
 /**
  * POST /api/security/cve/scan
  * Trigger a fresh npm audit scan, upsert results into DB, return findings.
+ * Automatically enqueues CVE auto-protect jobs for new critical findings.
  */
 router.post("/security/cve/scan", async (req, res): Promise<void> => {
   if (!req.userId) {
@@ -93,7 +97,6 @@ router.post("/security/cve/scan", async (req, res): Promise<void> => {
   try {
     const advisories = await runCveAudit();
 
-    // Mark all currently open findings as fixed before inserting fresh results
     await db
       .update(cveFindingsTable)
       .set({ status: "fixed" as CveStatus })
@@ -120,6 +123,22 @@ router.post("/security/cve/scan", async (req, res): Promise<void> => {
         })),
       )
       .returning();
+
+    for (const finding of inserted) {
+      if (finding.severity === "critical" || finding.severity === "high") {
+        enqueueCveAutoProtectJob({ findingId: finding.id, projectId: finding.projectId });
+      }
+    }
+
+    const criticalCount = inserted.filter(
+      (f) => f.severity === "critical" || f.severity === "high",
+    ).length;
+    if (criticalCount > 0) {
+      logger.info(
+        { criticalCount },
+        "CVE auto-protect jobs enqueued for critical/high findings",
+      );
+    }
 
     recordScanResult(inserted);
     res.json({ scanned: true, findings: inserted, total: inserted.length });
@@ -597,6 +616,116 @@ router.get("/projects/:id/sbom", requireProjectOwnership, async (req, res): Prom
   } catch (err) {
     logger.error({ err, projectId }, "Failed to generate SBOM");
     res.status(500).json({ error: "Failed to generate SBOM" });
+  }
+});
+
+/**
+ * POST /api/security/cve/:id/apply-patch
+ * Apply the prepared patch for a CVE finding.
+ * If the finding has a projectId, writes the patched file(s) to project_files
+ * and creates a version snapshot. Otherwise, the patch is informational only.
+ */
+router.post("/security/cve/:id/apply-patch", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const findingId = Number(req.params.id);
+  if (!Number.isFinite(findingId)) {
+    res.status(400).json({ error: "Invalid finding id" });
+    return;
+  }
+
+  try {
+    const [finding] = await db
+      .select()
+      .from(cveFindingsTable)
+      .where(eq(cveFindingsTable.id, findingId))
+      .limit(1);
+
+    if (!finding) {
+      res.status(404).json({ error: "Finding not found" });
+      return;
+    }
+
+    if (finding.patchStatus !== "ready") {
+      res.status(400).json({ error: "Patch is not ready to apply" });
+      return;
+    }
+
+    if (!finding.patchContent) {
+      res.status(400).json({ error: "No patch content available" });
+      return;
+    }
+
+    let parsedPatch: { files?: Array<{ path: string; content: string }>; summary?: string };
+    try {
+      parsedPatch = JSON.parse(finding.patchContent) as typeof parsedPatch;
+    } catch {
+      res.status(500).json({ error: "Invalid patch content format" });
+      return;
+    }
+
+    const patchFiles = parsedPatch.files ?? [];
+
+    if (finding.projectId && patchFiles.length > 0) {
+      const existingFiles = await db
+        .select()
+        .from(projectFilesTable)
+        .where(eq(projectFilesTable.projectId, finding.projectId));
+
+      const snapshotEntries = existingFiles.map((f) => ({
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+      }));
+
+      await db.insert(projectVersionsTable).values({
+        projectId: finding.projectId,
+        label: `CVE patch: ${finding.packageName}${finding.cveId ? ` (${finding.cveId})` : ""}`,
+        filesSnapshot: snapshotEntries,
+        note: `Auto-protect patch applied by ${req.userId}`,
+      });
+
+      for (const patchFile of patchFiles) {
+        const existing = existingFiles.find((f) => f.path === patchFile.path);
+        if (existing) {
+          await db
+            .update(projectFilesTable)
+            .set({ content: patchFile.content })
+            .where(
+              and(
+                eq(projectFilesTable.projectId, finding.projectId),
+                eq(projectFilesTable.path, patchFile.path),
+              ),
+            );
+        } else {
+          await db.insert(projectFilesTable).values({
+            projectId: finding.projectId,
+            path: patchFile.path,
+            content: patchFile.content,
+            mimeType: patchFile.path.endsWith(".json") ? "application/json" : "text/plain",
+          });
+        }
+      }
+    }
+
+    const [updated] = await db
+      .update(cveFindingsTable)
+      .set({
+        patchStatus: "applied" as CvePatchStatus,
+        status: "fixed" as CveStatus,
+        patchAppliedAt: new Date(),
+      })
+      .where(eq(cveFindingsTable.id, findingId))
+      .returning();
+
+    logger.info({ findingId, projectId: finding.projectId }, "CVE patch applied");
+    res.json(updated);
+  } catch (err) {
+    logger.error({ err, findingId }, "Failed to apply CVE patch");
+    res.status(500).json({ error: "Failed to apply patch" });
   }
 });
 

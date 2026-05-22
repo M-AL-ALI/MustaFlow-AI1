@@ -6452,6 +6452,125 @@ export async function runTestGenerationPipeline(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CVE Auto-Protect Patch Pipeline
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type CvePatchFile = {
+  path: string;
+  content: string;
+};
+
+export type CvePatchResult = {
+  patchedFiles: CvePatchFile[];
+  summary: string;
+  error?: string;
+};
+
+const CVE_PATCH_SYSTEM_PROMPT = `You are a dependency security patcher. Given a CVE advisory and the current contents of a package.json or pnpm-workspace.yaml, you output a minimal patch that upgrades the affected package to the patched version.
+
+Rules:
+- Only change the version of the specific affected package — do not touch any other dependency.
+- If the file is package.json: update the version in dependencies, devDependencies, peerDependencies, or overrides as appropriate.
+- If the file is pnpm-workspace.yaml: update the version in the catalog section.
+- Preserve all formatting, indentation, and comments as closely as possible.
+- If the patched version is null or unknown, use the "latest" tag as a safe fallback.
+- If the package is not found in the file, return the file unchanged.
+
+OUTPUT STRICT JSON:
+{
+  "files": [{ "path": string, "content": string }],
+  "summary": "One sentence describing what was changed."
+}`;
+
+/**
+ * AI pipeline that generates a minimal dependency upgrade patch for a given CVE.
+ * Takes the CVE advisory details and the current package files, returns updated file contents.
+ */
+export async function runCvePatchPipeline(opts: {
+  packageName: string;
+  currentVersion: string | null;
+  patchedVersion: string | null;
+  cveId: string | null;
+  title: string | null;
+  existingFiles: BuilderFile[];
+}): Promise<CvePatchResult> {
+  const { packageName, currentVersion, patchedVersion, cveId, title, existingFiles } = opts;
+
+  const targetVersion = patchedVersion ?? "latest";
+  const cveLabel = cveId ? ` (${cveId})` : "";
+  const titleLabel = title ? `: ${title}` : "";
+
+  const relevantFiles = existingFiles.filter(
+    (f) => f.path === "package.json" || f.path === "pnpm-workspace.yaml",
+  );
+
+  if (relevantFiles.length === 0) {
+    return {
+      patchedFiles: [],
+      summary: `No package.json or pnpm-workspace.yaml found to patch for ${packageName}.`,
+    };
+  }
+
+  const filesContext = relevantFiles
+    .map((f) => `=== ${f.path} ===\n${f.content}`)
+    .join("\n\n");
+
+  const userMessage = `CVE Advisory${cveLabel}${titleLabel}
+
+Vulnerable package: ${packageName}
+Current version: ${currentVersion ?? "unknown"}
+Patched version: ${targetVersion}
+
+Files to patch:
+${filesContext}
+
+Please upgrade "${packageName}" from "${currentVersion ?? "unknown"}" to "${targetVersion}" in the relevant file(s) above.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-5-mini",
+      max_completion_tokens: 2000,
+      messages: [
+        { role: "system", content: CVE_PATCH_SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const raw = response.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(raw) as { files?: CvePatchFile[]; summary?: string };
+
+    if (!Array.isArray(parsed.files) || parsed.files.length === 0) {
+      return {
+        patchedFiles: [],
+        summary: `AI patch generation returned no files for ${packageName}${cveLabel}.`,
+        error: "No files returned by AI",
+      };
+    }
+
+    const validFiles = parsed.files.filter(
+      (f) =>
+        typeof f.path === "string" &&
+        typeof f.content === "string" &&
+        (f.path === "package.json" || f.path === "pnpm-workspace.yaml"),
+    );
+
+    return {
+      patchedFiles: validFiles,
+      summary: parsed.summary ?? `Upgraded ${packageName} to ${targetVersion}${cveLabel}.`,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    logger.warn({ err, packageName, cveId }, "CVE patch pipeline failed");
+    return {
+      patchedFiles: [],
+      summary: `Patch generation failed for ${packageName}${cveLabel}.`,
+      error: message,
+    };
+  }
+}
+
 export function normalizePath(p: string): string {
   let clean = p.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
   if (clean.includes("..")) {

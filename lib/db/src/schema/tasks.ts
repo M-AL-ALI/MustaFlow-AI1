@@ -81,6 +81,15 @@ export type TaskReport = {
   testScript?: string | null;
   testRanAt?: string | null;
   syntaxValid?: boolean;
+  cveAutoProtect?: {
+    findingId: number;
+    packageName: string;
+    cveId: string | null;
+    severity: string;
+    patchReady: boolean;
+    typecheckPassed: boolean | null;
+  } | null;
+  summary?: string;
 };
 
 export const agentTasksTable = pgTable(

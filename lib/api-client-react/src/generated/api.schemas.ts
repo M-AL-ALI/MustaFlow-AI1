@@ -2062,6 +2062,16 @@ export const CveFindingStatus = {
   fixed: 'fixed',
 } as const;
 
+export type CveFindingPatchStatus = typeof CveFindingPatchStatus[keyof typeof CveFindingPatchStatus] | null;
+
+
+export const CveFindingPatchStatus = {
+  preparing: 'preparing',
+  ready: 'ready',
+  failed: 'failed',
+  applied: 'applied',
+} as const;
+
 export interface CveFinding {
   id: number;
   projectId?: number | null;
@@ -2076,6 +2086,11 @@ export interface CveFinding {
   status: CveFindingStatus;
   dismissedAt?: string | null;
   dismissedBy?: string | null;
+  patchStatus?: CveFindingPatchStatus;
+  patchContent?: string | null;
+  patchTypecheckPassed?: boolean | null;
+  patchPreparedAt?: string | null;
+  patchAppliedAt?: string | null;
 }
 
 export interface CveScanStatus {

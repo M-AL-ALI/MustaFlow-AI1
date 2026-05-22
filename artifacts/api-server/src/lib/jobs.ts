@@ -15,8 +15,10 @@ import {
   projectSuggestionsTable,
   checkRunsTable,
   appTestRunsTable,
+  cveFindingsTable,
   type TaskReport,
   type FileSnapshotEntry,
+  type CvePatchStatus,
 } from "@workspace/db";
 import {
   runBuildPipeline,
@@ -37,6 +39,7 @@ import {
   sanitisePrompt,
   scanForSecrets,
   validateCrossFileConsistency,
+  runCvePatchPipeline,
   type BuilderFile,
   type ConversationTurn,
 } from "./builder";
@@ -3184,3 +3187,198 @@ export async function runAppTestingJob(
 }
 
 export { extractAppJsonSummary };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CVE Auto-Protect Job
+// Triggered after a CVE scan finds critical findings.
+// Prepares an AI-generated dependency upgrade patch and verifies it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CveAutoProtectInput {
+  findingId: number;
+  projectId?: number | null;
+}
+
+/**
+ * Standalone background job for CVE auto-protect.
+ * Generates a dependency upgrade patch for the given CVE finding,
+ * verifies it by running the platform typecheck, and stores the result.
+ * If a projectId is provided, writes a notification into that project's chat.
+ */
+export async function runCveAutoProtectJob(input: CveAutoProtectInput): Promise<void> {
+  const { findingId, projectId } = input;
+  logger.info({ findingId, projectId }, "CVE auto-protect job starting");
+
+  let finding: { id: number; packageName: string; currentVersion: string | null; patchedVersion: string | null; cveId: string | null; title: string | null; severity: string; status: string } | null = null;
+
+  try {
+    const [row] = await db
+      .select()
+      .from(cveFindingsTable)
+      .where(eq(cveFindingsTable.id, findingId))
+      .limit(1);
+
+    if (!row || row.status === "dismissed" || row.status === "fixed") {
+      logger.info({ findingId }, "CVE auto-protect: finding not found or already resolved, skipping");
+      return;
+    }
+
+    if (row.patchStatus === "ready" || row.patchStatus === "applied") {
+      logger.info({ findingId }, "CVE auto-protect: patch already prepared, skipping");
+      return;
+    }
+
+    finding = row;
+
+    await db
+      .update(cveFindingsTable)
+      .set({ patchStatus: "preparing" as CvePatchStatus })
+      .where(eq(cveFindingsTable.id, findingId));
+
+    let existingFiles: BuilderFile[] = [];
+    if (projectId) {
+      existingFiles = await loadFiles(projectId);
+    }
+
+    if (existingFiles.length === 0) {
+      try {
+        const { readFile } = await import("fs/promises");
+        const pkgContent = await readFile("package.json", "utf-8");
+        existingFiles.push({ path: "package.json", content: pkgContent, mimeType: "application/json" });
+      } catch {
+        logger.warn({ findingId }, "CVE auto-protect: no project files and no platform package.json found");
+      }
+      try {
+        const { readFile } = await import("fs/promises");
+        const wsContent = await readFile("pnpm-workspace.yaml", "utf-8");
+        existingFiles.push({ path: "pnpm-workspace.yaml", content: wsContent, mimeType: "text/plain" });
+      } catch {
+        // platform pnpm-workspace.yaml not found — that's OK
+      }
+    }
+
+    const patchResult = await runCvePatchPipeline({
+      packageName: finding.packageName,
+      currentVersion: finding.currentVersion,
+      patchedVersion: finding.patchedVersion,
+      cveId: finding.cveId,
+      title: finding.title,
+      existingFiles,
+    });
+
+    if (patchResult.patchedFiles.length === 0 || patchResult.error) {
+      await db
+        .update(cveFindingsTable)
+        .set({
+          patchStatus: "failed" as CvePatchStatus,
+          patchContent: JSON.stringify({ error: patchResult.error ?? "No files patched", summary: patchResult.summary }),
+          patchPreparedAt: new Date(),
+        })
+        .where(eq(cveFindingsTable.id, findingId));
+
+      logger.warn({ findingId, error: patchResult.error }, "CVE auto-protect: patch generation failed");
+
+      if (projectId) {
+        await writeCveNotification(projectId, findingId, finding, false, patchResult.summary);
+      }
+      return;
+    }
+
+    const patchContentJson = JSON.stringify({
+      files: patchResult.patchedFiles,
+      summary: patchResult.summary,
+    });
+
+    let typecheckPassed: boolean | null = null;
+    try {
+      const { execFile } = await import("child_process");
+      const { promisify } = await import("util");
+      const execFileAsync = promisify(execFile);
+      await execFileAsync("pnpm", ["run", "typecheck"], {
+        cwd: process.cwd(),
+        timeout: 120_000,
+      });
+      typecheckPassed = true;
+      logger.info({ findingId }, "CVE auto-protect: typecheck passed");
+    } catch (tcErr) {
+      typecheckPassed = false;
+      logger.warn({ findingId, tcErr }, "CVE auto-protect: typecheck failed after patch preparation");
+    }
+
+    await db
+      .update(cveFindingsTable)
+      .set({
+        patchStatus: "ready" as CvePatchStatus,
+        patchContent: patchContentJson,
+        patchTypecheckPassed: typecheckPassed,
+        patchPreparedAt: new Date(),
+      })
+      .where(eq(cveFindingsTable.id, findingId));
+
+    logger.info({ findingId, typecheckPassed }, "CVE auto-protect: patch ready");
+
+    if (projectId) {
+      await writeCveNotification(projectId, findingId, finding, true, patchResult.summary, typecheckPassed);
+    }
+  } catch (err) {
+    logger.error({ err, findingId }, "CVE auto-protect job failed");
+    try {
+      await db
+        .update(cveFindingsTable)
+        .set({ patchStatus: "failed" as CvePatchStatus, patchPreparedAt: new Date() })
+        .where(eq(cveFindingsTable.id, findingId));
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+async function writeCveNotification(
+  projectId: number,
+  findingId: number,
+  finding: { packageName: string; cveId: string | null; severity: string },
+  patchReady: boolean,
+  summary: string,
+  typecheckPassed?: boolean | null,
+): Promise<void> {
+  try {
+    const cveLabel = finding.cveId ? `${finding.cveId} in` : "CVE in";
+    const statusText = !patchReady
+      ? "Patch generation failed"
+      : typecheckPassed === false
+        ? "Patch prepared but needs review — typecheck failed"
+        : "CVE patch ready";
+    const content = `${statusText} — ${cveLabel} ${finding.packageName}. ${summary}`;
+
+    await db.insert(chatMessagesTable).values({
+      projectId,
+      role: "assistant",
+      content,
+      planMode: false,
+      plan: {
+        kind: "cve-auto-protect",
+        findingId,
+        packageName: finding.packageName,
+        cveId: finding.cveId,
+        severity: finding.severity,
+        patchReady,
+        typecheckPassed: typecheckPassed ?? null,
+        summary: content,
+      },
+    });
+  } catch (err) {
+    logger.warn({ err, projectId, findingId }, "CVE auto-protect: failed to write notification");
+  }
+}
+
+/**
+ * Enqueue a CVE auto-protect background job via setImmediate.
+ * Non-blocking — fires and forgets in the background.
+ */
+export function enqueueCveAutoProtectJob(input: CveAutoProtectInput): void {
+  setImmediate(() => {
+    void runCveAutoProtectJob(input).catch((err) => {
+      logger.error({ err, findingId: input.findingId }, "CVE auto-protect job threw unhandled error");
+    });
+  });
+}

@@ -354,6 +354,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /security/cve/{id}/apply-patch:
+    post:
+      operationId: applyCvePatch
+      tags: [security]
+      summary: Apply the prepared CVE auto-protect patch for a finding. Writes patched files to the project and records a version snapshot.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Patch applied — finding marked as fixed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CveFinding"
+        "400":
+          description: Patch not ready or no content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Finding not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /security/sbom:
     get:
       operationId: downloadSbom
@@ -4747,6 +4774,14 @@ components:
           enum: [open, dismissed, fixed]
         dismissedAt: { type: string, format: date-time, nullable: true }
         dismissedBy: { type: string, nullable: true }
+        patchStatus:
+          type: string
+          enum: [preparing, ready, failed, applied]
+          nullable: true
+        patchContent: { type: string, nullable: true }
+        patchTypecheckPassed: { type: boolean, nullable: true }
+        patchPreparedAt: { type: string, format: date-time, nullable: true }
+        patchAppliedAt: { type: string, format: date-time, nullable: true }
 
     CveScanStatus:
       type: object

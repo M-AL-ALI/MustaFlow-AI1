@@ -309,7 +309,12 @@ export const ListCveFindingsResponseItem = zod.object({
   "detectedAt": zod.coerce.date(),
   "status": zod.enum(['open', 'dismissed', 'fixed']),
   "dismissedAt": zod.coerce.date().nullish(),
-  "dismissedBy": zod.string().nullish()
+  "dismissedBy": zod.string().nullish(),
+  "patchStatus": zod.enum(['preparing', 'ready', 'failed', 'applied']).nullish(),
+  "patchContent": zod.string().nullish(),
+  "patchTypecheckPassed": zod.boolean().nullish(),
+  "patchPreparedAt": zod.coerce.date().nullish(),
+  "patchAppliedAt": zod.coerce.date().nullish()
 })
 export const ListCveFindingsResponse = zod.array(ListCveFindingsResponseItem)
 
@@ -350,7 +355,12 @@ export const RunCveScanResponse = zod.object({
   "detectedAt": zod.coerce.date(),
   "status": zod.enum(['open', 'dismissed', 'fixed']),
   "dismissedAt": zod.coerce.date().nullish(),
-  "dismissedBy": zod.string().nullish()
+  "dismissedBy": zod.string().nullish(),
+  "patchStatus": zod.enum(['preparing', 'ready', 'failed', 'applied']).nullish(),
+  "patchContent": zod.string().nullish(),
+  "patchTypecheckPassed": zod.boolean().nullish(),
+  "patchPreparedAt": zod.coerce.date().nullish(),
+  "patchAppliedAt": zod.coerce.date().nullish()
 })),
   "total": zod.number()
 })
@@ -376,7 +386,41 @@ export const DismissCveFindingResponse = zod.object({
   "detectedAt": zod.coerce.date(),
   "status": zod.enum(['open', 'dismissed', 'fixed']),
   "dismissedAt": zod.coerce.date().nullish(),
-  "dismissedBy": zod.string().nullish()
+  "dismissedBy": zod.string().nullish(),
+  "patchStatus": zod.enum(['preparing', 'ready', 'failed', 'applied']).nullish(),
+  "patchContent": zod.string().nullish(),
+  "patchTypecheckPassed": zod.boolean().nullish(),
+  "patchPreparedAt": zod.coerce.date().nullish(),
+  "patchAppliedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Apply the prepared CVE auto-protect patch for a finding. Writes patched files to the project and records a version snapshot.
+ */
+export const ApplyCvePatchParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ApplyCvePatchResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number().nullish(),
+  "severity": zod.enum(['critical', 'high', 'moderate', 'low', 'info']),
+  "packageName": zod.string(),
+  "currentVersion": zod.string().nullish(),
+  "patchedVersion": zod.string().nullish(),
+  "cveId": zod.string().nullish(),
+  "title": zod.string().nullish(),
+  "advisoryUrl": zod.string().nullish(),
+  "detectedAt": zod.coerce.date(),
+  "status": zod.enum(['open', 'dismissed', 'fixed']),
+  "dismissedAt": zod.coerce.date().nullish(),
+  "dismissedBy": zod.string().nullish(),
+  "patchStatus": zod.enum(['preparing', 'ready', 'failed', 'applied']).nullish(),
+  "patchContent": zod.string().nullish(),
+  "patchTypecheckPassed": zod.boolean().nullish(),
+  "patchPreparedAt": zod.coerce.date().nullish(),
+  "patchAppliedAt": zod.coerce.date().nullish()
 })
 
 

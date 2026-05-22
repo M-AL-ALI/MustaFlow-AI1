@@ -1449,6 +1449,76 @@ export const useDismissCveFinding = <TError = ErrorType<ApiError>,
       return useMutation(getDismissCveFindingMutationOptions(options));
     }
 
+export const getApplyCvePatchUrl = (id: number,) => {
+
+
+
+
+  return `/api/security/cve/${id}/apply-patch`
+}
+
+/**
+ * @summary Apply the prepared CVE auto-protect patch for a finding. Writes patched files to the project and records a version snapshot.
+ */
+export const applyCvePatch = async (id: number, options?: RequestInit): Promise<CveFinding> => {
+
+  return customFetch<CveFinding>(getApplyCvePatchUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApplyCvePatchMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyCvePatch>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyCvePatch>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['applyCvePatch'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyCvePatch>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  applyCvePatch(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyCvePatchMutationResult = NonNullable<Awaited<ReturnType<typeof applyCvePatch>>>
+
+    export type ApplyCvePatchMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Apply the prepared CVE auto-protect patch for a finding. Writes patched files to the project and records a version snapshot.
+ */
+export const useApplyCvePatch = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyCvePatch>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof applyCvePatch>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getApplyCvePatchMutationOptions(options));
+    }
+
 export const getDownloadSbomUrl = () => {
 
 

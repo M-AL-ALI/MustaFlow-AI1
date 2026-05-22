@@ -9,6 +9,10 @@ import {
   useGetProject,
   getGetProjectQueryKey,
   useUpdateProject,
+  useListCveFindings,
+  getListCveFindingsQueryKey,
+  useDismissCveFinding,
+  useApplyCvePatch,
   type CheckRun,
   type CheckRunFinding,
 } from "@workspace/api-client-react";
@@ -37,6 +41,10 @@ import {
   BadgeCheck,
   Bolt,
   Cookie,
+  Shield,
+  PackageCheck,
+  PackageX,
+  Loader2,
 } from "lucide-react";
 
 type AuditCategory = "accessibility" | "seo" | "performance" | "security";
@@ -64,6 +72,20 @@ interface AuditReport {
   scores: AuditScore[];
   auditedAt: string;
   fileCount: number;
+}
+
+interface CvePatchFinding {
+  id: number;
+  packageName: string;
+  cveId: string | null;
+  title: string | null;
+  severity: string;
+  currentVersion: string | null;
+  patchedVersion: string | null;
+  patchStatus: string | null;
+  patchTypecheckPassed: boolean | null;
+  patchContent: string | null;
+  advisoryUrl: string | null;
 }
 
 const CATEGORY_ICONS: Record<AuditCategory, React.FC<{ className?: string }>> = {
@@ -178,6 +200,12 @@ function scoreBg(score: number): string {
   if (score >= 80) return "bg-green-500/10 border-green-500/30";
   if (score >= 60) return "bg-yellow-500/10 border-yellow-500/30";
   return "bg-red-500/10 border-red-500/30";
+}
+
+function severityBadgeClass(severity: string): string {
+  if (severity === "critical") return "bg-red-500/15 text-red-400 border-red-500/30";
+  if (severity === "high") return "bg-orange-500/15 text-orange-400 border-orange-500/30";
+  return "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
 }
 
 function SeverityIcon({ severity }: { severity: AuditSeverity | "error" | "warning" | "info" }) {
@@ -433,6 +461,265 @@ function CategorySection({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function CvePatchCard({
+  finding,
+  onApplied,
+  onDismissed,
+}: {
+  finding: CvePatchFinding;
+  onApplied: () => void;
+  onDismissed: () => void;
+}) {
+  const [showDiff, setShowDiff] = useState(false);
+  const applyMutation = useApplyCvePatch();
+  const dismissMutation = useDismissCveFinding();
+
+  const isPreparing = finding.patchStatus === "preparing";
+  const isReady = finding.patchStatus === "ready";
+  const isFailed = finding.patchStatus === "failed";
+
+  const typecheckBadge =
+    finding.patchTypecheckPassed === true ? (
+      <span className="inline-flex items-center gap-1 text-[10px] text-green-400 bg-green-500/10 border border-green-500/20 rounded px-1.5 py-0.5">
+        <CheckCircle2 className="h-2.5 w-2.5" /> Typecheck passed
+      </span>
+    ) : finding.patchTypecheckPassed === false ? (
+      <span className="inline-flex items-center gap-1 text-[10px] text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 rounded px-1.5 py-0.5">
+        <AlertTriangle className="h-2.5 w-2.5" /> Typecheck failed
+      </span>
+    ) : null;
+
+  let patchSummary: string | null = null;
+  let patchFiles: Array<{ path: string; content: string }> = [];
+  if (finding.patchContent) {
+    try {
+      const parsed = JSON.parse(finding.patchContent) as {
+        files?: Array<{ path: string; content: string }>;
+        summary?: string;
+        error?: string;
+      };
+      patchSummary = parsed.summary ?? parsed.error ?? null;
+      patchFiles = parsed.files ?? [];
+    } catch {
+      patchSummary = null;
+    }
+  }
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden text-xs">
+      <div className="p-3 flex items-start gap-2.5">
+        <div className="p-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 shrink-0 mt-0.5">
+          {isPreparing ? (
+            <Loader2 className="h-3.5 w-3.5 text-blue-400 animate-spin" />
+          ) : isReady ? (
+            <PackageCheck className="h-3.5 w-3.5 text-blue-400" />
+          ) : isFailed ? (
+            <PackageX className="h-3.5 w-3.5 text-red-400" />
+          ) : (
+            <Shield className="h-3.5 w-3.5 text-blue-400" />
+          )}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-foreground">
+              {isReady
+                ? "CVE patch ready"
+                : isFailed
+                  ? "Patch needs manual review"
+                  : isPreparing
+                    ? "Preparing patch…"
+                    : "CVE auto-protect"}
+            </span>
+            <span
+              className={`text-[10px] border rounded px-1.5 py-0.5 uppercase font-medium ${severityBadgeClass(finding.severity)}`}
+            >
+              {finding.severity}
+            </span>
+          </div>
+
+          <div className="text-muted-foreground mt-1 leading-relaxed">
+            {finding.cveId && (
+              <span className="font-mono text-[10px] text-muted-foreground mr-1">
+                {finding.cveId}
+              </span>
+            )}
+            <span className="font-medium text-foreground">{finding.packageName}</span>
+            {finding.currentVersion && finding.patchedVersion && (
+              <span className="text-muted-foreground ml-1">
+                {finding.currentVersion} → {finding.patchedVersion}
+              </span>
+            )}
+          </div>
+
+          {finding.title && (
+            <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">
+              {finding.title}
+            </div>
+          )}
+
+          {patchSummary && (
+            <div className="text-[10px] text-muted-foreground mt-1 italic">{patchSummary}</div>
+          )}
+
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            {typecheckBadge}
+            {finding.advisoryUrl && (
+              <a
+                href={finding.advisoryUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-primary underline underline-offset-2"
+              >
+                Advisory
+              </a>
+            )}
+          </div>
+
+          {isReady && patchFiles.length > 0 && (
+            <button
+              onClick={() => setShowDiff((v) => !v)}
+              className="text-[10px] text-muted-foreground hover:text-foreground mt-1.5 flex items-center gap-1 transition-colors"
+            >
+              {showDiff ? (
+                <ChevronUp className="h-3 w-3" />
+              ) : (
+                <ChevronDown className="h-3 w-3" />
+              )}
+              {showDiff ? "Hide" : "Show"} patch diff
+            </button>
+          )}
+
+          {showDiff && patchFiles.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {patchFiles.map((f) => (
+                <div key={f.path} className="rounded border border-border overflow-hidden">
+                  <div className="bg-muted/50 px-2 py-1 text-[10px] font-mono text-muted-foreground border-b border-border">
+                    {f.path}
+                  </div>
+                  <pre className="p-2 text-[10px] font-mono text-foreground overflow-x-auto whitespace-pre-wrap max-h-40">
+                    {f.content}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {isReady && (
+            <div className="flex items-center gap-2 mt-3">
+              <Button
+                size="sm"
+                variant="default"
+                className="h-7 text-[11px] gap-1.5 px-3"
+                disabled={applyMutation.isPending}
+                onClick={() => {
+                  applyMutation.mutate(
+                    { id: finding.id },
+                    { onSuccess: onApplied },
+                  );
+                }}
+              >
+                {applyMutation.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <PackageCheck className="h-3 w-3" />
+                )}
+                Apply patch
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-[11px] text-muted-foreground gap-1.5 px-3"
+                disabled={dismissMutation.isPending}
+                onClick={() => {
+                  dismissMutation.mutate(
+                    { id: finding.id },
+                    { onSuccess: onDismissed },
+                  );
+                }}
+              >
+                Dismiss
+              </Button>
+            </div>
+          )}
+
+          {isFailed && (
+            <div className="flex items-center gap-2 mt-3">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-[11px] text-muted-foreground gap-1.5 px-3"
+                disabled={dismissMutation.isPending}
+                onClick={() => {
+                  dismissMutation.mutate(
+                    { id: finding.id },
+                    { onSuccess: onDismissed },
+                  );
+                }}
+              >
+                Dismiss
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CvePatchSection({ projectId }: { projectId: number }) {
+  const queryClient = useQueryClient();
+
+  const { data: allFindings, isLoading } = useListCveFindings(
+    { status: "open" },
+    {
+      query: {
+        queryKey: getListCveFindingsQueryKey({ status: "open" }),
+        refetchInterval: 15_000,
+      },
+    },
+  );
+
+  const patchFindings = (allFindings ?? []).filter(
+    (f) =>
+      (f.patchStatus === "ready" ||
+        f.patchStatus === "preparing" ||
+        f.patchStatus === "failed") &&
+      (f.severity === "critical" || f.severity === "high"),
+  ) as CvePatchFinding[];
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({
+      queryKey: getListCveFindingsQueryKey({ status: "open" }),
+    });
+  };
+
+  if (isLoading) return null;
+  if (patchFindings.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Shield className="h-3.5 w-3.5 text-blue-400" />
+        <span className="text-xs font-medium text-foreground">CVE Auto-Protect</span>
+        <span className="text-[10px] text-muted-foreground">
+          {patchFindings.length} patch{patchFindings.length !== 1 ? "es" : ""} available
+        </span>
+      </div>
+      <div className="space-y-2">
+        {patchFindings.map((f) => (
+          <CvePatchCard
+            key={f.id}
+            finding={f}
+            onApplied={invalidate}
+            onDismissed={invalidate}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -856,6 +1143,8 @@ export function QualityPanel({
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
         </div>
+
+        <CvePatchSection projectId={projectId} />
 
         {isLoading && (
           <div className="p-4 text-center text-sm text-muted-foreground">

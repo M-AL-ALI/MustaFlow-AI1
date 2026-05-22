@@ -85,6 +85,7 @@ export * from './createDbSnapshotInput';
 export * from './createGithubBranch200';
 export * from './creditTransaction';
 export * from './cveFinding';
+export * from './cveFindingPatchStatus';
 export * from './cveFindingSeverity';
 export * from './cveFindingStatus';
 export * from './cveScanResult';

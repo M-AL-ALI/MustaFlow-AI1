@@ -5,6 +5,7 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { CveFindingPatchStatus } from './cveFindingPatchStatus';
 import type { CveFindingSeverity } from './cveFindingSeverity';
 import type { CveFindingStatus } from './cveFindingStatus';
 
@@ -22,4 +23,9 @@ export interface CveFinding {
   status: CveFindingStatus;
   dismissedAt?: Date | null;
   dismissedBy?: string | null;
+  patchStatus?: CveFindingPatchStatus;
+  patchContent?: string | null;
+  patchTypecheckPassed?: boolean | null;
+  patchPreparedAt?: Date | null;
+  patchAppliedAt?: Date | null;
 }
