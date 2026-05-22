@@ -681,6 +681,21 @@ export const CancelTaskResponse = zod.object({
 
 
 /**
+ * @summary Re-run AI-generated browser tests for a completed task
+ */
+export const RerunTaskTestsParams = zod.object({
+  "id": zod.coerce.number(),
+  "taskId": zod.coerce.number()
+})
+
+export const RerunTaskTestsResponse = zod.object({
+  "queued": zod.boolean(),
+  "taskId": zod.number(),
+  "projectId": zod.number()
+})
+
+
+/**
  * @summary Apply Task Agent staging snapshot to live project files
  */
 export const ApplyTaskStagingParams = zod.object({

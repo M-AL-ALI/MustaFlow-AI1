@@ -2133,6 +2133,16 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         ).catch((err) => logger.warn({ err, taskId }, "Background suggestion generation failed"));
       });
 
+      // Run AI-generated browser tests in the background (non-blocking, non-fatal)
+      // Only runs for web (non-mobile) projects that produce HTML output
+      if (!isMobileProject) {
+        setImmediate(() => {
+          void runAppTestingJob(projectId, taskId, project.name ?? project.kind).catch((err) =>
+            logger.warn({ err, taskId }, "Background app-testing job failed"),
+          );
+        });
+      }
+
       // --- Deduct credits after a successful AI build/refine ---
       if (project.ownerId) {
         void deductCredits(project.ownerId, creditCost, {
@@ -2906,6 +2916,88 @@ export function enqueueEasJob(input: EasJobInput): void {
   setImmediate(() => {
     void runEasBuildJob(input);
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// App Testing Job — AI-generated Playwright browser tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Generate and run AI-driven browser tests for a completed build.
+ * Finds index.html from DB, generates test steps via AI, runs them in
+ * headless Chromium, and persists results into the task report.
+ * Entirely non-fatal — exceptions are caught and logged.
+ */
+export async function runAppTestingJob(
+  projectId: number,
+  taskId: number,
+  projectDescription: string,
+): Promise<void> {
+  logger.info({ projectId, taskId }, "App testing job starting");
+
+  // Load index.html from DB
+  const [indexFile] = await db
+    .select({ content: projectFilesTable.content })
+    .from(projectFilesTable)
+    .where(
+      and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, "index.html")),
+    )
+    .limit(1);
+
+  if (!indexFile?.content) {
+    logger.info(
+      { projectId, taskId },
+      "No index.html found — skipping browser tests (non-HTML project)",
+    );
+    return;
+  }
+
+  // Generate test plan via AI
+  const { runTestGenerationPipeline } = await import("./builder");
+  const testPlan = await runTestGenerationPipeline(indexFile.content, projectDescription);
+
+  if (!testPlan) {
+    logger.warn({ projectId, taskId }, "Test generation returned null — skipping");
+    return;
+  }
+
+  logger.info(
+    { projectId, taskId, stepCount: testPlan.steps.length },
+    "Running Playwright tests",
+  );
+
+  // Run tests against the loaded HTML
+  const { runTestPlan } = await import("./checks/playwright-runner");
+  const testResults = await runTestPlan(indexFile.content, testPlan, { timeoutMs: 5000 });
+
+  const passed = testResults.filter((r) => r.passed).length;
+  const failed = testResults.filter((r) => !r.passed).length;
+
+  logger.info({ projectId, taskId, passed, failed }, "Browser tests complete");
+
+  // Persist results into the task report
+  const [latestTask] = await db
+    .select({ report: agentTasksTable.report })
+    .from(agentTasksTable)
+    .where(eq(agentTasksTable.id, taskId))
+    .limit(1);
+
+  if (!latestTask) return;
+
+  const latestReport = (latestTask.report ?? {}) as import("@workspace/db").TaskReport;
+  const updatedReport: import("@workspace/db").TaskReport = {
+    ...latestReport,
+    testResults,
+    testScript: JSON.stringify(testPlan, null, 2),
+    testRanAt: new Date().toISOString(),
+  };
+
+  await db
+    .update(agentTasksTable)
+    .set({ report: updatedReport })
+    .where(eq(agentTasksTable.id, taskId));
+
+  logger.info({ projectId, taskId, passed, failed }, "Test results saved to task report");
 }
 
 export { extractAppJsonSummary };

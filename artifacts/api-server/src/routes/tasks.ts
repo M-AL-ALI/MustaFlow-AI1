@@ -11,9 +11,10 @@ import {
   CancelTaskParams,
   ApplyTaskStagingParams,
   DiscardTaskStagingParams,
+  RerunTaskTestsParams,
 } from "@workspace/api-zod";
 import { requireProjectOwnership } from "../lib/auth";
-import { enqueueJob, applyTaskAgentStaging, discardTaskAgentStaging } from "../lib/jobs";
+import { enqueueJob, applyTaskAgentStaging, discardTaskAgentStaging, runAppTestingJob } from "../lib/jobs";
 
 const router: IRouter = Router();
 
@@ -275,6 +276,56 @@ router.post(
       }
       res.status(500).json({ error: message });
     }
+  },
+);
+
+router.post(
+  "/projects/:id/tasks/:taskId/rerun-tests",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = RerunTaskTestsParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+
+    const [task] = await db
+      .select()
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.id, params.data.taskId),
+          eq(agentTasksTable.projectId, params.data.id),
+        ),
+      )
+      .limit(1);
+
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    const [project] = await db
+      .select({ name: projectsTable.name, kind: projectsTable.kind })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, params.data.id))
+      .limit(1);
+
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    // Kick off tests in the background
+    setImmediate(() => {
+      void runAppTestingJob(
+        params.data.id,
+        params.data.taskId,
+        project.name ?? project.kind,
+      ).catch((err) => req.log.warn({ err, taskId: params.data.taskId }, "Rerun tests failed"));
+    });
+
+    res.json({ queued: true, taskId: params.data.taskId, projectId: params.data.id });
   },
 );
 

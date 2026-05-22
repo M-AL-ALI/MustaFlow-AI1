@@ -131,6 +131,7 @@ import type {
   PublishContainer200,
   PublishResult,
   ReadinessResult,
+  RerunTestsResult,
   RevokeAdminRole200,
   RollbackInput,
   RollbackResult,
@@ -1864,6 +1865,78 @@ export const useCancelTask = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getCancelTaskMutationOptions(options));
+    }
+
+export const getRerunTaskTestsUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}/rerun-tests`
+}
+
+/**
+ * @summary Re-run AI-generated browser tests for a completed task
+ */
+export const rerunTaskTests = async (id: number,
+    taskId: number, options?: RequestInit): Promise<RerunTestsResult> => {
+
+  return customFetch<RerunTestsResult>(getRerunTaskTestsUrl(id,taskId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRerunTaskTestsMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rerunTaskTests>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rerunTaskTests>>, TError,{id: number;taskId: number}, TContext> => {
+
+const mutationKey = ['rerunTaskTests'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rerunTaskTests>>, {id: number;taskId: number}> = (props) => {
+          const {id,taskId} = props ?? {};
+
+          return  rerunTaskTests(id,taskId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RerunTaskTestsMutationResult = NonNullable<Awaited<ReturnType<typeof rerunTaskTests>>>
+
+    export type RerunTaskTestsMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Re-run AI-generated browser tests for a completed task
+ */
+export const useRerunTaskTests = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rerunTaskTests>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rerunTaskTests>>,
+        TError,
+        {id: number;taskId: number},
+        TContext
+      > => {
+      return useMutation(getRerunTaskTestsMutationOptions(options));
     }
 
 export const getApplyTaskStagingUrl = (id: number,

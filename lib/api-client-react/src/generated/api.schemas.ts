@@ -1827,6 +1827,20 @@ export interface GenerateImageResponse {
   attachment: ChatAttachment;
 }
 
+export interface TestResult {
+  name: string;
+  passed: boolean;
+  message: string;
+  screenshotBase64?: string | null;
+  durationMs: number;
+}
+
+export interface RerunTestsResult {
+  queued: boolean;
+  taskId: number;
+  projectId: number;
+}
+
 export type CheckRunFindingSeverity = typeof CheckRunFindingSeverity[keyof typeof CheckRunFindingSeverity];
 
 

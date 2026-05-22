@@ -462,6 +462,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/tasks/{taskId}/rerun-tests:
+    post:
+      operationId: rerunTaskTests
+      tags: [tasks]
+      summary: Re-run AI-generated browser tests for a completed task
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Test run queued in background
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RerunTestsResult"
+        "404":
+          description: Task or project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/tasks/{taskId}/apply:
     post:
       operationId: applyTaskStaging
@@ -4164,6 +4186,24 @@ components:
       required: [attachment]
       properties:
         attachment: { $ref: "#/components/schemas/ChatAttachment" }
+
+    TestResult:
+      type: object
+      required: [name, passed, message, durationMs]
+      properties:
+        name: { type: string }
+        passed: { type: boolean }
+        message: { type: string }
+        screenshotBase64: { type: string, nullable: true }
+        durationMs: { type: integer }
+
+    RerunTestsResult:
+      type: object
+      required: [queued, taskId, projectId]
+      properties:
+        queued: { type: boolean }
+        taskId: { type: integer }
+        projectId: { type: integer }
 
     CheckRunFinding:
       type: object

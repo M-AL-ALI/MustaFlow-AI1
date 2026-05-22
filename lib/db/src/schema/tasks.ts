@@ -11,6 +11,14 @@ import {
 import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
 
+export type TestResult = {
+  name: string;
+  passed: boolean;
+  message: string;
+  screenshotBase64?: string | null;
+  durationMs: number;
+};
+
 export type TaskReport = {
   userRequest: string;
   blueprint?: Record<string, unknown> | null;
@@ -69,6 +77,9 @@ export type TaskReport = {
     failedChecks: string[];
     warnChecks: string[];
   };
+  testResults?: TestResult[] | null;
+  testScript?: string | null;
+  testRanAt?: string | null;
 };
 
 export const agentTasksTable = pgTable(

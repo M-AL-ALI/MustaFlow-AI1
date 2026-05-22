@@ -5,6 +5,7 @@ import type { AgentMode } from "./ai";
 import type { TaskReport } from "@workspace/db";
 import { scanCdnUrls, autoUpgradeCdnUrl } from "./cdn-allowlist";
 import type { CdnUpgrade } from "./cdn-allowlist";
+import type { TestPlan } from "./checks/playwright-runner";
 
 /**
  * Sanitises an AI-generated summary so the chat always shows human-readable
@@ -6153,6 +6154,105 @@ export async function runConverseStreamPipeline(
   } catch (err) {
     logger.error({ err }, "Converse stream pipeline failed");
     throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
+const TEST_GENERATION_SYSTEM_PROMPT = `You are a browser test planner. Given HTML content and a project description, generate a concise test plan (3-5 steps) that verifies the key user-facing functionality.
+
+OUTPUT STRICT JSON matching this exact shape:
+{
+  "steps": [
+    {
+      "name": "string — short, human-readable test name",
+      "action": "waitForSelector" | "click" | "fill" | "expectText" | "expectVisible" | "expectNotVisible" | "expectTitle" | "expectCount",
+      "selector": "CSS selector (omit for expectTitle)",
+      "value": "text to match or fill (required for expectText, fill, expectTitle)",
+      "timeout": 5000
+    }
+  ]
+}
+
+RULES:
+- First step MUST be waitForSelector for a prominent element (h1, main, [role="main"], header, nav, or .container)
+- Include expectTitle to verify the page has a meaningful title
+- Add 2-4 interaction steps: click a button/link, fill a form if present, expect visible content
+- Use CSS selectors that are robust — prefer tag names and roles over fragile class hashes
+- Keep selectors simple: h1, button, nav a, form, input[type="email"], .hero, #main, [role="main"]
+- Do NOT use XPath or complex pseudo-selectors
+- Timeout should be 5000ms for all steps
+- Maximum 5 steps total — keep the plan focused and fast
+- Never include steps that require network requests to external APIs`;
+
+/**
+ * Generate a structured test plan (JSON test steps) for an HTML app using AI.
+ * Uses gpt-5-mini for speed — this is a lightweight background call.
+ */
+export async function runTestGenerationPipeline(
+  indexHtmlContent: string,
+  projectDescription: string,
+): Promise<TestPlan | null> {
+  try {
+    const htmlSnippet = indexHtmlContent.slice(0, 3000);
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-5-mini",
+      max_completion_tokens: 800,
+      messages: [
+        { role: "system", content: TEST_GENERATION_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `Project description: ${projectDescription.slice(0, 200)}\n\nHTML content (first 3000 chars):\n${htmlSnippet}`,
+        },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const raw = response.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(raw) as { steps?: unknown[] };
+
+    if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) {
+      logger.warn("Test generation returned no steps");
+      return null;
+    }
+
+    const validActions = new Set([
+      "waitForSelector",
+      "click",
+      "fill",
+      "expectText",
+      "expectVisible",
+      "expectNotVisible",
+      "expectTitle",
+      "expectCount",
+    ]);
+
+    const steps = parsed.steps
+      .filter(
+        (s) =>
+          s !== null &&
+          typeof s === "object" &&
+          typeof (s as Record<string, unknown>).name === "string" &&
+          typeof (s as Record<string, unknown>).action === "string" &&
+          validActions.has((s as Record<string, unknown>).action as string),
+      )
+      .slice(0, 5)
+      .map((s) => {
+        const step = s as Record<string, unknown>;
+        return {
+          name: String(step.name).slice(0, 100),
+          action: step.action as TestPlan["steps"][number]["action"],
+          selector: typeof step.selector === "string" ? step.selector : undefined,
+          value: typeof step.value === "string" ? step.value : undefined,
+          timeout: typeof step.timeout === "number" ? step.timeout : 5000,
+        };
+      });
+
+    if (steps.length === 0) return null;
+
+    return { steps };
+  } catch (err) {
+    logger.warn({ err }, "Test generation pipeline failed (non-fatal)");
+    return null;
   }
 }
 
