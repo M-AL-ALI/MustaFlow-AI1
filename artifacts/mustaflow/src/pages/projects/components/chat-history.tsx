@@ -45,6 +45,7 @@ import {
   getListProjectFilesQueryKey,
   getListVersionsQueryKey,
   useRerunTaskTests,
+  useListTasks,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -406,18 +407,22 @@ function AgentModePill({ mode }: { mode: string }) {
   );
 }
 
+const TESTS_PENDING_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
+
 function InlineReportCard({
   report,
   onViewFile,
   onSendMessage,
   taskId,
   projectId,
+  taskCreatedAt,
 }: {
   report: TaskReport;
   onViewFile?: (path: string) => void;
   onSendMessage?: (text: string) => void;
   taskId?: number;
   projectId?: number;
+  taskCreatedAt?: string;
 }) {
   const [smellsOpen, setSmellsOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
@@ -425,6 +430,38 @@ function InlineReportCard({
   const [testScreenshot, setTestScreenshot] = useState<string | null>(null);
   const rerunTests = useRerunTaskTests();
   const queryClient = useQueryClient();
+
+  // Determine if we should poll for pending test results.
+  // "Could have tests" means: no results in the static prop, taskId is known,
+  // and the task was created recently (within 2 minutes).
+  const taskAgeMs = taskCreatedAt ? Date.now() - new Date(taskCreatedAt).getTime() : Infinity;
+  const couldHaveTests =
+    (report.testResults === null || report.testResults === undefined) &&
+    !!taskId &&
+    !!projectId &&
+    taskAgeMs < TESTS_PENDING_WINDOW_MS;
+
+  // Poll the tasks list while we might still be waiting on test results.
+  const { data: liveTasks } = useListTasks(projectId ?? 0, {
+    query: {
+      enabled: couldHaveTests,
+      queryKey: getListTasksQueryKey(projectId ?? 0),
+      refetchInterval: couldHaveTests ? 3000 : false,
+    },
+  });
+
+  // Extract live testResults from the polled task (overrides the stale prop value).
+  const liveTask = liveTasks?.find((t: { id: number; report?: unknown }) => t.id === taskId);
+  const liveReport = liveTask?.report as TaskReport | null | undefined;
+  const effectiveTestResults =
+    liveReport?.testResults !== undefined ? liveReport.testResults : report.testResults;
+  const effectiveTestRanAt =
+    liveReport?.testRanAt !== undefined ? liveReport.testRanAt : report.testRanAt;
+
+  // Show the spinner badge when we're actively waiting (no results yet in either prop or live data).
+  const testsPending =
+    couldHaveTests &&
+    (effectiveTestResults === null || effectiveTestResults === undefined);
   return (
     <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
       <div className="flex items-center gap-2 font-semibold text-foreground">
@@ -669,14 +706,23 @@ function InlineReportCard({
           )}
         </div>
       )}
-      {/* Tests card — shown when testResults are available */}
-      {report.testResults &&
-        report.testResults.length > 0 &&
+      {/* Tests pending badge — shown while browser tests are still running in the background */}
+      {testsPending && (
+        <div className="pt-1.5 border-t border-border/40">
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary/60" />
+            <span>Running tests...</span>
+          </div>
+        </div>
+      )}
+      {/* Tests card — shown when testResults are available (from live poll or prop) */}
+      {effectiveTestResults &&
+        effectiveTestResults.length > 0 &&
         (() => {
-          const passed = report.testResults.filter((r) => r.passed).length;
-          const failed = report.testResults.filter((r) => !r.passed).length;
+          const passed = effectiveTestResults.filter((r) => r.passed).length;
+          const failed = effectiveTestResults.filter((r) => !r.passed).length;
           const allPassed = failed === 0;
-          const ranAt = report.testRanAt ? new Date(report.testRanAt) : null;
+          const ranAt = effectiveTestRanAt ? new Date(effectiveTestRanAt) : null;
           return (
             <div
               className={`pt-1.5 border-t ${allPassed ? "border-green-500/20" : "border-red-500/20"}`}
@@ -729,7 +775,7 @@ function InlineReportCard({
               </div>
               {testsOpen && (
                 <ul className="mt-1.5 space-y-1 pl-1">
-                  {report.testResults.map((result, i) => (
+                  {effectiveTestResults.map((result, i) => (
                     <li key={i} className="text-[10px]">
                       <div className="flex items-start gap-1.5">
                         {result.passed ? (
@@ -1007,6 +1053,7 @@ function MessageRow({
                     onSendMessage={onSendMessage}
                     taskId={(planPayload as { taskId?: number }).taskId}
                     projectId={projectId}
+                    taskCreatedAt={msg.createdAt}
                   />
                 )}
               </>
