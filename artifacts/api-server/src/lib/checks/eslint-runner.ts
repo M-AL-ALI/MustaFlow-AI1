@@ -118,6 +118,35 @@ export function runEslintCheck(files: BuilderFile[]): {
     hljs: "readonly",
   };
 
+  // Curated stricter rules layered on top of eslint:recommended for plain JS
+  // (and inline <script> blocks). These catch a class of common AI mistakes
+  // that `eslint:recommended` alone misses — implicit globals, accidental
+  // assignment in returns, fall-through switches, eval-like patterns, loose
+  // equality, shadowed bindings, self-compares, etc. All non-blocking warnings
+  // so they surface in the Quality panel without failing publish.
+  const jsStricterRules: Linter.RulesRecord = {
+    eqeqeq: ["warn", "smart"],
+    "no-implicit-globals": "warn",
+    "no-shadow": "warn",
+    "no-eval": "warn",
+    "no-implied-eval": "warn",
+    "no-new-func": "warn",
+    "no-return-assign": ["warn", "always"],
+    "no-self-compare": "warn",
+    "no-unmodified-loop-condition": "warn",
+    "no-unreachable-loop": "warn",
+    "no-constructor-return": "warn",
+    "no-duplicate-imports": "warn",
+    "no-promise-executor-return": "warn",
+    "no-template-curly-in-string": "warn",
+    "default-case": "warn",
+    "default-case-last": "warn",
+    "no-throw-literal": "warn",
+    "no-var": "warn",
+    "prefer-const": "warn",
+    radix: "warn",
+  };
+
   const jsConfig = [
     {
       ...js.configs.recommended,
@@ -125,6 +154,10 @@ export function runEslintCheck(files: BuilderFile[]): {
         ecmaVersion: 2020 as const,
         sourceType: "script" as const,
         globals: sharedGlobals,
+      },
+      rules: {
+        ...js.configs.recommended.rules,
+        ...jsStricterRules,
       },
     },
   ];
