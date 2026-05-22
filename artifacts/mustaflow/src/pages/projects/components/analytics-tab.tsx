@@ -7,8 +7,10 @@ import {
   Users,
   TrendingUp,
   ExternalLink,
+  ShieldCheck,
 } from "lucide-react";
 import type { Project } from "@workspace/api-client-react";
+import { useGetCheckRunTrends, getGetCheckRunTrendsQueryKey } from "@workspace/api-client-react";
 
 type Deployment = {
   id: number;
@@ -26,6 +28,8 @@ type AnalyticsSummary = {
   dailyTrend: Array<{ day: string; count: number }>;
   windowDays: number;
 };
+
+type TrendStatus = "pass" | "warning" | "fail" | "skipped";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -85,6 +89,148 @@ function StatCard({
   );
 }
 
+const STATUS_COLOR: Record<TrendStatus, string> = {
+  pass: "bg-green-500",
+  warning: "bg-yellow-400",
+  fail: "bg-red-500",
+  skipped: "bg-muted-foreground/30",
+};
+
+const STATUS_LABEL: Record<TrendStatus, string> = {
+  pass: "Pass",
+  warning: "Warning",
+  fail: "Fail",
+  skipped: "Skipped",
+};
+
+function CheckSparkline({
+  checkName,
+  history,
+}: {
+  checkName: string;
+  history: Array<{ ranAt: string; status: TrendStatus }>;
+}) {
+  const latest = history[history.length - 1];
+  const latestStatus = (latest?.status ?? "skipped") as TrendStatus;
+  const passCount = history.filter((h) => h.status === "pass").length;
+  const failCount = history.filter((h) => h.status === "fail").length;
+
+  return (
+    <div className="flex items-center gap-3 py-2.5 px-4">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="text-xs font-medium font-mono">{checkName}</span>
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+              latestStatus === "pass"
+                ? "bg-green-500/10 text-green-400"
+                : latestStatus === "warning"
+                  ? "bg-yellow-500/10 text-yellow-400"
+                  : latestStatus === "fail"
+                    ? "bg-red-500/10 text-red-400"
+                    : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {STATUS_LABEL[latestStatus]}
+          </span>
+        </div>
+        <div className="flex items-center gap-0.5">
+          {history.map((point, i) => {
+            const s = point.status as TrendStatus;
+            return (
+              <div
+                key={i}
+                title={`${new Date(point.ranAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}: ${STATUS_LABEL[s]}`}
+                className={`h-4 w-2.5 rounded-[2px] shrink-0 cursor-default transition-opacity hover:opacity-80 ${STATUS_COLOR[s]}`}
+              />
+            );
+          })}
+          {history.length === 0 && (
+            <span className="text-[11px] text-muted-foreground/50">No data</span>
+          )}
+        </div>
+      </div>
+      <div className="text-right shrink-0 space-y-0.5">
+        <div className="text-[10px] text-green-400">{passCount} pass</div>
+        <div className="text-[10px] text-red-400">{failCount} fail</div>
+      </div>
+    </div>
+  );
+}
+
+function QualityTrendsSection({ projectId }: { projectId: number }) {
+  const { data, isLoading } = useGetCheckRunTrends(projectId, undefined, {
+    query: { queryKey: getGetCheckRunTrendsQueryKey(projectId) },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="bg-card border border-border rounded-xl p-4">
+        <div className="flex items-center gap-2 text-muted-foreground mb-3">
+          <ShieldCheck className="h-4 w-4" />
+          <span className="text-xs font-semibold">Quality Trends</span>
+        </div>
+        <div className="text-xs text-muted-foreground/50 animate-pulse text-center py-4">
+          Loading…
+        </div>
+      </div>
+    );
+  }
+
+  const trends = data?.trends ?? [];
+
+  if (trends.length === 0) {
+    return (
+      <div className="bg-card border border-border rounded-xl p-4">
+        <div className="flex items-center gap-2 text-muted-foreground mb-3">
+          <ShieldCheck className="h-4 w-4" />
+          <span className="text-xs font-semibold">Quality Trends</span>
+        </div>
+        <p className="text-xs text-muted-foreground/60 text-center py-4">
+          No check runs recorded yet. Quality checks run automatically after each build.
+        </p>
+      </div>
+    );
+  }
+
+  const windowSize = data?.window ?? 20;
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border bg-muted/50 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-semibold">Quality Trends</span>
+        </div>
+        <span className="text-[10px] text-muted-foreground/60">Last {windowSize} builds</span>
+      </div>
+      <div className="divide-y divide-border">
+        {trends.map((series) => (
+          <CheckSparkline
+            key={series.checkName}
+            checkName={series.checkName}
+            history={series.history as Array<{ ranAt: string; status: TrendStatus }>}
+          />
+        ))}
+      </div>
+      <div className="px-4 py-2 border-t border-border/50 flex items-center gap-4 text-[10px] text-muted-foreground/60">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2.5 w-2 rounded-[2px] bg-green-500" /> Pass
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2.5 w-2 rounded-[2px] bg-yellow-400" /> Warning
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2.5 w-2 rounded-[2px] bg-red-500" /> Fail
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2.5 w-2 rounded-[2px] bg-muted-foreground/30" /> Skipped
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function AnalyticsTab({ project }: { project: Project }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
@@ -123,16 +269,21 @@ export function AnalyticsTab({ project }: { project: Project }) {
 
   if (!isPublished) {
     return (
-      <div className="p-6 h-full overflow-y-auto flex items-center justify-center">
-        <div className="text-center space-y-3 max-w-sm">
-          <BarChart3 className="h-10 w-10 mx-auto text-muted-foreground/30" />
-          <div>
-            <p className="text-sm font-medium text-foreground">No analytics yet</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Publish your app to start tracking page views and visitors. Analytics data updates
-              automatically as users visit your published app.
-            </p>
+      <div className="p-6 h-full overflow-y-auto">
+        <div className="max-w-4xl mx-auto space-y-6">
+          <div className="flex items-center justify-center py-8">
+            <div className="text-center space-y-3 max-w-sm">
+              <BarChart3 className="h-10 w-10 mx-auto text-muted-foreground/30" />
+              <div>
+                <p className="text-sm font-medium text-foreground">No analytics yet</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Publish your app to start tracking page views and visitors. Analytics data updates
+                  automatically as users visit your published app.
+                </p>
+              </div>
+            </div>
           </div>
+          <QualityTrendsSection projectId={project.id} />
         </div>
       </div>
     );
@@ -226,6 +377,9 @@ export function AnalyticsTab({ project }: { project: Project }) {
             </div>
           </div>
         )}
+
+        {/* Quality trends */}
+        <QualityTrendsSection projectId={project.id} />
 
         {/* Top referrers */}
         {analytics && analytics.topReferrers.length > 0 && (

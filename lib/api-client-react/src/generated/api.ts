@@ -40,6 +40,7 @@ import type {
   ChatMessage,
   ChatMessageInput,
   CheckRun,
+  CheckRunTrendsResponse,
   ConnectGithub200,
   ContainerExecInput,
   ContainerExecResult,
@@ -70,6 +71,7 @@ import type {
   GetAdminAuditLogParams,
   GetAgentRouting200,
   GetAgentRoutingParams,
+  GetCheckRunTrendsParams,
   GetCheckRunsParams,
   GetContainerLogsParams,
   GetPublishReadinessParams,
@@ -397,6 +399,95 @@ export function useGetCheckRuns<TData = Awaited<ReturnType<typeof getCheckRuns>>
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetCheckRunsQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetCheckRunTrendsUrl = (id: number,
+    params?: GetCheckRunTrendsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/check-runs/trends?${stringifiedParams}` : `/api/projects/${id}/check-runs/trends`
+}
+
+/**
+ * @summary Return per-check status history for the last N builds (default 20).
+ */
+export const getCheckRunTrends = async (id: number,
+    params?: GetCheckRunTrendsParams, options?: RequestInit): Promise<CheckRunTrendsResponse> => {
+
+  return customFetch<CheckRunTrendsResponse>(getGetCheckRunTrendsUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCheckRunTrendsQueryKey = (id: number,
+    params?: GetCheckRunTrendsParams,) => {
+    return [
+    `/api/projects/${id}/check-runs/trends`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetCheckRunTrendsQueryOptions = <TData = Awaited<ReturnType<typeof getCheckRunTrends>>, TError = ErrorType<unknown>>(id: number,
+    params?: GetCheckRunTrendsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCheckRunTrends>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCheckRunTrendsQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCheckRunTrends>>> = ({ signal }) => getCheckRunTrends(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCheckRunTrends>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCheckRunTrendsQueryResult = NonNullable<Awaited<ReturnType<typeof getCheckRunTrends>>>
+export type GetCheckRunTrendsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Return per-check status history for the last N builds (default 20).
+ */
+
+export function useGetCheckRunTrends<TData = Awaited<ReturnType<typeof getCheckRunTrends>>, TError = ErrorType<unknown>>(
+ id: number,
+    params?: GetCheckRunTrendsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCheckRunTrends>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCheckRunTrendsQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

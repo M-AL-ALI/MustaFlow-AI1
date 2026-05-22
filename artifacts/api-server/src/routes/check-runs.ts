@@ -49,6 +49,53 @@ router.get("/projects/:id/check-runs", requireProjectOwnership, async (req, res)
   }
 });
 
+router.get(
+  "/projects/:id/check-runs/trends",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+
+    const rawWindow = Number(req.query.window);
+    const windowSize = Number.isFinite(rawWindow) && rawWindow >= 1 ? Math.min(rawWindow, 100) : 20;
+
+    try {
+      const rows = await db
+        .select({
+          checkName: checkRunsTable.checkName,
+          status: checkRunsTable.status,
+          ranAt: checkRunsTable.ranAt,
+        })
+        .from(checkRunsTable)
+        .where(eq(checkRunsTable.projectId, projectId))
+        .orderBy(desc(checkRunsTable.ranAt))
+        .limit(windowSize * 20);
+
+      const byName = new Map<string, Array<{ ranAt: string; status: string }>>();
+      for (const row of rows) {
+        if (!byName.has(row.checkName)) byName.set(row.checkName, []);
+        const arr = byName.get(row.checkName)!;
+        if (arr.length < windowSize) {
+          arr.push({ ranAt: row.ranAt.toISOString(), status: row.status });
+        }
+      }
+
+      const trends = Array.from(byName.entries()).map(([checkName, history]) => ({
+        checkName,
+        history: [...history].reverse(),
+      }));
+
+      res.json({ trends, window: windowSize });
+    } catch (err) {
+      logger.error({ err, projectId }, "Failed to fetch check-run trends");
+      res.status(500).json({ error: "Failed to fetch check-run trends" });
+    }
+  },
+);
+
 router.post(
   "/projects/:id/check-runs/trigger",
   requireProjectOwnership,

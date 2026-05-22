@@ -83,6 +83,34 @@ export const GetCheckRunsResponse = zod.array(GetCheckRunsResponseItem)
 
 
 /**
+ * @summary Return per-check status history for the last N builds (default 20).
+ */
+export const GetCheckRunTrendsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const getCheckRunTrendsQueryWindowDefault = 20;
+export const getCheckRunTrendsQueryWindowMax = 100;
+
+
+
+export const GetCheckRunTrendsQueryParams = zod.object({
+  "window": zod.coerce.number().min(1).max(getCheckRunTrendsQueryWindowMax).default(getCheckRunTrendsQueryWindowDefault)
+})
+
+export const GetCheckRunTrendsResponse = zod.object({
+  "trends": zod.array(zod.object({
+  "checkName": zod.string(),
+  "history": zod.array(zod.object({
+  "ranAt": zod.coerce.date(),
+  "status": zod.enum(['pass', 'warning', 'fail', 'skipped'])
+}))
+})),
+  "window": zod.number()
+})
+
+
+/**
  * @summary Manually trigger one or more checks (or a full on-demand security review).
  */
 export const TriggerCheckRunsParams = zod.object({

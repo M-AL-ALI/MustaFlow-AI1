@@ -103,6 +103,27 @@ paths:
                 items:
                   $ref: "#/components/schemas/CheckRun"
 
+  /projects/{id}/check-runs/trends:
+    get:
+      operationId: getCheckRunTrends
+      tags: [checks]
+      summary: Return per-check status history for the last N builds (default 20).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - {
+            name: window,
+            in: query,
+            required: false,
+            schema: { type: integer, minimum: 1, maximum: 100, default: 20 },
+          }
+      responses:
+        "200":
+          description: Quality trend series per check name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckRunTrendsResponse"
+
   /projects/{id}/check-runs/trigger:
     post:
       operationId: triggerCheckRuns
@@ -4173,6 +4194,35 @@ components:
             $ref: "#/components/schemas/CheckRunFinding"
         aiReason: { type: string, nullable: true }
         ranAt: { type: string, format: date-time }
+
+    CheckRunTrendPoint:
+      type: object
+      required: [ranAt, status]
+      properties:
+        ranAt: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [pass, warning, fail, skipped]
+
+    CheckRunTrendSeries:
+      type: object
+      required: [checkName, history]
+      properties:
+        checkName: { type: string }
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckRunTrendPoint"
+
+    CheckRunTrendsResponse:
+      type: object
+      required: [trends, window]
+      properties:
+        trends:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckRunTrendSeries"
+        window: { type: integer }
 
     TriggerChecksInput:
       type: object

@@ -1866,6 +1866,31 @@ export interface CheckRun {
   ranAt: string;
 }
 
+export type CheckRunTrendPointStatus = typeof CheckRunTrendPointStatus[keyof typeof CheckRunTrendPointStatus];
+
+
+export const CheckRunTrendPointStatus = {
+  pass: 'pass',
+  warning: 'warning',
+  fail: 'fail',
+  skipped: 'skipped',
+} as const;
+
+export interface CheckRunTrendPoint {
+  ranAt: string;
+  status: CheckRunTrendPointStatus;
+}
+
+export interface CheckRunTrendSeries {
+  checkName: string;
+  history: CheckRunTrendPoint[];
+}
+
+export interface CheckRunTrendsResponse {
+  trends: CheckRunTrendSeries[];
+  window: number;
+}
+
 export interface TriggerChecksInput {
   /** List of check names to run (e.g. sast, accessibility, seo). Ignored when onDemand is true. */
   checks?: string[];
@@ -1885,6 +1910,14 @@ taskId?: number;
  * @maximum 200
  */
 limit?: number;
+};
+
+export type GetCheckRunTrendsParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+window?: number;
 };
 
 export type DeleteWorkspace200 = {
