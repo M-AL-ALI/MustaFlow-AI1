@@ -649,8 +649,12 @@ export default function ProjectWorkspacePage() {
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
-    const stored = localStorage.getItem(`mustaflow_tab_${projectId}`);
     const valid = WORKSPACE_TABS.map((t) => t.value);
+    if (typeof window !== "undefined") {
+      const urlTab = new URLSearchParams(window.location.search).get("tab");
+      if (urlTab && valid.includes(urlTab)) return urlTab;
+    }
+    const stored = localStorage.getItem(`mustaflow_tab_${projectId}`);
     return stored && valid.includes(stored) ? stored : "preview";
   });
   const [moreTabsExpanded, setMoreTabsExpanded] = useState<boolean>(() => {
@@ -748,6 +752,18 @@ export default function ProjectWorkspacePage() {
     url.searchParams.delete("credits_success");
     window.history.replaceState({}, "", url.toString());
   }, [creditsSuccess]);
+
+  // One-shot: pre-fill AI builder chat prompt from URL (used by cross-project
+  // Security page "Fix" links to seed a targeted fix prompt).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const fixPromptParam = url.searchParams.get("fixPrompt");
+    if (!fixPromptParam) return;
+    setPrompt(fixPromptParam);
+    url.searchParams.delete("fixPrompt");
+    window.history.replaceState({}, "", url.toString());
+  }, []);
 
   useEffect(() => {
     if (activeTab === "preview" && !hasViewedPreview) {
@@ -2845,7 +2861,17 @@ export default function ProjectWorkspacePage() {
                 }}
               />
             )}
-            {activeTab === "security" && <SecurityTab projectId={projectId} />}
+            {activeTab === "security" && (
+              <SecurityTab
+                projectId={projectId}
+                onSendMessage={(text) => {
+                  setPrompt(text);
+                  switchLeftPanel("chat");
+                  if (isMobileLayout) setChatDrawerOpen(true);
+                  setTimeout(() => promptInputRef.current?.focus(), 50);
+                }}
+              />
+            )}
             {activeTab === "database" && <DatabaseTab projectId={projectId} />}
             {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
             {activeTab === "analytics" && <AnalyticsTab project={project} />}

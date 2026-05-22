@@ -23,6 +23,7 @@ import {
   ChevronUp,
   Clock,
   FileCode2,
+  Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -88,6 +89,38 @@ function getCheckMeta(checkType: string) {
   return CHECK_TYPE_META[checkType] ?? { label: checkType, Icon: ShieldAlert };
 }
 
+export function buildFixPrompt(finding: {
+  checkType: string;
+  severity: string;
+  message: string;
+  file?: string | null;
+  line?: number | null;
+}): string {
+  const { label } = getCheckMeta(finding.checkType);
+  const sev = finding.severity.toUpperCase();
+  const location = finding.file
+    ? `\n\nLocation: \`${finding.file}${finding.line ? `:${finding.line}` : ""}\``
+    : "";
+  return `Fix this ${sev} ${label} security finding:
+
+"${finding.message}"${location}
+
+Please update the code to resolve this issue without breaking existing functionality, and explain what you changed.`;
+}
+
+function buildBulkFixPrompt(findings: SecurityFinding[]): string {
+  const lines = findings.map((f, i) => {
+    const { label } = getCheckMeta(f.checkType);
+    const loc = f.file ? ` (\`${f.file}${f.line ? `:${f.line}` : ""}\`)` : "";
+    return `${i + 1}. [${f.severity.toUpperCase()} · ${label}] ${f.message}${loc}`;
+  });
+  return `Fix all of the following critical and high-severity security findings in this project:
+
+${lines.join("\n")}
+
+Please address each one without breaking existing functionality, and summarize what you changed for each.`;
+}
+
 function relativeTime(dateStr: string): string {
   const ms = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(ms / 60000);
@@ -120,10 +153,12 @@ function FindingRow({
   finding,
   onDismiss,
   isDismissing,
+  onFix,
 }: {
   finding: SecurityFinding;
   onDismiss: (id: number) => void;
   isDismissing: boolean;
+  onFix?: (finding: SecurityFinding) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const { label, Icon } = getCheckMeta(finding.checkType);
@@ -136,9 +171,17 @@ function FindingRow({
         isOpen ? "border-border" : "border-border/50 opacity-60",
       )}
     >
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded((v) => !v)}
-        className="w-full text-left p-2.5 flex items-start gap-2 hover:bg-muted/40 transition-colors"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded((v) => !v);
+          }
+        }}
+        className="w-full text-left p-2.5 flex items-start gap-2 hover:bg-muted/40 transition-colors cursor-pointer"
       >
         <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
@@ -167,12 +210,27 @@ function FindingRow({
             </div>
           )}
         </div>
+        {isOpen && onFix && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 text-[10px] gap-1 shrink-0 mt-0.5"
+            onClick={(e) => {
+              e.stopPropagation();
+              onFix(finding);
+            }}
+            title="Send a fix prompt to the AI builder chat"
+          >
+            <Wrench className="h-3 w-3" />
+            Fix
+          </Button>
+        )}
         {expanded ? (
           <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
         ) : (
           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
         )}
-      </button>
+      </div>
 
       {expanded && (
         <div className="border-t border-border bg-muted/20 px-3 py-2.5 space-y-2">
@@ -187,23 +245,38 @@ function FindingRow({
             </span>
           </div>
           {isOpen && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-[11px] gap-1.5"
-              disabled={isDismissing}
-              onClick={(e) => {
-                e.stopPropagation();
-                onDismiss(finding.id);
-              }}
-            >
-              {isDismissing ? (
-                <RefreshCw className="h-3 w-3 animate-spin" />
-              ) : (
-                <CheckCircle2 className="h-3 w-3" />
+            <div className="flex items-center gap-2 flex-wrap">
+              {onFix && (
+                <Button
+                  size="sm"
+                  className="h-7 text-[11px] gap-1.5"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onFix(finding);
+                  }}
+                >
+                  <Wrench className="h-3 w-3" />
+                  Fix with AI
+                </Button>
               )}
-              Dismiss finding
-            </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px] gap-1.5"
+                disabled={isDismissing}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDismiss(finding.id);
+                }}
+              >
+                {isDismissing ? (
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-3 w-3" />
+                )}
+                Dismiss finding
+              </Button>
+            </div>
           )}
         </div>
       )}
@@ -269,11 +342,13 @@ function CheckTypeGroup({
   findings,
   onDismiss,
   dismissingId,
+  onFix,
 }: {
   checkType: string;
   findings: SecurityFinding[];
   onDismiss: (id: number) => void;
   dismissingId: number | null;
+  onFix?: (finding: SecurityFinding) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const { label, Icon } = getCheckMeta(checkType);
@@ -317,6 +392,7 @@ function CheckTypeGroup({
               finding={f}
               onDismiss={onDismiss}
               isDismissing={dismissingId === f.id}
+              onFix={onFix}
             />
           ))}
         </div>
@@ -325,7 +401,13 @@ function CheckTypeGroup({
   );
 }
 
-export function SecurityTab({ projectId }: { projectId: number }) {
+export function SecurityTab({
+  projectId,
+  onSendMessage,
+}: {
+  projectId: number;
+  onSendMessage?: (text: string) => void;
+}) {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<FindingStatus>("open");
   const [dismissingId, setDismissingId] = useState<number | null>(null);
@@ -369,6 +451,19 @@ export function SecurityTab({ projectId }: { projectId: number }) {
     });
   };
 
+  const handleFix = (finding: SecurityFinding) => {
+    onSendMessage?.(buildFixPrompt(finding));
+  };
+
+  const criticalHighOpen = findings.filter(
+    (f) => f.status === "open" && (f.severity === "critical" || f.severity === "high"),
+  );
+
+  const handleFixAll = () => {
+    if (criticalHighOpen.length === 0) return;
+    onSendMessage?.(buildBulkFixPrompt(criticalHighOpen));
+  };
+
   const grouped = groupByCheckType(findings);
 
   // Sort groups: groups with open critical/high first
@@ -383,8 +478,6 @@ export function SecurityTab({ projectId }: { projectId: number }) {
     return 0;
   });
 
-  const _dismissedFindings = statusFilter === "dismissed" ? findings : [];
-
   return (
     <div className="space-y-4 p-1">
       {/* Header */}
@@ -393,13 +486,26 @@ export function SecurityTab({ projectId }: { projectId: number }) {
           <ShieldAlert className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium text-foreground">Security Center</span>
         </div>
-        <button
-          onClick={handleRefresh}
-          className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-          title="Refresh findings"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          {onSendMessage && criticalHighOpen.length > 0 && (
+            <Button
+              size="sm"
+              className="h-7 text-[11px] gap-1.5"
+              onClick={handleFixAll}
+              title="Send a single prompt to the AI builder with all critical & high findings"
+            >
+              <Wrench className="h-3 w-3" />
+              Fix all critical/high ({criticalHighOpen.length})
+            </Button>
+          )}
+          <button
+            onClick={handleRefresh}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
+            title="Refresh findings"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Status filter tabs */}
@@ -454,6 +560,7 @@ export function SecurityTab({ projectId }: { projectId: number }) {
                   findings={g.findings}
                   onDismiss={handleDismiss}
                   dismissingId={dismissingId}
+                  onFix={onSendMessage ? handleFix : undefined}
                 />
               ))}
             </div>
@@ -476,6 +583,7 @@ export function SecurityTab({ projectId }: { projectId: number }) {
                   findings={g.findings}
                   onDismiss={handleDismiss}
                   dismissingId={dismissingId}
+                  onFix={onSendMessage ? handleFix : undefined}
                 />
               ))}
             </div>
@@ -502,6 +610,7 @@ export function SecurityTab({ projectId }: { projectId: number }) {
                   findings={g.findings}
                   onDismiss={handleDismiss}
                   dismissingId={dismissingId}
+                  onFix={onSendMessage ? handleFix : undefined}
                 />
               ))}
             </div>

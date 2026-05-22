@@ -19,7 +19,9 @@ import {
   ExternalLink,
   FileCode2,
   Clock,
+  Wrench,
 } from "lucide-react";
+import { buildFixPrompt } from "./projects/components/security-tab";
 import { Button } from "@/components/ui/button";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
@@ -173,6 +175,11 @@ function relativeTime(dateStr: string): string {
 }
 
 function FindingRow({ finding }: { finding: AccountSecurityFinding }) {
+  const isOpen = finding.status === "open";
+  const fixPrompt = buildFixPrompt(finding);
+  const fixHref = `/projects/${finding.projectId}?tab=security&fixPrompt=${encodeURIComponent(
+    fixPrompt,
+  )}`;
   return (
     <div className="flex items-start gap-3 px-4 py-3 hover:bg-muted/20 transition-colors">
       <SeverityBadge severity={finding.severity as Severity} />
@@ -209,6 +216,19 @@ function FindingRow({ finding }: { finding: AccountSecurityFinding }) {
           </span>
         </div>
       </div>
+      {isOpen && (
+        <Link href={fixHref}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-[11px] gap-1.5 shrink-0"
+            title="Open this project's Security tab with a fix prompt pre-filled in the AI builder chat"
+          >
+            <Wrench className="h-3 w-3" />
+            Fix
+          </Button>
+        </Link>
+      )}
     </div>
   );
 }
