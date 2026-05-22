@@ -87,6 +87,7 @@ import { HistoryTab } from "./components/history-tab";
 import { TerminalTab } from "./components/terminal-tab";
 import { DatabaseTab } from "./components/database-tab";
 import { ChecksTab, useCveCriticalHighCount } from "./components/checks-tab";
+import { SecurityTab } from "./components/security-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
@@ -504,6 +505,7 @@ const ADVANCED_TABS = [
   { label: "Page Map", value: "page-map", icon: Globe },
   { label: "Tools & Files", value: "tools-files", icon: Blocks },
   { label: "Checks", value: "checks", icon: ScanSearch },
+  { label: "Security", value: "security", icon: ShieldCheck },
   { label: "AI Memory", value: "knowledge", icon: BrainCircuit },
   { label: "Database", value: "database", icon: DatabaseZap },
   { label: "Logs", value: "logs", icon: Wrench },
@@ -2796,6 +2798,7 @@ export default function ProjectWorkspacePage() {
                 }}
               />
             )}
+            {activeTab === "security" && <SecurityTab projectId={projectId} />}
             {activeTab === "database" && <DatabaseTab projectId={projectId} />}
             {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
             {activeTab === "analytics" && <AnalyticsTab project={project} />}

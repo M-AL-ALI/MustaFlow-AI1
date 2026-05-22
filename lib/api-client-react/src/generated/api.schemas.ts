@@ -1968,6 +1968,151 @@ export interface CveScanResult {
   total: number;
 }
 
+export type SecurityFindingSeverity = typeof SecurityFindingSeverity[keyof typeof SecurityFindingSeverity];
+
+
+export const SecurityFindingSeverity = {
+  critical: 'critical',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  info: 'info',
+} as const;
+
+export type SecurityFindingStatus = typeof SecurityFindingStatus[keyof typeof SecurityFindingStatus];
+
+
+export const SecurityFindingStatus = {
+  open: 'open',
+  dismissed: 'dismissed',
+  fixed: 'fixed',
+} as const;
+
+export interface SecurityFinding {
+  id: number;
+  projectId: number;
+  /** @nullable */
+  checkRunId?: number | null;
+  checkType: string;
+  severity: SecurityFindingSeverity;
+  fingerprint: string;
+  message: string;
+  /** @nullable */
+  file?: string | null;
+  /** @nullable */
+  line?: number | null;
+  status: SecurityFindingStatus;
+  /** @nullable */
+  dismissedBy?: string | null;
+  /** @nullable */
+  dismissedAt?: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export type AccountSecurityFindingSeverity = typeof AccountSecurityFindingSeverity[keyof typeof AccountSecurityFindingSeverity];
+
+
+export const AccountSecurityFindingSeverity = {
+  critical: 'critical',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  info: 'info',
+} as const;
+
+export type AccountSecurityFindingStatus = typeof AccountSecurityFindingStatus[keyof typeof AccountSecurityFindingStatus];
+
+
+export const AccountSecurityFindingStatus = {
+  open: 'open',
+  dismissed: 'dismissed',
+  fixed: 'fixed',
+} as const;
+
+export interface AccountSecurityFinding {
+  id: number;
+  projectId: number;
+  projectName: string;
+  projectStatus: string;
+  isPublished: boolean;
+  /** @nullable */
+  publicSlug?: string | null;
+  /** @nullable */
+  checkRunId?: number | null;
+  checkType: string;
+  severity: AccountSecurityFindingSeverity;
+  fingerprint: string;
+  message: string;
+  /** @nullable */
+  file?: string | null;
+  /** @nullable */
+  line?: number | null;
+  status: AccountSecurityFindingStatus;
+  /** @nullable */
+  dismissedBy?: string | null;
+  /** @nullable */
+  dismissedAt?: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface SecurityFindingsSummary {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+}
+
+export interface AccountSecurityFindingsResponse {
+  findings: AccountSecurityFinding[];
+  summary: SecurityFindingsSummary;
+}
+
+export interface SecurityBadgeCount {
+  count: number;
+}
+
+export type ListSecurityFindingsParams = {
+status?: ListSecurityFindingsStatus;
+severity?: ListSecurityFindingsSeverity;
+};
+
+export type ListSecurityFindingsStatus = typeof ListSecurityFindingsStatus[keyof typeof ListSecurityFindingsStatus];
+
+
+export const ListSecurityFindingsStatus = {
+  open: 'open',
+  dismissed: 'dismissed',
+  fixed: 'fixed',
+} as const;
+
+export type ListSecurityFindingsSeverity = typeof ListSecurityFindingsSeverity[keyof typeof ListSecurityFindingsSeverity];
+
+
+export const ListSecurityFindingsSeverity = {
+  critical: 'critical',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  info: 'info',
+} as const;
+
+export type GetAccountSecurityFindingsParams = {
+status?: GetAccountSecurityFindingsStatus;
+};
+
+export type GetAccountSecurityFindingsStatus = typeof GetAccountSecurityFindingsStatus[keyof typeof GetAccountSecurityFindingsStatus];
+
+
+export const GetAccountSecurityFindingsStatus = {
+  open: 'open',
+  dismissed: 'dismissed',
+  fixed: 'fixed',
+} as const;
+
+>>>>>>> 1c914fe (feat: Security Center dashboard (Task #402))
 export type GetCheckRunsParams = {
 taskId?: number;
 /**

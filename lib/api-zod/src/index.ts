@@ -16,3 +16,4 @@ export { ListGithubRepositoriesParams } from "./generated/api";
 export { GenerateImageResponse } from "./generated/api";
 export { GetCheckRunsParams } from "./generated/api";
 export { GetCheckRunTrendsParams } from "./generated/api";
+export { ListSecurityFindingsParams } from "./generated/api";

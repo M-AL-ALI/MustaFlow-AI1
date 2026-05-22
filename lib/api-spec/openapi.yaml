@@ -48,6 +48,8 @@ tags:
     description: AI-orchestrated quality and security check runs
   - name: security
     description: CVE dependency scanning and findings management
+  - name: security-findings
+    description: Persistent security findings across builds (dismiss/fix workflow)
 paths:
   /healthz:
     get:
@@ -80,6 +82,90 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UploadUrlResponse"
+
+  /projects/{id}/security-findings:
+    get:
+      operationId: listSecurityFindings
+      tags: [security-findings]
+      summary: List persistent security findings for a project.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, dismissed, fixed]
+        - name: severity
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [critical, high, medium, low, info]
+      responses:
+        "200":
+          description: Security findings list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SecurityFinding"
+
+  /projects/{id}/security-findings/{findingId}/dismiss:
+    post:
+      operationId: dismissSecurityFinding
+      tags: [security-findings]
+      summary: Dismiss a security finding (moves it to the dismissed section).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: findingId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Updated finding
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecurityFinding"
+        "404":
+          description: Finding not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /security/findings:
+    get:
+      operationId: getAccountSecurityFindings
+      tags: [security-findings]
+      summary: Cross-project security findings for the authenticated user, sorted by exposure.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, dismissed, fixed]
+      responses:
+        "200":
+          description: Account-level security findings with summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountSecurityFindingsResponse"
+
+  /security/badge:
+    get:
+      operationId: getSecurityBadgeCount
+      tags: [security-findings]
+      summary: Returns the count of open critical+high findings for the sidebar badge.
+      responses:
+        "200":
+          description: Badge count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecurityBadgeCount"
 
   /projects/{id}/check-runs:
     get:
@@ -4390,3 +4476,81 @@ components:
           items:
             $ref: "#/components/schemas/CveFinding"
         total: { type: integer }
+
+    SecurityFinding:
+      type: object
+      required: [id, projectId, checkType, severity, fingerprint, message, status, firstSeenAt, lastSeenAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        checkRunId: { type: ["integer", "null"] }
+        checkType: { type: string }
+        severity:
+          type: string
+          enum: [critical, high, medium, low, info]
+        fingerprint: { type: string }
+        message: { type: string }
+        file: { type: ["string", "null"] }
+        line: { type: ["integer", "null"] }
+        status:
+          type: string
+          enum: [open, dismissed, fixed]
+        dismissedBy: { type: ["string", "null"] }
+        dismissedAt: { type: ["string", "null"], format: date-time }
+        firstSeenAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+
+    AccountSecurityFinding:
+      type: object
+      required: [id, projectId, projectName, projectStatus, isPublished, checkType, severity, fingerprint, message, status, firstSeenAt, lastSeenAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        projectName: { type: string }
+        projectStatus: { type: string }
+        isPublished: { type: boolean }
+        publicSlug: { type: ["string", "null"] }
+        checkRunId: { type: ["integer", "null"] }
+        checkType: { type: string }
+        severity:
+          type: string
+          enum: [critical, high, medium, low, info]
+        fingerprint: { type: string }
+        message: { type: string }
+        file: { type: ["string", "null"] }
+        line: { type: ["integer", "null"] }
+        status:
+          type: string
+          enum: [open, dismissed, fixed]
+        dismissedBy: { type: ["string", "null"] }
+        dismissedAt: { type: ["string", "null"], format: date-time }
+        firstSeenAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+
+    SecurityFindingsSummary:
+      type: object
+      required: [critical, high, medium, low, info]
+      properties:
+        critical: { type: integer }
+        high: { type: integer }
+        medium: { type: integer }
+        low: { type: integer }
+        info: { type: integer }
+
+    AccountSecurityFindingsResponse:
+      type: object
+      required: [findings, summary]
+      properties:
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountSecurityFinding"
+        summary:
+          $ref: "#/components/schemas/SecurityFindingsSummary"
+
+    SecurityBadgeCount:
+      type: object
+      required: [count]
+      properties:
+        count: { type: integer }
+>>>>>>> 1c914fe (feat: Security Center dashboard (Task #402))

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser, useClerk } from "@clerk/react";
+import { useGetSecurityBadgeCount } from "@workspace/api-client-react";
 import { useState, useEffect, useCallback } from "react";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
@@ -35,7 +36,6 @@ const NAV_ITEMS = [
 const SECONDARY_NAV_ITEMS = [
   { name: "Published", href: "/published", icon: Globe },
   { name: "Integrations", href: "/integrations", icon: Blocks },
-  { name: "Security", href: "/security", icon: ShieldCheck },
   { name: "Billing", href: "/billing", icon: CreditCard },
 ];
 
@@ -145,6 +145,42 @@ function CreditsWidget() {
             )}
           </div>
           <CreditCard className="h-3 w-3 shrink-0 opacity-60" />
+        </div>
+      </Link>
+    </div>
+  );
+}
+
+function SecurityNavItem() {
+  const [location] = useLocation();
+  const { isSignedIn } = useUser();
+  const { data } = useGetSecurityBadgeCount({
+    query: {
+      enabled: !!isSignedIn,
+      refetchInterval: 60000,
+    },
+  });
+  const count = data?.count ?? 0;
+  const isActive = location === "/security" || location.startsWith("/security");
+
+  return (
+    <div className="px-3 py-1">
+      <Link href="/security">
+        <div
+          className={cn(
+            "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
+            isActive
+              ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
+              : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
+          )}
+        >
+          <ShieldCheck className="h-4 w-4 shrink-0" />
+          <span className="flex-1">Security</span>
+          {count > 0 && (
+            <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/30 leading-none">
+              {count}
+            </span>
+          )}
         </div>
       </Link>
     </div>
@@ -297,7 +333,10 @@ function SidebarInner({
       {/* Nav */}
       <div className="flex-1 space-y-4">
         <NavGroup items={NAV_ITEMS} />
-        <NavGroup items={SECONDARY_NAV_ITEMS} title="Platform" />
+        <div>
+          <NavGroup items={SECONDARY_NAV_ITEMS} title="Platform" />
+          <SecurityNavItem />
+        </div>
         <AdminNavItem />
       </div>
 

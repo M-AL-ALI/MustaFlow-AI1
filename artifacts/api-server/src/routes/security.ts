@@ -1,7 +1,16 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
-import { db, cveFindingsTable } from "@workspace/db";
+import { eq, and, desc, inArray, isNull } from "drizzle-orm";
+import {
+  db,
+  cveFindingsTable,
+  securityFindingsTable,
+  projectsTable,
+  type SecurityFindingStatus,
+  type SecurityFindingSeverity,
+} from "@workspace/db";
 import type { CveSeverity, CveStatus } from "@workspace/db";
+import { requireProjectOwnership } from "../lib/auth";
+import { getAuth } from "@clerk/express";
 import { logger } from "../lib/logger";
 import { runCveAudit } from "../lib/checks/cve-scanner";
 
@@ -116,6 +125,234 @@ router.patch("/security/cve/:id/dismiss", async (req, res): Promise<void> => {
   } catch (err) {
     logger.error({ err, findingId }, "Failed to dismiss CVE finding");
     res.status(500).json({ error: "Failed to dismiss finding" });
+  }
+});
+
+/**
+ * GET /projects/:id/security-findings
+ * List all security findings for a project, filterable by status and severity.
+ */
+router.get(
+  "/projects/:id/security-findings",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+
+    const statusFilter = req.query.status as string | undefined;
+    const severityFilter = req.query.severity as string | undefined;
+
+    const validStatuses = ["open", "dismissed", "fixed"] as const;
+    const validSeverities = ["critical", "high", "medium", "low", "info"] as const;
+
+    try {
+      const conditions = [eq(securityFindingsTable.projectId, projectId)];
+
+      if (statusFilter && validStatuses.includes(statusFilter as (typeof validStatuses)[number])) {
+        conditions.push(eq(securityFindingsTable.status, statusFilter as SecurityFindingStatus));
+      }
+
+      if (
+        severityFilter &&
+        validSeverities.includes(severityFilter as (typeof validSeverities)[number])
+      ) {
+        conditions.push(eq(securityFindingsTable.severity, severityFilter as SecurityFindingSeverity));
+      }
+
+      const findings = await db
+        .select()
+        .from(securityFindingsTable)
+        .where(and(...conditions))
+        .orderBy(desc(securityFindingsTable.lastSeenAt));
+
+      res.json(findings);
+    } catch (err) {
+      logger.error({ err, projectId }, "Failed to fetch security findings");
+      res.status(500).json({ error: "Failed to fetch security findings" });
+    }
+  },
+);
+
+/**
+ * POST /projects/:id/security-findings/:findingId/dismiss
+ * Dismiss a security finding.
+ */
+router.post(
+  "/projects/:id/security-findings/:findingId/dismiss",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const findingId = Number(req.params.findingId);
+
+    if (!Number.isFinite(projectId) || !Number.isFinite(findingId)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+
+    const { userId } = getAuth(req);
+    const now = new Date();
+
+    try {
+      const [finding] = await db
+        .select()
+        .from(securityFindingsTable)
+        .where(
+          and(
+            eq(securityFindingsTable.id, findingId),
+            eq(securityFindingsTable.projectId, projectId),
+          ),
+        );
+
+      if (!finding) {
+        res.status(404).json({ error: "Finding not found" });
+        return;
+      }
+
+      const [updated] = await db
+        .update(securityFindingsTable)
+        .set({
+          status: "dismissed",
+          dismissedBy: userId ?? "unknown",
+          dismissedAt: now,
+        })
+        .where(eq(securityFindingsTable.id, findingId))
+        .returning();
+
+      res.json(updated);
+    } catch (err) {
+      logger.error({ err, projectId, findingId }, "Failed to dismiss security finding");
+      res.status(500).json({ error: "Failed to dismiss security finding" });
+    }
+  },
+);
+
+/**
+ * GET /security/findings
+ * Cross-project security findings for the authenticated user.
+ * Sorted by severity × exposure (published projects first).
+ */
+router.get("/security/findings", async (req, res): Promise<void> => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const statusFilter = (req.query.status as string) || "open";
+
+  const SEVERITY_ORDER: Record<string, number> = {
+    critical: 0,
+    high: 1,
+    medium: 2,
+    low: 3,
+    info: 4,
+  };
+
+  try {
+    const projects = await db
+      .select({
+        id: projectsTable.id,
+        name: projectsTable.name,
+        status: projectsTable.status,
+        publishedSnapshotId: projectsTable.publishedSnapshotId,
+        publicSlug: projectsTable.publicSlug,
+      })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.ownerId, userId), isNull(projectsTable.deletedAt)));
+
+    if (projects.length === 0) {
+      res.json({ findings: [], summary: { critical: 0, high: 0, medium: 0, low: 0, info: 0 } });
+      return;
+    }
+
+    const projectIds = projects.map((p) => p.id);
+    const projectMap = new Map(projects.map((p) => [p.id, p]));
+
+    const conditions = [inArray(securityFindingsTable.projectId, projectIds)];
+    if (statusFilter && ["open", "dismissed", "fixed"].includes(statusFilter)) {
+      conditions.push(eq(securityFindingsTable.status, statusFilter as SecurityFindingStatus));
+    }
+
+    const rawFindings = await db
+      .select()
+      .from(securityFindingsTable)
+      .where(and(...conditions))
+      .orderBy(desc(securityFindingsTable.lastSeenAt));
+
+    // Enrich with project info and sort: published projects first, then by severity
+    const enriched = rawFindings.map((f) => {
+      const proj = projectMap.get(f.projectId);
+      return {
+        ...f,
+        projectName: proj?.name ?? "Unknown",
+        projectStatus: proj?.status ?? "draft",
+        isPublished: !!proj?.publishedSnapshotId,
+        publicSlug: proj?.publicSlug ?? null,
+      };
+    });
+
+    enriched.sort((a, b) => {
+      if (a.isPublished !== b.isPublished) return a.isPublished ? -1 : 1;
+      return (SEVERITY_ORDER[a.severity] ?? 99) - (SEVERITY_ORDER[b.severity] ?? 99);
+    });
+
+    // Compute summary counts
+    const summary = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    for (const f of enriched) {
+      if (f.status === "open" && f.severity in summary) {
+        summary[f.severity as keyof typeof summary]++;
+      }
+    }
+
+    res.json({ findings: enriched, summary });
+  } catch (err) {
+    logger.error({ err, userId }, "Failed to fetch account security findings");
+    res.status(500).json({ error: "Failed to fetch account security findings" });
+  }
+});
+
+/**
+ * GET /security/badge
+ * Returns the count of open critical+high findings for the badge.
+ */
+router.get("/security/badge", async (req, res): Promise<void> => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const projects = await db
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.ownerId, userId), isNull(projectsTable.deletedAt)));
+
+    if (projects.length === 0) {
+      res.json({ count: 0 });
+      return;
+    }
+
+    const projectIds = projects.map((p) => p.id);
+
+    const findings = await db
+      .select({ id: securityFindingsTable.id })
+      .from(securityFindingsTable)
+      .where(
+        and(
+          inArray(securityFindingsTable.projectId, projectIds),
+          eq(securityFindingsTable.status, "open"),
+          inArray(securityFindingsTable.severity, ["critical", "high"]),
+        ),
+      );
+
+    res.json({ count: findings.length });
+  } catch (err) {
+    logger.error({ err, userId }, "Failed to fetch security badge count");
+    res.status(500).json({ error: "Failed to fetch badge count" });
   }
 });
 

@@ -21,6 +21,7 @@ import type {
 
 import type {
   AcceptSuggestionBody,
+  AccountSecurityFindingsResponse,
   ActivityItem,
   AdminAuditLogPage,
   AdminLaunchReadiness,
@@ -70,6 +71,7 @@ import type {
   FileSearchResult,
   GenerateImageInput,
   GenerateImageResponse,
+  GetAccountSecurityFindingsParams,
   GetAdminAuditLogParams,
   GetAgentRouting200,
   GetAgentRoutingParams,
@@ -102,6 +104,7 @@ import type {
   ListKnowledgeParams,
   ListMobileBuilds200,
   ListProjectsParams,
+  ListSecurityFindingsParams,
   ListSuggestionsParams,
   MobileAppSettings,
   MobileAppSettingsInput,
@@ -143,6 +146,8 @@ import type {
   SecretEntry,
   SecretInput,
   SecretVerifyResult,
+  SecurityBadgeCount,
+  SecurityFinding,
   SelectGithubRepository200,
   SetProjectSubdomain400,
   StopContainer200,
@@ -325,6 +330,328 @@ export const useRequestUploadUrl = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getRequestUploadUrlMutationOptions(options));
     }
+
+export const getListSecurityFindingsUrl = (id: number,
+    params?: ListSecurityFindingsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/security-findings?${stringifiedParams}` : `/api/projects/${id}/security-findings`
+}
+
+/**
+ * @summary List persistent security findings for a project.
+ */
+export const listSecurityFindings = async (id: number,
+    params?: ListSecurityFindingsParams, options?: RequestInit): Promise<SecurityFinding[]> => {
+
+  return customFetch<SecurityFinding[]>(getListSecurityFindingsUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSecurityFindingsQueryKey = (id: number,
+    params?: ListSecurityFindingsParams,) => {
+    return [
+    `/api/projects/${id}/security-findings`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListSecurityFindingsQueryOptions = <TData = Awaited<ReturnType<typeof listSecurityFindings>>, TError = ErrorType<unknown>>(id: number,
+    params?: ListSecurityFindingsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSecurityFindings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSecurityFindingsQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSecurityFindings>>> = ({ signal }) => listSecurityFindings(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSecurityFindings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSecurityFindingsQueryResult = NonNullable<Awaited<ReturnType<typeof listSecurityFindings>>>
+export type ListSecurityFindingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List persistent security findings for a project.
+ */
+
+export function useListSecurityFindings<TData = Awaited<ReturnType<typeof listSecurityFindings>>, TError = ErrorType<unknown>>(
+ id: number,
+    params?: ListSecurityFindingsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSecurityFindings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSecurityFindingsQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getDismissSecurityFindingUrl = (id: number,
+    findingId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/security-findings/${findingId}/dismiss`
+}
+
+/**
+ * @summary Dismiss a security finding (moves it to the dismissed section).
+ */
+export const dismissSecurityFinding = async (id: number,
+    findingId: number, options?: RequestInit): Promise<SecurityFinding> => {
+
+  return customFetch<SecurityFinding>(getDismissSecurityFindingUrl(id,findingId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getDismissSecurityFindingMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissSecurityFinding>>, TError,{id: number;findingId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof dismissSecurityFinding>>, TError,{id: number;findingId: number}, TContext> => {
+
+const mutationKey = ['dismissSecurityFinding'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof dismissSecurityFinding>>, {id: number;findingId: number}> = (props) => {
+          const {id,findingId} = props ?? {};
+
+          return  dismissSecurityFinding(id,findingId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DismissSecurityFindingMutationResult = NonNullable<Awaited<ReturnType<typeof dismissSecurityFinding>>>
+
+    export type DismissSecurityFindingMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Dismiss a security finding (moves it to the dismissed section).
+ */
+export const useDismissSecurityFinding = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissSecurityFinding>>, TError,{id: number;findingId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof dismissSecurityFinding>>,
+        TError,
+        {id: number;findingId: number},
+        TContext
+      > => {
+      return useMutation(getDismissSecurityFindingMutationOptions(options));
+    }
+
+export const getGetAccountSecurityFindingsUrl = (params?: GetAccountSecurityFindingsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/security/findings?${stringifiedParams}` : `/api/security/findings`
+}
+
+/**
+ * @summary Cross-project security findings for the authenticated user, sorted by exposure.
+ */
+export const getAccountSecurityFindings = async (params?: GetAccountSecurityFindingsParams, options?: RequestInit): Promise<AccountSecurityFindingsResponse> => {
+
+  return customFetch<AccountSecurityFindingsResponse>(getGetAccountSecurityFindingsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAccountSecurityFindingsQueryKey = (params?: GetAccountSecurityFindingsParams,) => {
+    return [
+    `/api/security/findings`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAccountSecurityFindingsQueryOptions = <TData = Awaited<ReturnType<typeof getAccountSecurityFindings>>, TError = ErrorType<unknown>>(params?: GetAccountSecurityFindingsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAccountSecurityFindings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAccountSecurityFindingsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAccountSecurityFindings>>> = ({ signal }) => getAccountSecurityFindings(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAccountSecurityFindings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAccountSecurityFindingsQueryResult = NonNullable<Awaited<ReturnType<typeof getAccountSecurityFindings>>>
+export type GetAccountSecurityFindingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Cross-project security findings for the authenticated user, sorted by exposure.
+ */
+
+export function useGetAccountSecurityFindings<TData = Awaited<ReturnType<typeof getAccountSecurityFindings>>, TError = ErrorType<unknown>>(
+ params?: GetAccountSecurityFindingsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAccountSecurityFindings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAccountSecurityFindingsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetSecurityBadgeCountUrl = () => {
+
+
+
+
+  return `/api/security/badge`
+}
+
+/**
+ * @summary Returns the count of open critical+high findings for the sidebar badge.
+ */
+export const getSecurityBadgeCount = async ( options?: RequestInit): Promise<SecurityBadgeCount> => {
+
+  return customFetch<SecurityBadgeCount>(getGetSecurityBadgeCountUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSecurityBadgeCountQueryKey = () => {
+    return [
+    `/api/security/badge`
+    ] as const;
+    }
+
+
+export const getGetSecurityBadgeCountQueryOptions = <TData = Awaited<ReturnType<typeof getSecurityBadgeCount>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSecurityBadgeCount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSecurityBadgeCountQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSecurityBadgeCount>>> = ({ signal }) => getSecurityBadgeCount({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSecurityBadgeCount>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSecurityBadgeCountQueryResult = NonNullable<Awaited<ReturnType<typeof getSecurityBadgeCount>>>
+export type GetSecurityBadgeCountQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Returns the count of open critical+high findings for the sidebar badge.
+ */
+
+export function useGetSecurityBadgeCount<TData = Awaited<ReturnType<typeof getSecurityBadgeCount>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSecurityBadgeCount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSecurityBadgeCountQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetCheckRunsUrl = (id: number,
     params?: GetCheckRunsParams,) => {

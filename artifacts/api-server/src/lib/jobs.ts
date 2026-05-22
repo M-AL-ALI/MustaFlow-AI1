@@ -50,6 +50,7 @@ import { publishTaskEvent } from "./event-bus";
 import { runAudit } from "./auditor";
 import { runOrchestration } from "./checks/orchestrator";
 import { getCheckByName } from "./checks/registry";
+import { persistSecurityFindings } from "./security-findings";
 import {
   triggerEasBuild,
   getEasBuildStatus,
@@ -1917,8 +1918,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               );
 
               // Persist to check_runs table
+              let insertedCheckRunIds: number[] = [];
               if (runs.length > 0) {
-                await db.insert(checkRunsTable).values(
+                const inserted = await db.insert(checkRunsTable).values(
                   runs.map((r) => ({
                     projectId,
                     taskId: taskIdForChecks,
@@ -1927,8 +1929,19 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     findings: r.findings,
                     aiReason: r.aiReason,
                   })),
-                );
+                ).returning({ id: checkRunsTable.id });
+                insertedCheckRunIds = inserted.map((r) => r.id);
               }
+
+              // Persist security findings (non-fatal — runs after check_runs insert)
+              void persistSecurityFindings(
+                projectId,
+                runs.map((r, i) => ({
+                  checkType: r.checkName,
+                  checkRunId: insertedCheckRunIds[i] ?? null,
+                  findings: r.findings,
+                })),
+              );
 
               // Summary stats for the task report
               const checkRunsSummary = {

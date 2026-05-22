@@ -47,6 +47,109 @@ export const RequestUploadUrlResponse = zod.object({
 
 
 /**
+ * @summary List persistent security findings for a project.
+ */
+export const ListSecurityFindingsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListSecurityFindingsQueryParams = zod.object({
+  "status": zod.enum(['open', 'dismissed', 'fixed']).optional(),
+  "severity": zod.enum(['critical', 'high', 'medium', 'low', 'info']).optional()
+})
+
+export const ListSecurityFindingsResponseItem = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "checkRunId": zod.number().nullish(),
+  "checkType": zod.string(),
+  "severity": zod.enum(['critical', 'high', 'medium', 'low', 'info']),
+  "fingerprint": zod.string(),
+  "message": zod.string(),
+  "file": zod.string().nullish(),
+  "line": zod.number().nullish(),
+  "status": zod.enum(['open', 'dismissed', 'fixed']),
+  "dismissedBy": zod.string().nullish(),
+  "dismissedAt": zod.coerce.date().nullish(),
+  "firstSeenAt": zod.coerce.date(),
+  "lastSeenAt": zod.coerce.date()
+})
+export const ListSecurityFindingsResponse = zod.array(ListSecurityFindingsResponseItem)
+
+
+/**
+ * @summary Dismiss a security finding (moves it to the dismissed section).
+ */
+export const DismissSecurityFindingParams = zod.object({
+  "id": zod.coerce.number(),
+  "findingId": zod.coerce.number()
+})
+
+export const DismissSecurityFindingResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "checkRunId": zod.number().nullish(),
+  "checkType": zod.string(),
+  "severity": zod.enum(['critical', 'high', 'medium', 'low', 'info']),
+  "fingerprint": zod.string(),
+  "message": zod.string(),
+  "file": zod.string().nullish(),
+  "line": zod.number().nullish(),
+  "status": zod.enum(['open', 'dismissed', 'fixed']),
+  "dismissedBy": zod.string().nullish(),
+  "dismissedAt": zod.coerce.date().nullish(),
+  "firstSeenAt": zod.coerce.date(),
+  "lastSeenAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Cross-project security findings for the authenticated user, sorted by exposure.
+ */
+export const GetAccountSecurityFindingsQueryParams = zod.object({
+  "status": zod.enum(['open', 'dismissed', 'fixed']).optional()
+})
+
+export const GetAccountSecurityFindingsResponse = zod.object({
+  "findings": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "projectName": zod.string(),
+  "projectStatus": zod.string(),
+  "isPublished": zod.boolean(),
+  "publicSlug": zod.string().nullish(),
+  "checkRunId": zod.number().nullish(),
+  "checkType": zod.string(),
+  "severity": zod.enum(['critical', 'high', 'medium', 'low', 'info']),
+  "fingerprint": zod.string(),
+  "message": zod.string(),
+  "file": zod.string().nullish(),
+  "line": zod.number().nullish(),
+  "status": zod.enum(['open', 'dismissed', 'fixed']),
+  "dismissedBy": zod.string().nullish(),
+  "dismissedAt": zod.coerce.date().nullish(),
+  "firstSeenAt": zod.coerce.date(),
+  "lastSeenAt": zod.coerce.date()
+})),
+  "summary": zod.object({
+  "critical": zod.number(),
+  "high": zod.number(),
+  "medium": zod.number(),
+  "low": zod.number(),
+  "info": zod.number()
+})
+})
+
+
+/**
+ * @summary Returns the count of open critical+high findings for the sidebar badge.
+ */
+export const GetSecurityBadgeCountResponse = zod.object({
+  "count": zod.number()
+})
+
+
+/**
  * @summary List check runs for a project, optionally filtered by taskId.
  */
 export const GetCheckRunsParams = zod.object({
