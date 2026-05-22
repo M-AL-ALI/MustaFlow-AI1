@@ -1,4 +1,16 @@
-import { pgTable, serial, text, timestamp, integer, boolean, jsonb } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  integer,
+  boolean,
+  jsonb,
+  vector,
+} from "drizzle-orm/pg-core";
+
+/** Dimension of the OpenAI text-embedding-3-small vector. */
+export const KNOWLEDGE_EMBEDDING_DIM = 1536;
 
 export const KNOWLEDGE_TYPES = [
   "build",
@@ -52,6 +64,10 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   diffSummary: jsonb("diff_summary").$type<DiffSummary>(),
   // User-written annotation / note on this entry
   annotation: text("annotation"),
+  // AI-generated embedding vector for semantic similarity ranking.
+  // pgvector column (1536 dims = OpenAI text-embedding-3-small).
+  // Null when not yet computed — loadKnowledgeContext falls back to TF-IDF.
+  embedding: vector("embedding", { dimensions: KNOWLEDGE_EMBEDDING_DIM }),
   // Soft-delete: when set, the entry is archived and hidden by default
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

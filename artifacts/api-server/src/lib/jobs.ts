@@ -47,6 +47,7 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import type { AgentMode } from "./ai";
 import { logger } from "./logger";
 import { writeKnowledge } from "./knowledge";
+import { generateEmbedding, cosineSimilarity } from "./embeddings";
 import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, deductCredits } from "../routes/credits";
 import { extractPageMap } from "./page-map";
@@ -400,11 +401,13 @@ function tokenise(text: string): Set<string> {
 const KNOWLEDGE_CHAR_BUDGET = parseInt(process.env.KNOWLEDGE_TOKEN_BUDGET ?? "2400", 10);
 
 /**
- * Relevance-ranked knowledge injection with TF-IDF + recency + severity scoring.
+ * Relevance-ranked knowledge injection with embedding similarity (primary) and
+ * TF-IDF (fallback) plus recency + severity + project scoring.
  *
  * Eligibility: project-scoped entries for this project, plus globally approved entries.
- * Ranking signals (combined multiplicatively/additively):
- *   - TF-IDF keyword overlap with the user prompt
+ * Ranking signals (combined additively, then approved multiplier):
+ *   - Semantic match: cosine similarity × 6.0 when both prompt + entry have an
+ *     embedding; otherwise TF-IDF keyword overlap (per-entry graceful fallback).
  *   - Recency: entries created in last 24 h (+2.0), last 7 days (+1.0)
  *   - Severity: "error" (+1.5), "warning" (+0.5)
  *   - Approved for reuse: ×1.5 boost
@@ -474,6 +477,12 @@ async function loadKnowledgeContext(
         df.set(t, count);
       }
 
+      // Try to generate an embedding for the user prompt. If this fails (or any
+      // single entry lacks an embedding), we transparently fall back to TF-IDF
+      // for that entry — never the whole call.
+      const SEMANTIC_WEIGHT = 6.0;
+      const promptEmbedding = await generateEmbedding(userPrompt);
+
       const scored = entries.map((e) => {
         const entryText = `${e.title} ${e.content} ${e.tags ?? ""}`;
         const entryWords = entryText.toLowerCase().split(/\W+/).filter(Boolean);
@@ -482,13 +491,23 @@ async function loadKnowledgeContext(
           termCounts.set(w, (termCounts.get(w) ?? 0) + 1);
         }
 
-        // TF-IDF: sum of tf(t, entry) × idf(t) for each query token present in entry
         let score = 0;
-        for (const t of promptTokens) {
-          if (termCounts.has(t)) {
-            const tf = (termCounts.get(t) ?? 0) / Math.max(entryWords.length, 1);
-            const idf = Math.log((N + 1) / ((df.get(t) ?? 0) + 1)) + 1;
-            score += tf * idf;
+        const entryEmbedding = e.embedding;
+        if (
+          promptEmbedding &&
+          Array.isArray(entryEmbedding) &&
+          entryEmbedding.length === promptEmbedding.length
+        ) {
+          // Primary path: semantic similarity (cosine ∈ [-1, 1], typically [0, 1]).
+          score += cosineSimilarity(promptEmbedding, entryEmbedding) * SEMANTIC_WEIGHT;
+        } else {
+          // Fallback path: TF-IDF keyword overlap (per-entry, graceful).
+          for (const t of promptTokens) {
+            if (termCounts.has(t)) {
+              const tf = (termCounts.get(t) ?? 0) / Math.max(entryWords.length, 1);
+              const idf = Math.log((N + 1) / ((df.get(t) ?? 0) + 1)) + 1;
+              score += tf * idf;
+            }
           }
         }
 
