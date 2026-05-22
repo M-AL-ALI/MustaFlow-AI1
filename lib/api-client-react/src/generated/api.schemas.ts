@@ -1998,7 +1998,6 @@ export const ListCveFindingsStatus = {
   fixed: 'fixed',
 } as const;
 
-
 export type DeleteWorkspace200 = {
   deleted: boolean;
 };

@@ -5,6 +5,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { createTerminalServer } from "./lib/terminal";
 import { ensureFlyApp } from "./lib/container";
+import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,10 +21,12 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-// Verify semgrep is available for the semgrep-sast check (best-effort startup probe)
+// Verify semgrep is available and pre-warm the rule pack cache so the first
+// real scan doesn't pay the network round-trip cost.
 void execFileAsync("semgrep", ["--version"], { timeout: 5000 })
   .then(({ stdout }) => {
     logger.info({ version: stdout.trim().split("\n")[0] }, "semgrep available for SAST scanning");
+    void warmSemgrepRuleCache();
   })
   .catch(() => {
     logger.warn(

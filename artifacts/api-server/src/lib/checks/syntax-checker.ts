@@ -155,7 +155,8 @@ export function checkSyntax(files: BuilderFile[]): SyntaxError[] {
 export function formatSyntaxErrors(errors: SyntaxError[]): string {
   return errors
     .map((e) => {
-      const loc = e.line !== null ? ` (line ${e.line}${e.column !== null ? `:${e.column}` : ""})` : "";
+      const loc =
+        e.line !== null ? ` (line ${e.line}${e.column !== null ? `:${e.column}` : ""})` : "";
       return `Syntax error in ${e.file}${loc}: ${e.message}`;
     })
     .join("\n");

@@ -14,7 +14,12 @@ import {
   RerunTaskTestsParams,
 } from "@workspace/api-zod";
 import { requireProjectOwnership } from "../lib/auth";
-import { enqueueJob, applyTaskAgentStaging, discardTaskAgentStaging, runAppTestingJob } from "../lib/jobs";
+import {
+  enqueueJob,
+  applyTaskAgentStaging,
+  discardTaskAgentStaging,
+  runAppTestingJob,
+} from "../lib/jobs";
 
 const router: IRouter = Router();
 
@@ -318,11 +323,9 @@ router.post(
 
     // Kick off tests in the background
     setImmediate(() => {
-      void runAppTestingJob(
-        params.data.id,
-        params.data.taskId,
-        project.name ?? project.kind,
-      ).catch((err) => req.log.warn({ err, taskId: params.data.taskId }, "Rerun tests failed"));
+      void runAppTestingJob(params.data.id, params.data.taskId, project.name ?? project.kind).catch(
+        (err) => req.log.warn({ err, taskId: params.data.taskId }, "Rerun tests failed"),
+      );
     });
 
     res.json({ queued: true, taskId: params.data.taskId, projectId: params.data.id });

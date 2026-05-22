@@ -670,115 +670,121 @@ function InlineReportCard({
         </div>
       )}
       {/* Tests card — shown when testResults are available */}
-      {report.testResults && report.testResults.length > 0 && (() => {
-        const passed = report.testResults.filter((r) => r.passed).length;
-        const failed = report.testResults.filter((r) => !r.passed).length;
-        const allPassed = failed === 0;
-        const ranAt = report.testRanAt ? new Date(report.testRanAt) : null;
-        return (
-          <div className={`pt-1.5 border-t ${allPassed ? "border-green-500/20" : "border-red-500/20"}`}>
-            <div className="flex items-center gap-1.5">
-              <button
-                className={`flex-1 flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${allPassed ? "text-green-400 hover:text-green-300" : "text-red-400 hover:text-red-300"}`}
-                onClick={() => setTestsOpen((o) => !o)}
-              >
-                <FlaskConical className="h-3 w-3 shrink-0" />
-                <span>
-                  Tests — {passed} passed{failed > 0 ? `, ${failed} failed` : ""}
-                </span>
-                {ranAt && (
-                  <span className="text-muted-foreground/50 font-normal ml-0.5">
-                    {format(ranAt, "HH:mm")}
-                  </span>
-                )}
-                {testsOpen ? (
-                  <ChevronDown className="h-3 w-3 ml-auto shrink-0" />
-                ) : (
-                  <ChevronRight className="h-3 w-3 ml-auto shrink-0" />
-                )}
-              </button>
-              {taskId && projectId && (
+      {report.testResults &&
+        report.testResults.length > 0 &&
+        (() => {
+          const passed = report.testResults.filter((r) => r.passed).length;
+          const failed = report.testResults.filter((r) => !r.passed).length;
+          const allPassed = failed === 0;
+          const ranAt = report.testRanAt ? new Date(report.testRanAt) : null;
+          return (
+            <div
+              className={`pt-1.5 border-t ${allPassed ? "border-green-500/20" : "border-red-500/20"}`}
+            >
+              <div className="flex items-center gap-1.5">
                 <button
-                  onClick={() => {
-                    rerunTests.mutate(
-                      { id: projectId, taskId },
-                      {
-                        onSuccess: () => {
-                          void queryClient.invalidateQueries({
-                            queryKey: getListTasksQueryKey(projectId),
-                          });
-                        },
-                      },
-                    );
-                  }}
-                  disabled={rerunTests.isPending}
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-muted-foreground hover:text-foreground border border-border/50 hover:border-border transition-colors disabled:opacity-50"
-                  title="Re-run tests"
+                  className={`flex-1 flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${allPassed ? "text-green-400 hover:text-green-300" : "text-red-400 hover:text-red-300"}`}
+                  onClick={() => setTestsOpen((o) => !o)}
                 >
-                  {rerunTests.isPending ? (
-                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  <FlaskConical className="h-3 w-3 shrink-0" />
+                  <span>
+                    Tests — {passed} passed{failed > 0 ? `, ${failed} failed` : ""}
+                  </span>
+                  {ranAt && (
+                    <span className="text-muted-foreground/50 font-normal ml-0.5">
+                      {format(ranAt, "HH:mm")}
+                    </span>
+                  )}
+                  {testsOpen ? (
+                    <ChevronDown className="h-3 w-3 ml-auto shrink-0" />
                   ) : (
-                    <RefreshCw className="h-2.5 w-2.5" />
+                    <ChevronRight className="h-3 w-3 ml-auto shrink-0" />
                   )}
                 </button>
+                {taskId && projectId && (
+                  <button
+                    onClick={() => {
+                      rerunTests.mutate(
+                        { id: projectId, taskId },
+                        {
+                          onSuccess: () => {
+                            void queryClient.invalidateQueries({
+                              queryKey: getListTasksQueryKey(projectId),
+                            });
+                          },
+                        },
+                      );
+                    }}
+                    disabled={rerunTests.isPending}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-muted-foreground hover:text-foreground border border-border/50 hover:border-border transition-colors disabled:opacity-50"
+                    title="Re-run tests"
+                  >
+                    {rerunTests.isPending ? (
+                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-2.5 w-2.5" />
+                    )}
+                  </button>
+                )}
+              </div>
+              {testsOpen && (
+                <ul className="mt-1.5 space-y-1 pl-1">
+                  {report.testResults.map((result, i) => (
+                    <li key={i} className="text-[10px]">
+                      <div className="flex items-start gap-1.5">
+                        {result.passed ? (
+                          <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <XCircle className="h-3 w-3 text-red-400 shrink-0 mt-0.5" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <span
+                            className={result.passed ? "text-foreground/80" : "text-foreground"}
+                          >
+                            {result.name}
+                          </span>
+                          {!result.passed && (
+                            <p className="text-muted-foreground mt-0.5 leading-relaxed">
+                              {result.message}
+                            </p>
+                          )}
+                          {result.screenshotBase64 && (
+                            <div className="mt-1">
+                              <button
+                                className="text-[9px] text-primary/70 hover:text-primary underline"
+                                onClick={() =>
+                                  setTestScreenshot(
+                                    testScreenshot === result.screenshotBase64
+                                      ? null
+                                      : result.screenshotBase64!,
+                                  )
+                                }
+                              >
+                                {testScreenshot === result.screenshotBase64
+                                  ? "Hide screenshot"
+                                  : "View screenshot"}
+                              </button>
+                              {testScreenshot === result.screenshotBase64 && (
+                                <img
+                                  src={`data:image/png;base64,${result.screenshotBase64}`}
+                                  alt="Test failure screenshot"
+                                  className="mt-1 rounded border border-border/50 max-w-full"
+                                />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-muted-foreground/40 shrink-0 text-[9px] ml-auto">
+                          {result.durationMs}ms
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
-            {testsOpen && (
-              <ul className="mt-1.5 space-y-1 pl-1">
-                {report.testResults.map((result, i) => (
-                  <li key={i} className="text-[10px]">
-                    <div className="flex items-start gap-1.5">
-                      {result.passed ? (
-                        <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0 mt-0.5" />
-                      ) : (
-                        <XCircle className="h-3 w-3 text-red-400 shrink-0 mt-0.5" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <span className={result.passed ? "text-foreground/80" : "text-foreground"}>
-                          {result.name}
-                        </span>
-                        {!result.passed && (
-                          <p className="text-muted-foreground mt-0.5 leading-relaxed">
-                            {result.message}
-                          </p>
-                        )}
-                        {result.screenshotBase64 && (
-                          <div className="mt-1">
-                            <button
-                              className="text-[9px] text-primary/70 hover:text-primary underline"
-                              onClick={() =>
-                                setTestScreenshot(
-                                  testScreenshot === result.screenshotBase64
-                                    ? null
-                                    : result.screenshotBase64!,
-                                )
-                              }
-                            >
-                              {testScreenshot === result.screenshotBase64
-                                ? "Hide screenshot"
-                                : "View screenshot"}
-                            </button>
-                            {testScreenshot === result.screenshotBase64 && (
-                              <img
-                                src={`data:image/png;base64,${result.screenshotBase64}`}
-                                alt="Test failure screenshot"
-                                className="mt-1 rounded border border-border/50 max-w-full"
-                              />
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <span className="text-muted-foreground/40 shrink-0 text-[9px] ml-auto">
-                        {result.durationMs}ms
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        );
-      })()}
+          );
+        })()}
       {report.nextRecommendation && (
         <div className="pt-1.5 border-t border-border text-muted-foreground italic text-[10px]">
           {report.nextRecommendation}

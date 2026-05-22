@@ -3054,10 +3054,7 @@ export async function runAppTestingJob(
     return;
   }
 
-  logger.info(
-    { projectId, taskId, stepCount: testPlan.steps.length },
-    "Running Playwright tests",
-  );
+  logger.info({ projectId, taskId, stepCount: testPlan.steps.length }, "Running Playwright tests");
 
   // Run tests against the loaded HTML
   const { runTestPlan } = await import("./checks/playwright-runner");

@@ -620,8 +620,7 @@ function CveRow({
             )}
             {finding.patchedVersion && (
               <span>
-                Patched:{" "}
-                <span className="font-mono text-green-400">{finding.patchedVersion}</span>
+                Patched: <span className="font-mono text-green-400">{finding.patchedVersion}</span>
               </span>
             )}
             {finding.cveId && (
@@ -699,8 +698,7 @@ function CvePanel() {
   const high = openFindings.filter((f) => f.severity === "high").length;
 
   const sorted = [...openFindings].sort(
-    (a, b) =>
-      CVE_SEVERITY_ORDER.indexOf(a.severity) - CVE_SEVERITY_ORDER.indexOf(b.severity),
+    (a, b) => CVE_SEVERITY_ORDER.indexOf(a.severity) - CVE_SEVERITY_ORDER.indexOf(b.severity),
   );
 
   return (
