@@ -62,7 +62,7 @@ export const CHECK_REGISTRY: CheckDefinition[] = [
     description:
       "Performance audit: render-blocking scripts in <head> without defer/async, images missing width/height (CLS risk), images missing loading=lazy, large inline style blocks, excessive external resource requests. Run when scripts, images, or stylesheets were added or changed.",
     fixPrompt:
-      "Fix all performance issues in the generated app: add defer or async attributes to render-blocking <script> tags in the <head>, add explicit width and height attributes to all images to prevent layout shifts, add loading=\"lazy\" to below-the-fold images, and reduce or consolidate external resource requests.",
+      'Fix all performance issues in the generated app: add defer or async attributes to render-blocking <script> tags in the <head>, add explicit width and height attributes to all images to prevent layout shifts, add loading="lazy" to below-the-fold images, and reduce or consolidate external resource requests.',
   },
   {
     name: "cdn-security",

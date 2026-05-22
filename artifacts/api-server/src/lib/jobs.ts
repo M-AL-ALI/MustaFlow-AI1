@@ -1935,6 +1935,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 warnings: runs.filter((r) => r.status === "warning").length,
                 failed: runs.filter((r) => r.status === "fail").length,
                 skipped: runs.filter((r) => r.status === "skipped").length,
+                failedChecks: runs.filter((r) => r.status === "fail").map((r) => r.checkName),
+                warnChecks: runs.filter((r) => r.status === "warning").map((r) => r.checkName),
               };
 
               // Build backward-compat AuditReport from check results

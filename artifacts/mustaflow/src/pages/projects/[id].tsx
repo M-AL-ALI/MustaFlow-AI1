@@ -134,7 +134,14 @@ type TaskReport = {
     fileCount: number;
   } | null;
   checkSummary?: string;
-  checkRunsSummary?: { passed: number; warnings: number; failed: number; skipped: number };
+  checkRunsSummary?: {
+    passed: number;
+    warnings: number;
+    failed: number;
+    skipped: number;
+    failedChecks?: string[];
+    warnChecks?: string[];
+  };
 };
 
 type ChatPlanPayload =
@@ -321,11 +328,16 @@ function ReportCard({
             {(report.checkRunsSummary.failed > 0 || report.checkRunsSummary.warnings > 0) &&
               onSendMessage && (
                 <button
-                  onClick={() =>
+                  onClick={() => {
+                    const allBad = [
+                      ...(report.checkRunsSummary?.failedChecks ?? []),
+                      ...(report.checkRunsSummary?.warnChecks ?? []),
+                    ];
+                    const nameList = allBad.length > 0 ? ` (${allBad.join(", ")})` : "";
                     onSendMessage(
-                      "Fix all failing check issues in the generated app — address any security vulnerabilities, code quality problems, and other flagged issues shown in the Quality panel.",
-                    )
-                  }
+                      `Fix all failing check issues in the generated app${nameList} — address any security vulnerabilities, code quality problems, and other flagged issues shown in the Quality panel.`,
+                    );
+                  }}
                   className="ml-auto flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors"
                 >
                   <Wrench className="h-2.5 w-2.5" />
@@ -333,6 +345,27 @@ function ReportCard({
                 </button>
               )}
           </div>
+          {((report.checkRunsSummary.failedChecks?.length ?? 0) > 0 ||
+            (report.checkRunsSummary.warnChecks?.length ?? 0) > 0) && (
+            <div className="flex flex-wrap gap-1 mt-1 pl-5">
+              {report.checkRunsSummary.failedChecks?.map((name) => (
+                <span
+                  key={name}
+                  className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-red-950/40 text-red-400 border border-red-900/40"
+                >
+                  {name}
+                </span>
+              ))}
+              {report.checkRunsSummary.warnChecks?.map((name) => (
+                <span
+                  key={name}
+                  className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-yellow-950/40 text-yellow-400 border border-yellow-900/40"
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+          )}
           {report.checkSummary && (
             <p className="text-[10px] text-muted-foreground mt-0.5 pl-5 leading-relaxed">
               {report.checkSummary}

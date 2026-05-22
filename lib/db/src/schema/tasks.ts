@@ -61,7 +61,14 @@ export type TaskReport = {
   } | null;
   filesUnchanged?: string[];
   checkSummary?: string;
-  checkRunsSummary?: { passed: number; warnings: number; failed: number; skipped: number };
+  checkRunsSummary?: {
+    passed: number;
+    warnings: number;
+    failed: number;
+    skipped: number;
+    failedChecks: string[];
+    warnChecks: string[];
+  };
 };
 
 export const agentTasksTable = pgTable(
