@@ -1562,16 +1562,19 @@ async function callWithRetry(
   model: string,
   maxTokens: number,
   label: string,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   let lastError: Error = new Error("Unknown error");
 
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (signal?.aborted) throw new Error("Build cancelled");
     try {
       const response = await openai.chat.completions.create({
         model,
         max_completion_tokens: maxTokens,
         messages,
         response_format: { type: "json_object" },
+        ...(signal ? { signal } : {}),
       });
 
       const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
@@ -1596,6 +1599,9 @@ async function callWithRetry(
         }
       }
     } catch (apiErr) {
+      if (apiErr instanceof Error && (apiErr.name === "AbortError" || signal?.aborted)) {
+        throw new Error("Build cancelled");
+      }
       lastError = apiErr instanceof Error ? apiErr : new Error(String(apiErr));
       logger.error({ err: apiErr, attempt, label }, "OpenAI API call failed");
       if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
@@ -1626,6 +1632,7 @@ async function runCorrectionPass(
   mode: AgentMode,
   label: string,
   requireIndexHtml = false,
+  signal?: AbortSignal,
 ): Promise<BuilderFile[] | null> {
   try {
     const correctionType = classifyCriticalErrors(criticalErrors);
@@ -1638,7 +1645,7 @@ async function runCorrectionPass(
         content: correctionInstruction,
       },
     ];
-    const corrected = await callWithRetry(correctionMessages, modelFor(mode), 32000, label);
+    const corrected = await callWithRetry(correctionMessages, modelFor(mode), 32000, label, signal);
     const rawFiles = Array.isArray(corrected.files) ? corrected.files : [];
     const correctedSubset: BuilderFile[] = rawFiles
       .filter(
@@ -2160,6 +2167,7 @@ export async function runBuildPipeline(args: {
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
+  signal?: AbortSignal;
 }): Promise<BuilderResult> {
   const {
     projectName,
@@ -2173,6 +2181,7 @@ export async function runBuildPipeline(args: {
     planContext,
     conversationSummary,
     onEvent,
+    signal,
   } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
@@ -2265,7 +2274,7 @@ export async function runBuildPipeline(args: {
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", "Generating app blueprint and code…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "build");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "build", signal);
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -2546,6 +2555,7 @@ export async function runRefinePipeline(args: {
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
+  signal?: AbortSignal;
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
@@ -2570,6 +2580,7 @@ export async function runRefinePipeline(args: {
     planContext,
     conversationSummary,
     onEvent,
+    signal,
   } = args;
 
   const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
@@ -2655,7 +2666,7 @@ export async function runRefinePipeline(args: {
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", "Applying change request with AI…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "refine");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "refine", signal);
 
   // Build changedFiles from full replacements returned by AI
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
@@ -3152,6 +3163,7 @@ export async function runReactViteBuildPipeline(args: {
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
+  signal?: AbortSignal;
 }): Promise<BuilderResult> {
   const {
     projectName,
@@ -3165,6 +3177,7 @@ export async function runReactViteBuildPipeline(args: {
     planContext,
     conversationSummary,
     onEvent,
+    signal,
   } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
@@ -3247,7 +3260,13 @@ export async function runReactViteBuildPipeline(args: {
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", "Generating React + Vite project with AI…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "react-vite-build");
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    "react-vite-build",
+    signal,
+  );
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -3389,6 +3408,7 @@ export async function runReactViteRefinePipeline(args: {
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
+  signal?: AbortSignal;
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
@@ -3413,6 +3433,7 @@ export async function runReactViteRefinePipeline(args: {
     planContext,
     conversationSummary,
     onEvent,
+    signal,
   } = args;
 
   const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
@@ -3497,7 +3518,13 @@ export async function runReactViteRefinePipeline(args: {
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", "Applying change request to React + Vite project…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "react-vite-refine");
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    "react-vite-refine",
+    signal,
+  );
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
   let changedFiles: BuilderFile[] = rawFiles
@@ -4632,6 +4659,7 @@ type StackBuildArgs = {
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
+  signal?: AbortSignal;
 };
 
 type StackRefineArgs = {
@@ -4648,6 +4676,7 @@ type StackRefineArgs = {
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
   onEvent?: (type: string, message: string) => Promise<void>;
+  signal?: AbortSignal;
 };
 
 async function runStackBuildPipeline(
@@ -4666,6 +4695,7 @@ async function runStackBuildPipeline(
     planContext,
     conversationSummary,
     onEvent,
+    signal,
   } = args;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
@@ -4731,7 +4761,13 @@ async function runStackBuildPipeline(
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", `Generating ${stackLabel} project with AI…`);
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, `${stackLabel}-build`);
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    `${stackLabel}-build`,
+    signal,
+  );
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -4823,6 +4859,7 @@ async function runStackRefinePipeline(
     planContext,
     conversationSummary,
     onEvent,
+    signal,
   } = args;
 
   const fileManifest = makeCompactManifest(existingFiles, userPrompt, unchangedFilesHint);
@@ -4888,7 +4925,13 @@ async function runStackRefinePipeline(
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", `Applying change request to ${stackLabel} project…`);
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, `${stackLabel}-refine`);
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    `${stackLabel}-refine`,
+    signal,
+  );
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
   const changedFiles: BuilderFile[] = rawFiles
@@ -5088,6 +5131,7 @@ export async function runMobileBuildPipeline(args: {
   activeModuleIds?: string[];
   configuredSecretNames?: string[];
   onEvent?: (type: string, message: string) => Promise<void>;
+  signal?: AbortSignal;
 }): Promise<MobileBuilderResult> {
   const {
     projectName,
@@ -5099,6 +5143,7 @@ export async function runMobileBuildPipeline(args: {
     activeModuleIds,
     configuredSecretNames,
     onEvent,
+    signal,
   } = args;
 
   // Intent detection — classify which power modules are needed
@@ -5141,7 +5186,7 @@ export async function runMobileBuildPipeline(args: {
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", "Generating Expo/React Native app blueprint…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "mobile-build");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "mobile-build", signal);
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -5414,6 +5459,7 @@ export async function runMobileRefinePipeline(args: {
   activeModuleIds?: string[];
   configuredSecretNames?: string[];
   onEvent?: (type: string, message: string) => Promise<void>;
+  signal?: AbortSignal;
 }): Promise<{
   changedFiles: BuilderFile[];
   removedPaths: string[];
@@ -5436,6 +5482,7 @@ export async function runMobileRefinePipeline(args: {
     activeModuleIds,
     configuredSecretNames,
     onEvent,
+    signal,
   } = args;
 
   // Intent detection — detect modules to add or remove for this refine request
@@ -5475,7 +5522,7 @@ export async function runMobileRefinePipeline(args: {
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", "Applying change request to Expo project…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "mobile-refine");
+  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "mobile-refine", signal);
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
   const changedFiles: BuilderFile[] = rawFiles

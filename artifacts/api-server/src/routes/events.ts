@@ -6,7 +6,7 @@ import { subscribeTaskEvents, type TaskEventPayload } from "../lib/event-bus";
 
 const router: IRouter = Router();
 
-const TERMINAL_EVENT_TYPES = new Set(["completed", "failed"]);
+const TERMINAL_EVENT_TYPES = new Set(["completed", "failed", "cancelled"]);
 
 router.get(
   "/projects/:id/tasks/:taskId/events",

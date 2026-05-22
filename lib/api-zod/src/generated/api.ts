@@ -920,7 +920,7 @@ export const ListTaskEventsParams = zod.object({
 export const ListTaskEventsResponseItem = zod.object({
   "id": zod.number(),
   "taskId": zod.number(),
-  "eventType": zod.enum(['queued', 'planning', 'reading_files', 'generating_code', 'editing_files', 'testing', 'fixing_errors', 'updating_preview', 'saving_version', 'completed', 'failed']),
+  "eventType": zod.enum(['queued', 'planning', 'reading_files', 'generating_code', 'editing_files', 'testing', 'fixing_errors', 'updating_preview', 'saving_version', 'completed', 'failed', 'cancelled']),
   "message": zod.string(),
   "filePath": zod.string().nullish(),
   "createdAt": zod.coerce.date()

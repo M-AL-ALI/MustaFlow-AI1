@@ -76,6 +76,10 @@ function StatusBadge({ status }: { status: string }) {
       spin: true,
     },
     queued: { label: "Queued", className: "bg-muted text-muted-foreground border-border" },
+    canceled: {
+      label: "Canceled",
+      className: "bg-muted/60 text-muted-foreground/70 border-border/60",
+    },
   };
   const c = cfg[status] ?? {
     label: status,

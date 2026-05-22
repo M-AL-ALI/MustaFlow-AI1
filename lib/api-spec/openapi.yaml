@@ -3341,6 +3341,7 @@ components:
               saving_version,
               completed,
               failed,
+              cancelled,
             ]
         message: { type: string }
         filePath: { type: ["string", "null"] }

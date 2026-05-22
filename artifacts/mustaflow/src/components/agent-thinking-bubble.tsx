@@ -7,6 +7,7 @@ import {
   useListVersions,
   getListVersionsQueryKey,
   usePatchVersion,
+  useCancelTask,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -34,6 +35,7 @@ import {
   Check,
   X,
   ExternalLink,
+  Square,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -51,7 +53,7 @@ type StepGroup = {
   isFinished: boolean;
 };
 
-const TERMINAL_STATUSES = new Set(["completed", "failed"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 const STEP_ICON: Record<string, React.ElementType> = {
   queued: Clock,
@@ -510,6 +512,8 @@ export function AgentThinkingBubble({
   const mountTimeRef = useRef(Date.now());
   const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
   const [groupsExpanded, setGroupsExpanded] = useState(true);
+  const [cancelling, setCancelling] = useState(false);
+  const cancelTask = useCancelTask();
 
   const { data: events = [] } = useListTaskEvents(projectId, taskId, {
     query: {
@@ -528,6 +532,20 @@ export function AgentThinkingBubble({
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
+  const isCancelled = lastEvent?.eventType === "cancelled";
+
+  const handleCancel = () => {
+    if (cancelling || isTerminal) return;
+    setCancelling(true);
+    cancelTask.mutate(
+      { id: projectId, taskId },
+      {
+        onSettled: () => {
+          setCancelling(false);
+        },
+      },
+    );
+  };
 
   const { data: tasks } = useListTasks(projectId, {
     query: {
@@ -571,9 +589,10 @@ export function AgentThinkingBubble({
 
   useEffect(() => {
     if (!isTerminal) return;
-    const t = setTimeout(onDismiss, 2500);
+    const delay = isCancelled ? 1500 : 2500;
+    const t = setTimeout(onDismiss, delay);
     return () => clearTimeout(t);
-  }, [isTerminal, onDismiss]);
+  }, [isTerminal, isCancelled, onDismiss]);
 
   useEffect(() => {
     if (bubbleRef.current) {
@@ -605,6 +624,8 @@ export function AgentThinkingBubble({
           {isTerminal ? (
             isDone ? (
               <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+            ) : isCancelled ? (
+              <Square className="h-3 w-3 text-muted-foreground shrink-0" />
             ) : (
               <XCircle className="h-3 w-3 text-destructive shrink-0" />
             )
@@ -616,12 +637,46 @@ export function AgentThinkingBubble({
           )}
           <span
             className={cn(
-              "text-[11px] font-semibold",
-              isDone ? "text-green-400" : isFailed ? "text-destructive" : "text-primary",
+              "text-[11px] font-semibold flex-1",
+              isDone
+                ? "text-green-400"
+                : isCancelled
+                  ? "text-muted-foreground"
+                  : isFailed
+                    ? "text-destructive"
+                    : "text-primary",
             )}
           >
-            {isDone ? "Build complete" : isFailed ? "Build failed" : "Building"}
+            {isDone
+              ? "Build complete"
+              : isCancelled
+                ? "Cancelled"
+                : isFailed
+                  ? "Build failed"
+                  : cancelling
+                    ? "Cancelling…"
+                    : "Building"}
           </span>
+          {!isTerminal && (
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              title="Cancel build"
+              className={cn(
+                "flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors shrink-0",
+                cancelling
+                  ? "text-muted-foreground border-border cursor-not-allowed opacity-50"
+                  : "text-muted-foreground border-border hover:text-destructive hover:border-destructive/50",
+              )}
+            >
+              {cancelling ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              ) : (
+                <Square className="h-2.5 w-2.5" />
+              )}
+              Cancel
+            </button>
+          )}
         </div>
 
         {/* Build timing row (shown when terminal) */}

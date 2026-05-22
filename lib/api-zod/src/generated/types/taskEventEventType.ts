@@ -21,4 +21,5 @@ export const TaskEventEventType = {
   saving_version: 'saving_version',
   completed: 'completed',
   failed: 'failed',
+  cancelled: 'cancelled',
 } as const;

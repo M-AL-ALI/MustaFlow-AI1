@@ -98,6 +98,26 @@ const ESCALATION_MAP: Partial<Record<AgentMode, AgentMode>> = {
  */
 const activeProjectJobs = new Set<number>();
 
+/**
+ * Registry of AbortControllers for in-flight AI builds, keyed by taskId.
+ * Used by cancelActiveJob() to abort a running pipeline mid-flight.
+ */
+const activeJobControllers = new Map<number, AbortController>();
+
+/**
+ * Abort an in-flight build job by taskId.
+ * Returns true if a controller was found and aborted, false if the task wasn't running.
+ */
+export function cancelActiveJob(taskId: number): boolean {
+  const controller = activeJobControllers.get(taskId);
+  if (controller) {
+    controller.abort();
+    activeJobControllers.delete(taskId);
+    return true;
+  }
+  return false;
+}
+
 export type JobKind = "build" | "refine";
 
 export type AgentIdentity = "planning" | "task" | "main";
@@ -995,6 +1015,11 @@ export async function runJob(input: JobInput): Promise<void> {
   // Per-project in-memory lock — fast in-process guard to prevent duplicate enqueue.
   activeProjectJobs.add(projectId);
 
+  // Create a per-task AbortController so the cancel endpoint can kill in-flight AI calls.
+  const abortController = new AbortController();
+  const { signal } = abortController;
+  activeJobControllers.set(taskId, abortController);
+
   // Acquire a Postgres session-level advisory lock keyed by projectId.
   // pg_advisory_lock blocks until the lock is free, serializing same-project jobs
   // across all Node processes / replicas. Released in the finally block.
@@ -1196,6 +1221,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           planContext: input.planContext ?? null,
           conversationSummary,
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
+          signal,
         };
 
         let result = isMobileProject
@@ -1209,6 +1235,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               activeModuleIds,
               configuredSecretNames,
               onEvent: async (type, message) => emitEvent(taskId, type, message),
+              signal,
             })
           : isReactViteProject
             ? await runReactViteBuildPipeline({
@@ -1222,6 +1249,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 planContext: input.planContext ?? null,
                 conversationSummary,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
+                signal,
               })
             : isNextjsProject
               ? await runNextjsBuildPipeline(stackBuildArgs)
@@ -1241,6 +1269,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         databaseContext,
                         planContext: input.planContext ?? null,
                         conversationSummary,
+                        signal,
                       });
 
         analyticsCorrectionPasses = result.correctionPasses;
@@ -1268,6 +1297,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             planContext: input.planContext ?? null,
             conversationSummary,
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
+            signal,
           };
           const escalatedResult = isReactViteProject
             ? await runReactViteBuildPipeline({
@@ -1280,6 +1310,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 databaseContext,
                 planContext: input.planContext ?? null,
                 conversationSummary,
+                signal,
               })
             : isNextjsProject
               ? await runNextjsBuildPipeline(escalatedStackBuildArgs)
@@ -1299,6 +1330,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         databaseContext,
                         planContext: input.planContext ?? null,
                         conversationSummary,
+                        signal,
                       });
           wasEscalated = true;
           agentMode = buildEscalationMode;
@@ -1347,6 +1379,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           "generating_code",
           `Blueprint created: ${result.files.length} file(s) planned.`,
         );
+
+        // Guard: if the build was cancelled while the AI was responding, stop before touching files.
+        if (signal?.aborted) throw new Error("Build cancelled");
 
         await emitEvent(
           taskId,
@@ -1478,6 +1513,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           planContext: input.planContext ?? null,
           conversationSummary,
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
+          signal,
         };
 
         let refineResult = isMobileProject
@@ -1492,6 +1528,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               activeModuleIds,
               configuredSecretNames,
               onEvent: async (type, message) => emitEvent(taskId, type, message),
+              signal,
             })
           : isReactViteProject
             ? await runReactViteRefinePipeline({
@@ -1507,6 +1544,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 planContext: input.planContext ?? null,
                 conversationSummary,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
+                signal,
               })
             : isNextjsProject
               ? await runNextjsRefinePipeline(stackRefineArgs)
@@ -1529,6 +1567,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                         planContext: input.planContext ?? null,
                         conversationSummary,
+                        signal,
                       });
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
@@ -1658,6 +1697,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             ? "No files needed changing — your app is already up to date."
             : `Writing ${changedCount} updated file${changedCount !== 1 ? "s" : ""} to the project.`,
         );
+        // Guard: if the build was cancelled while the AI was responding, stop before touching files.
+        if (signal?.aborted) throw new Error("Build cancelled");
+
         await emitEvent(
           taskId,
           "editing_files",
@@ -2002,7 +2044,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           report,
           completedAt: sql`now()`,
         })
-        .where(eq(agentTasksTable.id, taskId));
+        .where(
+          and(
+            eq(agentTasksTable.id, taskId),
+            // Guard against cancel race: if cancel already wrote "canceled", don't overwrite it.
+            inArray(agentTasksTable.status, ["building", "planning"]),
+          ),
+        );
 
       // Fire-and-forget GitHub auto-commit — push all project files to the
       // connected GitHub repo (if any). Non-blocking; failure adds a warn to
@@ -2632,6 +2680,25 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           logger.warn({ err, taskId }, "Failed to record build analytics (non-fatal)"),
         );
     } catch (err) {
+      // Handle user-initiated cancellation separately — mark as canceled, don't emit "failed"
+      if (
+        err instanceof Error &&
+        (err.message === "Build cancelled" || abortController.signal.aborted)
+      ) {
+        await emitEvent(taskId, "cancelled", "Build cancelled by user.");
+        await db
+          .update(agentTasksTable)
+          .set({ status: "canceled", completedAt: sql`now()` })
+          .where(eq(agentTasksTable.id, taskId));
+        // Drain queued tasks so the project queue isn't stalled behind this cancelled build.
+        void drainNextProjectTask(projectId).catch((err) =>
+          logger.warn({ err, projectId, taskId }, "Failed to drain project task after cancel"),
+        );
+        void drainNextBatchTask(taskId).catch((err) =>
+          logger.warn({ err, taskId }, "Failed to drain batch task after cancel"),
+        );
+        return;
+      }
       logger.error({ err, taskId, projectId }, "Builder job failed");
       const message = err instanceof Error ? err.message : "Unknown builder error";
       await emitEvent(taskId, "failed", message);
@@ -2744,6 +2811,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
     }
     lockClient.release();
     activeProjectJobs.delete(projectId);
+    activeJobControllers.delete(taskId);
   }
 }
 
@@ -2829,7 +2897,13 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       stagingSnapshot: null,
       completedAt: sql`now()`,
     })
-    .where(eq(agentTasksTable.id, taskId));
+    .where(
+      and(
+        eq(agentTasksTable.id, taskId),
+        // Guard against cancel race: if cancel already wrote "canceled", don't overwrite it.
+        inArray(agentTasksTable.status, ["building", "planning"]),
+      ),
+    );
 
   // Update project status
   await db

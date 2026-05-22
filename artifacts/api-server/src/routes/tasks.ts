@@ -21,6 +21,7 @@ import {
   applyTaskAgentStaging,
   discardTaskAgentStaging,
   runAppTestingJob,
+  cancelActiveJob,
 } from "../lib/jobs";
 
 const router: IRouter = Router();
@@ -145,7 +146,11 @@ router.post(
       return;
     }
 
-    // Attempt a conditional update: only cancel if the task is still queued.
+    // For building/planning tasks, abort the in-flight AI call first so the
+    // pipeline can clean up gracefully, then fall through to the DB update.
+    cancelActiveJob(params.data.taskId);
+
+    // Attempt a conditional update: cancel if the task is queued, building, or planning.
     const [task] = await db
       .update(agentTasksTable)
       .set({ status: "canceled", completedAt: sql`now()` })
@@ -153,13 +158,13 @@ router.post(
         and(
           eq(agentTasksTable.id, params.data.taskId),
           eq(agentTasksTable.projectId, params.data.id),
-          eq(agentTasksTable.status, "queued"),
+          inArray(agentTasksTable.status, ["queued", "building", "planning"]),
         ),
       )
       .returning();
 
     if (!task) {
-      // Either the task doesn't exist or it's already past "queued" state.
+      // Either the task doesn't exist or it's already in a terminal state.
       const [existing] = await db
         .select({ id: agentTasksTable.id, status: agentTasksTable.status })
         .from(agentTasksTable)
