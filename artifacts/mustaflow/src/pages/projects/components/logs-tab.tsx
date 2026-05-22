@@ -34,7 +34,7 @@ type TaskReport = {
   warnings?: string[];
   suggestions?: string[];
   nextRecommendation?: string;
-  knowledgeApplied?: Array<{ title: string; category: string }>;
+  knowledgeApplied?: Array<{ id: number; title: string; category: string }>;
   nativeFeatures?: string[];
 };
 
@@ -373,9 +373,15 @@ function TaskRow({
             report?.knowledgeApplied &&
             report.knowledgeApplied.length > 0 && (
               <div className="space-y-1.5">
-                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  <BookOpen className="h-3 w-3 text-primary" /> Lessons applied
-                </div>
+                <a
+                  href={`/knowledge?ids=${report.knowledgeApplied.map((k) => k.id).join(",")}`}
+                  className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1 hover:text-primary transition-colors group"
+                  title="View these lessons in the Knowledge Vault"
+                >
+                  <BookOpen className="h-3 w-3 text-primary" />
+                  Applied {report.knowledgeApplied.length} prior{" "}
+                  {report.knowledgeApplied.length === 1 ? "lesson" : "lessons"}
+                </a>
                 {report.knowledgeApplied.map((k, i) => (
                   <div key={i} className="flex items-center gap-1.5">
                     <span className="text-[9px] font-medium text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0">

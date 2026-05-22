@@ -119,7 +119,7 @@ type TaskReport = {
     environment: "test" | "production";
   }>;
   nextRecommendation?: string;
-  knowledgeApplied?: Array<{ title: string; category: string }>;
+  knowledgeApplied?: Array<{ id: number; title: string; category: string }>;
   nativeFeatures?: string[];
   modulesWired?: Array<{ id: string; name: string; secretsConsumed: string[] }>;
   versionId?: number | null;
@@ -290,9 +290,16 @@ function ReportCard({
       )}
       {report.knowledgeApplied && report.knowledgeApplied.length > 0 && (
         <div className="space-y-1 pt-1.5 border-t border-border">
-          <div className="font-semibold text-foreground flex items-center gap-1 text-[11px]">
-            <BookOpen className="h-3 w-3 text-primary" /> Lessons applied
-          </div>
+          <a
+            href={`/knowledge?ids=${report.knowledgeApplied.map((k) => k.id).join(",")}`}
+            className="font-semibold text-foreground flex items-center gap-1 text-[11px] hover:text-primary transition-colors group"
+            title="View these lessons in the Knowledge Vault"
+          >
+            <BookOpen className="h-3 w-3 text-primary" />
+            Applied {report.knowledgeApplied.length} prior{" "}
+            {report.knowledgeApplied.length === 1 ? "lesson" : "lessons"}
+            <ExternalLink className="h-2.5 w-2.5 text-muted-foreground group-hover:text-primary transition-colors ml-auto" />
+          </a>
           {report.knowledgeApplied.map((k, i) => (
             <div key={i} className="flex items-center gap-1.5">
               <span className="text-[9px] font-medium text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0">

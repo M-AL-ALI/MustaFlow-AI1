@@ -36,7 +36,7 @@ export type TaskReport = {
   }>;
   versionId?: number | null;
   nextRecommendation?: string;
-  knowledgeApplied?: Array<{ title: string; category: string }>;
+  knowledgeApplied?: Array<{ id: number; title: string; category: string }>;
   nativeFeatures?: string[];
   modulesWired?: Array<{ id: string; name: string; secretsConsumed: string[] }>;
   codeSmells?: string[];

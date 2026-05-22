@@ -16,6 +16,7 @@
     "migrate-security-findings": "tsx ./src/migrate-security-findings.ts",
     "migrate-app-test-runs": "tsx ./src/migrate-app-test-runs.ts",
     "migrate-cve-patch-columns": "tsx ./src/migrate-cve-patch-columns.ts",
+    "backfill-knowledge-scores": "tsx ./src/backfill-knowledge-scores.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

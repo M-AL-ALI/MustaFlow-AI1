@@ -1901,7 +1901,7 @@ export async function runBuildPipeline(args: {
   if (knowledgeContext) {
     messages.push({
       role: "system",
-      content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+      content: knowledgeContext,
     });
   }
 
@@ -2174,7 +2174,7 @@ export async function runRefinePipeline(args: {
   if (knowledgeContext) {
     messages.push({
       role: "system",
-      content: `LEARNED LESSONS — apply these to every change without being asked:\n${knowledgeContext}`,
+      content: knowledgeContext,
     });
   }
 
@@ -2573,7 +2573,7 @@ export async function runReactViteBuildPipeline(args: {
   if (knowledgeContext) {
     messages.push({
       role: "system",
-      content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+      content: knowledgeContext,
     });
   }
 
@@ -2823,7 +2823,7 @@ export async function runReactViteRefinePipeline(args: {
   if (knowledgeContext) {
     messages.push({
       role: "system",
-      content: `LEARNED LESSONS — apply these to every change without being asked:\n${knowledgeContext}`,
+      content: knowledgeContext,
     });
   }
 
@@ -4071,7 +4071,7 @@ async function runStackBuildPipeline(
   if (knowledgeContext) {
     messages.push({
       role: "system",
-      content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+      content: knowledgeContext,
     });
   }
   if (conversationSummary) {
@@ -4233,7 +4233,7 @@ async function runStackRefinePipeline(
   if (knowledgeContext) {
     messages.push({
       role: "system",
-      content: `LEARNED LESSONS — apply these to every change without being asked:\n${knowledgeContext}`,
+      content: knowledgeContext,
     });
   }
   if (conversationSummary) {
@@ -4517,7 +4517,7 @@ export async function runMobileBuildPipeline(args: {
   if (knowledgeContext) {
     messages.push({
       role: "system",
-      content: `LEARNED LESSONS — apply these:\n${knowledgeContext}`,
+      content: knowledgeContext,
     });
   }
 
@@ -4821,7 +4821,7 @@ export async function runMobileRefinePipeline(args: {
   if (knowledgeContext) {
     messages.push({
       role: "system",
-      content: `LEARNED LESSONS — apply these:\n${knowledgeContext}`,
+      content: knowledgeContext,
     });
   }
 
@@ -5481,7 +5481,7 @@ export async function runNodeBuildPipeline(args: {
   if (knowledgeContext) {
     messages.push({
       role: "system",
-      content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+      content: knowledgeContext,
     });
   }
 
@@ -5620,7 +5620,7 @@ export async function runNodeRefinePipeline(args: {
   ];
 
   if (knowledgeContext) {
-    messages.push({ role: "system", content: `LEARNED LESSONS:\n${knowledgeContext}` });
+    messages.push({ role: "system", content: knowledgeContext });
   }
 
   if (planContext) {
@@ -5749,7 +5749,7 @@ export async function runPythonBuildPipeline(args: {
   if (knowledgeContext) {
     messages.push({
       role: "system",
-      content: `LEARNED LESSONS — apply these to every build without being asked:\n${knowledgeContext}`,
+      content: knowledgeContext,
     });
   }
 
@@ -5888,7 +5888,7 @@ export async function runPythonRefinePipeline(args: {
   ];
 
   if (knowledgeContext) {
-    messages.push({ role: "system", content: `LEARNED LESSONS:\n${knowledgeContext}` });
+    messages.push({ role: "system", content: knowledgeContext });
   }
 
   if (planContext) {

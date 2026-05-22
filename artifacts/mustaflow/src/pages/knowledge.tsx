@@ -31,6 +31,7 @@ import {
   MoreHorizontal,
   FolderOpen,
   SlidersHorizontal,
+  BookOpen,
 } from "lucide-react";
 
 function getTypeIcon(type: string) {
@@ -492,6 +493,12 @@ export default function KnowledgePage() {
   const [approvedOnly, setApprovedOnly] = useUrlFilter("approvedOnly");
   const [severityFilter, setSeverityFilter] = useUrlFilter("severity");
   const [typeFilter, setTypeFilter] = useUrlFilter("type");
+  // Deep-link from build cards: comma-separated entry IDs to highlight
+  const [idsFilter, setIdsFilter] = useUrlFilter("ids");
+  const appliedIdSet = useMemo(
+    () => new Set(idsFilter ? idsFilter.split(",").map((s) => parseInt(s, 10)) : []),
+    [idsFilter],
+  );
 
   const { data: projects = [] } = useListProjects();
 
@@ -558,6 +565,7 @@ export default function KnowledgePage() {
   const applyFilters = useCallback(
     (entries: KnowledgeEntry[]) =>
       entries.filter((e) => {
+        if (appliedIdSet.size > 0 && !appliedIdSet.has(e.id)) return false;
         if (approvedOnly === "true" && !e.approvedForReuse) return false;
         if (severityFilter && e.severity !== severityFilter) return false;
         if (typeFilter && e.type !== typeFilter) return false;
@@ -567,12 +575,14 @@ export default function KnowledgePage() {
         }
         return true;
       }),
-    [approvedOnly, severityFilter, typeFilter, searchQuery],
+    [appliedIdSet, approvedOnly, severityFilter, typeFilter, searchQuery],
   );
 
-  const hasActiveFilter = approvedOnly === "true" || !!severityFilter || !!typeFilter;
+  const hasActiveFilter =
+    appliedIdSet.size > 0 || approvedOnly === "true" || !!severityFilter || !!typeFilter;
 
   const resetFilters = () => {
+    setIdsFilter("");
     setApprovedOnly("");
     setSeverityFilter("");
     setTypeFilter("");
@@ -635,6 +645,23 @@ export default function KnowledgePage() {
           Per-project history, global lessons, and curated learnings for the AI builder.
         </p>
       </div>
+
+      {/* Deep-link banner: shown when arriving from a build card */}
+      {appliedIdSet.size > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
+          <BookOpen className="h-4 w-4 text-primary shrink-0" />
+          <span className="text-foreground">
+            Showing {appliedIdSet.size} lesson{appliedIdSet.size !== 1 ? "s" : ""} applied in the
+            last build.
+          </span>
+          <button
+            onClick={() => setIdsFilter("")}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+          >
+            <X className="h-3 w-3" /> Clear
+          </button>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="space-y-3">

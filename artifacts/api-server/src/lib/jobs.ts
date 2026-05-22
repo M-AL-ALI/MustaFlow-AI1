@@ -334,7 +334,7 @@ async function loadActiveIntegrations(projectId: number): Promise<string> {
 
 type KnowledgeContextResult = {
   context: string;
-  applied: Array<{ title: string; category: string }>;
+  applied: Array<{ id: number; title: string; category: string }>;
 };
 
 /**
@@ -393,39 +393,73 @@ function tokenise(text: string): Set<string> {
 }
 
 /**
- * Relevance-ranked knowledge injection.
- * Scores each knowledge entry by keyword overlap with the current user prompt,
- * then returns the top 15 most relevant. Also loads active integrations context.
- * Returns both the combined context string and the selected knowledge entries
- * so they can be surfaced in the task report.
+ * Configurable token budget for the Knowledge Vault context section (in characters;
+ * ~4 chars per token is a reasonable approximation for English prose).
+ * Set KNOWLEDGE_TOKEN_BUDGET env var to override. Default: 2400 chars (~600 tokens).
+ */
+const KNOWLEDGE_CHAR_BUDGET = parseInt(process.env.KNOWLEDGE_TOKEN_BUDGET ?? "2400", 10);
+
+/**
+ * Relevance-ranked knowledge injection with TF-IDF + recency + severity scoring.
+ *
+ * Eligibility: project-scoped entries for this project, plus globally approved entries.
+ * Ranking signals (combined multiplicatively/additively):
+ *   - TF-IDF keyword overlap with the user prompt
+ *   - Recency: entries created in last 24 h (+2.0), last 7 days (+1.0)
+ *   - Severity: "error" (+1.5), "warning" (+0.5)
+ *   - Approved for reuse: ×1.5 boost
+ *   - Same project: +2.0 additive boost (prefer own history)
+ *
+ * Token budget: lower-scoring entries are dropped first until the total character
+ * count fits within KNOWLEDGE_CHAR_BUDGET.
+ *
+ * Controlled by KNOWLEDGE_RETRIEVAL_ENABLED env var (default: true).
+ * When disabled, only the integrations note is returned (no vault entries).
+ *
+ * Returns both the formatted context string and the applied entry metadata
+ * (id + title + category) so they can be surfaced in the TaskReport.
  */
 async function loadKnowledgeContext(
   projectId: number,
   userPrompt?: string,
 ): Promise<KnowledgeContextResult> {
   try {
+    const retrievalEnabled = process.env.KNOWLEDGE_RETRIEVAL_ENABLED !== "false";
+
     const [entries, integrationsNote] = await Promise.all([
-      db
-        .select()
-        .from(knowledgeEntriesTable)
-        .where(
-          or(
-            eq(knowledgeEntriesTable.approvedForReuse, true),
-            eq(knowledgeEntriesTable.projectId, projectId),
-          ),
-        )
-        .orderBy(desc(knowledgeEntriesTable.createdAt))
-        .limit(80),
+      retrievalEnabled
+        ? db
+            .select()
+            .from(knowledgeEntriesTable)
+            .where(
+              and(
+                or(
+                  eq(knowledgeEntriesTable.approvedForReuse, true),
+                  eq(knowledgeEntriesTable.projectId, projectId),
+                ),
+                isNull(knowledgeEntriesTable.archivedAt),
+              ),
+            )
+            .orderBy(desc(knowledgeEntriesTable.createdAt))
+            .limit(100)
+        : Promise.resolve([] as import("@workspace/db").KnowledgeEntry[]),
       loadActiveIntegrations(projectId),
     ]);
-
-    let topEntries: typeof entries;
 
     if (entries.length === 0) {
       return { context: integrationsNote, applied: [] };
     }
 
+    const now = Date.now();
+    const ONE_DAY_MS = 86_400_000;
+    const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
+
     const APPROVED_BOOST = 1.5;
+    const SEVERITY_SCORE: Record<string, number> = { error: 1.5, warning: 0.5, info: 0 };
+    const SAME_PROJECT_BOOST = 2.0;
+
+    let topEntries: typeof entries;
+
     if (userPrompt && userPrompt.length > 0) {
       const promptTokens = tokenise(userPrompt);
       const N = entries.length;
@@ -447,36 +481,79 @@ async function loadKnowledgeContext(
         for (const w of entryWords) {
           termCounts.set(w, (termCounts.get(w) ?? 0) + 1);
         }
-        const entryTokens = new Set(termCounts.keys());
 
         // TF-IDF: sum of tf(t, entry) × idf(t) for each query token present in entry
         let score = 0;
         for (const t of promptTokens) {
-          if (entryTokens.has(t)) {
+          if (termCounts.has(t)) {
             const tf = (termCounts.get(t) ?? 0) / Math.max(entryWords.length, 1);
             const idf = Math.log((N + 1) / ((df.get(t) ?? 0) + 1)) + 1;
             score += tf * idf;
           }
         }
 
-        // Boost entries approved for reuse — higher-quality vetted lessons
+        // Recency boost
+        const ageMs = now - new Date(e.createdAt).getTime();
+        if (ageMs < ONE_DAY_MS) score += 2.0;
+        else if (ageMs < SEVEN_DAYS_MS) score += 1.0;
+
+        // Severity boost
+        score += SEVERITY_SCORE[e.severity] ?? 0;
+
+        // Same-project preference
+        if (e.projectId === projectId) score += SAME_PROJECT_BOOST;
+
+        // Approved-for-reuse multiplier (applied last so it amplifies the full base score)
         if (e.approvedForReuse) score *= APPROVED_BOOST;
+
         return { entry: e, score };
       });
       scored.sort((a, b) => b.score - a.score);
-      topEntries = scored.slice(0, 8).map((s) => s.entry);
+      // Take up to 12 candidates; budget trim happens below
+      topEntries = scored.slice(0, 12).map((s) => s.entry);
     } else {
-      // When no prompt provided, prefer approvedForReuse entries first
+      // No prompt: rank by same-project first, then approvedForReuse, then recency
       topEntries = [...entries]
-        .sort((a, b) => (b.approvedForReuse ? 1 : 0) - (a.approvedForReuse ? 1 : 0))
-        .slice(0, 8);
+        .sort((a, b) => {
+          const projectScore =
+            (b.projectId === projectId ? 1 : 0) - (a.projectId === projectId ? 1 : 0);
+          if (projectScore !== 0) return projectScore;
+          const approvedScore = (b.approvedForReuse ? 1 : 0) - (a.approvedForReuse ? 1 : 0);
+          if (approvedScore !== 0) return approvedScore;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        })
+        .slice(0, 12);
     }
 
-    const knowledgePart = topEntries
-      .map((e) => `[${e.category}] ${e.title}: ${e.content}`)
-      .join("\n");
-    const context = [integrationsNote, knowledgePart].filter(Boolean).join("\n\n");
-    const applied = topEntries.map((e) => ({ title: e.title, category: e.category }));
+    // ── Token budget enforcement (hard cap) ──────────────────────────────────
+    // Entries are already sorted best-first; drop from the tail until we fit.
+    // This is a strict cap — no minimum-entry override — so the context section
+    // never exceeds KNOWLEDGE_CHAR_BUDGET regardless of how few entries that allows.
+    const selected: typeof entries = [];
+    let charCount = 0;
+    for (const e of topEntries) {
+      const entryChars = e.title.length + e.content.length + 20; // 20 for label + punctuation
+      if (charCount + entryChars > KNOWLEDGE_CHAR_BUDGET) break;
+      selected.push(e);
+      charCount += entryChars;
+    }
+
+    if (selected.length === 0) {
+      return { context: integrationsNote, applied: [] };
+    }
+
+    // ── Format the lessons section with clear delimiters ────────────────────
+    const lessonLines = selected.map((e) => `[${e.category}] ${e.title}: ${e.content}`);
+    const knowledgeSection = [
+      `=== LESSONS FROM PRIOR BUILDS (${selected.length} selected, relevance-ranked) ===`,
+      `Apply each actively. Do not repeat past mistakes. Do not mention this section in your output.`,
+      ``,
+      ...lessonLines,
+      `=== END LESSONS ===`,
+    ].join("\n");
+
+    const context = [integrationsNote, knowledgeSection].filter(Boolean).join("\n\n");
+    const applied = selected.map((e) => ({ id: e.id, title: e.title, category: e.category }));
 
     return { context, applied };
   } catch {
