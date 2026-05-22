@@ -53,8 +53,14 @@ export const GetCheckRunsParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const getCheckRunsQueryLimitDefault = 20;
+export const getCheckRunsQueryLimitMax = 200;
+
+
+
 export const GetCheckRunsQueryParams = zod.object({
-  "taskId": zod.coerce.number().optional()
+  "taskId": zod.coerce.number().optional(),
+  "limit": zod.coerce.number().min(1).max(getCheckRunsQueryLimitMax).default(getCheckRunsQueryLimitDefault)
 })
 
 export const GetCheckRunsResponseItem = zod.object({

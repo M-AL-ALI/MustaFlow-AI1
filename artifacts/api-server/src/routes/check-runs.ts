@@ -21,6 +21,14 @@ router.get("/projects/:id/check-runs", requireProjectOwnership, async (req, res)
     return;
   }
 
+  const limitParam = req.query.limit ? Number(req.query.limit) : undefined;
+  const limit =
+    limitParam !== undefined && Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(limitParam, 200)
+      : taskId !== undefined
+        ? 50
+        : 20;
+
   try {
     const conditions = [eq(checkRunsTable.projectId, projectId)];
     if (taskId !== undefined) {
@@ -32,7 +40,7 @@ router.get("/projects/:id/check-runs", requireProjectOwnership, async (req, res)
       .from(checkRunsTable)
       .where(and(...conditions))
       .orderBy(desc(checkRunsTable.ranAt))
-      .limit(taskId !== undefined ? 50 : 20);
+      .limit(limit);
 
     res.json(rows);
   } catch (err) {

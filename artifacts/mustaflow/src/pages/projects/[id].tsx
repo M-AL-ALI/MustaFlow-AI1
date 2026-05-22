@@ -53,6 +53,7 @@ import {
   Puzzle,
   ListOrdered,
   ShieldCheck,
+  ScanSearch,
   Bookmark,
   Layers2,
   RotateCcw,
@@ -79,6 +80,7 @@ import { KnowledgeTab } from "./components/knowledge-tab";
 import { HistoryTab } from "./components/history-tab";
 import { TerminalTab } from "./components/terminal-tab";
 import { DatabaseTab } from "./components/database-tab";
+import { ChecksTab } from "./components/checks-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
@@ -461,6 +463,7 @@ const ADVANCED_TABS = [
   { label: "Canvas", value: "canvas", icon: Paintbrush2 },
   { label: "Page Map", value: "page-map", icon: Globe },
   { label: "Tools & Files", value: "tools-files", icon: Blocks },
+  { label: "Checks", value: "checks", icon: ScanSearch },
   { label: "AI Memory", value: "knowledge", icon: BrainCircuit },
   { label: "Database", value: "database", icon: DatabaseZap },
   { label: "Logs", value: "logs", icon: Wrench },
@@ -2701,6 +2704,15 @@ export default function ProjectWorkspacePage() {
                 onTryFix={(text) => {
                   setPrompt(text);
                   setActiveTab("preview");
+                }}
+              />
+            )}
+            {activeTab === "checks" && (
+              <ChecksTab
+                projectId={projectId}
+                files={files}
+                onSendMessage={(text) => {
+                  setPrompt(text);
                 }}
               />
             )}
