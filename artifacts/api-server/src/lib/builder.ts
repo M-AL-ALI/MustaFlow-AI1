@@ -4907,14 +4907,111 @@ export async function runMobileRefinePipeline(args: {
     return { id, name: mod?.name ?? id, secretsConsumed: mod?.requiredSecrets ?? [] };
   });
 
+  // TypeScript check — blocking for mobile refines. Retry once with errors as context.
+  // Merge changed files into the existing project snapshot, drop removed paths,
+  // and type-check the resulting tree so cross-file references resolve correctly.
+  const mergedForTsCheck = new Map(existingFiles.map((f) => [f.path, f]));
+  for (const rp of removedPaths) mergedForTsCheck.delete(rp);
+  for (const cf of changedFiles) mergedForTsCheck.set(cf.path, cf);
+  let mergedFiles = [...mergedForTsCheck.values()];
+
+  await onEvent?.("validating_output", "Running TypeScript type-check…");
+  const tsResult = await runTsCheck(mergedFiles);
+  let tsCheckFailed = false;
+  let tsErrors = tsResult.errors;
+  let correctionPasses = 0;
+
+  if (tsResult.errors.length > 0) {
+    logger.warn(
+      { errorCount: tsResult.errors.length },
+      "Mobile refine: TypeScript errors found — running TS correction pass",
+    );
+    await onEvent?.(
+      "validating_output",
+      `TypeScript: ${tsResult.errors.length} error(s) — running correction…`,
+    );
+
+    const tsErrorText = formatTsErrors(tsResult.errors);
+    const tsCorrection: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      ...messages,
+      { role: "assistant", content: JSON.stringify(parsed) },
+      {
+        role: "user",
+        content: `The updated TypeScript files have type errors that would prevent the app from compiling. Fix all errors below and return ONLY the corrected files with full content:\n\n${tsErrorText}`,
+      },
+    ];
+
+    try {
+      const tsCorrected = await callWithRetry(
+        tsCorrection,
+        modelFor(agentMode),
+        32000,
+        "mobile-refine-ts-correction",
+      );
+      const tsCorrectedRaw = Array.isArray(tsCorrected.files) ? tsCorrected.files : [];
+      const tsCorrectedFiles: BuilderFile[] = tsCorrectedRaw
+        .filter(
+          (f): f is { path: string; content: string; mimeType?: string } =>
+            typeof f === "object" &&
+            f !== null &&
+            typeof (f as { path?: unknown }).path === "string" &&
+            typeof (f as { content?: unknown }).content === "string",
+        )
+        .map((f) => ({
+          path: normalizePath(f.path),
+          content: f.content,
+          mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+        }));
+
+      // Merge corrections into both the changedFiles list (returned to caller)
+      // and the merged tree (for the re-check).
+      const changedMap = new Map(changedFiles.map((f) => [f.path, f]));
+      for (const cf of tsCorrectedFiles) changedMap.set(cf.path, cf);
+      changedFiles.length = 0;
+      changedFiles.push(...changedMap.values());
+
+      const mergedMap = new Map(mergedFiles.map((f) => [f.path, f]));
+      for (const cf of tsCorrectedFiles) mergedMap.set(cf.path, cf);
+      mergedFiles = [...mergedMap.values()];
+
+      correctionPasses = 1;
+
+      // Re-check after correction — surface remaining errors without blocking further
+      const tsRecheck = await runTsCheck(mergedFiles);
+      tsErrors = tsRecheck.errors;
+      if (tsRecheck.errors.length > 0) {
+        logger.warn(
+          { remaining: tsRecheck.errors.length },
+          "Mobile refine: TypeScript errors remain after correction pass",
+        );
+        tsCheckFailed = true;
+      }
+    } catch (err) {
+      logger.warn({ err }, "Mobile refine TS correction pass failed — using pre-correction output");
+      tsCheckFailed = true;
+      correctionPasses = 1;
+    }
+  }
+
+  // Recompute created/changed lists in case correction added new files.
+  const finalFilesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
+  const finalFilesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
+
+  const tsWarnings = tsCheckFailed
+    ? [
+        `TypeScript check: ${tsErrors.length} error(s) remain after correction. The app may not compile correctly.`,
+      ]
+    : [];
+  const warnings = [...aiWarnings, ...tsWarnings];
+
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: null,
-    filesCreated,
-    filesChanged,
+    filesCreated: finalFilesCreated,
+    filesChanged: finalFilesChanged,
     filesRemoved: removedPaths,
     previewUpdated: changedFiles.length > 0 || removedPaths.length > 0,
-    warnings: aiWarnings,
+    warnings,
     integrationsNeeded,
     nextRecommendation,
     nativeFeatures: nativeFeatures?.length ? nativeFeatures : undefined,
@@ -4928,9 +5025,9 @@ export async function runMobileRefinePipeline(args: {
     report,
     assistantSummary: summary,
     detectedModuleIds,
-    correctionPasses: 0,
-    correctionFailed: false,
-    primaryErrorCategory: null,
+    correctionPasses,
+    correctionFailed: tsCheckFailed,
+    primaryErrorCategory: tsCheckFailed ? "typescript" : null,
   };
 }
 
