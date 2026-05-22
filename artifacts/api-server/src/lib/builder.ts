@@ -1732,6 +1732,40 @@ Rules:
 - Do NOT flag style preferences, minor wording differences, or non-blocking cosmetic issues
 - If the app works as the user requested, always return verdict: "ok" — do not manufacture issues`;
 
+const MOBILE_CRITIQUE_SYSTEM_PROMPT = `You are a senior mobile QA engineer reviewing AI-generated Expo / React Native files before they ship to users.
+Your job is to identify REAL functional problems — not stylistic preferences.
+
+Review the generated files against the original user request and any validator findings.
+Focus on:
+1. Features explicitly requested by the user that are missing or broken
+2. Expo Router file structure: every screen referenced in navigation must exist as a route file under app/ (e.g. app/index.tsx, app/(tabs)/_layout.tsx, app/profile.tsx). Tab/stack layouts (_layout.tsx) must wrap the right routes.
+3. Screen navigation: router.push/router.replace/Link href targets must point at routes that actually exist in the file tree. Tab bar items must match real route files.
+4. NativeWind / Tailwind class validity: className strings must use real Tailwind utility classes (no made-up tokens). Color tokens, spacing, and flex utilities must be valid. No HTML-only classes (like "block", "inline") that don't apply on React Native.
+5. Buttons / Pressables / TouchableOpacity with no onPress handler when the screen clearly needs interaction
+6. Forms with no submit logic or no user feedback on submit
+7. JavaScript/TypeScript that references undefined functions, hooks, or imports — including missing imports from "expo-router", "react-native", or "nativewind"
+8. Screens that are completely empty or contain only placeholder content when real content was requested
+9. Critical validator errors that were not resolved in the file set
+
+Do NOT flag:
+- Web-only concerns (HTML semantics, CSS specificity, document.querySelector, etc.) — this is React Native
+- Style preferences, minor wording differences, or non-blocking cosmetic issues
+- Missing native module config that the build pipeline auto-wires (e.g. package.json deps for detected modules)
+
+OUTPUT STRICT JSON matching this exact shape:
+{
+  "verdict": "ok" | "issues_found",
+  "issues": string[],
+  "files": [{ "path": string, "content": string, "mimeType": string }]
+}
+
+Rules:
+- "verdict" is "ok" if the app is functionally complete for the user's request; "issues_found" otherwise
+- "issues" must be SPECIFIC: "Tab bar links to /settings but app/settings.tsx is missing" not "navigation needs work" — empty array if verdict is "ok"
+- "files" must contain ONLY the files that genuinely need changes (full corrected content) — empty array if verdict is "ok" or no changes are needed
+- Do NOT return files you did not change — only return files with real fixes applied
+- If the app works as the user requested, always return verdict: "ok" — do not manufacture issues`;
+
 /**
  * Power/Pro critique pass — holistic AI review of generated output against the user request.
  * Called after structural validation (and any correction pass) for Power/Pro builds.
@@ -1748,6 +1782,7 @@ async function runCritiquePass(
   validatorIssues: string[],
   mode: AgentMode,
   label: string,
+  systemPrompt: string = CRITIQUE_SYSTEM_PROMPT,
 ): Promise<{ issues: string[]; fixedFiles: BuilderFile[] | null }> {
   try {
     // Build a compact manifest for the critique (cap at 14k chars to stay within context)
@@ -1763,7 +1798,7 @@ async function runCritiquePass(
         : "";
 
     const critiqueMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-      { role: "system", content: CRITIQUE_SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       {
         role: "user",
         content: `Original user request: "${userPrompt}"\n\nGenerated files to review:\n${manifestTruncated}${issueBlock}\n\nReview the generated files for functional problems. Return JSON as instructed.`,
@@ -5394,7 +5429,73 @@ export async function runMobileBuildPipeline(args: {
         `TypeScript check: ${tsErrors.length} error(s) remain after correction. The app may not compile correctly.`,
       ]
     : [];
-  const warnings = [...aiWarnings, ...mobileValidation.warnings, ...tsWarnings];
+  let mobileBuildWarnings = [...aiWarnings, ...mobileValidation.warnings, ...tsWarnings];
+
+  // Power/Pro critique pass — holistic mobile review against the user's request.
+  // Lite/Eco: skip to keep costs down. Skip when prior validation failed.
+  let mobileBuildCritiqueMeta: TaskReport["critiquePass"] = null;
+  if ((agentMode === "power" || agentMode === "pro") && !mobileStructureFailed && !tsCheckFailed) {
+    await onEvent?.("validating_output", "Running quality critique (Power/Pro)…");
+    const { issues: critiqueIssues, fixedFiles: critiqueFixed } = await runCritiquePass(
+      messages,
+      files,
+      userPrompt,
+      mobileBuildWarnings,
+      agentMode,
+      "mobile-build-critique",
+      MOBILE_CRITIQUE_SYSTEM_PROMPT,
+    );
+
+    if (critiqueFixed !== null) {
+      // Revalidate critique output against Expo structure before accepting
+      const critiqueRevalidation = validateMobileFiles(critiqueFixed);
+      if (!critiqueRevalidation.passed) {
+        logger.warn(
+          { critiqueErrors: critiqueRevalidation.criticalErrors },
+          "Mobile build critique patch failed Expo structure revalidation — discarding critique patches",
+        );
+        mobileBuildCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+        mobileBuildWarnings = [
+          ...mobileBuildWarnings,
+          ...critiqueIssues.map((i) => `[critique] ${i}`),
+        ];
+      } else {
+        // Re-run TS check on critique patches — never accept patches that
+        // reintroduce TypeScript errors after the mobile TS gate already passed.
+        const critiqueTsRecheck = await runTsCheck(critiqueFixed);
+        if (critiqueTsRecheck.errors.length > 0) {
+          logger.warn(
+            { errorCount: critiqueTsRecheck.errors.length },
+            "Mobile build critique patch reintroduced TypeScript errors — discarding critique patches",
+          );
+          mobileBuildCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+          mobileBuildWarnings = [
+            ...mobileBuildWarnings,
+            ...critiqueIssues.map((i) => `[critique] ${i}`),
+          ];
+        } else {
+          files = critiqueFixed;
+          mobileBuildCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: true };
+          logger.info(
+            { issueCount: critiqueIssues.length },
+            "Mobile critique pass auto-fixed issues in build",
+          );
+          await onEvent?.(
+            "validating_output",
+            `Critique auto-fixed ${critiqueIssues.length} issue(s)`,
+          );
+        }
+      }
+    } else if (critiqueIssues.length > 0) {
+      mobileBuildCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+      mobileBuildWarnings = [
+        ...mobileBuildWarnings,
+        ...critiqueIssues.map((i) => `[critique] ${i}`),
+      ];
+    }
+  }
+
+  const warnings = mobileBuildWarnings;
 
   const summary = cleanSummary(
     typeof parsed.summary === "string" ? parsed.summary : null,
@@ -5425,6 +5526,7 @@ export async function runMobileBuildPipeline(args: {
     nextRecommendation,
     nativeFeatures: blueprint.nativeFeatures?.length ? blueprint.nativeFeatures : undefined,
     modulesWired: modulesWired.length > 0 ? modulesWired : undefined,
+    ...(mobileBuildCritiqueMeta ? { critiquePass: mobileBuildCritiqueMeta } : {}),
     ...(mobileValidation.criticalErrors.length > 0
       ? {
           validationReport: {
@@ -5688,13 +5790,102 @@ export async function runMobileRefinePipeline(args: {
         `TypeScript check: ${tsErrors.length} error(s) remain after correction. The app may not compile correctly.`,
       ]
     : [];
-  const warnings = [...aiWarnings, ...tsWarnings];
+  let refineWarnings = [...aiWarnings, ...tsWarnings];
+
+  // Power/Pro critique pass — holistic mobile review against the user's request.
+  // Lite/Eco: skip to keep costs down. Skip when prior validation failed.
+  let mobileRefineCritiqueMeta: TaskReport["critiquePass"] = null;
+  if ((agentMode === "power" || agentMode === "pro") && !tsCheckFailed) {
+    await onEvent?.("validating_output", "Running quality critique (Power/Pro)…");
+    const { issues: critiqueIssues, fixedFiles: critiqueFixed } = await runCritiquePass(
+      messages,
+      mergedFiles,
+      userPrompt,
+      refineWarnings,
+      agentMode,
+      "mobile-refine-critique",
+      MOBILE_CRITIQUE_SYSTEM_PROMPT,
+    );
+
+    if (critiqueFixed !== null) {
+      // Keep only the files the critique actually changed (existing changedFiles or net-new)
+      const originalPaths = new Set(existingFiles.map((f) => f.path));
+      const tentativeChangedMap = new Map(changedFiles.map((f) => [f.path, f]));
+      const critiqueChangedOnly: BuilderFile[] = [];
+      for (const cf of critiqueFixed) {
+        const wasChangedAlready = tentativeChangedMap.has(cf.path);
+        const isNew = !originalPaths.has(cf.path);
+        if (wasChangedAlready || isNew) {
+          tentativeChangedMap.set(cf.path, cf);
+          critiqueChangedOnly.push(cf);
+        }
+      }
+
+      if (critiqueChangedOnly.length > 0) {
+        // Revalidate the merged project against Expo structure before accepting
+        const tentativeMergedMap = new Map(mergedFiles.map((f) => [f.path, f]));
+        for (const cf of critiqueChangedOnly) tentativeMergedMap.set(cf.path, cf);
+        const tentativeMerged = [...tentativeMergedMap.values()];
+        const critiqueRevalidation = validateMobileFiles(tentativeMerged);
+
+        if (!critiqueRevalidation.passed) {
+          logger.warn(
+            { critiqueErrors: critiqueRevalidation.criticalErrors },
+            "Mobile refine critique patch failed Expo structure revalidation — discarding critique patches",
+          );
+          mobileRefineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+          refineWarnings = [...refineWarnings, ...critiqueIssues.map((i) => `[critique] ${i}`)];
+        } else {
+          // Re-run TS check on the post-critique merged tree — never accept
+          // patches that reintroduce TypeScript errors after the TS gate passed.
+          const critiqueTsRecheck = await runTsCheck(tentativeMerged);
+          if (critiqueTsRecheck.errors.length > 0) {
+            logger.warn(
+              { errorCount: critiqueTsRecheck.errors.length },
+              "Mobile refine critique patch reintroduced TypeScript errors — discarding critique patches",
+            );
+            mobileRefineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+            refineWarnings = [...refineWarnings, ...critiqueIssues.map((i) => `[critique] ${i}`)];
+          } else {
+            const newChanged = [...tentativeChangedMap.values()];
+            changedFiles.length = 0;
+            changedFiles.push(...newChanged);
+            mergedFiles = tentativeMerged;
+            mobileRefineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: true };
+            logger.info(
+              { issueCount: critiqueIssues.length },
+              "Mobile critique pass auto-fixed issues in refine",
+            );
+            await onEvent?.(
+              "validating_output",
+              `Critique auto-fixed ${critiqueIssues.length} issue(s)`,
+            );
+          }
+        }
+      } else {
+        mobileRefineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+      }
+    } else if (critiqueIssues.length > 0) {
+      mobileRefineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+      refineWarnings = [...refineWarnings, ...critiqueIssues.map((i) => `[critique] ${i}`)];
+    }
+  }
+
+  // Recompute created/changed lists in case critique added new files.
+  const postCritiqueFilesCreated = changedFiles
+    .filter((f) => !existingPaths.has(f.path))
+    .map((f) => f.path);
+  const postCritiqueFilesChanged = changedFiles
+    .filter((f) => existingPaths.has(f.path))
+    .map((f) => f.path);
+
+  const warnings = refineWarnings;
 
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: null,
-    filesCreated: finalFilesCreated,
-    filesChanged: finalFilesChanged,
+    filesCreated: postCritiqueFilesCreated,
+    filesChanged: postCritiqueFilesChanged,
     filesRemoved: removedPaths,
     previewUpdated: changedFiles.length > 0 || removedPaths.length > 0,
     warnings,
@@ -5702,6 +5893,7 @@ export async function runMobileRefinePipeline(args: {
     nextRecommendation,
     nativeFeatures: nativeFeatures?.length ? nativeFeatures : undefined,
     modulesWired: modulesWired.length > 0 ? modulesWired : undefined,
+    ...(mobileRefineCritiqueMeta ? { critiquePass: mobileRefineCritiqueMeta } : {}),
   };
 
   return {
