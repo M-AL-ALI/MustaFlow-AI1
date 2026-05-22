@@ -553,15 +553,25 @@ function ConnectedPanel({
                   connected
                 </span>
               </div>
-              <a
-                href={repoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-primary hover:underline flex items-center gap-0.5"
-              >
-                {connection.repositoryOwner}/{connection.repositoryName}
-                <ExternalLink className="h-2.5 w-2.5" />
-              </a>
+              <div className="flex items-center gap-2 flex-wrap">
+                <a
+                  href={repoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline flex items-center gap-0.5"
+                >
+                  {connection.repositoryOwner}/{connection.repositoryName}
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+                <span className="text-[10px] text-muted-foreground">·</span>
+                <a
+                  href={`/api/projects/${projectId}/github/oauth/start?switch=1`}
+                  className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors"
+                  title="Re-authorize with a different GitHub account"
+                >
+                  Switch account
+                </a>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-1.5">

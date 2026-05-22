@@ -195,10 +195,19 @@ router.get(
         host: req.get("host") ?? "",
         projectId,
       });
+      // When ?switch=1 is passed, force GitHub to re-show the account picker
+      // rather than silently re-using the currently signed-in browser session.
+      const switchAccount =
+        req.query.switch === "1" ||
+        req.query.switch === "true" ||
+        req.query.prompt === "select_account";
+      const loginHint = typeof req.query.login === "string" ? req.query.login : undefined;
       const url = buildAuthorizeUrl({
         clientId: config.clientId,
         redirectUri,
         state,
+        prompt: switchAccount ? "select_account" : undefined,
+        login: loginHint,
       });
       res.redirect(302, url);
     } catch (err) {

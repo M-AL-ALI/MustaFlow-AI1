@@ -100,6 +100,8 @@ export function buildAuthorizeUrl(args: {
   redirectUri: string;
   state: string;
   scope?: string;
+  prompt?: string;
+  login?: string;
 }): string {
   const params = new URLSearchParams({
     client_id: args.clientId,
@@ -108,6 +110,8 @@ export function buildAuthorizeUrl(args: {
     state: args.state,
     allow_signup: "true",
   });
+  if (args.prompt) params.set("prompt", args.prompt);
+  if (args.login) params.set("login", args.login);
   return `${GITHUB_AUTHORIZE_URL}?${params.toString()}`;
 }
 
