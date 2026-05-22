@@ -14,6 +14,12 @@ import { getAuth } from "@clerk/express";
 import { logger } from "../lib/logger";
 import { runCveAudit } from "../lib/checks/cve-scanner";
 import { getCveScanStatus, recordScanResult, acknowledgeNewFindings } from "../lib/cve-scheduler";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { randomUUID } from "crypto";
+import path from "path";
+
+const execAsync = promisify(exec);
 
 const router: IRouter = Router();
 
@@ -385,6 +391,121 @@ router.get("/security/badge", async (req, res): Promise<void> => {
   } catch (err) {
     logger.error({ err, userId }, "Failed to fetch security badge count");
     res.status(500).json({ error: "Failed to fetch badge count" });
+  }
+});
+
+interface NpmLsPackage {
+  version?: string;
+  dependencies?: Record<string, NpmLsPackage>;
+}
+
+interface NpmLsOutput {
+  name?: string;
+  version?: string;
+  dependencies?: Record<string, NpmLsPackage>;
+}
+
+function collectPackages(
+  deps: Record<string, NpmLsPackage>,
+  seen: Map<string, string>,
+): void {
+  for (const [name, pkg] of Object.entries(deps)) {
+    if (!pkg.version) continue;
+    const key = `${name}@${pkg.version}`;
+    if (!seen.has(key)) {
+      seen.set(key, pkg.version);
+    }
+    if (pkg.dependencies) {
+      collectPackages(pkg.dependencies, seen);
+    }
+  }
+}
+
+/**
+ * GET /security/sbom
+ * Generate and download a CycloneDX 1.4 SBOM for the workspace dependencies.
+ */
+router.get("/security/sbom", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  try {
+    const workspaceRoot = path.resolve(process.cwd(), "../..");
+    const { stdout } = await execAsync("npm ls --json --all --omit=dev", {
+      cwd: workspaceRoot,
+      timeout: 30_000,
+    }).catch(async () => {
+      return execAsync("npm ls --json --all", { cwd: workspaceRoot, timeout: 30_000 }).catch(
+        async () => {
+          return execAsync("pnpm ls --json --depth=Infinity", {
+            cwd: workspaceRoot,
+            timeout: 30_000,
+          });
+        },
+      );
+    });
+
+    let parsed: NpmLsOutput | NpmLsOutput[] = {};
+    try {
+      parsed = JSON.parse(stdout) as NpmLsOutput | NpmLsOutput[];
+    } catch {
+      logger.warn("SBOM: Could not parse npm ls output, using empty dependency list");
+    }
+
+    const seen = new Map<string, string>();
+
+    const roots = Array.isArray(parsed) ? parsed : [parsed];
+    for (const root of roots) {
+      if (root.dependencies) {
+        collectPackages(root.dependencies, seen);
+      }
+    }
+
+    const components = [...seen.entries()].map(([nameAtVersion, version]) => {
+      const name = nameAtVersion.slice(0, nameAtVersion.lastIndexOf("@"));
+      const safeName = name.startsWith("@") ? name : name;
+      return {
+        type: "library",
+        name,
+        version,
+        purl: `pkg:npm/${encodeURIComponent(safeName)}@${encodeURIComponent(version)}`,
+      };
+    });
+
+    components.sort((a, b) => a.name.localeCompare(b.name));
+
+    const sbom = {
+      bomFormat: "CycloneDX",
+      specVersion: "1.4",
+      serialNumber: `urn:uuid:${randomUUID()}`,
+      version: 1,
+      metadata: {
+        timestamp: new Date().toISOString(),
+        tools: [
+          {
+            vendor: "MustaFlow",
+            name: "MustaFlow SBOM Generator",
+            version: "1.0.0",
+          },
+        ],
+        component: {
+          type: "application",
+          name: "mustaflow",
+          version: "1.0.0",
+        },
+      },
+      components,
+    };
+
+    const filename = `mustaflow-sbom-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "application/json");
+    res.json(sbom);
+  } catch (err) {
+    logger.error({ err }, "SBOM generation failed");
+    res.status(500).json({ error: "SBOM generation failed" });
   }
 });
 

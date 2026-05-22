@@ -43,6 +43,7 @@ import {
   Package,
   ExternalLink,
   Ban,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -759,6 +760,15 @@ function CvePanel() {
       })
     : null;
 
+  const handleDownloadSbom = () => {
+    const a = document.createElement("a");
+    a.href = "/api/security/sbom";
+    a.download = `mustaflow-sbom-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -771,20 +781,32 @@ function CvePanel() {
             </span>
           )}
         </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground shrink-0"
-          onClick={() => runScan()}
-          disabled={isScanning}
-        >
-          {isScanning ? (
-            <RefreshCw className="h-3 w-3 animate-spin" />
-          ) : (
-            <RefreshCw className="h-3 w-3" />
-          )}
-          Re-scan
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground shrink-0"
+            onClick={handleDownloadSbom}
+            title="Download SBOM (CycloneDX JSON) for compliance audits"
+          >
+            <Download className="h-3 w-3" />
+            Download SBOM
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground shrink-0"
+            onClick={() => runScan()}
+            disabled={isScanning}
+          >
+            {isScanning ? (
+              <RefreshCw className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
+            Re-scan
+          </Button>
+        </div>
       </div>
 
       {formattedLastScan && (

@@ -318,6 +318,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /security/sbom:
+    get:
+      operationId: downloadSbom
+      tags: [security]
+      summary: Download a CycloneDX SBOM listing all workspace dependencies for compliance audits.
+      responses:
+        "200":
+          description: CycloneDX JSON SBOM document (attachment download)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SbomDocument"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: SBOM generation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/generate-image:
     post:
       operationId: generateImage
@@ -4513,6 +4538,58 @@ components:
           items:
             $ref: "#/components/schemas/CveFinding"
         total: { type: integer }
+
+    SbomComponent:
+      type: object
+      required: [type, name, version, purl]
+      properties:
+        type: { type: string }
+        name: { type: string }
+        version: { type: string }
+        purl: { type: string }
+
+    SbomMetadataComponent:
+      type: object
+      required: [type, name]
+      properties:
+        type: { type: string }
+        name: { type: string }
+        version: { type: string, nullable: true }
+
+    SbomMetadataTool:
+      type: object
+      required: [vendor, name, version]
+      properties:
+        vendor: { type: string }
+        name: { type: string }
+        version: { type: string }
+
+    SbomMetadata:
+      type: object
+      required: [timestamp, tools, component]
+      properties:
+        timestamp: { type: string, format: date-time }
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/SbomMetadataTool"
+        component:
+          $ref: "#/components/schemas/SbomMetadataComponent"
+
+    SbomDocument:
+      type: object
+      required: [bomFormat, specVersion, serialNumber, version, metadata, components]
+      properties:
+        bomFormat: { type: string }
+        specVersion: { type: string }
+        serialNumber: { type: string }
+        version: { type: integer }
+        metadata:
+          $ref: "#/components/schemas/SbomMetadata"
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/SbomComponent"
 
     SecurityFinding:
       type: object
