@@ -6913,6 +6913,13 @@ const SHORT_REACTIONS = new Set([
   "lol",
 ]);
 
+// Detect whether the message is phrased as a direct command/imperative
+// ("Fix the header", "Add login"). Only true when the very first word is a
+// build action verb — questions like "why isn't this fixed?" or "nothing is
+// fixed, why?" use the same vocabulary but are NOT imperatives.
+const STARTS_WITH_BUILD_IMPERATIVE =
+  /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge|deploy|publish|undo|rollback|retry|try\s+again)\b/i;
+
 function fastClassify(userPrompt: string): IntentResult | null {
   const trimmed = userPrompt.trim();
   if (!trimmed) return null;
@@ -6922,16 +6929,21 @@ function fastClassify(userPrompt: string): IntentResult | null {
     return { intent: "converse", confidence: 0.95 };
   }
 
-  // If the message contains an explicit build/change action verb, let the LLM decide
-  // (it might still be a question about that verb, e.g. "how do I add auth?").
-  const hasBuildVerb = BUILD_ACTION_VERBS.test(trimmed);
+  const isImperative = STARTS_WITH_BUILD_IMPERATIVE.test(trimmed);
 
-  // Short messages (<= 10 words) that are clearly questions and contain no build
-  // verb are reliably converse.
-  const wordCount = trimmed.split(/\s+/).length;
-  const looksLikeQuestion = trimmed.endsWith("?") || QUESTION_STARTERS.test(trimmed);
-  if (looksLikeQuestion && !hasBuildVerb && wordCount <= 12) {
+  // Strong signal: any message ending in "?" that is not a direct imperative
+  // is a question/conversation, regardless of length or vocabulary used
+  // inside it. ("Why isn't it fixed?", "Nothing changed, why?", "How do I
+  // make this work?") all → converse.
+  if (trimmed.endsWith("?") && !isImperative) {
     return { intent: "converse", confidence: 0.95 };
+  }
+
+  // Short messages that start with a question word (what/why/how/...) and
+  // are not direct imperatives are also reliably converse.
+  const wordCount = trimmed.split(/\s+/).length;
+  if (QUESTION_STARTERS.test(trimmed) && !isImperative && wordCount <= 20) {
+    return { intent: "converse", confidence: 0.9 };
   }
 
   return null;
