@@ -20,7 +20,7 @@ import {
 } from "@workspace/api-client-react";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { CodeEditorTab } from "./components/code-editor-tab";
-import { ChatHistory } from "./components/chat-history";
+import { ChatHistory, StreamingText } from "./components/chat-history";
 import { PageMapTab } from "./components/page-map-tab";
 import { Button } from "@/components/ui/button";
 import {
@@ -421,10 +421,10 @@ const ADVANCED_TABS = [
 const WORKSPACE_TABS = [...PRIMARY_TABS, ...ADVANCED_TABS];
 
 const QUICK_ACTIONS = [
+  "Explain how my app works",
   "Add a login page",
   "Make it mobile-friendly",
   "Add dark mode",
-  "Add smooth animations",
   "Fix the last error",
   "Add a contact form",
 ];
@@ -719,6 +719,8 @@ export default function ProjectWorkspacePage() {
   // Track whether the pending send is plan-mode so we can show the right indicator
   const pendingIsPlanRef = useRef(false);
   const [pendingIsPlan, setPendingIsPlan] = useState(false);
+  const pendingIsConverseRef = useRef(false);
+  const [pendingIsConverse, setPendingIsConverse] = useState(false);
   const seenPageMapEventIdsRef = useRef<Set<number>>(new Set());
   // Whether chat was scrolled to (or near) the bottom — controls auto-scroll behaviour
   const chatAtBottomRef = useRef(true);
@@ -938,7 +940,18 @@ export default function ProjectWorkspacePage() {
   const send = useCallback(
     (
       content: string,
-      opts?: { planMode?: boolean; background?: boolean; agentMode?: AgentMode },
+      opts?: {
+        planMode?: boolean;
+        background?: boolean;
+        agentMode?: AgentMode;
+        agentIntent?: "converse" | "plan" | "build";
+        attachments?: Array<{
+          kind: "image";
+          url: string;
+          alt?: string;
+          generated?: boolean;
+        }>;
+      },
     ) => {
       if (!content.trim()) return;
       setActiveTaskId(null);
@@ -947,8 +960,18 @@ export default function ProjectWorkspacePage() {
       if (opts?.background ?? runInBackground) setBackgroundPanelOpen(true);
       const effectiveMode = opts?.agentMode ?? agentMode;
       const effectivePlanMode = opts?.planMode ?? planMode;
+      const effectiveAgentIntent = opts?.agentIntent;
       pendingIsPlanRef.current = effectivePlanMode;
       setPendingIsPlan(effectivePlanMode);
+      // Local heuristic for display: show conversational indicator when content looks like a
+      // question or explicit agentIntent=converse. Does NOT affect server classification.
+      const converseKeywords =
+        /^(what|how|why|when|where|who|can you|tell me|explain|does|is there|will|should|could|help me|is it|are there|what is|what are|what does)/i;
+      const isLikelyConverse =
+        effectiveAgentIntent === "converse" ||
+        (converseKeywords.test(content.trim()) && !effectivePlanMode);
+      pendingIsConverseRef.current = isLikelyConverse;
+      setPendingIsConverse(isLikelyConverse);
       sendMessage.mutate(
         {
           id: projectId,
@@ -958,6 +981,10 @@ export default function ProjectWorkspacePage() {
             planMode: effectivePlanMode,
             background: opts?.background ?? runInBackground,
             agentIdentity,
+            ...(effectiveAgentIntent ? { agentIntent: effectiveAgentIntent } : {}),
+            ...(opts?.attachments && opts.attachments.length > 0
+              ? { attachments: opts.attachments }
+              : {}),
           },
         },
         {
@@ -965,6 +992,8 @@ export default function ProjectWorkspacePage() {
             setPendingBuildStartedAt(null);
             pendingIsPlanRef.current = false;
             setPendingIsPlan(false);
+            pendingIsConverseRef.current = false;
+            setPendingIsConverse(false);
             void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
             void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
             setTimeout(() => {
@@ -987,6 +1016,8 @@ export default function ProjectWorkspacePage() {
             setPendingBuildStartedAt(null);
             pendingIsPlanRef.current = false;
             setPendingIsPlan(false);
+            pendingIsConverseRef.current = false;
+            setPendingIsConverse(false);
           },
         },
       );
@@ -1475,13 +1506,21 @@ export default function ProjectWorkspacePage() {
                   className={cn(
                     "ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-medium",
                     sendMessage.isPending
-                      ? pendingIsPlan
-                        ? "bg-secondary/15 text-secondary"
-                        : "bg-primary/15 text-primary"
+                      ? pendingIsConverse
+                        ? "bg-blue-500/15 text-blue-400"
+                        : pendingIsPlan
+                          ? "bg-secondary/15 text-secondary"
+                          : "bg-primary/15 text-primary"
                       : "bg-green-500/15 text-green-400",
                   )}
                 >
-                  {sendMessage.isPending ? (pendingIsPlan ? "Planning…" : "Working…") : "Ready"}
+                  {sendMessage.isPending
+                    ? pendingIsConverse
+                      ? "Answering…"
+                      : pendingIsPlan
+                        ? "Planning…"
+                        : "Working…"
+                    : "Ready"}
                 </span>
                 <button
                   onClick={() => setShowChatHistory((v) => !v)}
@@ -1513,6 +1552,12 @@ export default function ProjectWorkspacePage() {
                       }
                     }}
                     onClose={() => setShowChatHistory(false)}
+                    onApplyCode={(code) =>
+                      send(`Apply this to my app:\n\`\`\`\n${code}\n\`\`\``, {
+                        agentIntent: "build",
+                        planMode: false,
+                      })
+                    }
                   />
                 </div>
               )}
@@ -1608,9 +1653,49 @@ export default function ProjectWorkspacePage() {
                                       : "bg-muted text-foreground rounded-bl-sm border border-border",
                                 )}
                               >
-                                <div className="whitespace-pre-wrap leading-relaxed">
-                                  {msg.content}
-                                </div>
+                                {msg.role === "assistant" && !isReport && !isError ? (
+                                  <StreamingText
+                                    content={msg.content}
+                                    messageId={msg.id}
+                                    animate={
+                                      msgIdx === visibleMsgs.length - 1 &&
+                                      !!(planPayload as { streaming?: boolean } | null | undefined)
+                                        ?.streaming
+                                    }
+                                    onApply={(code) =>
+                                      send(`Apply this to my app:\n\`\`\`\n${code}\n\`\`\``, {
+                                        agentIntent: "build",
+                                        planMode: false,
+                                      })
+                                    }
+                                  />
+                                ) : (
+                                  <div className="whitespace-pre-wrap leading-relaxed">
+                                    {msg.content}
+                                  </div>
+                                )}
+
+                                {/* Clarifying quick-reply chips — clickable in live chat */}
+                                {payloadKind === "clarifying" &&
+                                  !sendMessage.isPending &&
+                                  (() => {
+                                    const opts = (planPayload as { options?: string[] }).options;
+                                    if (!opts?.length) return null;
+                                    return (
+                                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                                        {opts.map((opt) => (
+                                          <button
+                                            key={opt}
+                                            onClick={() => send(opt)}
+                                            className="px-2.5 py-1 rounded-full text-[10px] border border-primary/30 bg-primary/8 text-primary hover:bg-primary/15 hover:border-primary/50 transition-colors font-medium"
+                                          >
+                                            {opt}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    );
+                                  })()}
+
                                 {isReport &&
                                   (() => {
                                     const rp = planPayload as {
@@ -1689,7 +1774,22 @@ export default function ProjectWorkspacePage() {
                     })()}
 
                     {sendMessage.isPending ? (
-                      pendingFeedTaskId !== null ? (
+                      pendingIsConverse ? (
+                        <div className="flex justify-start">
+                          <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
+                            <span className="flex gap-0.5">
+                              {[0, 1, 2].map((i) => (
+                                <span
+                                  key={i}
+                                  className="w-1 h-1 rounded-full bg-blue-400/60 animate-bounce"
+                                  style={{ animationDelay: `${i * 150}ms` }}
+                                />
+                              ))}
+                            </span>
+                            <span className="text-muted-foreground">Thinking…</span>
+                          </div>
+                        </div>
+                      ) : pendingFeedTaskId !== null ? (
                         <AgentThinkingBubble
                           projectId={projectId}
                           taskId={pendingFeedTaskId}
@@ -1739,11 +1839,30 @@ export default function ProjectWorkspacePage() {
                         {sendMessage.isPending ? (
                           <>
                             <span className="relative flex h-1.5 w-1.5 shrink-0">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
+                              <span
+                                className={cn(
+                                  "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                                  pendingIsConverse ? "bg-blue-400" : "bg-primary",
+                                )}
+                              />
+                              <span
+                                className={cn(
+                                  "relative inline-flex rounded-full h-1.5 w-1.5",
+                                  pendingIsConverse ? "bg-blue-400" : "bg-primary",
+                                )}
+                              />
                             </span>
-                            <span className="text-[10px] text-primary font-medium">
-                              {pendingIsPlan ? "Planning…" : "Building…"}
+                            <span
+                              className={cn(
+                                "text-[10px] font-medium",
+                                pendingIsConverse ? "text-blue-400" : "text-primary",
+                              )}
+                            >
+                              {pendingIsConverse
+                                ? "Answering…"
+                                : pendingIsPlan
+                                  ? "Planning…"
+                                  : "Building…"}
                             </span>
                           </>
                         ) : (
@@ -1835,9 +1954,9 @@ export default function ProjectWorkspacePage() {
                     variantMode={variantMode}
                     onVariantModeChange={setVariantMode}
                     disabled={sendMessage.isPending}
-                    onSingleSend={(content) => {
+                    onSingleSend={(content, _intent, attachments) => {
                       setPrompt("");
-                      send(content);
+                      send(content, attachments ? { attachments } : undefined);
                     }}
                     onBatchStarted={handleBatchStarted}
                     promptValue={prompt}

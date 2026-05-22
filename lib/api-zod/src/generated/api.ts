@@ -17,6 +17,65 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary Request a presigned URL for direct file upload to GCS.
+ */
+
+
+
+
+
+export const RequestUploadUrlBody = zod.object({
+  "name": zod.string().min(1),
+  "size": zod.number().min(1),
+  "contentType": zod.string().min(1)
+})
+
+
+
+
+
+
+export const RequestUploadUrlResponse = zod.object({
+  "uploadURL": zod.string().url(),
+  "objectPath": zod.string(),
+  "metadata": zod.object({
+  "name": zod.string().min(1),
+  "size": zod.number().min(1),
+  "contentType": zod.string().min(1)
+}).optional()
+})
+
+
+/**
+ * @summary Generate an image with gpt-image-1 and attach it to the project.
+ */
+export const GenerateImageParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+
+
+export const GenerateImageBody = zod.object({
+  "prompt": zod.string().min(1),
+  "size": zod.enum(['1024x1024', '1536x1024', '1024x1536']).optional().describe('Image dimensions. Defaults to 1024x1024.'),
+  "savePath": zod.string().optional().describe('Optional project file path to also save the image (e.g. assets\/hero.png). Auto-generated if omitted.')
+})
+
+export const GenerateImageResponse = zod.object({
+  "attachment": zod.object({
+  "kind": zod.enum(['image']),
+  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "width": zod.number().optional(),
+  "height": zod.number().optional(),
+  "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
+  "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
+})
+})
+
+
+/**
  * @summary List user workspaces (auto-creates default if empty)
  */
 export const ListWorkspacesResponseItem = zod.object({
@@ -316,6 +375,15 @@ export const ListMessagesResponseItem = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "planMode": zod.boolean(),
   "plan": zod.record(zod.string(), zod.unknown()).nullish(),
+  "attachments": zod.array(zod.object({
+  "kind": zod.enum(['image']),
+  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "width": zod.number().optional(),
+  "height": zod.number().optional(),
+  "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
+  "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
+})).nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListMessagesResponse = zod.array(ListMessagesResponseItem)
@@ -336,7 +404,17 @@ export const SendMessageBody = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "planMode": zod.boolean(),
   "background": zod.boolean().optional(),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.')
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.'),
+  "agentIntent": zod.enum(['converse', 'plan', 'build']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection.'),
+  "attachments": zod.array(zod.object({
+  "kind": zod.enum(['image']),
+  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "width": zod.number().optional(),
+  "height": zod.number().optional(),
+  "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
+  "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
+})).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.')
 })
 
 export const SendMessageResponse = zod.object({
@@ -348,6 +426,15 @@ export const SendMessageResponse = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "planMode": zod.boolean(),
   "plan": zod.record(zod.string(), zod.unknown()).nullish(),
+  "attachments": zod.array(zod.object({
+  "kind": zod.enum(['image']),
+  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "width": zod.number().optional(),
+  "height": zod.number().optional(),
+  "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
+  "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
+})).nullish(),
   "createdAt": zod.coerce.date()
 }),
   "assistantMessage": zod.object({
@@ -358,8 +445,18 @@ export const SendMessageResponse = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "planMode": zod.boolean(),
   "plan": zod.record(zod.string(), zod.unknown()).nullish(),
+  "attachments": zod.array(zod.object({
+  "kind": zod.enum(['image']),
+  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "width": zod.number().optional(),
+  "height": zod.number().optional(),
+  "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
+  "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
+})).nullish(),
   "createdAt": zod.coerce.date()
-})
+}),
+  "detectedIntent": zod.enum(['converse', 'plan', 'build']).optional().describe('The intent auto-detected or explicitly provided for this exchange.')
 })
 
 
@@ -390,7 +487,7 @@ export const ListTasksResponseItem = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -436,7 +533,7 @@ export const CreateTaskParams = zod.object({
 
 export const CreateTaskBody = zod.object({
   "title": zod.string().min(1),
-  "kind": zod.enum(['main', 'background', 'plan']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
   "prompt": zod.string().optional()
 })
 
@@ -453,7 +550,7 @@ export const CancelTaskResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -498,7 +595,7 @@ export const ApplyTaskStagingResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -543,7 +640,7 @@ export const DiscardTaskStagingResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -609,7 +706,7 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),

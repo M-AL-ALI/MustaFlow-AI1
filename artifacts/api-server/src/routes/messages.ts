@@ -16,11 +16,12 @@ import {
   SendMessageResponse,
 } from "@workspace/api-zod";
 import { type AgentMode } from "../lib/ai";
-import { runPlanPipeline } from "../lib/builder";
-import type { ConversationTurn } from "../lib/builder";
+import { runPlanPipeline, runConversePipeline, runIntentClassifierPipeline } from "../lib/builder";
+import type { ConversationTurn, ConverseImageAttachment } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
 import { enqueueJob, runJob, resolveAgentIdentity, type AgentIdentity } from "../lib/jobs";
 import { logger } from "../lib/logger";
+import { fetchAttachmentAsDataUri } from "./images";
 
 const router: IRouter = Router();
 
@@ -67,8 +68,19 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     return;
   }
 
-  const { content, agentMode, planMode, agentIdentity: explicitAgentIdentity } = parsed.data;
+  const {
+    content,
+    agentMode,
+    planMode,
+    agentIdentity: explicitAgentIdentity,
+    agentIntent: explicitAgentIntent,
+    attachments: rawAttachments,
+  } = parsed.data;
   const mode = agentMode as AgentMode;
+  const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
+  const imageAttachments = attachments.filter(
+    (a) => a.kind === "image" && typeof a.url === "string",
+  );
   // Foreground requests that were queued by aiBuilderLimiter physically wait
   // in-line (HTTP connection held open) until a slot frees, then run here
   // synchronously. Only explicit background=true from the client triggers
@@ -103,6 +115,43 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     }))
     .slice(-8);
 
+  // Intent detection — resolve the routing intent for this message.
+  // Priority: explicit agentIntent override > planMode flag > auto-classifier.
+  let resolvedIntent: "converse" | "plan" | "build" = "build";
+  let intentConfidence = 1.0;
+
+  if (
+    explicitAgentIntent === "converse" ||
+    explicitAgentIntent === "plan" ||
+    explicitAgentIntent === "build"
+  ) {
+    // Explicit client override takes highest priority — always honor it,
+    // even when the Plan Mode toggle is on (e.g. "Apply to app" must build).
+    resolvedIntent = explicitAgentIntent;
+  } else if (planMode) {
+    resolvedIntent = "plan";
+  } else {
+    // Run lightweight auto-classifier (gpt-5-nano) to detect intent
+    const hasFiles = currentProjectFiles.length > 0;
+    try {
+      const classified = await runIntentClassifierPipeline(content, conversationHistory, hasFiles);
+      resolvedIntent = classified.intent;
+      intentConfidence = classified.confidence;
+    } catch (err) {
+      logger.warn({ err }, "Intent classifier failed, defaulting to build");
+      resolvedIntent = hasFiles ? "build" : "converse";
+    }
+    // Route ALL ambiguous requests to the clarifying pipeline regardless of primary intent.
+    // This prevents accidental build/plan runs when the user's meaning is unclear.
+    if (intentConfidence < 0.7) {
+      resolvedIntent = "converse"; // will be handled with isAmbiguous=true
+    }
+  }
+
+  // Effective planMode — true when explicitly toggled OR when intent classifier auto-routes to plan.
+  // This ensures assistant messages are stored with planMode=true so the plan-card UI renders.
+  const effectivePlanMode = planMode || resolvedIntent === "plan";
+
   // Save user message
   const [userMessage] = await db
     .insert(chatMessagesTable)
@@ -111,7 +160,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       role: "user",
       content,
       agentMode: mode,
-      planMode,
+      planMode: effectivePlanMode,
+      attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
     })
     .returning();
   if (!userMessage) {
@@ -123,7 +173,73 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   // eslint-disable-next-line no-useless-assignment
   let plan: Record<string, unknown> | null = null;
 
-  if (planMode) {
+  if (resolvedIntent === "converse") {
+    // ── Conversational path ─────────────────────────────────────────────────
+    // Creates a lightweight task record (kind="converse") for history tracking.
+    // No files are written, no build report is generated.
+    const isAmbiguous = intentConfidence < 0.7;
+    const [converseTask] = await db
+      .insert(agentTasksTable)
+      .values({
+        projectId: project.id,
+        title: `Chat: ${content.slice(0, 60)}`,
+        kind: "converse",
+        status: "building",
+        prompt: content,
+        agentIdentity: "main",
+      })
+      .returning();
+
+    const taskId = converseTask?.id ?? 0;
+
+    try {
+      const visionParts: ConverseImageAttachment[] = [];
+      for (const att of imageAttachments) {
+        const dataUri = await fetchAttachmentAsDataUri(att.url);
+        if (dataUri) visionParts.push({ dataUri, alt: att.alt });
+      }
+
+      const converseResult = await runConversePipeline({
+        projectName: project.name,
+        userPrompt: content,
+        conversationHistory,
+        currentFiles: currentProjectFiles,
+        agentMode: mode,
+        isAmbiguous,
+        imageAttachments: visionParts.length > 0 ? visionParts : undefined,
+      });
+
+      if (converseTask) {
+        await db
+          .update(agentTasksTable)
+          .set({ status: "completed", result: converseResult.markdown, completedAt: sql`now()` })
+          .where(eq(agentTasksTable.id, converseTask.id));
+      }
+
+      assistantContent = converseResult.markdown;
+      if (converseResult.clarifying) {
+        plan = {
+          kind: "clarifying",
+          question: converseResult.clarifying.question,
+          options: converseResult.clarifying.options,
+          taskId,
+          streaming: true,
+        } as unknown as Record<string, unknown>;
+      } else {
+        plan = { kind: "converse", taskId, streaming: true } as unknown as Record<string, unknown>;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Conversation failed";
+      if (converseTask) {
+        await db
+          .update(agentTasksTable)
+          .set({ status: "failed", result: msg, completedAt: sql`now()` })
+          .where(eq(agentTasksTable.id, converseTask.id));
+      }
+      assistantContent = `I wasn't able to answer that: ${msg}`;
+      plan = { kind: "error", message: msg } as unknown as Record<string, unknown>;
+    }
+  } else if (resolvedIntent === "plan") {
     // Create a task row so plan mode is tracked in Build History with live events
     const [planTask] = await db
       .insert(agentTasksTable)
@@ -284,7 +400,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       role: "assistant",
       content: assistantContent,
       agentMode: mode,
-      planMode,
+      planMode: effectivePlanMode,
       plan: plan ?? undefined,
     })
     .returning();
@@ -306,6 +422,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     SendMessageResponse.parse({
       userMessage,
       assistantMessage,
+      detectedIntent: resolvedIntent,
     }),
   );
 });

@@ -412,6 +412,27 @@ export interface ProjectsSummary {
   recent: Project[];
 }
 
+export type ChatAttachmentKind = typeof ChatAttachmentKind[keyof typeof ChatAttachmentKind];
+
+
+export const ChatAttachmentKind = {
+  image: 'image',
+} as const;
+
+export interface ChatAttachment {
+  kind: ChatAttachmentKind;
+  /** Object path served via /api/storage{objectPath} (e.g. /objects/uploads/uuid). */
+  url: string;
+  /** Alt text or, for AI-generated images, the source prompt. */
+  alt?: string;
+  width?: number;
+  height?: number;
+  /** True when this image was produced by the AI image-generation pipeline. */
+  generated?: boolean;
+  /** Project file path the generated image was also saved to (e.g. assets/generated/img-123.png). */
+  savedPath?: string;
+}
+
 export type ChatMessageRole = typeof ChatMessageRole[keyof typeof ChatMessageRole];
 
 
@@ -445,6 +466,8 @@ export interface ChatMessage {
   planMode: boolean;
   /** @nullable */
   plan?: ChatMessagePlan;
+  /** @nullable */
+  attachments?: ChatAttachment[] | null;
   createdAt: string;
 }
 
@@ -470,6 +493,18 @@ export const ChatMessageInputAgentIdentity = {
   main: 'main',
 } as const;
 
+/**
+ * Optional explicit intent override. If provided, skips server-side intent detection.
+ */
+export type ChatMessageInputAgentIntent = typeof ChatMessageInputAgentIntent[keyof typeof ChatMessageInputAgentIntent];
+
+
+export const ChatMessageInputAgentIntent = {
+  converse: 'converse',
+  plan: 'plan',
+  build: 'build',
+} as const;
+
 export interface ChatMessageInput {
   /** @minLength 1 */
   content: string;
@@ -478,11 +513,29 @@ export interface ChatMessageInput {
   background?: boolean;
   /** Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically. */
   agentIdentity?: ChatMessageInputAgentIdentity;
+  /** Optional explicit intent override. If provided, skips server-side intent detection. */
+  agentIntent?: ChatMessageInputAgentIntent;
+  /** Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model. */
+  attachments?: ChatAttachment[];
 }
+
+/**
+ * The intent auto-detected or explicitly provided for this exchange.
+ */
+export type ChatExchangeDetectedIntent = typeof ChatExchangeDetectedIntent[keyof typeof ChatExchangeDetectedIntent];
+
+
+export const ChatExchangeDetectedIntent = {
+  converse: 'converse',
+  plan: 'plan',
+  build: 'build',
+} as const;
 
 export interface ChatExchange {
   userMessage: ChatMessage;
   assistantMessage: ChatMessage;
+  /** The intent auto-detected or explicitly provided for this exchange. */
+  detectedIntent?: ChatExchangeDetectedIntent;
 }
 
 export type TaskEventEventType = typeof TaskEventEventType[keyof typeof TaskEventEventType];
@@ -519,6 +572,7 @@ export const AgentTaskKind = {
   main: 'main',
   background: 'background',
   plan: 'plan',
+  converse: 'converse',
 } as const;
 
 export type AgentTaskStatus = typeof AgentTaskStatus[keyof typeof AgentTaskStatus];
@@ -631,6 +685,7 @@ export const AgentTaskInputKind = {
   main: 'main',
   background: 'background',
   plan: 'plan',
+  converse: 'converse',
 } as const;
 
 export interface AgentTaskInput {
@@ -1720,6 +1775,46 @@ export interface DbSnapshotRestoreResult {
   errors: number;
   /** True when the restored snapshot was partial (row-limited). Some data may have been missing. */
   isPartial?: boolean;
+}
+
+export interface UploadUrlRequest {
+  /** @minLength 1 */
+  name: string;
+  /** @minimum 1 */
+  size: number;
+  /** @minLength 1 */
+  contentType: string;
+}
+
+export interface UploadUrlResponse {
+  uploadURL: string;
+  objectPath: string;
+  metadata?: UploadUrlRequest;
+}
+
+/**
+ * Image dimensions. Defaults to 1024x1024.
+ */
+export type GenerateImageInputSize = typeof GenerateImageInputSize[keyof typeof GenerateImageInputSize];
+
+
+export const GenerateImageInputSize = {
+  '1024x1024': '1024x1024',
+  '1536x1024': '1536x1024',
+  '1024x1536': '1024x1536',
+} as const;
+
+export interface GenerateImageInput {
+  /** @minLength 1 */
+  prompt: string;
+  /** Image dimensions. Defaults to 1024x1024. */
+  size?: GenerateImageInputSize;
+  /** Optional project file path to also save the image (e.g. assets/hero.png). Auto-generated if omitted. */
+  savePath?: string;
+}
+
+export interface GenerateImageResponse {
+  attachment: ChatAttachment;
 }
 
 export type DeleteWorkspace200 = {

@@ -13,4 +13,5 @@ export const AgentTaskInputKind = {
   main: 'main',
   background: 'background',
   plan: 'plan',
+  converse: 'converse',
 } as const;

@@ -5713,6 +5713,208 @@ export async function runPythonRefinePipeline(args: {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Intent classification — fast single-shot to detect converse / plan / build
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type IntentResult = {
+  intent: "converse" | "plan" | "build";
+  confidence: number;
+};
+
+const INTENT_CLASSIFIER_SYSTEM = `You are a router for an AI app-builder chat. Given the user's latest message and recent conversation history, classify the user's intent into exactly one of:
+
+- "converse": The user is asking a question, requesting an explanation, asking for advice, or having a general conversation about their app. Examples: "How does my auth flow work?", "What's the difference between X and Y?", "Explain the file structure", "What does this code do?"
+- "plan": The user wants a structured plan, architecture overview, or design spec before building. Examples: "Plan me a dashboard", "Design the data model", "What should I build first?", "Create an architecture plan for..."
+- "build": The user wants to create, modify, add, remove, or fix something in the app. Examples: "Add a dark mode toggle", "Fix the login bug", "Create a settings page", "Remove the sidebar", "Make it mobile-friendly"
+
+Respond with ONLY valid JSON: {"intent": "converse"|"plan"|"build", "confidence": 0.0-1.0}
+
+confidence should reflect how certain you are. Use < 0.7 only when the request is genuinely ambiguous between two intents.`;
+
+export async function runIntentClassifierPipeline(
+  userPrompt: string,
+  conversationHistory: ConversationTurn[],
+  hasFiles: boolean,
+): Promise<IntentResult> {
+  try {
+    const recentHistory = conversationHistory.slice(-4);
+    const historyText =
+      recentHistory.length > 0
+        ? recentHistory.map((t) => `${t.role}: ${t.content}`).join("\n")
+        : "";
+
+    const userContent = [
+      historyText ? `Recent conversation:\n${historyText}` : "",
+      `Current message: ${userPrompt}`,
+      !hasFiles ? "Note: This project has no files yet (no app built)." : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-5-nano",
+      max_completion_tokens: 60,
+      messages: [
+        { role: "system", content: INTENT_CLASSIFIER_SYSTEM },
+        { role: "user", content: userContent },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
+    const parsed = JSON.parse(raw) as { intent?: string; confidence?: number };
+    const intent =
+      parsed.intent === "converse" || parsed.intent === "plan" || parsed.intent === "build"
+        ? parsed.intent
+        : hasFiles
+          ? "build"
+          : "converse";
+    const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0.8;
+    return { intent, confidence };
+  } catch (err) {
+    logger.warn({ err }, "Intent classifier failed, defaulting to build");
+    return { intent: hasFiles ? "build" : "converse", confidence: 0.8 };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Converse pipeline — answers questions / gives advice without modifying files
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ConverseResult = {
+  markdown: string;
+  clarifying?: {
+    question: string;
+    options: string[];
+  };
+};
+
+const CONVERSE_SYSTEM_PROMPT = `You are the MustaFlow AI assistant for a web app builder. You help users understand their app, answer questions, give advice, and explain code — but you do NOT modify any files in this mode.
+
+Your responses:
+- Are clear, concise, and in plain Markdown (use headings, lists, bold, code blocks as appropriate)
+- Reference the user's actual files and code when relevant
+- Suggest next steps when helpful, prefixed with a clear "Next steps:" heading
+- Stay friendly and practical — you're a helpful co-pilot, not just a code generator
+- Never produce JSON, build reports, or file modifications in this mode
+- Keep responses focused — 2-4 paragraphs for explanations, shorter for simple questions`;
+
+const CLARIFY_SYSTEM_PROMPT = `You are the MustaFlow AI assistant. The user's request is ambiguous — it could mean different things. Ask ONE short, friendly clarifying question and provide 2-3 specific quick-reply options.
+
+Respond with ONLY valid JSON: {"question": string, "options": string[]}
+- question: a single short sentence asking for clarification
+- options: 2-3 specific action chips the user can click (keep each under 8 words)`;
+
+export interface ConverseImageAttachment {
+  dataUri: string;
+  alt?: string;
+}
+
+export async function runConversePipeline(args: {
+  projectName: string;
+  userPrompt: string;
+  conversationHistory: ConversationTurn[];
+  currentFiles: { path: string; content: string; mimeType: string }[];
+  agentMode: AgentMode;
+  isAmbiguous?: boolean;
+  imageAttachments?: ConverseImageAttachment[];
+}): Promise<ConverseResult> {
+  const {
+    projectName,
+    userPrompt,
+    conversationHistory,
+    currentFiles,
+    agentMode,
+    isAmbiguous,
+    imageAttachments,
+  } = args;
+
+  if (isAmbiguous) {
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5-nano",
+        max_completion_tokens: 200,
+        messages: [
+          { role: "system", content: CLARIFY_SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: { type: "json_object" },
+      });
+      const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
+      const parsed = JSON.parse(raw) as { question?: string; options?: unknown[] };
+      const question =
+        typeof parsed.question === "string" && parsed.question.trim()
+          ? parsed.question.trim()
+          : "Could you clarify what you'd like to do?";
+      const options = Array.isArray(parsed.options)
+        ? parsed.options.filter((o): o is string => typeof o === "string").slice(0, 3)
+        : ["Explain how it works", "Build something new", "Create a plan first"];
+      return { markdown: question, clarifying: { question, options } };
+    } catch (err) {
+      logger.warn({ err }, "Clarify call failed, falling through to converse");
+    }
+  }
+
+  // Build a compact file context: path + first 400 chars of content
+  const fileContext =
+    currentFiles.length > 0
+      ? currentFiles
+          .slice(0, 12)
+          .map((f) => {
+            const snippet = f.content.slice(0, 400).replace(/\n/g, " ").trim();
+            return `- ${f.path}: ${snippet}${f.content.length > 400 ? "…" : ""}`;
+          })
+          .join("\n")
+      : "No files yet — the app hasn't been built.";
+
+  const model = modelFor(agentMode);
+
+  type TextPart = { type: "text"; text: string };
+  type ImagePart = { type: "image_url"; image_url: { url: string } };
+  type ChatMsg =
+    | { role: "system" | "assistant"; content: string }
+    | { role: "user"; content: string | Array<TextPart | ImagePart> };
+
+  const messages: ChatMsg[] = [
+    { role: "system", content: CONVERSE_SYSTEM_PROMPT },
+    {
+      role: "system",
+      content: `Project: "${projectName}"\n\nCurrent files:\n${fileContext}`,
+    },
+  ];
+
+  for (const turn of conversationHistory.slice(-6)) {
+    messages.push({ role: turn.role, content: turn.content });
+  }
+
+  if (imageAttachments && imageAttachments.length > 0) {
+    const parts: Array<TextPart | ImagePart> = [{ type: "text", text: userPrompt }];
+    for (const att of imageAttachments) {
+      parts.push({ type: "image_url", image_url: { url: att.dataUri } });
+    }
+    messages.push({ role: "user", content: parts });
+  } else {
+    messages.push({ role: "user", content: userPrompt });
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model,
+      max_completion_tokens: 1200,
+      // OpenAI types accept multimodal content; our local union mirrors that shape.
+      messages: messages as Parameters<typeof openai.chat.completions.create>[0]["messages"],
+    });
+    const markdown =
+      response.choices[0]?.message?.content?.trim() ??
+      "I couldn't generate a response. Please try again.";
+    return { markdown };
+  } catch (err) {
+    logger.error({ err }, "Converse pipeline failed");
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
 export function normalizePath(p: string): string {
   let clean = p.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
   if (clean.includes("..")) {

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Send,
   Plus,
@@ -9,6 +9,7 @@ import {
   Paperclip,
   Mic,
   Paintbrush2,
+  Image as ImageIcon,
   Layers2,
   Navigation,
   Cpu,
@@ -55,6 +56,13 @@ interface QueueRow {
   text: string;
 }
 
+export type ComposerAttachment = {
+  kind: "image";
+  url: string;
+  alt?: string;
+  generated?: boolean;
+};
+
 interface QueueComposerProps {
   projectId: number;
   agentMode: AgentMode;
@@ -66,7 +74,11 @@ interface QueueComposerProps {
   variantMode: boolean;
   onVariantModeChange: (v: boolean) => void;
   disabled: boolean;
-  onSingleSend: (content: string) => void;
+  onSingleSend: (
+    content: string,
+    agentIntent?: "converse" | "plan" | "build",
+    attachments?: ComposerAttachment[],
+  ) => void;
   onBatchStarted: (batchId: string, totalCount: number) => void;
   promptValue?: string;
   onPromptValueChange?: (v: string) => void;
@@ -140,6 +152,123 @@ export function QueueComposer({
   );
 
   const [rows, setRows] = useState<QueueRow[]>([{ id: crypto.randomUUID(), text: "" }]);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [imagePanelOpen, setImagePanelOpen] = useState(false);
+  const [generatingImage, setGeneratingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const uploadFile = useCallback(async (file: File): Promise<ComposerAttachment | null> => {
+    if (!file.type.startsWith("image/")) return null;
+    setUploadingCount((c) => c + 1);
+    try {
+      const meta = await fetch("/api/storage/uploads/request-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
+      });
+      if (!meta.ok) throw new Error("Failed to request upload URL");
+      const { uploadURL, objectPath } = (await meta.json()) as {
+        uploadURL: string;
+        objectPath: string;
+      };
+      const put = await fetch(uploadURL, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!put.ok) throw new Error("Upload failed");
+      return { kind: "image", url: objectPath, alt: file.name };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Image upload failed:", err);
+      return null;
+    } finally {
+      setUploadingCount((c) => Math.max(0, c - 1));
+    }
+  }, []);
+
+  const handleFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      if (arr.length === 0) return;
+      const results = await Promise.all(arr.map((f) => uploadFile(f)));
+      const ok = results.filter((r): r is ComposerAttachment => r !== null);
+      if (ok.length > 0) setAttachments((prev) => [...prev, ...ok]);
+    },
+    [uploadFile],
+  );
+
+  const handlePaste = useCallback(
+    async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const files: File[] = [];
+      for (const it of items) {
+        if (it.kind === "file") {
+          const f = it.getAsFile();
+          if (f && f.type.startsWith("image/")) files.push(f);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        await handleFiles(files);
+      }
+    },
+    [handleFiles],
+  );
+
+  const removeAttachment = useCallback((idx: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+
+  const handleGenerateImage = useCallback(async () => {
+    const p = imagePrompt.trim();
+    if (!p || generatingImage) return;
+    setGeneratingImage(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/generate-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ prompt: p }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? "Image generation failed");
+      }
+      const data = (await res.json()) as {
+        attachment: { kind: "image"; url: string; alt?: string; generated?: boolean };
+      };
+      setAttachments((prev) => [...prev, data.attachment]);
+      setImagePrompt("");
+      setImagePanelOpen(false);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Image generation failed:", err);
+    } finally {
+      setGeneratingImage(false);
+    }
+  }, [imagePrompt, generatingImage, projectId]);
+
+  // Client-side intent heuristic — fast local keyword scan for immediate UI feedback.
+  // The authoritative routing still happens server-side; this is display-only.
+  const clientIntent = useMemo((): "converse" | "plan" | "build" | null => {
+    const text = rows[0]?.text?.trim() ?? "";
+    if (text.length < 4) return null;
+    const lower = text.toLowerCase();
+    const questionWords =
+      /^(what|how|why|where|when|who|which|can you|could you|do you|is there|explain|tell me|describe|show me|what does|what is|why does|does this)/;
+    if (questionWords.test(lower) || lower.endsWith("?")) return "converse";
+    const planWords =
+      /\b(plan|design|architect|outline|structure|diagram|blueprint|strategy|roadmap|spec|prototype)\b/;
+    if (planWords.test(lower)) return "plan";
+    const buildWords =
+      /\b(add|build|create|make|implement|fix|remove|delete|update|change|refactor|style|integrate|connect|deploy|enable|disable|install|generate|write)\b/;
+    if (buildWords.test(lower)) return "build";
+    return null;
+  }, [rows]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragItemId = useRef<string | null>(null);
@@ -228,9 +357,11 @@ export function QueueComposer({
 
     if (messages.length === 1) {
       const text = messages[0]!;
+      const pending = attachments;
       setRows([{ id: crypto.randomUUID(), text: "" }]);
+      setAttachments([]);
       if (onPromptValueChange) onPromptValueChange("");
-      onSingleSend(text);
+      onSingleSend(text, undefined, pending.length > 0 ? pending : undefined);
       return;
     }
 
@@ -265,6 +396,7 @@ export function QueueComposer({
     onSingleSend,
     onBatchStarted,
     onPromptValueChange,
+    attachments,
   ]);
 
   const handleKeyDown = useCallback(
@@ -373,12 +505,13 @@ export function QueueComposer({
                       ? "Describe your app — I'll create a plan first…"
                       : isMultiRow
                         ? "Task 1…"
-                        : "Describe what to build or change…"
+                        : "Ask anything — I'll answer, plan, or build…"
                     : `Task ${idx + 1}…`
                 }
                 rows={isMultiRow ? 1 : 2}
                 className="flex-1 bg-transparent px-4 pt-2.5 pb-1.5 text-sm resize-none focus:outline-none text-foreground placeholder:text-muted-foreground/60"
                 onKeyDown={(e) => handleKeyDown(e, row.id)}
+                onPaste={idx === 0 ? handlePaste : undefined}
                 title={
                   isMultiRow
                     ? "Shift+Enter to add task · ⌘↩ to send all"
@@ -407,15 +540,118 @@ export function QueueComposer({
             </button>
           )}
 
-          <div className="h-px bg-border/40 mx-4" />
+          {(attachments.length > 0 || uploadingCount > 0) && (
+            <div className="px-3 pt-1.5 flex flex-wrap gap-1.5">
+              {attachments.map((a, i) => {
+                const src = a.url.startsWith("/objects/") ? `/api/storage${a.url}` : a.url;
+                return (
+                  <div
+                    key={`${a.url}-${i}`}
+                    className="relative group rounded-md overflow-hidden border border-border bg-background/60"
+                  >
+                    <img
+                      src={src}
+                      alt={a.alt ?? "attachment"}
+                      className="block h-14 w-14 object-cover"
+                    />
+                    {a.generated && (
+                      <span className="absolute bottom-0 left-0 right-0 text-[8px] font-bold text-center bg-primary/80 text-primary-foreground py-0.5 leading-none">
+                        AI
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(i)}
+                      className="absolute top-0 right-0 w-4 h-4 flex items-center justify-center bg-background/80 text-muted-foreground hover:text-destructive rounded-bl-md"
+                      title="Remove"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                );
+              })}
+              {uploadingCount > 0 && (
+                <div className="h-14 w-14 flex items-center justify-center rounded-md border border-dashed border-border bg-background/40 text-[9px] text-muted-foreground">
+                  Uploading…
+                </div>
+              )}
+            </div>
+          )}
+          {imagePanelOpen && (
+            <div className="px-3 pt-1.5">
+              <div className="flex items-center gap-1.5 bg-background/60 border border-border rounded-lg px-2 py-1.5">
+                <ImageIcon className="h-3.5 w-3.5 text-secondary shrink-0" />
+                <input
+                  type="text"
+                  value={imagePrompt}
+                  onChange={(e) => setImagePrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleGenerateImage();
+                    }
+                    if (e.key === "Escape") {
+                      setImagePanelOpen(false);
+                    }
+                  }}
+                  placeholder="Describe an image to generate…"
+                  className="flex-1 bg-transparent text-xs focus:outline-none text-foreground placeholder:text-muted-foreground/60"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  disabled={generatingImage || imagePrompt.trim().length === 0}
+                  onClick={() => void handleGenerateImage()}
+                  className="px-2 py-0.5 text-[10px] font-semibold rounded-md bg-primary text-primary-foreground disabled:opacity-40"
+                >
+                  {generatingImage ? "Generating…" : "Generate"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImagePanelOpen(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                  title="Close"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="h-px bg-border/40 mx-4 mt-1.5" />
           <div className="flex items-center gap-2 px-3 py-1.5">
             {!isMultiRow && (
               <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    if (e.target.files) void handleFiles(e.target.files);
+                    e.currentTarget.value = "";
+                  }}
+                />
                 <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
                   className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
-                  title="Attach file"
+                  title="Attach image"
                 >
                   <Paperclip className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImagePanelOpen((v) => !v)}
+                  className={cn(
+                    "w-6 h-6 flex items-center justify-center rounded-md transition-colors",
+                    imagePanelOpen
+                      ? "text-secondary bg-secondary/15"
+                      : "text-muted-foreground hover:text-foreground hover:bg-background/60",
+                  )}
+                  title="Generate an image with AI"
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
                 </button>
                 <button
                   className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
@@ -513,6 +749,26 @@ export function QueueComposer({
               );
             })}
           </div>
+
+          {/* Client-side intent hint badge — display-only, updates instantly as user types */}
+          {clientIntent && !planMode && (
+            <span
+              className={cn(
+                "flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border pointer-events-none select-none",
+                clientIntent === "converse"
+                  ? "border-blue-500/30 bg-blue-500/8 text-blue-400"
+                  : clientIntent === "plan"
+                    ? "border-secondary/30 bg-secondary/8 text-secondary"
+                    : "border-green-500/30 bg-green-500/8 text-green-400",
+              )}
+            >
+              {clientIntent === "converse"
+                ? "I'll answer this"
+                : clientIntent === "plan"
+                  ? "I'll plan this"
+                  : "I'll build this"}
+            </span>
+          )}
 
           {/* Routing hint badge — updates as user types */}
           {routingHint?.agentIdentity && routingHint.agentIdentity !== agentType && (

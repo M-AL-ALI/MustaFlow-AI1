@@ -22,6 +22,7 @@ export const chatMessagesTable = pgTable(
     agentMode: text("agent_mode").notNull().default("eco"),
     planMode: boolean("plan_mode").notNull().default(false),
     plan: jsonb("plan"),
+    attachments: jsonb("attachments"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

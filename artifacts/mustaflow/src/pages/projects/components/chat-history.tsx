@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, isValidElement } from "react";
 import {
   Search,
   X,
@@ -20,9 +20,14 @@ import {
   Zap,
   Navigation,
   Loader2,
+  MessageCircle,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import "highlight.js/styles/github-dark.min.css";
 import {
   useCancelTask,
   getListTasksQueryKey,
@@ -93,7 +98,19 @@ type ChatPlanPayload =
   | { kind: "task-queued"; taskId: number }
   | { kind: "task-done"; taskId: number }
   | { kind: "error"; message: string; suggestions?: string[] }
+  | { kind: "converse"; taskId?: number }
+  | { kind: "clarifying"; question: string; options: string[]; taskId?: number }
   | Record<string, unknown>;
+
+type ChatAttachment = {
+  kind: "image";
+  url: string;
+  alt?: string;
+  width?: number;
+  height?: number;
+  generated?: boolean;
+  savedPath?: string;
+};
 
 type Message = {
   id: number;
@@ -102,9 +119,43 @@ type Message = {
   agentMode: string;
   planMode: boolean;
   plan?: ChatPlanPayload | null | Record<string, unknown>;
+  attachments?: ChatAttachment[] | null;
   createdAt: string;
   agentIdentity?: string | null;
 };
+
+function AttachmentGallery({ attachments }: { attachments: ChatAttachment[] }) {
+  if (!attachments || attachments.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {attachments.map((att, i) => {
+        if (att.kind !== "image" || !att.url) return null;
+        const src = att.url.startsWith("/objects/")
+          ? `/api/storage${att.url}`
+          : att.url.startsWith("http")
+            ? att.url
+            : `/api/storage${att.url.startsWith("/") ? att.url : `/${att.url}`}`;
+        return (
+          <a
+            key={i}
+            href={src}
+            target="_blank"
+            rel="noreferrer"
+            className="block rounded-lg overflow-hidden border border-border bg-background/60 hover:border-primary/40 transition-colors"
+            title={att.alt ?? (att.generated ? "AI-generated image" : "Attached image")}
+          >
+            <img
+              src={src}
+              alt={att.alt ?? "image"}
+              className="block max-h-44 max-w-[220px] object-contain"
+              loading="lazy"
+            />
+          </a>
+        );
+      })}
+    </div>
+  );
+}
 
 function getDateLabel(dateStr: string): string {
   const d = new Date(dateStr);
@@ -129,6 +180,141 @@ function highlightText(text: string, query: string): React.ReactNode {
     ) : (
       part
     ),
+  );
+}
+
+function extractCodeText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractCodeText).join("");
+  if (isValidElement(node)) {
+    return extractCodeText((node.props as { children?: React.ReactNode }).children);
+  }
+  return "";
+}
+
+function MarkdownMessage({
+  content,
+  onApply,
+}: {
+  content: string;
+  onApply?: (code: string) => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "prose prose-invert max-w-none",
+        "[&_p]:text-xs [&_p]:leading-relaxed [&_p:last-child]:mb-0 [&_p]:my-1",
+        "[&_h1]:text-sm [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1",
+        "[&_h2]:text-xs [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1",
+        "[&_h3]:text-xs [&_h3]:font-medium [&_h3]:mt-1.5 [&_h3]:mb-0.5",
+        "[&_ul]:text-xs [&_ul]:pl-4 [&_ul]:my-1 [&_ul_li]:my-0.5",
+        "[&_ol]:text-xs [&_ol]:pl-4 [&_ol]:my-1 [&_ol_li]:my-0.5",
+        "[&_code]:text-[11px] [&_code]:bg-background/70 [&_code]:border [&_code]:border-border/50 [&_code]:rounded [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono",
+        "[&_pre]:bg-background [&_pre]:border [&_pre]:border-border/60 [&_pre]:rounded-lg [&_pre]:overflow-x-auto [&_pre]:p-3 [&_pre]:my-2",
+        "[&_pre_code]:bg-transparent [&_pre_code]:border-0 [&_pre_code]:p-0 [&_pre_code]:text-[11px]",
+        "[&_blockquote]:border-l-2 [&_blockquote]:border-primary/30 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground",
+        "[&_strong]:font-semibold [&_strong]:text-foreground",
+        "[&_a]:text-primary [&_a]:underline-offset-2 [&_a]:hover:underline",
+        "[&_hr]:border-border/40 [&_hr]:my-2",
+      )}
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+        components={
+          onApply
+            ? {
+                pre({ children, ...props }) {
+                  return (
+                    <div className="relative group">
+                      <pre {...props}>{children}</pre>
+                      <button
+                        onClick={() => {
+                          const code = extractCodeText(children).replace(/\n$/, "");
+                          if (code.trim()) onApply(code.trim());
+                        }}
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 transition-all"
+                      >
+                        Apply to app
+                      </button>
+                    </div>
+                  );
+                },
+              }
+            : undefined
+        }
+      >
+        {content}
+      </ReactMarkdown>
+      {onApply && !content.includes("```") && ACTIONABLE_PATTERNS.some((p) => p.test(content)) && (
+        <button
+          onClick={() => onApply(content)}
+          className="mt-2 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors"
+        >
+          Build this
+        </button>
+      )}
+    </div>
+  );
+}
+
+const ACTIONABLE_PATTERNS = [
+  /\bhere'?s? how\b/i,
+  /\byou could\b/i,
+  /\bi'?d suggest\b/i,
+  /\bhere'?s? an example\b/i,
+  /\bhere'?s? a suggestion\b/i,
+  /\btry adding\b/i,
+  /\bconsider adding\b/i,
+  /\byou can add\b/i,
+  /\byou might want to\b/i,
+  /\bhere'?s? what you'?d?\b/i,
+];
+
+const completedAnimations = new Set<number>();
+
+export function StreamingText({
+  content,
+  messageId,
+  animate = false,
+  onApply,
+}: {
+  content: string;
+  messageId: number;
+  animate?: boolean;
+  onApply?: (code: string) => void;
+}) {
+  const words = content.split(" ");
+  const shouldAnimate = animate && !completedAnimations.has(messageId);
+  const [count, setCount] = useState(shouldAnimate ? 0 : words.length);
+
+  useEffect(() => {
+    if (!shouldAnimate) return;
+    let i = 0;
+    const batchSize = Math.max(1, Math.ceil(words.length / 40));
+    const iv = setInterval(() => {
+      i += batchSize;
+      const next = Math.min(i, words.length);
+      setCount(next);
+      if (next >= words.length) {
+        clearInterval(iv);
+        completedAnimations.add(messageId);
+      }
+    }, 25);
+    return () => clearInterval(iv);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isDone = count >= words.length;
+
+  if (isDone) {
+    return <MarkdownMessage content={content} onApply={onApply} />;
+  }
+
+  return (
+    <div className="text-xs leading-relaxed">
+      {words.slice(0, count).join(" ")}
+      <span className="inline-block w-0.5 h-3 bg-foreground/50 animate-pulse ml-0.5 align-middle" />
+    </div>
   );
 }
 
@@ -422,11 +608,13 @@ function MessageRow({
   searchQuery,
   projectId,
   onViewFile,
+  onApply,
 }: {
   msg: Message;
   searchQuery: string;
   projectId: number;
   onViewFile?: (path: string) => void;
+  onApply?: (code: string) => void;
 }) {
   const [reportExpanded, setReportExpanded] = useState(false);
   const [planExpanded, setPlanExpanded] = useState(false);
@@ -443,6 +631,8 @@ function MessageRow({
   const isReport = payloadKind === "report";
   const isError = payloadKind === "error";
   const isTaskQueued = payloadKind === "task-queued";
+  const isConverse = payloadKind === "converse" && msg.role === "assistant";
+  const isClarifying = payloadKind === "clarifying" && msg.role === "assistant";
   const isPlanCard =
     msg.planMode && msg.role === "assistant" && !isReport && planPayload && payloadKind !== "error";
   const structuredPlan = isPlanCard ? (planPayload as StructuredPlan) : null;
@@ -478,6 +668,11 @@ function MessageRow({
             Plan
           </span>
         )}
+        {(isConverse || isClarifying) && (
+          <span className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium shrink-0">
+            <MessageCircle className="h-2.5 w-2.5" /> Answer
+          </span>
+        )}
         <span>{ts}</span>
       </div>
 
@@ -492,9 +687,33 @@ function MessageRow({
               : "bg-muted border border-border text-foreground rounded-bl-sm",
         )}
       >
-        <div className="whitespace-pre-wrap leading-relaxed">
-          {highlightText(msg.content, searchQuery)}
-        </div>
+        {isConverse || isClarifying ? (
+          <StreamingText content={msg.content} messageId={msg.id} onApply={onApply} />
+        ) : msg.role === "assistant" && !isReport && !isError && !isPlanCard && !isTaskQueued ? (
+          <MarkdownMessage content={msg.content} onApply={onApply} />
+        ) : (
+          <div className="whitespace-pre-wrap leading-relaxed">
+            {highlightText(msg.content, searchQuery)}
+          </div>
+        )}
+
+        {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
+          <AttachmentGallery attachments={msg.attachments} />
+        )}
+
+        {/* Clarifying quick-reply chips — read-only in history */}
+        {isClarifying && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {((planPayload as { options?: string[] }).options ?? []).map((opt) => (
+              <span
+                key={opt}
+                className="px-2 py-0.5 rounded-full text-[10px] border border-blue-500/30 bg-blue-500/8 text-blue-400 font-medium"
+              >
+                {opt}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Expandable report chip */}
         {isReport && (
@@ -828,12 +1047,14 @@ export function ChatHistory({
   projectId,
   onViewFile,
   onClose,
+  onApplyCode,
 }: {
   messages: Message[] | undefined;
   isLoading: boolean;
   projectId: number;
   onViewFile?: (path: string) => void;
   onClose: () => void;
+  onApplyCode?: (code: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -948,7 +1169,7 @@ export function ChatHistory({
             <div>
               <div className="text-xs font-medium text-foreground/60">No messages yet</div>
               <div className="text-[10px] text-muted-foreground/50 mt-1">
-                Start building to see your AI conversation here
+                Ask a question, request a plan, or describe what you want to build
               </div>
             </div>
           </div>
@@ -978,6 +1199,7 @@ export function ChatHistory({
                     searchQuery={searchQuery}
                     projectId={projectId}
                     onViewFile={onViewFile}
+                    onApply={onApplyCode}
                   />
                 ))}
               </div>

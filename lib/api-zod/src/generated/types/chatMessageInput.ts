@@ -5,7 +5,9 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { ChatAttachment } from './chatAttachment';
 import type { ChatMessageInputAgentIdentity } from './chatMessageInputAgentIdentity';
+import type { ChatMessageInputAgentIntent } from './chatMessageInputAgentIntent';
 import type { ChatMessageInputAgentMode } from './chatMessageInputAgentMode';
 
 export interface ChatMessageInput {
@@ -16,4 +18,8 @@ export interface ChatMessageInput {
   background?: boolean;
   /** Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically. */
   agentIdentity?: ChatMessageInputAgentIdentity;
+  /** Optional explicit intent override. If provided, skips server-side intent detection. */
+  agentIntent?: ChatMessageInputAgentIntent;
+  /** Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model. */
+  attachments?: ChatAttachment[];
 }

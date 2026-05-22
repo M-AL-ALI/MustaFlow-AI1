@@ -13,4 +13,5 @@ export const AgentTaskKind = {
   main: 'main',
   background: 'background',
   plan: 'plan',
+  converse: 'converse',
 } as const;

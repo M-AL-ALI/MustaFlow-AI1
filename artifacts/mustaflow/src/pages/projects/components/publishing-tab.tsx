@@ -2503,7 +2503,14 @@ export function PublishingTab({
     void fetchDomain();
     void fetchIosReadiness();
     void fetchAndReadiness();
-  }, [fetchReadiness, fetchDeployments, fetchSiteSettings, fetchDomain, fetchIosReadiness, fetchAndReadiness]);
+  }, [
+    fetchReadiness,
+    fetchDeployments,
+    fetchSiteSettings,
+    fetchDomain,
+    fetchIosReadiness,
+    fetchAndReadiness,
+  ]);
 
   const webChecklist = webEnv === "testing" ? WEB_TESTING_CHECKLIST : WEB_PRODUCTION_CHECKLIST;
   const webRequired = webChecklist.flatMap((s) => s.items).filter((i) => i.required);
@@ -2512,12 +2519,16 @@ export function PublishingTab({
   const iosRequired = IOS_CHECKLIST.flatMap((s) => s.items).filter((i) => i.required);
   const iosChecklistComplete = iosRequired.every((i) => checked.has(i.id));
   // Gate on server-side readiness when available; fall back to checklist-only
-  const iosReady = iosReadiness ? iosReadiness.canPublish && iosChecklistComplete : iosChecklistComplete;
+  const iosReady = iosReadiness
+    ? iosReadiness.canPublish && iosChecklistComplete
+    : iosChecklistComplete;
 
   const andRequired = ANDROID_CHECKLIST.flatMap((s) => s.items).filter((i) => i.required);
   const andChecklistComplete = andRequired.every((i) => checked.has(i.id));
   // Gate on server-side readiness when available; fall back to checklist-only
-  const andReady = andReadiness ? andReadiness.canPublish && andChecklistComplete : andChecklistComplete;
+  const andReady = andReadiness
+    ? andReadiness.canPublish && andChecklistComplete
+    : andChecklistComplete;
 
   return (
     <div className="h-full overflow-y-auto">
@@ -3955,7 +3966,9 @@ export function PublishingTab({
               {/* Server-side readiness checks */}
               {iosReadiness && (
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-foreground">Store Submission Requirements</p>
+                  <p className="text-xs font-semibold text-foreground">
+                    Store Submission Requirements
+                  </p>
                   {iosReadiness.checks.map((check) => (
                     <ReadinessCheckRow key={check.id} check={check} />
                   ))}
@@ -3984,11 +3997,7 @@ export function PublishingTab({
                 </div>
               )}
               {/* Submit button — gated on server-side canPublish + checklist */}
-              <Button
-                className="w-full"
-                disabled={!iosReady}
-                asChild={iosReady}
-              >
+              <Button className="w-full" disabled={!iosReady} asChild={iosReady}>
                 {iosReady ? (
                   <a
                     href="https://appstoreconnect.apple.com"
@@ -4008,7 +4017,8 @@ export function PublishingTab({
                 )}
               </Button>
               <p className="text-[11px] text-muted-foreground text-center">
-                Use the EAS Build panel above to build your IPA, then upload it manually via App Store Connect.
+                Use the EAS Build panel above to build your IPA, then upload it manually via App
+                Store Connect.
               </p>
             </div>
           </div>
@@ -4354,7 +4364,9 @@ export function PublishingTab({
               {/* Server-side readiness checks */}
               {andReadiness && (
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-foreground">Store Submission Requirements</p>
+                  <p className="text-xs font-semibold text-foreground">
+                    Store Submission Requirements
+                  </p>
                   {andReadiness.checks.map((check) => (
                     <ReadinessCheckRow key={check.id} check={check} />
                   ))}
@@ -4383,11 +4395,7 @@ export function PublishingTab({
                 </div>
               )}
               {/* Submit button — gated on server-side canPublish + checklist */}
-              <Button
-                className="w-full"
-                disabled={!andReady}
-                asChild={andReady}
-              >
+              <Button className="w-full" disabled={!andReady} asChild={andReady}>
                 {andReady ? (
                   <a
                     href="https://play.google.com/console"
@@ -4407,7 +4415,8 @@ export function PublishingTab({
                 )}
               </Button>
               <p className="text-[11px] text-muted-foreground text-center">
-                Use the EAS Build panel above to build your AAB, then upload it manually via the Google Play Console.
+                Use the EAS Build panel above to build your AAB, then upload it manually via the
+                Google Play Console.
               </p>
             </div>
           </div>

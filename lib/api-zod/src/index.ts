@@ -13,3 +13,4 @@ export { PatchVersionBody } from "./generated/api";
 export { PatchVersionParams } from "./generated/api";
 export { GetContainerLogsParams } from "./generated/api";
 export { ListGithubRepositoriesParams } from "./generated/api";
+export { GenerateImageResponse } from "./generated/api";

@@ -38,6 +38,10 @@ tags:
     description: AI-generated post-build next-step suggestions
   - name: database
     description: Per-project database provisioning and query browser
+  - name: storage
+    description: Object storage upload and serving endpoints
+  - name: images
+    description: AI image generation for chat and project assets
 paths:
   /healthz:
     get:
@@ -51,6 +55,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request a presigned URL for direct file upload to GCS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlRequest"
+      responses:
+        "200":
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+
+  /projects/{id}/generate-image:
+    post:
+      operationId: generateImage
+      tags: [images]
+      summary: Generate an image with gpt-image-1 and attach it to the project.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateImageInput"
+      responses:
+        "200":
+          description: Generated image stored, returned as a chat attachment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateImageResponse"
 
   /workspaces:
     get:
@@ -2716,6 +2760,28 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Project" }
 
+    ChatAttachment:
+      type: object
+      required: [kind, url]
+      properties:
+        kind:
+          type: string
+          enum: [image]
+        url:
+          type: string
+          description: "Object path served via /api/storage{objectPath} (e.g. /objects/uploads/uuid)."
+        alt:
+          type: string
+          description: "Alt text or, for AI-generated images, the source prompt."
+        width: { type: integer }
+        height: { type: integer }
+        generated:
+          type: boolean
+          description: "True when this image was produced by the AI image-generation pipeline."
+        savedPath:
+          type: string
+          description: "Project file path the generated image was also saved to (e.g. assets/generated/img-123.png)."
+
     ChatMessage:
       type: object
       required: [id, projectId, role, content, agentMode, planMode, createdAt]
@@ -2733,6 +2799,9 @@ components:
         plan:
           type: ["object", "null"]
           additionalProperties: true
+        attachments:
+          type: ["array", "null"]
+          items: { $ref: "#/components/schemas/ChatAttachment" }
         createdAt: { type: string, format: date-time }
 
     ChatMessageInput:
@@ -2749,6 +2818,14 @@ components:
           type: string
           enum: [planning, task, main]
           description: "Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically."
+        agentIntent:
+          type: string
+          enum: [converse, plan, build]
+          description: "Optional explicit intent override. If provided, skips server-side intent detection."
+        attachments:
+          type: array
+          items: { $ref: "#/components/schemas/ChatAttachment" }
+          description: "Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model."
 
     ChatExchange:
       type: object
@@ -2756,6 +2833,10 @@ components:
       properties:
         userMessage: { $ref: "#/components/schemas/ChatMessage" }
         assistantMessage: { $ref: "#/components/schemas/ChatMessage" }
+        detectedIntent:
+          type: string
+          enum: [converse, plan, build]
+          description: "The intent auto-detected or explicitly provided for this exchange."
 
     TaskEvent:
       type: object
@@ -2792,7 +2873,7 @@ components:
         title: { type: string }
         kind:
           type: string
-          enum: [main, background, plan]
+          enum: [main, background, plan, converse]
         status:
           type: string
           enum:
@@ -2862,7 +2943,7 @@ components:
         title: { type: string, minLength: 1 }
         kind:
           type: string
-          enum: [main, background, plan]
+          enum: [main, background, plan, converse]
         prompt: { type: string }
 
     ProjectVersion:
@@ -3931,3 +4012,38 @@ components:
         isPartial:
           type: boolean
           description: "True when the restored snapshot was partial (row-limited). Some data may have been missing."
+
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name: { type: string, minLength: 1 }
+        size: { type: integer, minimum: 1 }
+        contentType: { type: string, minLength: 1 }
+
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL: { type: string, format: uri }
+        objectPath: { type: string }
+        metadata: { $ref: "#/components/schemas/UploadUrlRequest" }
+
+    GenerateImageInput:
+      type: object
+      required: [prompt]
+      properties:
+        prompt: { type: string, minLength: 1 }
+        size:
+          type: string
+          enum: ["1024x1024", "1536x1024", "1024x1536"]
+          description: "Image dimensions. Defaults to 1024x1024."
+        savePath:
+          type: string
+          description: "Optional project file path to also save the image (e.g. assets/hero.png). Auto-generated if omitted."
+
+    GenerateImageResponse:
+      type: object
+      required: [attachment]
+      properties:
+        attachment: { $ref: "#/components/schemas/ChatAttachment" }

@@ -5,9 +5,12 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { ChatExchangeDetectedIntent } from './chatExchangeDetectedIntent';
 import type { ChatMessage } from './chatMessage';
 
 export interface ChatExchange {
   userMessage: ChatMessage;
   assistantMessage: ChatMessage;
+  /** The intent auto-detected or explicitly provided for this exchange. */
+  detectedIntent?: ChatExchangeDetectedIntent;
 }

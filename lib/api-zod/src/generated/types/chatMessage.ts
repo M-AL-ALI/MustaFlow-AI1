@@ -5,6 +5,7 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { ChatAttachment } from './chatAttachment';
 import type { ChatMessageAgentMode } from './chatMessageAgentMode';
 import type { ChatMessagePlan } from './chatMessagePlan';
 import type { ChatMessageRole } from './chatMessageRole';
@@ -18,5 +19,7 @@ export interface ChatMessage {
   planMode: boolean;
   /** @nullable */
   plan?: ChatMessagePlan;
+  /** @nullable */
+  attachments?: ChatAttachment[] | null;
   createdAt: Date;
 }
