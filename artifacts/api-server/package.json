@@ -17,6 +17,7 @@
     "@eslint/js": "^10.0.1",
     "@google-cloud/storage": "^7.19.0",
     "@types/acorn": "^6.0.4",
+    "@typescript-eslint/parser": "^8.59.4",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/integrations-openai-ai-server": "workspace:*",

@@ -114,11 +114,11 @@ export const CHECK_REGISTRY: CheckDefinition[] = [
     name: "eslint",
     category: "quality",
     trigger: "agent-selected",
-    platform: "web",
+    platform: "any",
     description:
-      "ESLint with eslint:recommended rules against generated JS files and HTML inline scripts. Catches no-unused-vars, no-undef, no-console, eqeqeq, and other common code quality issues. Run for web projects when JS files were added or changed.",
+      "ESLint with eslint:recommended rules against generated JS files, HTML inline scripts, and TypeScript files (.ts/.tsx) via @typescript-eslint/parser. Catches no-unused-vars, no-undef, no-console, eqeqeq, prefer-const, and other common code quality issues for both web and mobile projects. Run when JS or TS files were added or changed.",
     fixPrompt:
-      "Fix all ESLint issues in the generated code: remove or use unused variables, define any undeclared variables, replace == with ===, remove console.log statements left in production code, and address other code quality warnings. Do not change functionality — only fix the flagged issues.",
+      "Fix all ESLint issues in the generated code: remove or use unused variables, define any undeclared variables, replace == with ===, prefer const over let where applicable, remove console.log statements left in production code, and address other code quality warnings. Do not change functionality — only fix the flagged issues.",
   },
   {
     name: "typescript",

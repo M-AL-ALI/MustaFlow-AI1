@@ -1,14 +1,17 @@
 /**
  * ESLint Runner
  *
- * Runs ESLint with eslint:recommended rules against generated JS files.
+ * Runs ESLint with eslint:recommended rules against generated JS files
+ * and TypeScript files (.ts/.tsx) using @typescript-eslint/parser.
  * Uses the ESLint Linter class (flat config, no file system access needed).
  * Returns findings compatible with the check registry system.
  *
- * Web projects only. Findings are warnings (non-blocking for publish).
+ * Runs for both web (JS) and mobile (TS/TSX) projects. Findings are warnings
+ * (non-blocking for publish).
  */
 import { Linter } from "eslint";
 import js from "@eslint/js";
+import tsParser from "@typescript-eslint/parser";
 import type { BuilderFile } from "../builder";
 import type { CheckFinding, CheckRunStatus } from "@workspace/db";
 import { logger } from "../logger";
@@ -40,6 +43,12 @@ function isLintableJs(file: BuilderFile): boolean {
   );
 }
 
+/** TypeScript files we want to lint (.ts/.tsx, excluding declaration files). */
+function isLintableTs(file: BuilderFile): boolean {
+  if (file.path.endsWith(".d.ts")) return false;
+  return file.path.endsWith(".ts") || file.path.endsWith(".tsx");
+}
+
 /**
  * Extract and lint inline <script> blocks from HTML files.
  * Skips type="text/babel", type="module" (may contain JSX / TS), and external src=.
@@ -69,70 +78,118 @@ export function runEslintCheck(files: BuilderFile[]): {
   findings: CheckFinding[];
 } {
   const linter = new Linter({ configType: "flat" });
-  const config = [
+  const sharedGlobals = {
+    window: "readonly",
+    document: "readonly",
+    navigator: "readonly",
+    console: "readonly",
+    fetch: "readonly",
+    setTimeout: "readonly",
+    clearTimeout: "readonly",
+    setInterval: "readonly",
+    clearInterval: "readonly",
+    alert: "readonly",
+    confirm: "readonly",
+    localStorage: "readonly",
+    sessionStorage: "readonly",
+    location: "readonly",
+    history: "readonly",
+    Event: "readonly",
+    CustomEvent: "readonly",
+    FormData: "readonly",
+    Promise: "readonly",
+    URL: "readonly",
+    URLSearchParams: "readonly",
+    L: "readonly",
+    React: "readonly",
+    ReactDOM: "readonly",
+    lucide: "readonly",
+    tailwind: "readonly",
+    luxon: "readonly",
+    Chart: "readonly",
+    hljs: "readonly",
+  };
+
+  const jsConfig = [
     {
       ...js.configs.recommended,
       languageOptions: {
         ecmaVersion: 2020 as const,
         sourceType: "script" as const,
-        globals: {
-          window: "readonly",
-          document: "readonly",
-          navigator: "readonly",
-          console: "readonly",
-          fetch: "readonly",
-          setTimeout: "readonly",
-          clearTimeout: "readonly",
-          setInterval: "readonly",
-          clearInterval: "readonly",
-          alert: "readonly",
-          confirm: "readonly",
-          localStorage: "readonly",
-          sessionStorage: "readonly",
-          location: "readonly",
-          history: "readonly",
-          Event: "readonly",
-          CustomEvent: "readonly",
-          FormData: "readonly",
-          Promise: "readonly",
-          URL: "readonly",
-          URLSearchParams: "readonly",
-          L: "readonly",
-          React: "readonly",
-          ReactDOM: "readonly",
-          lucide: "readonly",
-          tailwind: "readonly",
-          luxon: "readonly",
-          Chart: "readonly",
-          hljs: "readonly",
-        },
+        globals: sharedGlobals,
       },
     },
   ];
+
+  // TS/TSX config uses @typescript-eslint/parser. We apply eslint:recommended
+  // rules but skip TS-specific plugin rules — those overlap heavily with tsc,
+  // which already runs as a separate "typescript" check for mobile projects.
+  const tsConfig = [
+    {
+      ...js.configs.recommended,
+      languageOptions: {
+        parser: tsParser as unknown as Linter.Parser,
+        ecmaVersion: 2022 as const,
+        sourceType: "module" as const,
+        parserOptions: {
+          ecmaFeatures: { jsx: true },
+        },
+        globals: {
+          ...sharedGlobals,
+          require: "readonly",
+          module: "readonly",
+          process: "readonly",
+          __dirname: "readonly",
+          __filename: "readonly",
+          global: "readonly",
+        },
+      },
+      rules: {
+        ...js.configs.recommended.rules,
+        // tsc handles undefined identifiers; ESLint's no-undef misfires on TS types.
+        "no-undef": "off" as const,
+        // tsc's noUnusedLocals/noUnusedParameters cover this better for TS.
+        "no-unused-vars": "off" as const,
+      },
+    },
+  ] satisfies Linter.Config[];
 
   const allFindings: CheckFinding[] = [];
 
   for (const file of files) {
     const isJs = isLintableJs(file);
+    const isTs = isLintableTs(file);
     const isHtml = file.mimeType === "text/html" || file.path.endsWith(".html");
 
-    if (!isJs && !isHtml) continue;
+    if (!isJs && !isTs && !isHtml) continue;
 
-    const codeBlocks: Array<{ code: string; path: string; lineOffset: number }> = [];
+    const codeBlocks: Array<{
+      code: string;
+      path: string;
+      lineOffset: number;
+      config: Linter.Config[];
+    }> = [];
 
     if (isJs) {
-      codeBlocks.push({ code: file.content, path: file.path, lineOffset: 0 });
+      codeBlocks.push({ code: file.content, path: file.path, lineOffset: 0, config: jsConfig });
+    } else if (isTs) {
+      codeBlocks.push({ code: file.content, path: file.path, lineOffset: 0, config: tsConfig });
     } else if (isHtml) {
       const scripts = extractInlineScripts(file.content);
       for (const s of scripts) {
-        codeBlocks.push({ code: s.code, path: file.path, lineOffset: s.lineOffset });
+        codeBlocks.push({
+          code: s.code,
+          path: file.path,
+          lineOffset: s.lineOffset,
+          config: jsConfig,
+        });
       }
     }
 
     for (const block of codeBlocks) {
       let messages: ReturnType<Linter["verify"]>;
       try {
-        messages = linter.verify(block.code, config, { filename: block.path });
+        messages = linter.verify(block.code, block.config, { filename: block.path });
       } catch (err) {
         logger.warn({ err, path: block.path }, "ESLint: linter.verify threw — skipping file");
         continue;

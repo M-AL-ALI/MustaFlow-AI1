@@ -500,9 +500,8 @@ function ChecksSection({
 
   const allRuns = runs ?? [];
 
-  // Platform-aware filtering: ESLint only for web, TypeScript only for mobile
+  // Platform-aware filtering: ESLint runs for both web and mobile; TypeScript only for mobile.
   const latestRuns = allRuns.filter((run) => {
-    if (run.checkName === "eslint" && isMobile) return false;
     if (run.checkName === "typescript" && !isMobile) return false;
     return true;
   });

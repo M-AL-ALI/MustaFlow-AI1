@@ -4994,8 +4994,12 @@ export async function runMobileRefinePipeline(args: {
   }
 
   // Recompute created/changed lists in case correction added new files.
-  const finalFilesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
-  const finalFilesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
+  const finalFilesCreated = changedFiles
+    .filter((f) => !existingPaths.has(f.path))
+    .map((f) => f.path);
+  const finalFilesChanged = changedFiles
+    .filter((f) => existingPaths.has(f.path))
+    .map((f) => f.path);
 
   const tsWarnings = tsCheckFailed
     ? [
