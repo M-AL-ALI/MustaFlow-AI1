@@ -38,6 +38,7 @@ import {
 import { cn } from "@/lib/utils";
 import { TemplatePicker } from "@/components/template-picker";
 import { type TemplateDefinition } from "@/lib/templates";
+import { useToast } from "@/hooks/use-toast";
 
 type Stack = "react-vite" | "nextjs" | "node-api" | "python-flask" | "python-fastapi";
 
@@ -127,6 +128,7 @@ export function CreateProjectModal({
   const queryClient = useQueryClient();
   const createProject = useCreateProject();
   const { currentWorkspace } = useWorkspace();
+  const { toast } = useToast();
 
   const [view, setView] = useState<View>("form");
   const [platformTab, setPlatformTab] = useState<PlatformTab>("web");
@@ -223,6 +225,17 @@ export function CreateProjectModal({
           void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
           onOpenChange(false);
           setLocation(`/projects/${project.id}`);
+        },
+        onError: (err: unknown) => {
+          const message =
+            err instanceof Error && err.message
+              ? err.message
+              : "Could not create your project. Please try again.";
+          toast({
+            title: "Couldn't create project",
+            description: message,
+            variant: "destructive",
+          });
         },
       },
     );
