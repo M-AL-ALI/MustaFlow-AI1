@@ -175,64 +175,64 @@ function ConnectPanel({
 
           {(oauthEnabled === false || showPat) && (
             <>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Create a GitHub personal access token with{" "}
-            <code className="bg-muted px-1 py-px rounded text-[11px]">repo</code> scope. Your token
-            is encrypted and stored server-side — it is never returned to the browser.
-          </p>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">
-              Personal access token
-            </label>
-            <Input
-              type="password"
-              placeholder="ghp_••••••••••••••••••••"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void handleConnect()}
-              className="h-8 text-sm font-mono"
-            />
-          </div>
-          {error && (
-            <div className="flex items-start gap-2 text-xs text-destructive">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              {error}
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              className="h-8"
-              onClick={() => void handleConnect()}
-              disabled={connect.isPending || !token.trim()}
-            >
-              {connect.isPending ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Connecting…
-                </>
-              ) : (
-                <>
-                  <Link2 className="h-3.5 w-3.5 mr-1.5" /> Connect GitHub
-                </>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Create a GitHub personal access token with{" "}
+                <code className="bg-muted px-1 py-px rounded text-[11px]">repo</code> scope. Your
+                token is encrypted and stored server-side — it is never returned to the browser.
+              </p>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Personal access token
+                </label>
+                <Input
+                  type="password"
+                  placeholder="ghp_••••••••••••••••••••"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && void handleConnect()}
+                  className="h-8 text-sm font-mono"
+                />
+              </div>
+              {error && (
+                <div className="flex items-start gap-2 text-xs text-destructive">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  {error}
+                </div>
               )}
-            </Button>
-            <a
-              href="https://github.com/settings/tokens/new?description=MustaFlow&scopes=repo"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-primary hover:underline flex items-center gap-1"
-            >
-              <ExternalLink className="h-3 w-3" /> Create a token
-            </a>
-          </div>
-          <div className="flex items-start gap-2 bg-muted/40 border border-border rounded-lg p-2.5 text-xs text-muted-foreground">
-            <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5 text-green-400" />
-            <span>
-              Your token is AES-256 encrypted before being stored. It is never logged or returned to
-              the frontend. Only your project&apos;s files are pushed — no MustaFlow platform
-              credentials are ever included.
-            </span>
-          </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-8"
+                  onClick={() => void handleConnect()}
+                  disabled={connect.isPending || !token.trim()}
+                >
+                  {connect.isPending ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Connecting…
+                    </>
+                  ) : (
+                    <>
+                      <Link2 className="h-3.5 w-3.5 mr-1.5" /> Connect GitHub
+                    </>
+                  )}
+                </Button>
+                <a
+                  href="https://github.com/settings/tokens/new?description=MustaFlow&scopes=repo"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                >
+                  <ExternalLink className="h-3 w-3" /> Create a token
+                </a>
+              </div>
+              <div className="flex items-start gap-2 bg-muted/40 border border-border rounded-lg p-2.5 text-xs text-muted-foreground">
+                <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5 text-green-400" />
+                <span>
+                  Your token is AES-256 encrypted before being stored. It is never logged or
+                  returned to the frontend. Only your project&apos;s files are pushed — no MustaFlow
+                  platform credentials are ever included.
+                </span>
+              </div>
             </>
           )}
         </div>
@@ -972,9 +972,10 @@ function ConnectedPanel({
 export function GithubTab({ projectId }: { projectId: number }) {
   const queryClient = useQueryClient();
   const [changingRepo, setChangingRepo] = useState(false);
-  const [oauthBanner, setOauthBanner] = useState<
-    { kind: "success" | "error"; message: string } | null
-  >(null);
+  const [oauthBanner, setOauthBanner] = useState<{
+    kind: "success" | "error";
+    message: string;
+  } | null>(null);
 
   const { data, isLoading, refetch } = useGetGithubStatus(projectId, {
     query: { queryKey: getGetGithubStatusQueryKey(projectId) },

@@ -1101,6 +1101,7 @@ export function ToolsTab({
   prefillSecretName,
   defaultTab,
   onSendMessage,
+  onNavigateToFile,
 }: {
   projectId: number;
   projectKind?: string;
@@ -1108,6 +1109,7 @@ export function ToolsTab({
   prefillSecretName?: string | null;
   defaultTab?: string;
   onSendMessage?: (text: string) => void;
+  onNavigateToFile?: (filePath: string, line?: number | null) => void;
 }) {
   const queryClient = useQueryClient();
   const isMobile =
@@ -1433,6 +1435,7 @@ export function ToolsTab({
                 projectId={projectId}
                 projectKind={projectKind}
                 onSendMessage={onSendMessage}
+                onNavigateToFile={onNavigateToFile}
               />
             </TabsContent>
 

@@ -2819,6 +2819,16 @@ export default function ProjectWorkspacePage() {
                   setActiveTab("preview");
                   send(text);
                 }}
+                onNavigateToFile={(filePath, line) => {
+                  const f = files.find(
+                    (x) => x.path === filePath || x.path.endsWith("/" + filePath),
+                  );
+                  if (f) {
+                    setSelectedCodeFileId(f.id);
+                    setSelectedCodeFileLine(line ?? null);
+                    setActiveTab("code");
+                  }
+                }}
               />
             )}
             {activeTab === "publishing" && (

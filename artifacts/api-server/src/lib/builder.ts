@@ -6512,9 +6512,7 @@ export async function runCvePatchPipeline(opts: {
     };
   }
 
-  const filesContext = relevantFiles
-    .map((f) => `=== ${f.path} ===\n${f.content}`)
-    .join("\n\n");
+  const filesContext = relevantFiles.map((f) => `=== ${f.path} ===\n${f.content}`).join("\n\n");
 
   const userMessage = `CVE Advisory${cveLabel}${titleLabel}
 

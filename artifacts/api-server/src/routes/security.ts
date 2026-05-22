@@ -134,10 +134,7 @@ router.post("/security/cve/scan", async (req, res): Promise<void> => {
       (f) => f.severity === "critical" || f.severity === "high",
     ).length;
     if (criticalCount > 0) {
-      logger.info(
-        { criticalCount },
-        "CVE auto-protect jobs enqueued for critical/high findings",
-      );
+      logger.info({ criticalCount }, "CVE auto-protect jobs enqueued for critical/high findings");
     }
 
     recordScanResult(inserted);

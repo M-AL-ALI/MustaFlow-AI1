@@ -140,7 +140,8 @@ export async function exchangeCodeForToken(args: {
     error_description?: string;
   };
   if (!res.ok || !json.access_token) {
-    const msg = json.error_description ?? json.error ?? `GitHub token exchange failed (${res.status})`;
+    const msg =
+      json.error_description ?? json.error ?? `GitHub token exchange failed (${res.status})`;
     throw new Error(msg);
   }
   return {
@@ -150,7 +151,11 @@ export async function exchangeCodeForToken(args: {
   };
 }
 
-export function buildCallbackUrl(args: { protocol: string; host: string; projectId: number }): string {
+export function buildCallbackUrl(args: {
+  protocol: string;
+  host: string;
+  projectId: number;
+}): string {
   const override = process.env.GITHUB_OAUTH_REDIRECT_URL?.trim();
   if (override) {
     return override.replace(/\{id\}|\{projectId\}/g, String(args.projectId));

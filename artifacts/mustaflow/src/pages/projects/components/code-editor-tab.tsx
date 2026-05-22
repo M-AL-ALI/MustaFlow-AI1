@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 type MonacoEditor = Parameters<OnMount>[0];
+type Monaco = Parameters<OnMount>[1];
 import {
   useListProjectFiles,
   useGetProjectFile,
@@ -10,8 +11,11 @@ import {
   useRenameProjectFile,
   useInstallPackage,
   useUninstallPackage,
+  useGetCheckRuns,
   getListProjectFilesQueryKey,
   getGetProjectFileQueryKey,
+  getGetCheckRunsQueryKey,
+  type CheckRunFinding,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -811,10 +815,22 @@ export function CodeEditorTab({
   const [confirmDeleteFileId, setConfirmDeleteFileId] = useState<number | null>(null);
 
   const editorRef = useRef<MonacoEditor | null>(null);
+  const monacoRef = useRef<Monaco | null>(null);
   const pendingRevealLineRef = useRef<number | null>(initialLine ?? null);
 
   const { data: files = [] } = useListProjectFiles(projectId, {
     query: { queryKey: getListProjectFilesQueryKey(projectId) },
+  });
+
+  // Fetch latest check runs so ESLint findings can be surfaced as inline
+  // squiggles/gutter markers in the editor for the currently open file.
+  const { data: checkRuns } = useGetCheckRuns(projectId, undefined, {
+    query: {
+      enabled: !!projectId,
+      queryKey: getGetCheckRunsQueryKey(projectId),
+      retry: false,
+      staleTime: 30_000,
+    },
   });
 
   const { data: fileContent } = useGetProjectFile(projectId, selectedFileId ?? 0, {
@@ -875,6 +891,60 @@ export function CodeEditorTab({
     }, 200);
     return () => clearTimeout(timer);
   }, [selectedFileId, fileContent]);
+
+  // Map ESLint findings (per check run) onto the currently open file so they
+  // render as Monaco squiggles + gutter markers. We match by path suffix to be
+  // tolerant of leading "./", "src/", or other prefixes in stored paths.
+  const eslintFindings = useMemo<CheckRunFinding[]>(() => {
+    if (!selectedFile || !Array.isArray(checkRuns)) return [];
+    const runs = checkRuns.filter((r) => r.checkName === "eslint");
+    if (runs.length === 0) return [];
+    const matches: CheckRunFinding[] = [];
+    for (const run of runs) {
+      const findings = (run.findings ?? []) as CheckRunFinding[];
+      for (const f of findings) {
+        if (!f.file || !f.line) continue;
+        if (
+          f.file === selectedFile.path ||
+          f.file.endsWith("/" + selectedFile.path) ||
+          selectedFile.path.endsWith("/" + f.file)
+        ) {
+          matches.push(f);
+        }
+      }
+    }
+    return matches;
+  }, [checkRuns, selectedFile]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const lineCount = model.getLineCount();
+    const markers = eslintFindings.map((f) => {
+      const line = Math.max(1, Math.min(f.line ?? 1, lineCount));
+      const maxCol = model.getLineMaxColumn(line);
+      return {
+        severity:
+          f.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
+        startLineNumber: line,
+        startColumn: 1,
+        endLineNumber: line,
+        endColumn: maxCol,
+        message: f.detail ? `${f.message}\n${f.detail}` : f.message,
+        source: "ESLint",
+      };
+    });
+
+    monaco.editor.setModelMarkers(model, "mustaflow-eslint", markers);
+    return () => {
+      // Clear when findings change or component unmounts.
+      monaco.editor.setModelMarkers(model, "mustaflow-eslint", []);
+    };
+  }, [eslintFindings, fileContent, selectedFileId]);
 
   function discardAndSwitch() {
     if (pendingFileId !== null) {
@@ -1413,8 +1483,9 @@ export function CodeEditorTab({
                 value={displayContent}
                 onChange={handleEditorChange}
                 theme="vs-dark"
-                onMount={(ed) => {
+                onMount={(ed, monaco) => {
                   editorRef.current = ed;
+                  monacoRef.current = monaco;
                 }}
                 options={{
                   minimap: { enabled: false },

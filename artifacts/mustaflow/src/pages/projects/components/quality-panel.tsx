@@ -250,9 +250,11 @@ function CheckStatusBadge({ status }: { status: CheckRun["status"] }) {
 function CheckRunCard({
   run,
   onSendMessage,
+  onNavigateToFile,
 }: {
   run: CheckRun;
   onSendMessage?: (text: string) => void;
+  onNavigateToFile?: (filePath: string, line?: number | null) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const meta = CHECK_META[run.checkName] ?? {
@@ -301,25 +303,43 @@ function CheckRunCard({
             </div>
           ) : (
             <div className="space-y-1.5">
-              {findings.slice(0, 10).map((f, i) => (
-                <div key={i} className="border border-border rounded-md p-2.5 text-xs space-y-0.5">
-                  <div className="flex items-start gap-2">
-                    <SeverityIcon severity={f.severity} />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-foreground leading-snug">{f.message}</div>
-                      <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                        {f.file}
-                        {f.line ? `:${f.line}` : ""}
+              {findings.slice(0, 10).map((f, i) => {
+                const canJump = !!onNavigateToFile && !!f.file;
+                return (
+                  <div
+                    key={i}
+                    className="border border-border rounded-md p-2.5 text-xs space-y-0.5"
+                  >
+                    <div className="flex items-start gap-2">
+                      <SeverityIcon severity={f.severity} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-foreground leading-snug">{f.message}</div>
+                        {canJump ? (
+                          <button
+                            type="button"
+                            onClick={() => onNavigateToFile!(f.file!, f.line ?? null)}
+                            className="text-[10px] text-muted-foreground hover:text-primary font-mono mt-0.5 underline-offset-2 hover:underline transition-colors text-left"
+                            title="Open in code editor"
+                          >
+                            {f.file}
+                            {f.line ? `:${f.line}` : ""}
+                          </button>
+                        ) : (
+                          <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                            {f.file}
+                            {f.line ? `:${f.line}` : ""}
+                          </div>
+                        )}
                       </div>
                     </div>
+                    {f.detail && (
+                      <div className="pl-5 text-[10px] text-muted-foreground leading-relaxed">
+                        {f.detail}
+                      </div>
+                    )}
                   </div>
-                  {f.detail && (
-                    <div className="pl-5 text-[10px] text-muted-foreground leading-relaxed">
-                      {f.detail}
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
               {findings.length > 10 && (
                 <div className="text-[10px] text-muted-foreground text-center">
                   +{findings.length - 10} more findings
@@ -585,11 +605,7 @@ function CvePatchCard({
               onClick={() => setShowDiff((v) => !v)}
               className="text-[10px] text-muted-foreground hover:text-foreground mt-1.5 flex items-center gap-1 transition-colors"
             >
-              {showDiff ? (
-                <ChevronUp className="h-3 w-3" />
-              ) : (
-                <ChevronDown className="h-3 w-3" />
-              )}
+              {showDiff ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               {showDiff ? "Hide" : "Show"} patch diff
             </button>
           )}
@@ -617,10 +633,7 @@ function CvePatchCard({
                 className="h-7 text-[11px] gap-1.5 px-3"
                 disabled={applyMutation.isPending}
                 onClick={() => {
-                  applyMutation.mutate(
-                    { id: finding.id },
-                    { onSuccess: onApplied },
-                  );
+                  applyMutation.mutate({ id: finding.id }, { onSuccess: onApplied });
                 }}
               >
                 {applyMutation.isPending ? (
@@ -636,10 +649,7 @@ function CvePatchCard({
                 className="h-7 text-[11px] text-muted-foreground gap-1.5 px-3"
                 disabled={dismissMutation.isPending}
                 onClick={() => {
-                  dismissMutation.mutate(
-                    { id: finding.id },
-                    { onSuccess: onDismissed },
-                  );
+                  dismissMutation.mutate({ id: finding.id }, { onSuccess: onDismissed });
                 }}
               >
                 Dismiss
@@ -655,10 +665,7 @@ function CvePatchCard({
                 className="h-7 text-[11px] text-muted-foreground gap-1.5 px-3"
                 disabled={dismissMutation.isPending}
                 onClick={() => {
-                  dismissMutation.mutate(
-                    { id: finding.id },
-                    { onSuccess: onDismissed },
-                  );
+                  dismissMutation.mutate({ id: finding.id }, { onSuccess: onDismissed });
                 }}
               >
                 Dismiss
@@ -671,7 +678,7 @@ function CvePatchCard({
   );
 }
 
-function CvePatchSection({ projectId }: { projectId: number }) {
+function CvePatchSection({ projectId: _projectId }: { projectId: number }) {
   const queryClient = useQueryClient();
 
   const { data: allFindings, isLoading } = useListCveFindings(
@@ -686,9 +693,7 @@ function CvePatchSection({ projectId }: { projectId: number }) {
 
   const patchFindings = (allFindings ?? []).filter(
     (f) =>
-      (f.patchStatus === "ready" ||
-        f.patchStatus === "preparing" ||
-        f.patchStatus === "failed") &&
+      (f.patchStatus === "ready" || f.patchStatus === "preparing" || f.patchStatus === "failed") &&
       (f.severity === "critical" || f.severity === "high"),
   ) as CvePatchFinding[];
 
@@ -712,12 +717,7 @@ function CvePatchSection({ projectId }: { projectId: number }) {
       </div>
       <div className="space-y-2">
         {patchFindings.map((f) => (
-          <CvePatchCard
-            key={f.id}
-            finding={f}
-            onApplied={invalidate}
-            onDismissed={invalidate}
-          />
+          <CvePatchCard key={f.id} finding={f} onApplied={invalidate} onDismissed={invalidate} />
         ))}
       </div>
     </div>
@@ -729,11 +729,13 @@ function ChecksSection({
   isMobile,
   onSecurityReview,
   onSendMessage,
+  onNavigateToFile,
 }: {
   projectId: number;
   isMobile?: boolean;
   onSecurityReview: () => void;
   onSendMessage?: (text: string) => void;
+  onNavigateToFile?: (filePath: string, line?: number | null) => void;
 }) {
   const queryClient = useQueryClient();
   const { data: runs, isLoading } = useGetCheckRuns(projectId, undefined, {
@@ -897,7 +899,12 @@ function ChecksSection({
       {latestRuns.length > 0 && (
         <div className="space-y-1.5">
           {latestRuns.map((run) => (
-            <CheckRunCard key={run.id} run={run} onSendMessage={onSendMessage} />
+            <CheckRunCard
+              key={run.id}
+              run={run}
+              onSendMessage={onSendMessage}
+              onNavigateToFile={onNavigateToFile}
+            />
           ))}
         </div>
       )}
@@ -1082,10 +1089,12 @@ export function QualityPanel({
   projectId,
   projectKind,
   onSendMessage,
+  onNavigateToFile,
 }: {
   projectId: number;
   projectKind?: string;
   onSendMessage?: (text: string) => void;
+  onNavigateToFile?: (filePath: string, line?: number | null) => void;
 }) {
   const queryClient = useQueryClient();
   const isMobile =
@@ -1127,6 +1136,7 @@ export function QualityPanel({
           void queryClient.invalidateQueries({ queryKey: getGetCheckRunsQueryKey(projectId) });
         }}
         onSendMessage={onSendMessage}
+        onNavigateToFile={onNavigateToFile}
       />
 
       <div className="space-y-4">
