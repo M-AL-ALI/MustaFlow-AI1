@@ -11,6 +11,7 @@ import {
   X,
   Smartphone,
   Upload,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -276,6 +277,22 @@ export function ManageTab({
               </a>
             </Button>
           </div>
+        </div>
+
+        {/* SBOM */}
+        <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+          <h3 className="text-sm font-semibold">Software Bill of Materials</h3>
+          <p className="text-xs text-muted-foreground">
+            Download a CycloneDX 1.5 SBOM listing all CDN libraries detected in your app and API
+            server dependencies — including versions, licences, and any known CVEs. Useful for
+            compliance audits, security reviews, and supply-chain analysis.
+          </p>
+          <Button variant="outline" size="sm" asChild>
+            <a href={`/api/projects/${projectId}/sbom`} download={`sbom-${projectId}.json`}>
+              <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+              Download SBOM
+            </a>
+          </Button>
         </div>
 
         {/* Duplicate */}

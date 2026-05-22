@@ -5,11 +5,13 @@ import {
   cveFindingsTable,
   securityFindingsTable,
   projectsTable,
+  projectFilesTable,
   type SecurityFindingStatus,
   type SecurityFindingSeverity,
 } from "@workspace/db";
 import type { CveSeverity, CveStatus } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+import { generateSbom } from "../lib/sbom";
 import { getAuth } from "@clerk/express";
 import { logger } from "../lib/logger";
 import { runCveAudit } from "../lib/checks/cve-scanner";
@@ -553,6 +555,51 @@ router.get("/security/sbom", async (req, res): Promise<void> => {
   } catch (err) {
     logger.error({ err }, "SBOM generation failed");
     res.status(500).json({ error: "SBOM generation failed" });
+  }
+});
+
+/**
+ * GET /api/projects/:id/sbom
+ * Generate and download a CycloneDX 1.5 SBOM for a project.
+ */
+router.get("/projects/:id/sbom", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  if (!Number.isFinite(projectId)) {
+    res.status(400).json({ error: "Invalid project id" });
+    return;
+  }
+
+  try {
+    const [project] = await db
+      .select({ id: projectsTable.id, name: projectsTable.name })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const files = await db
+      .select({
+        path: projectFilesTable.path,
+        content: projectFilesTable.content,
+        mimeType: projectFilesTable.mimeType,
+      })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId));
+
+    const sbom = generateSbom(project.name, files);
+
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="sbom-${projectId}.json"`,
+    );
+    res.json(sbom);
+  } catch (err) {
+    logger.error({ err, projectId }, "Failed to generate SBOM");
+    res.status(500).json({ error: "Failed to generate SBOM" });
   }
 });
 

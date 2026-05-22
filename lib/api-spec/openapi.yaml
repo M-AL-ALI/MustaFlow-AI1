@@ -978,6 +978,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/sbom:
+    get:
+      operationId: getProjectSbom
+      tags: [projects]
+      summary: Generate and download a CycloneDX 1.5 SBOM for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: CycloneDX 1.5 SBOM JSON document (downloaded as sbom-{id}.json)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SbomDocument"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/files:
     get:
       operationId: listProjectFiles
@@ -4296,6 +4317,79 @@ components:
         ok: { type: boolean }
         output: { type: string }
 
+    SbomDocument:
+      type: object
+      description: CycloneDX 1.5 Software Bill of Materials document
+      required:
+        [bomFormat, specVersion, serialNumber, version, metadata, components, vulnerabilities]
+      properties:
+        bomFormat: { type: string, enum: [CycloneDX] }
+        specVersion: { type: string, enum: ["1.5"] }
+        serialNumber: { type: string }
+        version: { type: integer }
+        metadata:
+          type: object
+          properties:
+            timestamp: { type: string, format: date-time }
+            tools:
+              type: array
+              items:
+                type: object
+                properties:
+                  vendor: { type: string }
+                  name: { type: string }
+                  version: { type: string }
+            component:
+              type: object
+              properties:
+                type: { type: string }
+                name: { type: string }
+                version: { type: string }
+        components:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              bom-ref: { type: string }
+              name: { type: string }
+              version: { type: string }
+              purl: { type: string }
+              licenses:
+                type: array
+                items: { type: object }
+              externalReferences:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type: { type: string }
+                    url: { type: string }
+        vulnerabilities:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              source:
+                type: object
+                properties:
+                  name: { type: string }
+                  url: { type: string }
+              ratings:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    severity: { type: string }
+              description: { type: string }
+              affects:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    ref: { type: string }
+
     ProjectAuditResult:
       type: object
       required: [findings, scores, auditedAt, fileCount]
@@ -4709,21 +4803,6 @@ components:
             $ref: "#/components/schemas/SbomMetadataTool"
         component:
           $ref: "#/components/schemas/SbomMetadataComponent"
-
-    SbomDocument:
-      type: object
-      required: [bomFormat, specVersion, serialNumber, version, metadata, components]
-      properties:
-        bomFormat: { type: string }
-        specVersion: { type: string }
-        serialNumber: { type: string }
-        version: { type: integer }
-        metadata:
-          $ref: "#/components/schemas/SbomMetadata"
-        components:
-          type: array
-          items:
-            $ref: "#/components/schemas/SbomComponent"
 
     SecurityFinding:
       type: object

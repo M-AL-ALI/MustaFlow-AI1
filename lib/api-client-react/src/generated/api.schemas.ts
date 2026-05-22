@@ -1634,6 +1634,89 @@ export interface ContainerExecResult {
   output: string;
 }
 
+export type SbomDocumentBomFormat = typeof SbomDocumentBomFormat[keyof typeof SbomDocumentBomFormat];
+
+
+export const SbomDocumentBomFormat = {
+  CycloneDX: 'CycloneDX',
+} as const;
+
+export type SbomDocumentSpecVersion = typeof SbomDocumentSpecVersion[keyof typeof SbomDocumentSpecVersion];
+
+
+export const SbomDocumentSpecVersion = {
+  '15': '1.5',
+} as const;
+
+export type SbomDocumentMetadataToolsItem = {
+  vendor?: string;
+  name?: string;
+  version?: string;
+};
+
+export type SbomDocumentMetadataComponent = {
+  type?: string;
+  name?: string;
+  version?: string;
+};
+
+export type SbomDocumentMetadata = {
+  timestamp?: string;
+  tools?: SbomDocumentMetadataToolsItem[];
+  component?: SbomDocumentMetadataComponent;
+};
+
+export type SbomDocumentComponentsItemLicensesItem = { [key: string]: unknown };
+
+export type SbomDocumentComponentsItemExternalReferencesItem = {
+  type?: string;
+  url?: string;
+};
+
+export type SbomDocumentComponentsItem = {
+  type?: string;
+  'bom-ref'?: string;
+  name?: string;
+  version?: string;
+  purl?: string;
+  licenses?: SbomDocumentComponentsItemLicensesItem[];
+  externalReferences?: SbomDocumentComponentsItemExternalReferencesItem[];
+};
+
+export type SbomDocumentVulnerabilitiesItemSource = {
+  name?: string;
+  url?: string;
+};
+
+export type SbomDocumentVulnerabilitiesItemRatingsItem = {
+  severity?: string;
+};
+
+export type SbomDocumentVulnerabilitiesItemAffectsItem = {
+  ref?: string;
+};
+
+export type SbomDocumentVulnerabilitiesItem = {
+  id?: string;
+  source?: SbomDocumentVulnerabilitiesItemSource;
+  ratings?: SbomDocumentVulnerabilitiesItemRatingsItem[];
+  description?: string;
+  affects?: SbomDocumentVulnerabilitiesItemAffectsItem[];
+};
+
+/**
+ * CycloneDX 1.5 Software Bill of Materials document
+ */
+export interface SbomDocument {
+  bomFormat: SbomDocumentBomFormat;
+  specVersion: SbomDocumentSpecVersion;
+  serialNumber: string;
+  version: number;
+  metadata: SbomDocumentMetadata;
+  components: SbomDocumentComponentsItem[];
+  vulnerabilities: SbomDocumentVulnerabilitiesItem[];
+}
+
 export interface ProjectAuditResult {
   findings: AuditFinding[];
   scores: AuditScore[];
@@ -2030,15 +2113,6 @@ export interface SbomMetadata {
   timestamp: string;
   tools: SbomMetadataTool[];
   component: SbomMetadataComponent;
-}
-
-export interface SbomDocument {
-  bomFormat: string;
-  specVersion: string;
-  serialNumber: string;
-  version: number;
-  metadata: SbomMetadata;
-  components: SbomComponent[];
 }
 
 export type SecurityFindingSeverity = typeof SecurityFindingSeverity[keyof typeof SecurityFindingSeverity];

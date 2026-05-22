@@ -384,30 +384,52 @@ export const DismissCveFindingResponse = zod.object({
  * @summary Download a CycloneDX SBOM listing all workspace dependencies for compliance audits.
  */
 export const DownloadSbomResponse = zod.object({
-  "bomFormat": zod.string(),
-  "specVersion": zod.string(),
+  "bomFormat": zod.enum(['CycloneDX']),
+  "specVersion": zod.enum(['1.5']),
   "serialNumber": zod.string(),
   "version": zod.number(),
   "metadata": zod.object({
-  "timestamp": zod.coerce.date(),
+  "timestamp": zod.coerce.date().optional(),
   "tools": zod.array(zod.object({
-  "vendor": zod.string(),
-  "name": zod.string(),
-  "version": zod.string()
-})),
+  "vendor": zod.string().optional(),
+  "name": zod.string().optional(),
+  "version": zod.string().optional()
+})).optional(),
   "component": zod.object({
-  "type": zod.string(),
-  "name": zod.string(),
-  "version": zod.string().nullish()
-})
+  "type": zod.string().optional(),
+  "name": zod.string().optional(),
+  "version": zod.string().optional()
+}).optional()
 }),
   "components": zod.array(zod.object({
-  "type": zod.string(),
-  "name": zod.string(),
-  "version": zod.string(),
-  "purl": zod.string()
+  "type": zod.string().optional(),
+  "bom-ref": zod.string().optional(),
+  "name": zod.string().optional(),
+  "version": zod.string().optional(),
+  "purl": zod.string().optional(),
+  "licenses": zod.array(zod.object({
+
+}).passthrough()).optional(),
+  "externalReferences": zod.array(zod.object({
+  "type": zod.string().optional(),
+  "url": zod.string().optional()
+})).optional()
+})),
+  "vulnerabilities": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "source": zod.object({
+  "name": zod.string().optional(),
+  "url": zod.string().optional()
+}).optional(),
+  "ratings": zod.array(zod.object({
+  "severity": zod.string().optional()
+})).optional(),
+  "description": zod.string().optional(),
+  "affects": zod.array(zod.object({
+  "ref": zod.string().optional()
+})).optional()
 }))
-})
+}).describe('CycloneDX 1.5 Software Bill of Materials document')
 
 
 /**
@@ -1308,6 +1330,62 @@ export const GetProjectAuditResponse = zod.object({
   "auditedAt": zod.coerce.date(),
   "fileCount": zod.number()
 })
+
+
+/**
+ * @summary Generate and download a CycloneDX 1.5 SBOM for a project
+ */
+export const GetProjectSbomParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetProjectSbomResponse = zod.object({
+  "bomFormat": zod.enum(['CycloneDX']),
+  "specVersion": zod.enum(['1.5']),
+  "serialNumber": zod.string(),
+  "version": zod.number(),
+  "metadata": zod.object({
+  "timestamp": zod.coerce.date().optional(),
+  "tools": zod.array(zod.object({
+  "vendor": zod.string().optional(),
+  "name": zod.string().optional(),
+  "version": zod.string().optional()
+})).optional(),
+  "component": zod.object({
+  "type": zod.string().optional(),
+  "name": zod.string().optional(),
+  "version": zod.string().optional()
+}).optional()
+}),
+  "components": zod.array(zod.object({
+  "type": zod.string().optional(),
+  "bom-ref": zod.string().optional(),
+  "name": zod.string().optional(),
+  "version": zod.string().optional(),
+  "purl": zod.string().optional(),
+  "licenses": zod.array(zod.object({
+
+}).passthrough()).optional(),
+  "externalReferences": zod.array(zod.object({
+  "type": zod.string().optional(),
+  "url": zod.string().optional()
+})).optional()
+})),
+  "vulnerabilities": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "source": zod.object({
+  "name": zod.string().optional(),
+  "url": zod.string().optional()
+}).optional(),
+  "ratings": zod.array(zod.object({
+  "severity": zod.string().optional()
+})).optional(),
+  "description": zod.string().optional(),
+  "affects": zod.array(zod.object({
+  "ref": zod.string().optional()
+})).optional()
+}))
+}).describe('CycloneDX 1.5 Software Bill of Materials document')
 
 
 /**

@@ -3717,6 +3717,83 @@ export function useGetProjectAudit<TData = Awaited<ReturnType<typeof getProjectA
 
 
 
+export const getGetProjectSbomUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/sbom`
+}
+
+/**
+ * @summary Generate and download a CycloneDX 1.5 SBOM for a project
+ */
+export const getProjectSbom = async (id: number, options?: RequestInit): Promise<SbomDocument> => {
+
+  return customFetch<SbomDocument>(getGetProjectSbomUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectSbomQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/sbom`
+    ] as const;
+    }
+
+
+export const getGetProjectSbomQueryOptions = <TData = Awaited<ReturnType<typeof getProjectSbom>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectSbom>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectSbomQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectSbom>>> = ({ signal }) => getProjectSbom(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectSbom>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectSbomQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectSbom>>>
+export type GetProjectSbomQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Generate and download a CycloneDX 1.5 SBOM for a project
+ */
+
+export function useGetProjectSbom<TData = Awaited<ReturnType<typeof getProjectSbom>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectSbom>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectSbomQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
 export const getListProjectFilesUrl = (id: number,) => {
 
 

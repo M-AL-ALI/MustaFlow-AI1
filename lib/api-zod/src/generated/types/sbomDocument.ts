@@ -5,14 +5,21 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
-import type { SbomComponent } from './sbomComponent';
-import type { SbomMetadata } from './sbomMetadata';
+import type { SbomDocumentBomFormat } from './sbomDocumentBomFormat';
+import type { SbomDocumentComponentsItem } from './sbomDocumentComponentsItem';
+import type { SbomDocumentMetadata } from './sbomDocumentMetadata';
+import type { SbomDocumentSpecVersion } from './sbomDocumentSpecVersion';
+import type { SbomDocumentVulnerabilitiesItem } from './sbomDocumentVulnerabilitiesItem';
 
+/**
+ * CycloneDX 1.5 Software Bill of Materials document
+ */
 export interface SbomDocument {
-  bomFormat: string;
-  specVersion: string;
+  bomFormat: SbomDocumentBomFormat;
+  specVersion: SbomDocumentSpecVersion;
   serialNumber: string;
   version: number;
-  metadata: SbomMetadata;
-  components: SbomComponent[];
+  metadata: SbomDocumentMetadata;
+  components: SbomDocumentComponentsItem[];
+  vulnerabilities: SbomDocumentVulnerabilitiesItem[];
 }
