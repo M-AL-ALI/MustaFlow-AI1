@@ -142,8 +142,8 @@ async function getMobileReadiness(
       message: hasBundleId
         ? `Bundle ID: ${String(bundleId)}`
         : appJson
-          ? "Set a real bundle ID in Mobile Settings (not com.example.app)."
-          : "Build the app first so app.json is generated, then update Mobile Settings.",
+          ? `Current value: ${String(bundleId ?? "not set")} — replace with a unique bundle ID in Mobile Settings.`
+          : "Build the app first so app.json is generated, then set the bundle ID in Mobile Settings.",
     });
 
     // ── Check 4 (iOS): Apple Developer account secrets (BLOCKING) ─────────
@@ -213,8 +213,8 @@ async function getMobileReadiness(
       message: hasPackageName
         ? `Package name: ${String(packageName)}`
         : appJson
-          ? "Set a real package name in Mobile Settings (not com.example.app)."
-          : "Build the app first so app.json is generated, then update Mobile Settings.",
+          ? `Current value: ${String(packageName ?? "not set")} — replace with a unique package name in Mobile Settings.`
+          : "Build the app first so app.json is generated, then set the package name in Mobile Settings.",
     });
 
     // ── Check 4 (Android): Keystore / service account secrets (BLOCKING) ──

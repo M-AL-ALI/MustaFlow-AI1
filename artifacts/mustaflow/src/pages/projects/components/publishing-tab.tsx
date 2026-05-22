@@ -559,7 +559,7 @@ type ReadinessResult = {
   checks: ReadinessCheck[];
 };
 
-function ReadinessCheckRow({ check }: { check: ReadinessCheck }) {
+function ReadinessCheckRow({ check, onFix }: { check: ReadinessCheck; onFix?: () => void }) {
   const icon = {
     pass: <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />,
     fail: <XCircle className="h-3.5 w-3.5 text-destructive" />,
@@ -581,6 +581,15 @@ function ReadinessCheckRow({ check }: { check: ReadinessCheck }) {
         </div>
         {check.message && (
           <div className="text-[11px] text-muted-foreground mt-0.5">{check.message}</div>
+        )}
+        {onFix && check.status === "fail" && (
+          <button
+            onClick={onFix}
+            className="mt-1 flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 font-medium transition-colors"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Fix in Mobile Settings
+          </button>
         )}
       </div>
     </div>
@@ -2020,12 +2029,14 @@ export function PublishingTab({
   containerStatus: _containerStatus,
   containerUrl: _containerUrl,
   onNavigateToSecret,
+  onNavigateToMobileSettings,
 }: {
   projectId: number;
   kind?: string;
   containerStatus?: string;
   containerUrl?: string | null;
   onNavigateToSecret?: (secretName: string) => void;
+  onNavigateToMobileSettings?: () => void;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
   const queryClient = useQueryClient();
@@ -3970,7 +3981,17 @@ export function PublishingTab({
                     Store Submission Requirements
                   </p>
                   {iosReadiness.checks.map((check) => (
-                    <ReadinessCheckRow key={check.id} check={check} />
+                    <ReadinessCheckRow
+                      key={check.id}
+                      check={check}
+                      onFix={
+                        check.id === "ios_bundle_id" &&
+                        check.status === "fail" &&
+                        onNavigateToMobileSettings
+                          ? onNavigateToMobileSettings
+                          : undefined
+                      }
+                    />
                   ))}
                 </div>
               )}
@@ -4368,7 +4389,17 @@ export function PublishingTab({
                     Store Submission Requirements
                   </p>
                   {andReadiness.checks.map((check) => (
-                    <ReadinessCheckRow key={check.id} check={check} />
+                    <ReadinessCheckRow
+                      key={check.id}
+                      check={check}
+                      onFix={
+                        check.id === "android_package_name" &&
+                        check.status === "fail" &&
+                        onNavigateToMobileSettings
+                          ? onNavigateToMobileSettings
+                          : undefined
+                      }
+                    />
                   ))}
                 </div>
               )}

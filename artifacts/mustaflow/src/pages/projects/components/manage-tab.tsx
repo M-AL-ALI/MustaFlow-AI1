@@ -51,9 +51,29 @@ function validateHex(value: string): string | null {
   return null;
 }
 
-export function ManageTab({ projectId }: { projectId: number }) {
+export function ManageTab({
+  projectId,
+  scrollToMobileSettings,
+  onScrollComplete,
+}: {
+  projectId: number;
+  scrollToMobileSettings?: boolean;
+  onScrollComplete?: () => void;
+}) {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!scrollToMobileSettings) return;
+    const id = setTimeout(() => {
+      const el = document.getElementById("mobile-settings-section");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      onScrollComplete?.();
+    }, 100);
+    return () => clearTimeout(id);
+  }, [scrollToMobileSettings, onScrollComplete]);
 
   // ── Project data ─────────────────────────────────────────────────────────
   const { data: project } = useGetProject(projectId, {
@@ -465,7 +485,10 @@ function MobileAppSettingsSection({ projectId }: { projectId: number }) {
   const displayIconUrl = iconPreviewUrl ?? current?.iconUrl ?? null;
 
   return (
-    <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+    <div
+      id="mobile-settings-section"
+      className="bg-card border border-border rounded-xl p-5 space-y-4"
+    >
       <div className="flex items-center gap-2">
         <Smartphone className="h-4 w-4 text-muted-foreground" />
         <h3 className="text-sm font-semibold">App Settings</h3>

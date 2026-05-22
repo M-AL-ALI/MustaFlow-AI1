@@ -561,6 +561,7 @@ export default function ProjectWorkspacePage() {
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [historyFocusVersionId, setHistoryFocusVersionId] = useState<number | null>(null);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
+  const [scrollManageToMobileSettings, setScrollManageToMobileSettings] = useState(false);
   const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
   const [creditsSuccess, setCreditsSuccess] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -2389,6 +2390,10 @@ export default function ProjectWorkspacePage() {
                 containerStatus={containerStatus}
                 containerUrl={containerUrl}
                 onNavigateToSecret={handleAddKey}
+                onNavigateToMobileSettings={() => {
+                  setScrollManageToMobileSettings(true);
+                  setActiveTab("manage");
+                }}
               />
             )}
             {activeTab === "logs" && (
@@ -2405,7 +2410,13 @@ export default function ProjectWorkspacePage() {
             {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
             {activeTab === "analytics" && <AnalyticsTab project={project} />}
             {activeTab === "resources" && <ResourcesTab />}
-            {activeTab === "manage" && <ManageTab projectId={projectId} />}
+            {activeTab === "manage" && (
+              <ManageTab
+                projectId={projectId}
+                scrollToMobileSettings={scrollManageToMobileSettings}
+                onScrollComplete={() => setScrollManageToMobileSettings(false)}
+              />
+            )}
           </div>
         </div>
       </div>
