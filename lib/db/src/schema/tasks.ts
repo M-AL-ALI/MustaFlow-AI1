@@ -96,6 +96,27 @@ export type TaskReport = {
     fixedCount: number;
     remainingCount: number;
   } | null;
+  /** Populated when a Power/Pro critique pass runs after the build */
+  critiquePass?: {
+    /** Human-readable list of issues the critique identified */
+    issuesFound: string[];
+    /** True if the critique returned patched files that were applied */
+    autoFixed: boolean;
+  } | null;
+  /**
+   * Structured record of the structural/per-file validation cycle.
+   * Populated for every build or refine that triggered validation.
+   */
+  validationReport?: {
+    /** Critical errors found in the initial pass (before any fix-up) */
+    initialIssues: string[];
+    /** True if a correction pass was attempted */
+    fixupAttempted: boolean;
+    /** Critical errors still present after the correction pass (empty = all fixed) */
+    remainingIssues: string[];
+    /** True when no critical errors remain in the final output */
+    passed: boolean;
+  } | null;
 };
 
 export const agentTasksTable = pgTable(

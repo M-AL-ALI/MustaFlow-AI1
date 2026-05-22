@@ -101,6 +101,18 @@ type TaskReport = {
   testScript?: string | null;
   testRanAt?: string | null;
   syntaxValid?: boolean;
+  /** Populated when a Power/Pro critique pass runs after the build */
+  critiquePass?: {
+    issuesFound: string[];
+    autoFixed: boolean;
+  } | null;
+  /** Structured record of the structural/per-file validation cycle */
+  validationReport?: {
+    initialIssues: string[];
+    fixupAttempted: boolean;
+    remainingIssues: string[];
+    passed: boolean;
+  } | null;
 };
 
 type StructuredPlan = {
@@ -550,6 +562,38 @@ function InlineReportCard({
         <div className="pt-1 border-t border-border">
           <div className="font-semibold text-foreground flex items-center gap-1 text-[11px]">
             <KeyRound className="h-3 w-3" /> Integrations required
+          </div>
+        </div>
+      )}
+      {report.validationReport && (
+        <div className="pt-1.5 border-t border-border">
+          {report.validationReport.passed ? (
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400">
+              <ShieldCheck className="h-3 w-3 shrink-0" />
+              <span>Validation fixed {report.validationReport.initialIssues.length} issue(s)</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-red-400">
+              <AlertTriangle className="h-3 w-3 shrink-0" />
+              <span>
+                {report.validationReport.remainingIssues.length} validation issue(s) persist after
+                fix-up
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+      {report.critiquePass?.autoFixed && (
+        <div className="pt-1.5 border-t border-border">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400">
+            <Wand2 className="h-3 w-3 shrink-0" />
+            <span>Auto-fixed by quality review</span>
+            {report.critiquePass.issuesFound.length > 0 && (
+              <span className="text-muted-foreground font-normal">
+                ({report.critiquePass.issuesFound.length} issue
+                {report.critiquePass.issuesFound.length > 1 ? "s" : ""} found &amp; patched)
+              </span>
+            )}
           </div>
         </div>
       )}

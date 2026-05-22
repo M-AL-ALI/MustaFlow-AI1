@@ -1292,6 +1292,15 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           ];
         }
 
+        // Hard gate — if validation still failed after correction pass and escalation, refuse to
+        // write broken files. Throw so runJob marks the task failed without saving a snapshot.
+        if (result.correctionFailed) {
+          throw new Error(
+            `Build validation still failed after correction pass${buildEscalationMode ? " and auto-escalation" : ""}. ` +
+              `No files were saved. Try rephrasing your request or switching to a higher agent mode.`,
+          );
+        }
+
         // Secrets scan — redact before persisting
         const { files: sanitisedFiles, findings: secretFindings } = scanForSecrets(result.files);
         if (secretFindings.length > 0) {
@@ -1576,6 +1585,15 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             `Auto-escalated from ${input.agentMode} to ${refineEscalationMode} mode after validation failure`,
             ...(refineResult.report.warnings ?? []),
           ];
+        }
+
+        // Hard gate — if validation still failed after correction pass and escalation, refuse to
+        // write broken files. Throw so runJob marks the task failed without saving a snapshot.
+        if (refineResult.correctionFailed) {
+          throw new Error(
+            `Refine validation still failed after correction pass${refineEscalationMode ? " and auto-escalation" : ""}. ` +
+              `No files were saved. Try rephrasing your request or switching to a higher agent mode.`,
+          );
         }
 
         // Secrets scan — redact before persisting

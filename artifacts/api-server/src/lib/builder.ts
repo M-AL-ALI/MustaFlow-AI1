@@ -829,6 +829,155 @@ export function validateMobileFiles(files: BuilderFile[]): ValidationResult {
     }
   }
 
+  // Screen/route reference integrity — check that routes pushed in navigation code exist as files
+  try {
+    const appFiles = files.filter((f) => f.path.startsWith("app/") || f.path.startsWith("src/"));
+    const allContent = appFiles.map((f) => f.content).join("\n");
+    const filePaths = new Set(files.map((f) => f.path));
+
+    // Extract route strings from Expo Router Link href, useRouter().push(), router.navigate() etc.
+    const routePatterns = [
+      /href=["']([a-z0-9/_-]+)["']/gi,
+      /router\.(?:push|navigate|replace)\s*\(\s*["']([a-z0-9/_-]+)["']/gi,
+      /useRouter\(\)\.(?:push|navigate)\s*\(\s*["']([a-z0-9/_-]+)["']/gi,
+    ];
+    const referencedRoutes = new Set<string>();
+    for (const pattern of routePatterns) {
+      pattern.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = pattern.exec(allContent)) !== null) {
+        const route = (m[1] ?? "").replace(/^\//, "");
+        if (route && !route.includes("http") && route.length > 0) {
+          referencedRoutes.add(route);
+        }
+      }
+    }
+
+    // For each referenced route, check that a corresponding screen file exists
+    for (const route of referencedRoutes) {
+      const candidates = [
+        `app/${route}.tsx`,
+        `app/${route}.ts`,
+        `app/${route}/index.tsx`,
+        `app/${route}/index.ts`,
+        `src/screens/${route}.tsx`,
+      ];
+      const exists = candidates.some((c) => filePaths.has(c));
+      if (!exists) {
+        warnings.push(
+          `Mobile: route "/${route}" is referenced in navigation code but no matching screen file found (checked ${candidates[0]}, ${candidates[2]})`,
+        );
+      }
+    }
+  } catch {
+    // best-effort — never block a build
+  }
+
+  return { passed: criticalErrors.length === 0, criticalErrors, warnings };
+}
+
+/**
+ * Structural validator for web (static HTML/CSS/JS) projects.
+ * Runs BEFORE file commit — complements the per-file validateFiles checks with
+ * project-level checks: index.html existence, local file reference integrity,
+ * Tailwind/Lucide CDN presence when used, and truncation heuristics.
+ * Synchronous — no network I/O.
+ */
+export function validateWebStructure(files: BuilderFile[]): ValidationResult {
+  const criticalErrors: string[] = [];
+  const warnings: string[] = [];
+  const filePaths = new Set(files.map((f) => f.path));
+
+  // 1. index.html must exist
+  if (!filePaths.has("index.html")) {
+    criticalErrors.push(
+      "Missing index.html — all web projects must have an index.html entry point",
+    );
+  }
+
+  const htmlFiles = files.filter(
+    (f) => f.mimeType === "text/html" || f.path.endsWith(".html") || f.path.endsWith(".htm"),
+  );
+
+  for (const f of htmlFiles) {
+    const c = f.content;
+
+    // 2. Truncation heuristic — no closing </body> or </html> near the end
+    if (c.length > 300) {
+      const tail = c.slice(-600);
+      const hasClosingHtml = /<\/html\s*>/i.test(tail);
+      const hasClosingBody = /<\/body\s*>/i.test(tail);
+      if (!hasClosingHtml && !hasClosingBody) {
+        criticalErrors.push(
+          `${f.path}: Content appears truncated — missing closing </body> and </html> tags`,
+        );
+      }
+    }
+
+    // 3. Tailwind CDN — if Tailwind utility classes are used but no CDN script is present
+    const hasTailwindClasses =
+      /class="[^"]*(?:flex|grid|p-\d|m-\d|text-(?:sm|base|lg|xl|2xl|3xl)|bg-|border-|rounded|w-\d|h-\d|gap-\d)[^"]*"/i.test(
+        c,
+      );
+    const hasTailwindCdn = /cdn\.tailwindcss\.com|tailwindcss@/i.test(c);
+    if (hasTailwindClasses && !hasTailwindCdn) {
+      criticalErrors.push(
+        `${f.path}: Tailwind utility classes detected but no Tailwind CDN script found — add <script src="https://cdn.tailwindcss.com"></script> to <head>`,
+      );
+    }
+
+    // 4. Lucide CDN — if lucide icons are used but no CDN script is present
+    const hasLucideUsage = /data-lucide=|class="lucide|lucide\./i.test(c);
+    const hasLucideCdn = /unpkg\.com\/lucide/i.test(c);
+    if (hasLucideUsage && !hasLucideCdn) {
+      warnings.push(
+        `${f.path}: Lucide icons referenced but no Lucide CDN script found — add <script src="https://unpkg.com/lucide@latest"></script>`,
+      );
+    }
+
+    // 5. Local file reference integrity — local src/href must point to files in the generated set
+    const localSrcs = [...c.matchAll(/src="(?!https?:\/\/)(?!data:)(?!\/\/)([^"#?]+)"/gi)].map(
+      (m) => m[1]!,
+    );
+    const localHrefs = [
+      ...c.matchAll(
+        /href="(?!https?:\/\/)(?!#)(?!mailto:)(?!tel:)(?!javascript:)([^"#?]+\.(?:html|css|js|svg|png|jpg|gif|ico|webp|woff|woff2|ttf|json))"/gi,
+      ),
+    ].map((m) => m[1]!);
+
+    // HTML file's directory (empty string for root-level files)
+    const htmlDir = f.path.includes("/") ? f.path.replace(/\/[^/]+$/, "") : "";
+
+    for (const ref of [...localSrcs, ...localHrefs]) {
+      if (ref.length === 0 || ref.includes("//")) continue;
+      if (ref.startsWith("_mocks/")) continue;
+
+      let resolvedPath: string;
+      if (ref.startsWith("/")) {
+        // Absolute-from-root reference — strip leading slash
+        resolvedPath = ref.slice(1);
+      } else {
+        // Relative reference — resolve against the HTML file's directory
+        const base = htmlDir ? htmlDir + "/" : "";
+        const raw = ref.startsWith("./") ? ref.slice(2) : ref;
+        const parts = (base + raw).split("/");
+        const resolved: string[] = [];
+        for (const p of parts) {
+          if (p === "..") resolved.pop();
+          else if (p !== "." && p !== "") resolved.push(p);
+        }
+        resolvedPath = resolved.join("/");
+      }
+
+      if (resolvedPath.length === 0) continue;
+      if (!filePaths.has(resolvedPath)) {
+        criticalErrors.push(
+          `${f.path}: References local file "${ref}" which is not in the generated file set`,
+        );
+      }
+    }
+  }
+
   return { passed: criticalErrors.length === 0, criticalErrors, warnings };
 }
 
@@ -1542,6 +1691,142 @@ async function runCorrectionPass(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Critique Pass — Power/Pro only
+// A second-opinion AI call that reviews the generated output holistically
+// against the original request, even when structural validation passes.
+// Returns the issues found and a patched file set (or null if no changes needed).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CRITIQUE_SYSTEM_PROMPT = `You are a senior QA engineer reviewing AI-generated web app files before they ship to users.
+Your job is to identify REAL functional problems — not stylistic preferences.
+
+Review the generated files against the original user request and any validator findings.
+Focus on:
+1. Features explicitly requested by the user that are missing or broken
+2. Navigation links that go nowhere (href="#" with no handler, missing pages)
+3. Forms with no submit logic or no user feedback on submit
+4. Buttons or interactive elements with no event handler
+5. JavaScript that calls functions or uses variables that are not defined
+6. Pages that are completely empty or contain only placeholder content when real content was requested
+7. Critical validator errors that were not resolved in the file set
+
+OUTPUT STRICT JSON matching this exact shape:
+{
+  "verdict": "ok" | "issues_found",
+  "issues": string[],
+  "files": [{ "path": string, "content": string, "mimeType": string }]
+}
+
+Rules:
+- "verdict" is "ok" if the app is functionally complete for the user's request; "issues_found" otherwise
+- "issues" must be SPECIFIC: "Login button has no click handler" not "buttons need work" — empty array if verdict is "ok"
+- "files" must contain ONLY the files that genuinely need changes (full corrected content) — empty array if verdict is "ok" or no changes are needed
+- Do NOT return files you did not change — only return files with real fixes applied
+- Do NOT flag style preferences, minor wording differences, or non-blocking cosmetic issues
+- If the app works as the user requested, always return verdict: "ok" — do not manufacture issues`;
+
+/**
+ * Power/Pro critique pass — holistic AI review of generated output against the user request.
+ * Called after structural validation (and any correction pass) for Power/Pro builds.
+ * For Lite/Eco, skipped entirely to keep costs down.
+ *
+ * Returns:
+ *   issues    — human-readable list of problems found (may be empty)
+ *   fixedFiles — merged file set with critique patches applied, or null if no changes needed
+ */
+async function runCritiquePass(
+  originalMessages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  files: BuilderFile[],
+  userPrompt: string,
+  validatorIssues: string[],
+  mode: AgentMode,
+  label: string,
+): Promise<{ issues: string[]; fixedFiles: BuilderFile[] | null }> {
+  try {
+    // Build a compact manifest for the critique (cap at 14k chars to stay within context)
+    const manifest = makeCompactManifest(files);
+    const manifestTruncated =
+      manifest.length > 14000
+        ? manifest.slice(0, 14000) + "\n…(file manifest truncated for review)"
+        : manifest;
+
+    const issueBlock =
+      validatorIssues.length > 0
+        ? `\n\nStructural validator found these issues in the file set:\n${validatorIssues.map((e) => `- ${e}`).join("\n")}`
+        : "";
+
+    const critiqueMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      { role: "system", content: CRITIQUE_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: `Original user request: "${userPrompt}"\n\nGenerated files to review:\n${manifestTruncated}${issueBlock}\n\nReview the generated files for functional problems. Return JSON as instructed.`,
+      },
+    ];
+
+    const corrected = await callWithRetry(critiqueMessages, modelFor(mode), 16000, label);
+
+    const verdict = typeof corrected.verdict === "string" ? corrected.verdict : "ok";
+    const issues = Array.isArray(corrected.issues)
+      ? corrected.issues.filter((i): i is string => typeof i === "string")
+      : [];
+
+    if (
+      verdict !== "issues_found" ||
+      !Array.isArray(corrected.files) ||
+      (corrected.files as unknown[]).length === 0
+    ) {
+      if (issues.length > 0) {
+        logger.info(
+          { label, issueCount: issues.length },
+          "Critique found issues but no file patches",
+        );
+      }
+      return { issues, fixedFiles: null };
+    }
+
+    const rawFixed = corrected.files as Array<{
+      path?: unknown;
+      content?: unknown;
+      mimeType?: unknown;
+    }>;
+    const fixedSubset = rawFixed
+      .filter(
+        (f): f is { path: string; content: string; mimeType?: string } =>
+          typeof f === "object" &&
+          f !== null &&
+          typeof (f as { path?: unknown }).path === "string" &&
+          typeof (f as { content?: unknown }).content === "string",
+      )
+      .map((f) => ({
+        path: normalizePath(f.path),
+        content: f.content,
+        mimeType: typeof f.mimeType === "string" ? f.mimeType : guessMime(f.path),
+      }));
+
+    if (fixedSubset.length === 0) {
+      return { issues, fixedFiles: null };
+    }
+
+    // Merge corrected subset into the full file set — never drop uncorrected files
+    const mergedMap = new Map(files.map((f) => [f.path, f]));
+    for (const cf of fixedSubset) {
+      mergedMap.set(cf.path, cf);
+    }
+    const mergedFiles = [...mergedMap.values()];
+
+    logger.info(
+      { label, issueCount: issues.length, fixedFileCount: fixedSubset.length },
+      "Critique pass found and patched issues",
+    );
+
+    return { issues, fixedFiles: mergedFiles };
+  } catch (err) {
+    logger.warn({ err, label }, "Critique pass threw — skipping (non-fatal)");
+    return { issues: [], fixedFiles: null };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // API Mock Auto-Generation
 // Scans generated files for fetch/axios calls, creates _mocks/ JSON stubs,
 // and injects a lightweight service-worker interceptor into index.html.
@@ -2013,26 +2298,44 @@ export async function runBuildPipeline(args: {
   // Post-processing: inject required meta tags into every HTML file as a safety net
   files = files.map((f) => injectRequiredMetaTags(f, projectName));
 
-  // Self-validation pass
+  // Web structural validator — checks index.html, local refs, Tailwind/Lucide CDN, truncation
+  const structuralValidation = validateWebStructure(files);
+  if (!structuralValidation.passed) {
+    logger.warn(
+      { criticalErrors: structuralValidation.criticalErrors },
+      "Web structural validator found critical errors",
+    );
+  }
+
+  // Per-file self-validation pass (HTML parseability, JS syntax, CDN reachability, etc.)
   await onEvent?.("validating_output", "Validating generated files…");
-  const validation = await validateFiles(files);
+  const perFileValidation = await validateFiles(files);
+
+  // Merge structural + per-file validation results
+  const allCriticalErrors = [
+    ...structuralValidation.criticalErrors,
+    ...perFileValidation.criticalErrors,
+  ];
+  const allValidationWarnings = [...structuralValidation.warnings, ...perFileValidation.warnings];
+  const validationPassed = allCriticalErrors.length === 0;
+
   let correctionFailed = false;
   let postCorrectionWarnings: string[] = [];
 
-  if (!validation.passed) {
+  if (!validationPassed) {
     logger.warn(
-      { criticalErrors: validation.criticalErrors },
+      { criticalErrors: allCriticalErrors },
       "Build validation found critical errors — running correction pass",
     );
     await onEvent?.(
       "validating_output",
-      `Validation found ${validation.criticalErrors.length} issue(s) — running correction…`,
+      `Validation found ${allCriticalErrors.length} issue(s) — running correction…`,
     );
 
     const corrected = await runCorrectionPass(
       messages,
       parsed,
-      validation.criticalErrors,
+      allCriticalErrors,
       files,
       agentMode,
       "build-correction",
@@ -2040,22 +2343,119 @@ export async function runBuildPipeline(args: {
     );
     if (corrected !== null) {
       files = corrected;
-      // Re-inject meta tags into corrected files too
+      // Re-inject meta tags into corrected files
       files = files.map((f) => injectRequiredMetaTags(f, projectName));
+
+      // Mandatory revalidation — verify the correction actually fixed the structural + per-file errors
+      const revalidateStructural = validateWebStructure(files);
+      const revalidatePerFile = await validateFiles(
+        files.filter(
+          (f) =>
+            f.mimeType === "text/html" ||
+            f.path.endsWith(".html") ||
+            f.path.endsWith(".htm") ||
+            f.mimeType === "application/javascript" ||
+            f.mimeType === "text/javascript" ||
+            f.path.endsWith(".js") ||
+            f.path.endsWith(".mjs"),
+        ),
+      );
+      const remainingCritical = [
+        ...revalidateStructural.criticalErrors,
+        ...revalidatePerFile.criticalErrors,
+      ];
+      if (remainingCritical.length > 0) {
+        logger.warn(
+          { remainingCritical },
+          "Build revalidation after correction still has critical errors — marking failed",
+        );
+        correctionFailed = true;
+        postCorrectionWarnings = remainingCritical.map((e) => `[validation_failed] ${e}`);
+      } else {
+        // Correction succeeded — surface only non-critical warnings
+        postCorrectionWarnings = [...revalidateStructural.warnings, ...revalidatePerFile.warnings];
+      }
     } else {
       correctionFailed = true;
-      postCorrectionWarnings = validation.criticalErrors.map((e) => `[validation_failed] ${e}`);
+      postCorrectionWarnings = allCriticalErrors.map((e) => `[validation_failed] ${e}`);
     }
   } else {
-    // Validation passed — surface non-critical warnings (CDN, unbalanced tags, etc.)
-    postCorrectionWarnings = validation.warnings;
+    // Validation passed — surface non-critical warnings
+    postCorrectionWarnings = allValidationWarnings;
+  }
+
+  // Power/Pro critique pass — holistic review against the user's request
+  // Lite/Eco: skip to keep costs down. Runs even when validation passed.
+  let critiqueMeta: TaskReport["critiquePass"] = null;
+  if ((agentMode === "power" || agentMode === "pro") && !correctionFailed) {
+    await onEvent?.("validating_output", "Running quality critique (Power/Pro)…");
+    const { issues: critiqueIssues, fixedFiles: critiqueFixed } = await runCritiquePass(
+      messages,
+      files,
+      userPrompt,
+      postCorrectionWarnings,
+      agentMode,
+      "build-critique",
+    );
+
+    if (critiqueFixed !== null) {
+      // Revalidate critique output before accepting — never accept broken patches
+      const critiqueValidateStructural = validateWebStructure(critiqueFixed);
+      const critiqueValidatePerFile = await validateFiles(
+        critiqueFixed.filter(
+          (f) =>
+            f.mimeType === "text/html" ||
+            f.path.endsWith(".html") ||
+            f.path.endsWith(".htm") ||
+            f.mimeType === "application/javascript" ||
+            f.mimeType === "text/javascript" ||
+            f.path.endsWith(".js") ||
+            f.path.endsWith(".mjs"),
+        ),
+      );
+      const critiqueNewErrors = [
+        ...critiqueValidateStructural.criticalErrors,
+        ...critiqueValidatePerFile.criticalErrors,
+      ];
+      if (critiqueNewErrors.length > 0) {
+        logger.warn(
+          { critiqueNewErrors },
+          "Critique patch output failed revalidation — discarding critique patches",
+        );
+        // Do not apply the broken critique patches; keep pre-critique files
+        critiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+        postCorrectionWarnings = [
+          ...postCorrectionWarnings,
+          ...critiqueIssues.map((i) => `[critique] ${i}`),
+        ];
+      } else {
+        files = critiqueFixed;
+        files = files.map((f) => injectRequiredMetaTags(f, projectName));
+        critiqueMeta = { issuesFound: critiqueIssues, autoFixed: true };
+        logger.info(
+          { issueCount: critiqueIssues.length },
+          "Critique pass auto-fixed issues in build",
+        );
+        await onEvent?.(
+          "validating_output",
+          `Critique auto-fixed ${critiqueIssues.length} issue(s)`,
+        );
+      }
+    } else if (critiqueIssues.length > 0) {
+      // Critique found issues but couldn't patch — surface as warnings
+      critiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+      postCorrectionWarnings = [
+        ...postCorrectionWarnings,
+        ...critiqueIssues.map((i) => `[critique] ${i}`),
+      ];
+    }
   }
 
   const aiWarnings = Array.isArray(parsed.warnings)
     ? parsed.warnings.filter((w): w is string => typeof w === "string")
     : [];
   const warnings = correctionFailed
-    ? [...aiWarnings, ...validation.warnings, ...postCorrectionWarnings]
+    ? [...aiWarnings, ...allValidationWarnings, ...postCorrectionWarnings]
     : [...aiWarnings, ...postCorrectionWarnings];
 
   const nextRecommendation =
@@ -2079,7 +2479,7 @@ export async function runBuildPipeline(args: {
   );
   const securityNotices = scanFilesForCdnIssues(files);
 
-  // Run syntax check on the final (post-correction) files to get a definitive result
+  // Run syntax check on the final (post-correction/critique) files
   const finalSyntaxErrors = checkSyntax(files);
   if (finalSyntaxErrors.length > 0) {
     logger.warn(
@@ -2101,12 +2501,23 @@ export async function runBuildPipeline(args: {
     syntaxValid: finalSyntaxErrors.length === 0,
     ...(cdnUpgrades.length > 0 ? { cdnUpgrades } : {}),
     ...(securityNotices.length > 0 ? { securityNotices } : {}),
+    ...(critiqueMeta ? { critiquePass: critiqueMeta } : {}),
+    ...(allCriticalErrors.length > 0
+      ? {
+          validationReport: {
+            initialIssues: allCriticalErrors,
+            fixupAttempted: !validationPassed,
+            remainingIssues: correctionFailed
+              ? postCorrectionWarnings.filter((w) => w.startsWith("[validation_failed]"))
+              : [],
+            passed: !correctionFailed,
+          },
+        }
+      : {}),
   };
 
-  const correctionPasses = !validation.passed ? 1 : 0;
-  const errorCategory = !validation.passed
-    ? classifyCriticalErrors(validation.criticalErrors)
-    : null;
+  const correctionPasses = !validationPassed ? 1 : 0;
+  const errorCategory = !validationPassed ? classifyCriticalErrors(allCriticalErrors) : null;
 
   return {
     blueprint,
@@ -2302,7 +2713,26 @@ export async function runRefinePipeline(args: {
     }
   }
 
-  // Self-validation pass on ALL changed files (HTML + standalone JS)
+  // Build merged project state for structural + per-file validation
+  // (structural validator needs the full file graph, not just the delta)
+  const removedPathsForValidation = new Set(
+    Array.isArray(parsed.filesRemoved)
+      ? (parsed.filesRemoved as unknown[]).filter((p): p is string => typeof p === "string")
+      : [],
+  );
+  const changedPathsForValidation = new Set(changedFiles.map((f) => f.path));
+  const mergedForValidation = [
+    ...existingFiles.filter(
+      (f) => !removedPathsForValidation.has(f.path) && !changedPathsForValidation.has(f.path),
+    ),
+    ...changedFiles,
+  ];
+
+  // Web structural validator — runs on the full merged project (not just the delta)
+  await onEvent?.("validating_output", "Validating changed files…");
+  const structuralValidation = validateWebStructure(mergedForValidation);
+
+  // Per-file validation — runs on the changed HTML/JS files only
   const filesToValidate = changedFiles.filter(
     (f) =>
       f.mimeType === "text/html" ||
@@ -2313,58 +2743,222 @@ export async function runRefinePipeline(args: {
       f.path.endsWith(".js") ||
       f.path.endsWith(".mjs"),
   );
+  const perFileValidation =
+    filesToValidate.length > 0
+      ? await validateFiles(filesToValidate)
+      : { passed: true, criticalErrors: [] as string[], warnings: [] as string[] };
 
-  const correctionFailed = false;
+  // Merge all critical errors for the correction gate
+  const initialCriticalErrors = [
+    ...structuralValidation.criticalErrors,
+    ...perFileValidation.criticalErrors,
+  ];
+  const initialWarnings = [...structuralValidation.warnings, ...perFileValidation.warnings];
+  const initialValidationPassed = initialCriticalErrors.length === 0;
+
+  let correctionFailed = false;
   let correctionWasAttempted = false;
   let refineErrorCategory: string | null = null;
   let validationWarnings: string[] = [];
+  let remainingCriticalErrors: string[] = [];
 
-  if (filesToValidate.length > 0) {
-    await onEvent?.("validating_output", "Validating changed files…");
-    const validation = await validateFiles(filesToValidate);
+  if (!initialValidationPassed) {
+    correctionWasAttempted = true;
+    refineErrorCategory = classifyCriticalErrors(initialCriticalErrors);
+    logger.warn(
+      { criticalErrors: initialCriticalErrors },
+      "Refine validation found critical errors — running correction pass",
+    );
+    await onEvent?.(
+      "validating_output",
+      `Validation found ${initialCriticalErrors.length} issue(s) — running correction…`,
+    );
 
-    if (!validation.passed) {
-      correctionWasAttempted = true;
-      refineErrorCategory = classifyCriticalErrors(validation.criticalErrors);
-      logger.warn(
-        { criticalErrors: validation.criticalErrors },
-        "Refine validation found critical errors — running correction pass",
-      );
-      await onEvent?.(
-        "validating_output",
-        `Validation found ${validation.criticalErrors.length} issue(s) — running correction…`,
-      );
+    // Pass changedFiles as currentFiles — runCorrectionPass merges the corrected subset in
+    const corrected = await runCorrectionPass(
+      messages,
+      parsed,
+      initialCriticalErrors,
+      changedFiles,
+      agentMode,
+      "refine-correction",
+      false,
+    );
+    if (corrected !== null) {
+      // corrected is already the fully merged set — replace changedFiles in-place
+      changedFiles.splice(0, changedFiles.length, ...corrected);
 
-      // Pass changedFiles as currentFiles — runCorrectionPass merges the corrected subset in
-      const corrected = await runCorrectionPass(
-        messages,
-        parsed,
-        validation.criticalErrors,
-        changedFiles,
-        agentMode,
-        "refine-correction",
-        false,
+      // Mandatory revalidation — both structural (on full merged state) and per-file
+      const revalidateMerged = [
+        ...existingFiles.filter(
+          (f) =>
+            !removedPathsForValidation.has(f.path) &&
+            !new Set(corrected.map((c) => c.path)).has(f.path),
+        ),
+        ...corrected,
+      ];
+      const revalidateStructural = validateWebStructure(revalidateMerged);
+      const revalidateFiltered = corrected.filter(
+        (f) =>
+          f.mimeType === "text/html" ||
+          f.path.endsWith(".html") ||
+          f.path.endsWith(".htm") ||
+          f.mimeType === "application/javascript" ||
+          f.mimeType === "text/javascript" ||
+          f.path.endsWith(".js") ||
+          f.path.endsWith(".mjs"),
       );
-      if (corrected !== null) {
-        // corrected is already the fully merged set — replace changedFiles in-place
-        changedFiles.splice(0, changedFiles.length, ...corrected);
-        // Correction succeeded — only surface non-critical warnings
-        validationWarnings = validation.warnings;
+      const revalidatePerFile =
+        revalidateFiltered.length > 0
+          ? await validateFiles(revalidateFiltered)
+          : { passed: true, criticalErrors: [] as string[], warnings: [] as string[] };
+      remainingCriticalErrors = [
+        ...revalidateStructural.criticalErrors,
+        ...revalidatePerFile.criticalErrors,
+      ];
+      if (remainingCriticalErrors.length > 0) {
+        logger.warn(
+          { remainingCritical: remainingCriticalErrors },
+          "Refine revalidation after correction still has critical errors — marking failed",
+        );
+        correctionFailed = true;
+        validationWarnings = remainingCriticalErrors.map((e) => `[validation_failed] ${e}`);
       } else {
-        validationWarnings = [
-          ...validation.warnings,
-          ...validation.criticalErrors.map((e) => `[validation_failed] ${e}`),
-        ];
+        // Correction succeeded — surface non-critical warnings
+        validationWarnings = [...revalidateStructural.warnings, ...revalidatePerFile.warnings];
       }
     } else {
-      // Passed — surface non-critical warnings (CDN reachability, tag balance, etc.)
-      validationWarnings = validation.warnings;
+      correctionFailed = true;
+      remainingCriticalErrors = initialCriticalErrors;
+      validationWarnings = [
+        ...initialWarnings,
+        ...initialCriticalErrors.map((e) => `[validation_failed] ${e}`),
+      ];
     }
+  } else {
+    // Passed — surface non-critical warnings (CDN reachability, tag balance, etc.)
+    validationWarnings = initialWarnings;
   }
 
   // Post-processing: inject required meta tags into any changed HTML files
   for (let i = 0; i < changedFiles.length; i++) {
     changedFiles[i] = injectRequiredMetaTags(changedFiles[i]!, projectName);
+  }
+
+  // Power/Pro critique pass — holistic review against the user's request
+  // Lite/Eco: skip to keep costs down.
+  let refineCritiqueMeta: TaskReport["critiquePass"] = null;
+  if ((agentMode === "power" || agentMode === "pro") && !correctionFailed) {
+    await onEvent?.("validating_output", "Running quality critique (Power/Pro)…");
+    // Build the full merged project state for critique context
+    const removedSet = new Set(
+      Array.isArray(parsed.filesRemoved)
+        ? (parsed.filesRemoved as string[]).filter((p) => typeof p === "string")
+        : [],
+    );
+    const changedPathSet = new Set(changedFiles.map((f) => f.path));
+    const fullProjectForCritique = [
+      ...existingFiles.filter((f) => !removedSet.has(f.path) && !changedPathSet.has(f.path)),
+      ...changedFiles,
+    ];
+
+    const { issues: critiqueIssues, fixedFiles: critiqueFixed } = await runCritiquePass(
+      messages,
+      fullProjectForCritique,
+      userPrompt,
+      validationWarnings,
+      agentMode,
+      "refine-critique",
+    );
+
+    if (critiqueFixed !== null) {
+      // Keep only the files that the critique actually changed (those in changedFiles or new)
+      const originalPaths = new Set(existingFiles.map((f) => f.path));
+      const critiqueChanges = critiqueFixed.filter((f) => {
+        const isNew = !originalPaths.has(f.path);
+        const isChanged = changedPathSet.has(f.path) || isNew;
+        return isChanged;
+      });
+      if (critiqueChanges.length > 0) {
+        // Revalidate critique patches before accepting them
+        const critiqueValidateFiltered = critiqueChanges.filter(
+          (f) =>
+            f.mimeType === "text/html" ||
+            f.path.endsWith(".html") ||
+            f.path.endsWith(".htm") ||
+            f.mimeType === "application/javascript" ||
+            f.mimeType === "text/javascript" ||
+            f.path.endsWith(".js") ||
+            f.path.endsWith(".mjs"),
+        );
+        const critiqueRevalidation =
+          critiqueValidateFiltered.length > 0
+            ? await validateFiles(critiqueValidateFiltered)
+            : { passed: true, criticalErrors: [] as string[], warnings: [] as string[] };
+
+        if (!critiqueRevalidation.passed) {
+          logger.warn(
+            { errors: critiqueRevalidation.criticalErrors },
+            "Refine critique patch failed revalidation — discarding critique patches",
+          );
+          refineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+          validationWarnings = [
+            ...validationWarnings,
+            ...critiqueIssues.map((i) => `[critique] ${i}`),
+          ];
+        } else {
+          // Per-file check passed — now revalidate the full merged project structure
+          const tentativeChangedMap = new Map(changedFiles.map((f) => [f.path, f]));
+          for (const cf of critiqueChanges) tentativeChangedMap.set(cf.path, cf);
+          const tentativeChanged = [...tentativeChangedMap.values()];
+          const tentativeRemovedSet = new Set(
+            Array.isArray(parsed?.filesRemoved)
+              ? (parsed.filesRemoved as string[]).filter((r): r is string => typeof r === "string")
+              : [],
+          );
+          const tentativeChangedPaths = new Set(tentativeChanged.map((f) => f.path));
+          const tentativeMerged = [
+            ...existingFiles.filter(
+              (f) => !tentativeRemovedSet.has(f.path) && !tentativeChangedPaths.has(f.path),
+            ),
+            ...tentativeChanged,
+          ];
+          const critiqueStructural = validateWebStructure(tentativeMerged);
+          if (!critiqueStructural.passed) {
+            logger.warn(
+              { errors: critiqueStructural.criticalErrors },
+              "Refine critique patch failed merged structural validation — discarding critique patches",
+            );
+            refineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+            validationWarnings = [
+              ...validationWarnings,
+              ...critiqueIssues.map((i) => `[critique] ${i}`),
+            ];
+          } else {
+            // Both per-file and merged structural checks passed — commit the critique changes
+            changedFiles.splice(0, changedFiles.length, ...tentativeChanged);
+            for (let i = 0; i < changedFiles.length; i++) {
+              changedFiles[i] = injectRequiredMetaTags(changedFiles[i]!, projectName);
+            }
+            refineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: true };
+            logger.info(
+              { issueCount: critiqueIssues.length },
+              "Critique pass auto-fixed issues in refine",
+            );
+            await onEvent?.(
+              "validating_output",
+              `Critique auto-fixed ${critiqueIssues.length} issue(s)`,
+            );
+          }
+        }
+      } else {
+        // Critique returned no actionable file changes — treat as issues-only
+        refineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+      }
+    } else if (critiqueIssues.length > 0) {
+      refineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: false };
+      validationWarnings = [...validationWarnings, ...critiqueIssues.map((i) => `[critique] ${i}`)];
+    }
   }
 
   const removedPaths = Array.isArray(parsed.filesRemoved)
@@ -2453,6 +3047,17 @@ export async function runRefinePipeline(args: {
     syntaxValid: refineSyntaxErrors.length === 0,
     ...(refineCdnUpgrades.length > 0 ? { cdnUpgrades: refineCdnUpgrades } : {}),
     ...(securityNotices.length > 0 ? { securityNotices } : {}),
+    ...(refineCritiqueMeta ? { critiquePass: refineCritiqueMeta } : {}),
+    ...(initialCriticalErrors.length > 0
+      ? {
+          validationReport: {
+            initialIssues: initialCriticalErrors,
+            fixupAttempted: correctionWasAttempted,
+            remainingIssues: remainingCriticalErrors,
+            passed: !correctionFailed,
+          },
+        }
+      : {}),
   };
 
   return {
@@ -4567,6 +5172,8 @@ export async function runMobileBuildPipeline(args: {
   // Mobile validation: check for required Expo structure
   await onEvent?.("validating_output", "Validating Expo project structure…");
   const mobileValidation = validateMobileFiles(files);
+  let mobileStructureFailed = !mobileValidation.passed;
+  let mobileValidationRemainingErrors: string[] = mobileValidation.criticalErrors;
 
   if (!mobileValidation.passed) {
     logger.warn(
@@ -4611,8 +5218,24 @@ export async function runMobileBuildPipeline(args: {
       const mergedMap = new Map(files.map((f) => [f.path, f]));
       for (const cf of correctedFiles) mergedMap.set(cf.path, cf);
       files = [...mergedMap.values()];
+      // Mandatory revalidation after mobile correction — check that critical errors are resolved
+      const revalidated = validateMobileFiles(files);
+      if (revalidated.criticalErrors.length > 0) {
+        logger.warn(
+          { remaining: revalidated.criticalErrors },
+          "Mobile build: structural validation still failing after correction — marking failed",
+        );
+        // mobileCorrectionFailed is returned via correctionFailed below
+        mobileStructureFailed = true;
+        mobileValidationRemainingErrors = revalidated.criticalErrors;
+      } else {
+        mobileStructureFailed = false;
+        mobileValidationRemainingErrors = [];
+      }
     } catch (err) {
       logger.warn({ err }, "Mobile correction pass failed — using original output");
+      mobileStructureFailed = true;
+      mobileValidationRemainingErrors = mobileValidation.criticalErrors;
     }
   }
 
@@ -4743,6 +5366,8 @@ export async function runMobileBuildPipeline(args: {
     return { id, name: mod?.name ?? id, secretsConsumed: mod?.requiredSecrets ?? [] };
   });
 
+  const mobileFinalCorrectionFailed = mobileStructureFailed || tsCheckFailed;
+
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: blueprint as unknown as Record<string, unknown>,
@@ -4755,6 +5380,16 @@ export async function runMobileBuildPipeline(args: {
     nextRecommendation,
     nativeFeatures: blueprint.nativeFeatures?.length ? blueprint.nativeFeatures : undefined,
     modulesWired: modulesWired.length > 0 ? modulesWired : undefined,
+    ...(mobileValidation.criticalErrors.length > 0
+      ? {
+          validationReport: {
+            initialIssues: mobileValidation.criticalErrors,
+            fixupAttempted: true,
+            remainingIssues: mobileValidationRemainingErrors,
+            passed: !mobileStructureFailed,
+          },
+        }
+      : {}),
   };
 
   return {
@@ -4762,9 +5397,9 @@ export async function runMobileBuildPipeline(args: {
     files,
     report,
     assistantSummary: summary,
-    correctionPasses: 0,
-    correctionFailed: false,
-    primaryErrorCategory: null,
+    correctionPasses: mobileValidation.criticalErrors.length > 0 ? 1 : 0,
+    correctionFailed: mobileFinalCorrectionFailed,
+    primaryErrorCategory: mobileStructureFailed ? "mobile_structure" : null,
   };
 }
 
