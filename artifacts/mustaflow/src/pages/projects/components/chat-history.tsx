@@ -23,6 +23,7 @@ import {
   Loader2,
   MessageCircle,
   Wand2,
+  Wrench,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -367,9 +368,11 @@ function AgentModePill({ mode }: { mode: string }) {
 function InlineReportCard({
   report,
   onViewFile,
+  onSendMessage,
 }: {
   report: TaskReport;
   onViewFile?: (path: string) => void;
+  onSendMessage?: (text: string) => void;
 }) {
   const [smellsOpen, setSmellsOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
@@ -550,6 +553,20 @@ function InlineReportCard({
                 {report.checkRunsSummary.skipped} skipped
               </span>
             )}
+            {(report.checkRunsSummary.failed > 0 || report.checkRunsSummary.warnings > 0) &&
+              onSendMessage && (
+                <button
+                  onClick={() =>
+                    onSendMessage(
+                      "Fix all failing check issues in the generated app — address any security vulnerabilities, code quality problems, and other flagged issues shown in the Quality panel.",
+                    )
+                  }
+                  className="ml-auto flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  <Wrench className="h-2.5 w-2.5" />
+                  Fix issues
+                </button>
+              )}
           </div>
           {report.checkSummary && (
             <p className="text-[10px] text-muted-foreground mt-0.5 pl-5 leading-relaxed">
@@ -641,12 +658,14 @@ function MessageRow({
   projectId,
   onViewFile,
   onApply,
+  onSendMessage,
 }: {
   msg: Message;
   searchQuery: string;
   projectId: number;
   onViewFile?: (path: string) => void;
   onApply?: (code: string) => void;
+  onSendMessage?: (text: string) => void;
 }) {
   const [reportExpanded, setReportExpanded] = useState(false);
   const [planExpanded, setPlanExpanded] = useState(false);
@@ -775,6 +794,7 @@ function MessageRow({
                   <InlineReportCard
                     report={(planPayload as { kind: "report"; report: TaskReport }).report}
                     onViewFile={onViewFile}
+                    onSendMessage={onSendMessage}
                   />
                 )}
               </>
@@ -1080,6 +1100,7 @@ export function ChatHistory({
   onViewFile,
   onClose,
   onApplyCode,
+  onSendMessage,
 }: {
   messages: Message[] | undefined;
   isLoading: boolean;
@@ -1087,6 +1108,7 @@ export function ChatHistory({
   onViewFile?: (path: string) => void;
   onClose: () => void;
   onApplyCode?: (code: string) => void;
+  onSendMessage?: (text: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1232,6 +1254,7 @@ export function ChatHistory({
                     projectId={projectId}
                     onViewFile={onViewFile}
                     onApply={onApplyCode}
+                    onSendMessage={onSendMessage}
                   />
                 ))}
               </div>

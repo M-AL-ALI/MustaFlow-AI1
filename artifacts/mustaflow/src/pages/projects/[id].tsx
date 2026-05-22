@@ -147,10 +147,12 @@ function ReportCard({
   report,
   onViewFile,
   onViewHistory,
+  onSendMessage,
 }: {
   report: TaskReport;
   onViewFile?: (path: string) => void;
   onViewHistory?: () => void;
+  onSendMessage?: (text: string) => void;
 }) {
   return (
     <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
@@ -291,7 +293,7 @@ function ReportCard({
       )}
       {report.checkRunsSummary && (
         <div className="pt-1.5 border-t border-border">
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground flex-wrap">
             <ShieldCheck className="h-3 w-3 shrink-0 text-primary/70" />
             <span className="font-semibold text-foreground/80">Checks</span>
             {report.checkRunsSummary.passed > 0 && (
@@ -308,6 +310,20 @@ function ReportCard({
                 {report.checkRunsSummary.skipped} skipped
               </span>
             )}
+            {(report.checkRunsSummary.failed > 0 || report.checkRunsSummary.warnings > 0) &&
+              onSendMessage && (
+                <button
+                  onClick={() =>
+                    onSendMessage(
+                      "Fix all failing check issues in the generated app — address any security vulnerabilities, code quality problems, and other flagged issues shown in the Quality panel.",
+                    )
+                  }
+                  className="ml-auto flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  <Wrench className="h-2.5 w-2.5" />
+                  Fix issues
+                </button>
+              )}
           </div>
           {report.checkSummary && (
             <p className="text-[10px] text-muted-foreground mt-0.5 pl-5 leading-relaxed">
@@ -1805,6 +1821,10 @@ export default function ProjectWorkspacePage() {
                         planMode: false,
                       })
                     }
+                    onSendMessage={(text) => {
+                      setShowChatHistory(false);
+                      send(text);
+                    }}
                   />
                 </div>
               )}
@@ -1981,6 +2001,7 @@ export default function ProjectWorkspacePage() {
                                             }
                                           }}
                                           onViewHistory={() => switchLeftPanel("history")}
+                                          onSendMessage={(text) => send(text)}
                                         />
                                         {isLastReport && rp.taskId && !isBusy && (
                                           <SuggestionChips

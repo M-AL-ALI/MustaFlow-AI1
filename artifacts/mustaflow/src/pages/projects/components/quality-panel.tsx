@@ -104,15 +104,50 @@ const CATEGORY_FIX_PROMPTS: Record<AuditCategory, (findings: AuditFinding[]) => 
 
 const CHECK_META: Record<
   string,
-  { label: string; Icon: React.FC<{ className?: string }>; fixable: boolean }
+  { label: string; Icon: React.FC<{ className?: string }>; fixPrompt?: string }
 > = {
-  "secret-leak": { label: "Secret Leak", Icon: KeyRound, fixable: false },
-  "code-quality": { label: "Code Quality", Icon: Code2, fixable: false },
-  sast: { label: "SAST", Icon: ScanSearch, fixable: false },
-  accessibility: { label: "Accessibility", Icon: Eye, fixable: true },
-  seo: { label: "SEO", Icon: Search, fixable: true },
-  performance: { label: "Performance", Icon: Zap, fixable: true },
-  "cdn-security": { label: "CDN Security", Icon: Globe, fixable: true },
+  "secret-leak": {
+    label: "Secret Leak",
+    Icon: KeyRound,
+    fixPrompt:
+      "Remove all hardcoded API keys, tokens, and secrets from the generated code. Do NOT delete the surrounding functionality — instead replace each hardcoded value with a placeholder comment like /* TODO: Load from environment */ or a descriptive constant like YOUR_API_KEY_HERE. If the secret is used to call an API, keep the call intact but remove only the literal credential value.",
+  },
+  "code-quality": {
+    label: "Code Quality",
+    Icon: Code2,
+    fixPrompt:
+      "Fix all code quality issues in the generated app: replace eval() calls with safer alternatives, replace document.write() with proper DOM manipulation, fix innerHTML string concatenation with safe DOM methods, remove console.log statements, and add missing semicolons.",
+  },
+  sast: {
+    label: "SAST",
+    Icon: ScanSearch,
+    fixPrompt:
+      "Fix all SAST security issues in the generated app: sanitise innerHTML assignments that use user-controlled data to prevent XSS, remove prototype pollution patterns, move sensitive values out of localStorage/sessionStorage, and replace hardcoded internal endpoint URLs with configurable values.",
+  },
+  accessibility: {
+    label: "Accessibility",
+    Icon: Eye,
+    fixPrompt:
+      "Fix all accessibility issues in the generated app: add the lang attribute to the <html> element, add descriptive alt attributes to all images, add associated <label> elements to all form inputs, add accessible text to all buttons (visible text or aria-label), and add a skip-navigation link at the top of the page.",
+  },
+  seo: {
+    label: "SEO",
+    Icon: Search,
+    fixPrompt:
+      "Fix all SEO issues in the generated app: add or improve the <title> tag, add a meta description, add Open Graph tags (og:title, og:description, og:image), add a canonical link tag, and add basic structured data (JSON-LD) for the page.",
+  },
+  performance: {
+    label: "Performance",
+    Icon: Zap,
+    fixPrompt:
+      "Fix all performance issues in the generated app: add defer or async attributes to render-blocking <script> tags in the <head>, add explicit width and height attributes to all images to prevent layout shifts, and add loading=\"lazy\" to below-the-fold images.",
+  },
+  "cdn-security": {
+    label: "CDN Security",
+    Icon: Globe,
+    fixPrompt:
+      "Update all CDN script and stylesheet URLs to the latest stable secure versions. Replace any vulnerable or outdated library URLs in <script src> and <link href> tags with their current versions from cdnjs.cloudflare.com or jsdelivr.com.",
+  },
 };
 
 function scoreColor(score: number): string {
@@ -166,15 +201,25 @@ function CheckStatusBadge({ status }: { status: CheckRun["status"] }) {
   );
 }
 
-function CheckRunCard({ run }: { run: CheckRun }) {
+function CheckRunCard({
+  run,
+  onSendMessage,
+}: {
+  run: CheckRun;
+  onSendMessage?: (text: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const meta = CHECK_META[run.checkName] ?? {
     label: run.checkName,
     Icon: ShieldCheck,
-    fixable: false,
+    fixPrompt: undefined,
   };
   const Icon = meta.Icon;
   const findings = (run.findings ?? []) as CheckRunFinding[];
+  const canFix =
+    (run.status === "fail" || run.status === "warning") &&
+    !!meta.fixPrompt &&
+    !!onSendMessage;
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -237,6 +282,17 @@ function CheckRunCard({ run }: { run: CheckRun }) {
                 </div>
               )}
             </div>
+          )}
+          {canFix && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full mt-1 text-xs h-8 gap-1.5"
+              onClick={() => onSendMessage!(meta.fixPrompt!)}
+            >
+              <Wrench className="h-3.5 w-3.5" />
+              Fix with AI
+            </Button>
           )}
         </div>
       )}
@@ -368,9 +424,11 @@ function CategorySection({
 function ChecksSection({
   projectId,
   onSecurityReview,
+  onSendMessage,
 }: {
   projectId: number;
   onSecurityReview: () => void;
+  onSendMessage?: (text: string) => void;
 }) {
   const queryClient = useQueryClient();
   const { data: runs, isLoading } = useGetCheckRuns(projectId, undefined, {
@@ -466,7 +524,7 @@ function ChecksSection({
       {latestRuns.length > 0 && (
         <div className="space-y-1.5">
           {latestRuns.map((run) => (
-            <CheckRunCard key={run.id} run={run} />
+            <CheckRunCard key={run.id} run={run} onSendMessage={onSendMessage} />
           ))}
         </div>
       )}
@@ -512,6 +570,7 @@ export function QualityPanel({
         onSecurityReview={() => {
           void queryClient.invalidateQueries({ queryKey: getGetCheckRunsQueryKey(projectId) });
         }}
+        onSendMessage={onSendMessage}
       />
 
       <div className="space-y-4">
