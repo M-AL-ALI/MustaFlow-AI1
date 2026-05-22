@@ -64,6 +64,8 @@ import type {
   DisconnectGithub200,
   DuplicateProjectResult,
   FileSearchResult,
+  GenerateImageInput,
+  GenerateImageResponse,
   GetAdminAuditLogParams,
   GetAgentRouting200,
   GetAgentRoutingParams,
@@ -144,6 +146,8 @@ import type {
   TaskFeedbackInput,
   UnpublishContainer200,
   UnpublishProject200,
+  UploadUrlRequest,
+  UploadUrlResponse,
   UserCredit,
   Workspace,
   WorkspaceInput,
@@ -238,6 +242,149 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
 
 
+
+export const getRequestUploadUrlUrl = () => {
+
+
+
+
+  return `/api/storage/uploads/request-url`
+}
+
+/**
+ * @summary Request a presigned URL for direct file upload to GCS.
+ */
+export const requestUploadUrl = async (uploadUrlRequest: UploadUrlRequest, options?: RequestInit): Promise<UploadUrlResponse> => {
+
+  return customFetch<UploadUrlResponse>(getRequestUploadUrlUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      uploadUrlRequest,)
+  }
+);}
+
+
+
+
+export const getRequestUploadUrlMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<UploadUrlRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<UploadUrlRequest>}, TContext> => {
+
+const mutationKey = ['requestUploadUrl'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestUploadUrl>>, {data: BodyType<UploadUrlRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  requestUploadUrl(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestUploadUrlMutationResult = NonNullable<Awaited<ReturnType<typeof requestUploadUrl>>>
+    export type RequestUploadUrlMutationBody = BodyType<UploadUrlRequest>
+    export type RequestUploadUrlMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Request a presigned URL for direct file upload to GCS.
+ */
+export const useRequestUploadUrl = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<UploadUrlRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof requestUploadUrl>>,
+        TError,
+        {data: BodyType<UploadUrlRequest>},
+        TContext
+      > => {
+      return useMutation(getRequestUploadUrlMutationOptions(options));
+    }
+
+export const getGenerateImageUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/generate-image`
+}
+
+/**
+ * @summary Generate an image with gpt-image-1 and attach it to the project.
+ */
+export const generateImage = async (id: number,
+    generateImageInput: GenerateImageInput, options?: RequestInit): Promise<GenerateImageResponse> => {
+
+  return customFetch<GenerateImageResponse>(getGenerateImageUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      generateImageInput,)
+  }
+);}
+
+
+
+
+export const getGenerateImageMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateImage>>, TError,{id: number;data: BodyType<GenerateImageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateImage>>, TError,{id: number;data: BodyType<GenerateImageInput>}, TContext> => {
+
+const mutationKey = ['generateImage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateImage>>, {id: number;data: BodyType<GenerateImageInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  generateImage(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GenerateImageMutationResult = NonNullable<Awaited<ReturnType<typeof generateImage>>>
+    export type GenerateImageMutationBody = BodyType<GenerateImageInput>
+    export type GenerateImageMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Generate an image with gpt-image-1 and attach it to the project.
+ */
+export const useGenerateImage = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateImage>>, TError,{id: number;data: BodyType<GenerateImageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof generateImage>>,
+        TError,
+        {id: number;data: BodyType<GenerateImageInput>},
+        TContext
+      > => {
+      return useMutation(getGenerateImageMutationOptions(options));
+    }
 
 export const getListWorkspacesUrl = () => {
 
