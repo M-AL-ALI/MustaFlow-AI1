@@ -78,14 +78,14 @@ function extractInlineScripts(html: string): Array<{ code: string; lineOffset: n
 }
 
 /**
- * Run ESLint against generated JS files and HTML inline scripts.
- * Returns { status, findings } compatible with the check orchestrator.
+ * Build the shared globals + per-language ESLint configs used by both the
+ * check runner and the on-demand "auto-fix" endpoint. Extracted into a single
+ * function so server-side linting and editor auto-fixing always agree.
  */
-export function runEslintCheck(files: BuilderFile[]): {
-  status: CheckRunStatus;
-  findings: CheckFinding[];
+function buildEslintConfigs(): {
+  jsConfig: Linter.Config[];
+  tsConfig: Linter.Config[];
 } {
-  const linter = new Linter({ configType: "flat" });
   const sharedGlobals = {
     window: "readonly",
     document: "readonly",
@@ -252,6 +252,20 @@ export function runEslintCheck(files: BuilderFile[]): {
     },
   ] satisfies Linter.Config[];
 
+  return { jsConfig, tsConfig };
+}
+
+/**
+ * Run ESLint against generated JS files and HTML inline scripts.
+ * Returns { status, findings } compatible with the check orchestrator.
+ */
+export function runEslintCheck(files: BuilderFile[]): {
+  status: CheckRunStatus;
+  findings: CheckFinding[];
+} {
+  const linter = new Linter({ configType: "flat" });
+  const { jsConfig, tsConfig } = buildEslintConfigs();
+
   const allFindings: CheckFinding[] = [];
 
   for (const file of files) {
@@ -315,4 +329,100 @@ export function runEslintCheck(files: BuilderFile[]): {
     allFindings.length === 0 ? "pass" : hasErrors ? "warning" : "warning";
 
   return { status, findings: allFindings };
+}
+
+export type EslintFixableIssue = {
+  ruleId: string | null;
+  line: number;
+  column: number;
+  endLine: number | null;
+  endColumn: number | null;
+  message: string;
+  severity: "error" | "warning";
+};
+
+/**
+ * Apply ESLint's auto-fixers to a single file's content.
+ *
+ * - If `ruleIds` is provided, only messages whose ruleId is in that list are fixed.
+ * - Returns the post-fix output and the list of issues that remained after fixing.
+ *
+ * Only supports plain JS (`.js`, `.mjs`) and TS/TSX files. Returns `{ supported: false }`
+ * for any other path so the caller can render an appropriate UI state. HTML files
+ * are not supported because fixing inline <script> blocks would require splicing
+ * post-fix code back into the surrounding HTML, which is out of scope for v1.
+ */
+export function runEslintFix(opts: {
+  path: string;
+  content: string;
+  ruleIds?: string[];
+}): {
+  supported: boolean;
+  output: string;
+  changed: boolean;
+  remaining: EslintFixableIssue[];
+} {
+  const file: BuilderFile = {
+    path: opts.path,
+    content: opts.content,
+    mimeType: guessMimeForPath(opts.path),
+  };
+
+  const isJs = isLintableJs(file);
+  const isTs = isLintableTs(file);
+  if (!isJs && !isTs) {
+    return { supported: false, output: opts.content, changed: false, remaining: [] };
+  }
+
+  const linter = new Linter({ configType: "flat" });
+  const { jsConfig, tsConfig } = buildEslintConfigs();
+  const config = isTs ? tsConfig : jsConfig;
+
+  const ruleFilter = opts.ruleIds && opts.ruleIds.length > 0 ? new Set(opts.ruleIds) : null;
+
+  let result: ReturnType<Linter["verifyAndFix"]>;
+  try {
+    // ESLint's runtime supports `fix` as either a boolean or a predicate
+    // function, but the published TS types only declare the boolean form.
+    // Cast through unknown to use the function-filter variant safely.
+    const fixOption: Linter.FixOptions = {
+      filename: opts.path,
+      fix: (ruleFilter
+        ? (msg: Linter.LintMessage) => !!msg.ruleId && ruleFilter.has(msg.ruleId)
+        : true) as unknown as boolean,
+    };
+    result = linter.verifyAndFix(opts.content, config, fixOption);
+  } catch (err) {
+    logger.warn({ err, path: opts.path }, "ESLint: verifyAndFix threw");
+    return { supported: true, output: opts.content, changed: false, remaining: [] };
+  }
+
+  const remaining: EslintFixableIssue[] = (result.messages ?? [])
+    .filter((m) => !m.fatal)
+    .map((m) => ({
+      ruleId: m.ruleId ?? null,
+      line: m.line ?? 1,
+      column: m.column ?? 1,
+      endLine: m.endLine ?? null,
+      endColumn: m.endColumn ?? null,
+      message: m.message,
+      severity: m.severity === 2 ? "error" : "warning",
+    }));
+
+  return {
+    supported: true,
+    output: result.output,
+    changed: result.output !== opts.content,
+    remaining,
+  };
+}
+
+/**
+ * Minimal mime guess for the `runEslintFix` helper so it can build a
+ * `BuilderFile` without importing from `../builder` and creating a cycle.
+ */
+function guessMimeForPath(p: string): string {
+  if (p.endsWith(".ts") || p.endsWith(".tsx")) return "application/typescript";
+  if (p.endsWith(".mjs") || p.endsWith(".js")) return "application/javascript";
+  return "text/plain";
 }

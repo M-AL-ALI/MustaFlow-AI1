@@ -42,6 +42,7 @@ import {
   ExternalLink,
   Lock,
   ChevronDown,
+  Wand2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -817,6 +818,8 @@ export function CodeEditorTab({
   const editorRef = useRef<MonacoEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const pendingRevealLineRef = useRef<number | null>(initialLine ?? null);
+  const codeActionDisposableRef = useRef<{ dispose: () => void } | null>(null);
+  const [isFixingAll, setIsFixingAll] = useState(false);
 
   const { data: files = [] } = useListProjectFiles(projectId, {
     query: { queryKey: getListProjectFilesQueryKey(projectId) },
@@ -927,6 +930,10 @@ export function CodeEditorTab({
     const markers = eslintFindings.map((f) => {
       const line = Math.max(1, Math.min(f.line ?? 1, lineCount));
       const maxCol = model.getLineMaxColumn(line);
+      // Extract the rule id from the finding's detail field ("Rule: <id>") so
+      // the marker carries it for the code action provider to consume.
+      const ruleMatch = f.detail?.match(/^Rule:\s*(.+)$/);
+      const ruleId = ruleMatch?.[1] ?? null;
       return {
         severity:
           f.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
@@ -936,6 +943,7 @@ export function CodeEditorTab({
         endColumn: maxCol,
         message: f.detail ? `${f.message}\n${f.detail}` : f.message,
         source: "ESLint",
+        code: ruleId ?? undefined,
       };
     });
 
@@ -945,6 +953,189 @@ export function CodeEditorTab({
       monaco.editor.setModelMarkers(model, "mustaflow-eslint", []);
     };
   }, [eslintFindings, fileContent, selectedFileId]);
+
+  // Whether the currently open file is auto-fixable by ESLint (JS / TS / TSX / MJS).
+  // HTML is intentionally excluded — fixing inline <script> blocks is out of scope
+  // for v1 since it requires splicing post-fix code back into surrounding HTML.
+  const canEslintFix = useMemo(() => {
+    if (!selectedFile) return false;
+    const p = selectedFile.path.toLowerCase();
+    if (p.endsWith(".min.js")) return false;
+    if (p.endsWith(".d.ts")) return false;
+    return (
+      p.endsWith(".js") ||
+      p.endsWith(".mjs") ||
+      p.endsWith(".ts") ||
+      p.endsWith(".tsx")
+    );
+  }, [selectedFile]);
+
+  type EslintFixResponse = {
+    supported: boolean;
+    output: string;
+    changed: boolean;
+    remaining: Array<{ ruleId: string | null; line: number; message: string }>;
+  };
+
+  /**
+   * Call the server-side auto-fixer for the open file. When `ruleIds` is empty,
+   * the server applies every safe auto-fix. Returns the fix response or null on
+   * failure. The caller is responsible for writing the result back into Monaco.
+   */
+  const fetchEslintFix = useCallback(
+    async (ruleIds?: string[]): Promise<EslintFixResponse | null> => {
+      if (!selectedFileId || !selectedFile) return null;
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/files/${selectedFileId}/eslint-fix`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: displayContent,
+              ruleIds: ruleIds ?? [],
+            }),
+          },
+        );
+        if (!res.ok) return null;
+        return (await res.json()) as EslintFixResponse;
+      } catch {
+        return null;
+      }
+    },
+    [projectId, selectedFileId, selectedFile, displayContent],
+  );
+
+  /**
+   * Apply post-fix content into the Monaco model via a full-range edit so the
+   * change participates in the editor's undo stack (Cmd/Ctrl+Z reverts it).
+   */
+  const applyFixToEditor = useCallback((nextContent: string) => {
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model) return;
+    const fullRange = model.getFullModelRange();
+    editor.executeEdits("mustaflow-eslint-fix", [
+      { range: fullRange, text: nextContent, forceMoveMarkers: true },
+    ]);
+    editor.pushUndoStop();
+  }, []);
+
+  const handleFixAll = useCallback(async () => {
+    if (!canEslintFix || isFixingAll) return;
+    setIsFixingAll(true);
+    try {
+      const result = await fetchEslintFix();
+      if (!result) {
+        toast({
+          title: "Auto-fix failed",
+          description: "Could not run ESLint auto-fix. Try again later.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!result.supported) {
+        toast({
+          title: "Not auto-fixable",
+          description: "This file type doesn't support ESLint auto-fix.",
+        });
+        return;
+      }
+      if (!result.changed) {
+        toast({ title: "Nothing to fix", description: "No auto-fixable issues found." });
+        return;
+      }
+      applyFixToEditor(result.output);
+      toast({
+        title: "Auto-fixes applied",
+        description: result.remaining.length
+          ? `${result.remaining.length} issue${result.remaining.length === 1 ? "" : "s"} still need manual review.`
+          : "All ESLint issues fixed.",
+      });
+    } finally {
+      setIsFixingAll(false);
+    }
+  }, [canEslintFix, isFixingAll, fetchEslintFix, applyFixToEditor, toast]);
+
+  // Register a Monaco code action provider that surfaces a "Fix this ESLint
+  // issue" action on each ESLint marker. The action calls the server, asking
+  // it to fix only the rule attached to that marker.
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco || !selectedFile) return;
+
+    codeActionDisposableRef.current?.dispose();
+    codeActionDisposableRef.current = null;
+
+    if (!canEslintFix) return;
+
+    const language = getLanguage(selectedFile.path);
+    type MonacoMarker = {
+      source?: string;
+      code?: string | { value: string } | undefined;
+    };
+    type MonacoCodeActionContext = { markers: MonacoMarker[] };
+    type MonacoModel = { uri: { toString: () => string } };
+    const disposable = monaco.languages.registerCodeActionProvider(language, {
+      provideCodeActions: (model: MonacoModel, _range: unknown, context: MonacoCodeActionContext) => {
+        const eslintMarkers = context.markers.filter((m: MonacoMarker) => m.source === "ESLint");
+        if (eslintMarkers.length === 0) return { actions: [], dispose: () => {} };
+
+        const seenRules = new Set<string>();
+        const actions = eslintMarkers
+          .map((marker: MonacoMarker): {
+            title: string;
+            diagnostics: MonacoMarker[];
+            kind: string;
+            isPreferred: boolean;
+            command: { id: string; title: string; arguments: unknown[] };
+          } | null => {
+            // Marker `code` carries the ruleId (set when we add markers below).
+            const ruleId =
+              typeof marker.code === "string"
+                ? marker.code
+                : marker.code && typeof marker.code === "object" && "value" in marker.code
+                  ? String(marker.code.value)
+                  : null;
+            if (!ruleId || seenRules.has(ruleId)) return null;
+            seenRules.add(ruleId);
+            return {
+              title: `Fix this ESLint issue (${ruleId})`,
+              diagnostics: [marker],
+              kind: "quickfix",
+              isPreferred: true,
+              command: {
+                id: "mustaflow.eslintFixRule",
+                title: "Fix ESLint Rule",
+                arguments: [ruleId, model.uri.toString()],
+              },
+            };
+          })
+          .filter((a): a is NonNullable<typeof a> => a !== null);
+
+        return { actions, dispose: () => {} };
+      },
+    });
+    codeActionDisposableRef.current = disposable;
+
+    return () => {
+      disposable.dispose();
+      codeActionDisposableRef.current = null;
+    };
+  }, [selectedFile, canEslintFix]);
+
+  // Bridge the code-action command id to a real handler. Registered once per
+  // mount of the editor; we re-register inside the onMount callback below by
+  // using a ref-stable closure that reads the latest fetchEslintFix.
+  const fetchEslintFixRef = useRef(fetchEslintFix);
+  useEffect(() => {
+    fetchEslintFixRef.current = fetchEslintFix;
+  }, [fetchEslintFix]);
+  const applyFixToEditorRef = useRef(applyFixToEditor);
+  useEffect(() => {
+    applyFixToEditorRef.current = applyFixToEditor;
+  }, [applyFixToEditor]);
 
   function discardAndSwitch() {
     if (pendingFileId !== null) {
@@ -1421,6 +1612,21 @@ export function CodeEditorTab({
               <span className="ml-auto text-[10px] text-[#858585] px-1.5 py-0.5 rounded bg-[#2d2d2d] border border-white/10">
                 {getLanguage(selectedFile.path)}
               </span>
+              {canEslintFix && (
+                <button
+                  onClick={() => void handleFixAll()}
+                  disabled={isFixingAll}
+                  title="Apply all safe ESLint auto-fixes"
+                  className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded border border-white/10 bg-[#2d2d2d] text-[#cccccc] hover:bg-[#3a3a3a] transition-colors disabled:opacity-60 ml-1"
+                >
+                  {isFixingAll ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Wand2 className="h-3 w-3" />
+                  )}
+                  {isFixingAll ? "Fixing…" : "Fix all auto-fixable"}
+                </button>
+              )}
               {isDirty && (
                 <button
                   onClick={() => void handleSave()}
@@ -1486,6 +1692,16 @@ export function CodeEditorTab({
                 onMount={(ed, monaco) => {
                   editorRef.current = ed;
                   monacoRef.current = monaco;
+                  // Register a single command id that Monaco quick-fix actions
+                  // can invoke. The handler reads the rule id from arguments,
+                  // calls the auto-fix endpoint scoped to that rule, and
+                  // applies the result into the model.
+                  ed.addCommand(0, async (_ctx: unknown, ruleId: string) => {
+                    if (!ruleId) return;
+                    const result = await fetchEslintFixRef.current([ruleId]);
+                    if (!result || !result.supported) return;
+                    if (result.changed) applyFixToEditorRef.current(result.output);
+                  }, "mustaflow.eslintFixRule");
                 }}
                 options={{
                   minimap: { enabled: false },

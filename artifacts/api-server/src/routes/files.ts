@@ -8,6 +8,7 @@ import { injectBridge, MOCK_FLAG_SCRIPT } from "../lib/consoleBridge";
 import { extractPageMap } from "../lib/page-map";
 import { logger } from "../lib/logger";
 import { writeFileToContainer } from "../lib/container";
+import { runEslintFix } from "../lib/checks/eslint-runner";
 
 const router: IRouter = Router();
 
@@ -337,6 +338,40 @@ router.patch(
       content: updated.content,
       updatedAt: updated.updatedAt,
     });
+  },
+);
+
+// Auto-fix simple ESLint issues for a single file. Returns the fixed content
+// and the list of issues that remain after fixing. Does NOT persist — the
+// frontend applies the edit through Monaco so the user can save (or undo).
+router.post(
+  "/projects/:id/files/:fileId/eslint-fix",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const fileId = Number(req.params.fileId);
+    if (!Number.isFinite(fileId)) {
+      res.status(400).json({ error: "Invalid file id" });
+      return;
+    }
+    const body = (req.body ?? {}) as { content?: unknown; ruleIds?: unknown };
+
+    const [row] = await db
+      .select()
+      .from(projectFilesTable)
+      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)));
+    if (!row) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+
+    const content = typeof body.content === "string" ? body.content : row.content;
+    const ruleIds = Array.isArray(body.ruleIds)
+      ? body.ruleIds.filter((r): r is string => typeof r === "string")
+      : undefined;
+
+    const result = runEslintFix({ path: row.path, content, ruleIds });
+    res.json(result);
   },
 );
 

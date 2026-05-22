@@ -161,7 +161,6 @@ function SecurityNavItem() {
     query: {
       queryKey: getGetSecurityBadgeCountQueryKey(),
       enabled: !!isSignedIn,
-      queryKey: getGetSecurityBadgeCountQueryKey(),
       refetchInterval: 60000,
     },
   });

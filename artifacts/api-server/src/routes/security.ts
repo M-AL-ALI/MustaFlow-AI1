@@ -7,7 +7,6 @@ import {
   projectFilesTable,
   projectVersionsTable,
   projectsTable,
-  projectFilesTable,
   type SecurityFindingStatus,
   type SecurityFindingSeverity,
 } from "@workspace/db";
