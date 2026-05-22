@@ -6043,6 +6043,7 @@ export async function runConverseStreamPipeline(
     agentMode: AgentMode;
     isAmbiguous?: boolean;
     imageAttachments?: ConverseImageAttachment[];
+    signal?: AbortSignal;
   },
   onToken: (token: string) => void,
 ): Promise<ConverseResult> {
@@ -6054,6 +6055,7 @@ export async function runConverseStreamPipeline(
     agentMode,
     isAmbiguous,
     imageAttachments,
+    signal,
   } = args;
 
   // Ambiguous path uses JSON mode — not streamable; call onToken once with full text.
@@ -6126,15 +6128,19 @@ export async function runConverseStreamPipeline(
   }
 
   try {
-    const stream = await openai.chat.completions.create({
-      model,
-      max_completion_tokens: 1200,
-      stream: true,
-      messages: messages as Parameters<typeof openai.chat.completions.create>[0]["messages"],
-    });
+    const stream = await openai.chat.completions.create(
+      {
+        model,
+        max_completion_tokens: 1200,
+        stream: true,
+        messages: messages as Parameters<typeof openai.chat.completions.create>[0]["messages"],
+      },
+      signal ? { signal } : undefined,
+    );
 
     let markdown = "";
     for await (const chunk of stream) {
+      if (signal?.aborted) break;
       const delta = chunk.choices[0]?.delta?.content;
       if (delta) {
         markdown += delta;

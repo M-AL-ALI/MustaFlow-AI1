@@ -560,6 +560,12 @@ router.post(
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
+    // Track client disconnect so we can skip DB writes on abort
+    const abortController = new AbortController();
+    req.on("close", () => {
+      abortController.abort();
+    });
+
     const sendEvent = (data: Record<string, unknown>): void => {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
@@ -680,11 +686,24 @@ router.post(
           agentMode: mode,
           isAmbiguous,
           imageAttachments: visionParts.length > 0 ? visionParts : undefined,
+          signal: abortController.signal,
         },
         (token) => {
           sendEvent({ type: "token", content: token });
         },
       );
+
+      // Client disconnected mid-stream — discard partial result, skip DB writes
+      if (abortController.signal.aborted) {
+        if (converseTask) {
+          await db
+            .update(agentTasksTable)
+            .set({ status: "failed", result: "Aborted by client", completedAt: sql`now()` })
+            .where(eq(agentTasksTable.id, converseTask.id));
+        }
+        res.end();
+        return;
+      }
 
       // Update task status
       if (converseTask) {
@@ -735,6 +754,17 @@ router.post(
         plan,
       });
     } catch (err) {
+      // Client aborted mid-stream — just mark task failed, no error message to DB
+      if (abortController.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+        if (converseTask) {
+          await db
+            .update(agentTasksTable)
+            .set({ status: "failed", result: "Aborted by client", completedAt: sql`now()` })
+            .where(eq(agentTasksTable.id, converseTask.id));
+        }
+        res.end();
+        return;
+      }
       const msg = err instanceof Error ? err.message : "Conversation failed";
       if (converseTask) {
         await db

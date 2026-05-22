@@ -59,6 +59,7 @@ import {
   RotateCcw,
   DatabaseZap,
   Map,
+  Square,
 } from "lucide-react";
 import { SuggestionChips } from "./components/suggestion-chips";
 import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
@@ -1271,7 +1272,14 @@ export default function ProjectWorkspacePage() {
             }
           }
         } catch (err) {
-          if ((err as { name?: string }).name === "AbortError") return;
+          if ((err as { name?: string }).name === "AbortError") {
+            // User aborted — clean up streaming state without re-sending
+            setIsStreaming(false);
+            setStreamingText("");
+            setPendingIsConverse(false);
+            pendingIsConverseRef.current = false;
+            return;
+          }
           // Network or parse error — fall back to regular mutation
           setIsStreaming(false);
           setStreamingText("");
@@ -1283,6 +1291,17 @@ export default function ProjectWorkspacePage() {
     },
     [projectId, agentMode, planMode, runInBackground, sendRegular, queryClient, agentIdentity],
   );
+
+  const handleStopStream = useCallback(() => {
+    if (streamAbortRef.current) {
+      streamAbortRef.current.abort();
+      streamAbortRef.current = null;
+    }
+    setIsStreaming(false);
+    setStreamingText("");
+    setPendingIsConverse(false);
+    pendingIsConverseRef.current = false;
+  }, []);
 
   const handleAddKey = useCallback((keyName: string) => {
     setPrefillSecretName(keyName);
@@ -2069,6 +2088,16 @@ export default function ProjectWorkspacePage() {
                               <span className="text-muted-foreground">Thinking…</span>
                             </span>
                           )}
+                          <div className="mt-1.5 flex justify-end">
+                            <button
+                              onClick={handleStopStream}
+                              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                              title="Stop generating"
+                            >
+                              <Square className="w-2.5 h-2.5 fill-current" />
+                              Stop
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
