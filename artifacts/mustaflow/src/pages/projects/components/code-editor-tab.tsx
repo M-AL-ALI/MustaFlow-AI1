@@ -954,9 +954,9 @@ export function CodeEditorTab({
     };
   }, [eslintFindings, fileContent, selectedFileId]);
 
-  // Whether the currently open file is auto-fixable by ESLint (JS / TS / TSX / MJS).
-  // HTML is intentionally excluded — fixing inline <script> blocks is out of scope
-  // for v1 since it requires splicing post-fix code back into surrounding HTML.
+  // Whether the currently open file is auto-fixable by ESLint. HTML files are
+  // supported by running ESLint on each inline <script> block and splicing
+  // fixed code back into the surrounding HTML byte-for-byte.
   const canEslintFix = useMemo(() => {
     if (!selectedFile) return false;
     const p = selectedFile.path.toLowerCase();
@@ -966,7 +966,9 @@ export function CodeEditorTab({
       p.endsWith(".js") ||
       p.endsWith(".mjs") ||
       p.endsWith(".ts") ||
-      p.endsWith(".tsx")
+      p.endsWith(".tsx") ||
+      p.endsWith(".html") ||
+      p.endsWith(".htm")
     );
   }, [selectedFile]);
 
@@ -986,17 +988,14 @@ export function CodeEditorTab({
     async (ruleIds?: string[]): Promise<EslintFixResponse | null> => {
       if (!selectedFileId || !selectedFile) return null;
       try {
-        const res = await fetch(
-          `/api/projects/${projectId}/files/${selectedFileId}/eslint-fix`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              content: displayContent,
-              ruleIds: ruleIds ?? [],
-            }),
-          },
-        );
+        const res = await fetch(`/api/projects/${projectId}/files/${selectedFileId}/eslint-fix`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: displayContent,
+            ruleIds: ruleIds ?? [],
+          }),
+        });
         if (!res.ok) return null;
         return (await res.json()) as EslintFixResponse;
       } catch {
@@ -1078,40 +1077,48 @@ export function CodeEditorTab({
     type MonacoCodeActionContext = { markers: MonacoMarker[] };
     type MonacoModel = { uri: { toString: () => string } };
     const disposable = monaco.languages.registerCodeActionProvider(language, {
-      provideCodeActions: (model: MonacoModel, _range: unknown, context: MonacoCodeActionContext) => {
+      provideCodeActions: (
+        model: MonacoModel,
+        _range: unknown,
+        context: MonacoCodeActionContext,
+      ) => {
         const eslintMarkers = context.markers.filter((m: MonacoMarker) => m.source === "ESLint");
         if (eslintMarkers.length === 0) return { actions: [], dispose: () => {} };
 
         const seenRules = new Set<string>();
         const actions = eslintMarkers
-          .map((marker: MonacoMarker): {
-            title: string;
-            diagnostics: MonacoMarker[];
-            kind: string;
-            isPreferred: boolean;
-            command: { id: string; title: string; arguments: unknown[] };
-          } | null => {
-            // Marker `code` carries the ruleId (set when we add markers below).
-            const ruleId =
-              typeof marker.code === "string"
-                ? marker.code
-                : marker.code && typeof marker.code === "object" && "value" in marker.code
-                  ? String(marker.code.value)
-                  : null;
-            if (!ruleId || seenRules.has(ruleId)) return null;
-            seenRules.add(ruleId);
-            return {
-              title: `Fix this ESLint issue (${ruleId})`,
-              diagnostics: [marker],
-              kind: "quickfix",
-              isPreferred: true,
-              command: {
-                id: "mustaflow.eslintFixRule",
-                title: "Fix ESLint Rule",
-                arguments: [ruleId, model.uri.toString()],
-              },
-            };
-          })
+          .map(
+            (
+              marker: MonacoMarker,
+            ): {
+              title: string;
+              diagnostics: MonacoMarker[];
+              kind: string;
+              isPreferred: boolean;
+              command: { id: string; title: string; arguments: unknown[] };
+            } | null => {
+              // Marker `code` carries the ruleId (set when we add markers below).
+              const ruleId =
+                typeof marker.code === "string"
+                  ? marker.code
+                  : marker.code && typeof marker.code === "object" && "value" in marker.code
+                    ? String(marker.code.value)
+                    : null;
+              if (!ruleId || seenRules.has(ruleId)) return null;
+              seenRules.add(ruleId);
+              return {
+                title: `Fix this ESLint issue (${ruleId})`,
+                diagnostics: [marker],
+                kind: "quickfix",
+                isPreferred: true,
+                command: {
+                  id: "mustaflow.eslintFixRule",
+                  title: "Fix ESLint Rule",
+                  arguments: [ruleId, model.uri.toString()],
+                },
+              };
+            },
+          )
           .filter((a): a is NonNullable<typeof a> => a !== null);
 
         return { actions, dispose: () => {} };
@@ -1696,12 +1703,16 @@ export function CodeEditorTab({
                   // can invoke. The handler reads the rule id from arguments,
                   // calls the auto-fix endpoint scoped to that rule, and
                   // applies the result into the model.
-                  ed.addCommand(0, async (_ctx: unknown, ruleId: string) => {
-                    if (!ruleId) return;
-                    const result = await fetchEslintFixRef.current([ruleId]);
-                    if (!result || !result.supported) return;
-                    if (result.changed) applyFixToEditorRef.current(result.output);
-                  }, "mustaflow.eslintFixRule");
+                  ed.addCommand(
+                    0,
+                    async (_ctx: unknown, ruleId: string) => {
+                      if (!ruleId) return;
+                      const result = await fetchEslintFixRef.current([ruleId]);
+                      if (!result || !result.supported) return;
+                      if (result.changed) applyFixToEditorRef.current(result.output);
+                    },
+                    "mustaflow.eslintFixRule",
+                  );
                 }}
                 options={{
                   minimap: { enabled: false },

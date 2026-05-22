@@ -60,19 +60,39 @@ function isLintableTs(file: BuilderFile): boolean {
 /**
  * Extract and lint inline <script> blocks from HTML files.
  * Skips type="text/babel", type="module" (may contain JSX / TS), and external src=.
+ *
+ * Returns each block's raw inner content along with the [innerStart, innerEnd)
+ * byte offsets inside the HTML so callers can splice fixed code back in.
+ * `lineOffset` is the number of newlines preceding the inner content (used to
+ * map ESLint message line numbers back into HTML coordinates).
  */
-function extractInlineScripts(html: string): Array<{ code: string; lineOffset: number }> {
-  const scripts: Array<{ code: string; lineOffset: number }> = [];
+function extractInlineScripts(html: string): Array<{
+  code: string;
+  innerStart: number;
+  innerEnd: number;
+  lineOffset: number;
+}> {
+  const scripts: Array<{
+    code: string;
+    innerStart: number;
+    innerEnd: number;
+    lineOffset: number;
+  }> = [];
   const scriptPattern =
     /<script(?![^>]*type=["']text\/babel["'])(?![^>]*type=["']module["'])(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/gi;
   let match: RegExpExecArray | null;
   while ((match = scriptPattern.exec(html)) !== null) {
-    const code = (match[1] ?? "").trim();
-    if (!code) continue;
-    // Count newlines before match to calculate line offset
-    const before = html.slice(0, match.index);
+    const fullMatch = match[0];
+    const openTagLen = fullMatch.indexOf(">") + 1;
+    const closeIdx = fullMatch.toLowerCase().lastIndexOf("</script");
+    if (openTagLen <= 0 || closeIdx < 0) continue;
+    const innerStart = match.index + openTagLen;
+    const innerEnd = match.index + closeIdx;
+    const code = html.slice(innerStart, innerEnd);
+    if (!code.trim()) continue;
+    const before = html.slice(0, innerStart);
     const lineOffset = (before.match(/\n/g) ?? []).length;
-    scripts.push({ code, lineOffset });
+    scripts.push({ code, innerStart, innerEnd, lineOffset });
   }
   return scripts;
 }
@@ -347,16 +367,12 @@ export type EslintFixableIssue = {
  * - If `ruleIds` is provided, only messages whose ruleId is in that list are fixed.
  * - Returns the post-fix output and the list of issues that remained after fixing.
  *
- * Only supports plain JS (`.js`, `.mjs`) and TS/TSX files. Returns `{ supported: false }`
- * for any other path so the caller can render an appropriate UI state. HTML files
- * are not supported because fixing inline <script> blocks would require splicing
- * post-fix code back into the surrounding HTML, which is out of scope for v1.
+ * Supports plain JS (`.js`, `.mjs`), TS/TSX files, and HTML files (auto-fix
+ * only runs on inline `<script>` blocks; the surrounding HTML is preserved
+ * byte-for-byte). Returns `{ supported: false }` for any other path so the
+ * caller can render an appropriate UI state.
  */
-export function runEslintFix(opts: {
-  path: string;
-  content: string;
-  ruleIds?: string[];
-}): {
+export function runEslintFix(opts: { path: string; content: string; ruleIds?: string[] }): {
   supported: boolean;
   output: string;
   changed: boolean;
@@ -370,27 +386,39 @@ export function runEslintFix(opts: {
 
   const isJs = isLintableJs(file);
   const isTs = isLintableTs(file);
-  if (!isJs && !isTs) {
+  const isHtml =
+    file.mimeType === "text/html" ||
+    opts.path.toLowerCase().endsWith(".html") ||
+    opts.path.toLowerCase().endsWith(".htm");
+  if (!isJs && !isTs && !isHtml) {
     return { supported: false, output: opts.content, changed: false, remaining: [] };
   }
 
   const linter = new Linter({ configType: "flat" });
   const { jsConfig, tsConfig } = buildEslintConfigs();
-  const config = isTs ? tsConfig : jsConfig;
 
   const ruleFilter = opts.ruleIds && opts.ruleIds.length > 0 ? new Set(opts.ruleIds) : null;
+  const fixOption: Linter.FixOptions = {
+    filename: opts.path,
+    fix: (ruleFilter
+      ? (msg: Linter.LintMessage) => !!msg.ruleId && ruleFilter.has(msg.ruleId)
+      : true) as unknown as boolean,
+  };
+
+  if (isHtml) {
+    return runEslintFixHtml({
+      linter,
+      jsConfig,
+      content: opts.content,
+      path: opts.path,
+      fixOption,
+    });
+  }
+
+  const config = isTs ? tsConfig : jsConfig;
 
   let result: ReturnType<Linter["verifyAndFix"]>;
   try {
-    // ESLint's runtime supports `fix` as either a boolean or a predicate
-    // function, but the published TS types only declare the boolean form.
-    // Cast through unknown to use the function-filter variant safely.
-    const fixOption: Linter.FixOptions = {
-      filename: opts.path,
-      fix: (ruleFilter
-        ? (msg: Linter.LintMessage) => !!msg.ruleId && ruleFilter.has(msg.ruleId)
-        : true) as unknown as boolean,
-    };
     result = linter.verifyAndFix(opts.content, config, fixOption);
   } catch (err) {
     logger.warn({ err, path: opts.path }, "ESLint: verifyAndFix threw");
@@ -418,11 +446,105 @@ export function runEslintFix(opts: {
 }
 
 /**
+ * Auto-fix inline `<script>` blocks inside an HTML file.
+ *
+ * Each lintable block is fixed independently; the surrounding HTML
+ * (indentation, attributes, whitespace) is preserved exactly by splicing the
+ * post-fix code back at the original byte offsets. We walk blocks in reverse
+ * order so earlier offsets stay valid as later ones grow or shrink. Remaining
+ * issues are reported with line numbers translated back to HTML coordinates
+ * via each block's `lineOffset`.
+ */
+function runEslintFixHtml(args: {
+  linter: Linter;
+  jsConfig: Linter.Config[];
+  content: string;
+  path: string;
+  fixOption: Linter.FixOptions;
+}): {
+  supported: boolean;
+  output: string;
+  changed: boolean;
+  remaining: EslintFixableIssue[];
+} {
+  const { linter, jsConfig, content, path, fixOption } = args;
+  const blocks = extractInlineScripts(content);
+  if (blocks.length === 0) {
+    return { supported: true, output: content, changed: false, remaining: [] };
+  }
+
+  type BlockResult = {
+    innerStart: number;
+    innerEnd: number;
+    lineOffset: number;
+    output: string;
+    original: string;
+    messages: Linter.LintMessage[];
+  };
+  const results: BlockResult[] = [];
+
+  for (const block of blocks) {
+    let res: ReturnType<Linter["verifyAndFix"]>;
+    try {
+      res = linter.verifyAndFix(block.code, jsConfig, fixOption);
+    } catch (err) {
+      logger.warn({ err, path }, "ESLint: verifyAndFix threw on inline <script>");
+      results.push({
+        innerStart: block.innerStart,
+        innerEnd: block.innerEnd,
+        lineOffset: block.lineOffset,
+        output: block.code,
+        original: block.code,
+        messages: [],
+      });
+      continue;
+    }
+    results.push({
+      innerStart: block.innerStart,
+      innerEnd: block.innerEnd,
+      lineOffset: block.lineOffset,
+      output: res.output,
+      original: block.code,
+      messages: res.messages ?? [],
+    });
+  }
+
+  let output = content;
+  let changed = false;
+  for (let i = results.length - 1; i >= 0; i--) {
+    const r = results[i]!;
+    if (r.output !== r.original) {
+      output = output.slice(0, r.innerStart) + r.output + output.slice(r.innerEnd);
+      changed = true;
+    }
+  }
+
+  const remaining: EslintFixableIssue[] = [];
+  for (const r of results) {
+    for (const m of r.messages) {
+      if (m.fatal) continue;
+      remaining.push({
+        ruleId: m.ruleId ?? null,
+        line: (m.line ?? 1) + r.lineOffset,
+        column: m.column ?? 1,
+        endLine: m.endLine !== undefined && m.endLine !== null ? m.endLine + r.lineOffset : null,
+        endColumn: m.endColumn ?? null,
+        message: m.message,
+        severity: m.severity === 2 ? "error" : "warning",
+      });
+    }
+  }
+
+  return { supported: true, output, changed, remaining };
+}
+
+/**
  * Minimal mime guess for the `runEslintFix` helper so it can build a
  * `BuilderFile` without importing from `../builder` and creating a cycle.
  */
 function guessMimeForPath(p: string): string {
   if (p.endsWith(".ts") || p.endsWith(".tsx")) return "application/typescript";
   if (p.endsWith(".mjs") || p.endsWith(".js")) return "application/javascript";
+  if (p.endsWith(".html") || p.endsWith(".htm")) return "text/html";
   return "text/plain";
 }
