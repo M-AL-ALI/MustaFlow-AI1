@@ -1569,13 +1569,15 @@ async function callWithRetry(
   for (let attempt = 0; attempt < 2; attempt++) {
     if (signal?.aborted) throw new Error("Build cancelled");
     try {
-      const response = await openai.chat.completions.create({
-        model,
-        max_completion_tokens: maxTokens,
-        messages,
-        response_format: { type: "json_object" },
-        ...(signal ? { signal } : {}),
-      });
+      const response = await openai.chat.completions.create(
+        {
+          model,
+          max_completion_tokens: maxTokens,
+          messages,
+          response_format: { type: "json_object" },
+        },
+        signal ? { signal } : undefined,
+      );
 
       const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
       try {
