@@ -57,6 +57,7 @@ import {
   Layers2,
   RotateCcw,
   DatabaseZap,
+  Map,
 } from "lucide-react";
 import { SuggestionChips } from "./components/suggestion-chips";
 import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
@@ -81,6 +82,7 @@ import { DatabaseTab } from "./components/database-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
+import { WorkspaceTour } from "./components/workspace-tour";
 import { cn } from "@/lib/utils";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -630,6 +632,30 @@ export default function ProjectWorkspacePage() {
       return false;
     }
   });
+  const [tourActive, setTourActive] = useState(false);
+  const [tourSeenOnce, setTourSeenOnce] = useState(() => {
+    try {
+      return localStorage.getItem(`mustaflow_tour_seen_${projectId}`) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const startTour = useCallback(() => {
+    setTourActive(true);
+    if (!tourSeenOnce) {
+      setTourSeenOnce(true);
+      try {
+        localStorage.setItem(`mustaflow_tour_seen_${projectId}`, "1");
+      } catch {
+        // ignore
+      }
+    }
+  }, [tourSeenOnce, projectId]);
+
+  const closeTour = useCallback(() => {
+    setTourActive(false);
+  }, []);
 
   useEffect(() => {
     if (!creditsSuccess) return;
@@ -661,6 +687,19 @@ export default function ProjectWorkspacePage() {
       }
     }
   }, [onboardingStarted, versions, projectId]);
+
+  // Auto-start the tour the very first time a brand-new project is opened.
+  // Only fires once per project if the tour has never been seen.
+  const autoTourFiredRef = useRef(false);
+  useEffect(() => {
+    if (autoTourFiredRef.current) return;
+    if (!onboardingStarted) return;
+    if (tourSeenOnce) return;
+    autoTourFiredRef.current = true;
+    // Small delay so the workspace renders fully before the spotlight runs.
+    const t = setTimeout(() => startTour(), 800);
+    return () => clearTimeout(t);
+  }, [onboardingStarted, tourSeenOnce, startTour]);
   // ── Container state ────────────────────────────────────────────────────────
   type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
   const [containerStatus, setContainerStatus] = useState<ContainerStatus>("stopped");
@@ -1389,6 +1428,13 @@ export default function ProjectWorkspacePage() {
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button
+            onClick={startTour}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border text-muted-foreground text-xs hover:bg-muted hover:text-foreground transition-colors"
+            title="Take the workspace tour"
+          >
+            <Map style={{ width: 11, height: 11 }} />
+          </button>
+          <button
             onClick={() => setNewProjectOpen(true)}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-border text-muted-foreground text-xs font-medium hover:bg-muted hover:text-foreground transition-colors"
           >
@@ -1628,6 +1674,7 @@ export default function ProjectWorkspacePage() {
                         }}
                         onNavigatePreview={() => setActiveTab("preview")}
                         onNavigatePublishing={() => setActiveTab("publishing")}
+                        onStartTour={startTour}
                       />
                     </div>
                   )}
@@ -1984,6 +2031,7 @@ export default function ProjectWorkspacePage() {
                   )}
 
                   {/* Chat / Queue input */}
+                  <div data-tour="chat-input">
                   <QueueComposer
                     projectId={projectId}
                     agentMode={agentMode}
@@ -2004,6 +2052,7 @@ export default function ProjectWorkspacePage() {
                     onPromptValueChange={setPrompt}
                     onAgentIdentityChange={setAgentIdentity}
                   />
+                  </div>
                 </>
               )}
             </>
@@ -2502,6 +2551,7 @@ export default function ProjectWorkspacePage() {
         onClose={() => setBuyCreditsOpen(false)}
         returnUrl={`${window.location.origin}/projects/${projectId}?credits_success=1`}
       />
+      <WorkspaceTour active={tourActive} onClose={closeTour} />
     </div>
   );
 }

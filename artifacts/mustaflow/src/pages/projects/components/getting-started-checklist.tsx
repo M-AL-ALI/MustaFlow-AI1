@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { CheckCircle2, Circle, X, ChevronDown, ChevronUp, Rocket } from "lucide-react";
+import { CheckCircle2, Circle, X, ChevronDown, ChevronUp, Rocket, Map } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ChecklistStep {
@@ -18,6 +18,7 @@ interface GettingStartedChecklistProps {
   onDismiss: () => void;
   onNavigatePreview?: () => void;
   onNavigatePublishing?: () => void;
+  onStartTour?: () => void;
 }
 
 export function GettingStartedChecklist({
@@ -29,6 +30,7 @@ export function GettingStartedChecklist({
   onDismiss,
   onNavigatePreview,
   onNavigatePublishing,
+  onStartTour,
 }: GettingStartedChecklistProps) {
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -86,7 +88,10 @@ export function GettingStartedChecklist({
   const progressPct = Math.round((doneCount / steps.length) * 100);
 
   return (
-    <div className="mx-1 mb-2 rounded-xl border border-border bg-muted/30 overflow-hidden">
+    <div
+      data-tour="getting-started"
+      className="mx-1 mb-2 rounded-xl border border-border bg-muted/30 overflow-hidden"
+    >
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5">
         <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -96,6 +101,16 @@ export function GettingStartedChecklist({
             {doneCount}/{steps.length}
           </span>
         </div>
+        {onStartTour && (
+          <button
+            onClick={onStartTour}
+            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted border border-transparent hover:border-border"
+            title="Take the workspace tour"
+          >
+            <Map className="h-3 w-3 shrink-0" />
+            Tour
+          </button>
+        )}
         <button
           onClick={() => setCollapsed((v) => !v)}
           className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded"
@@ -137,12 +152,23 @@ export function GettingStartedChecklist({
               <span className="text-[11px] text-muted-foreground">
                 Your app is built, previewed, and published.
               </span>
-              <button
-                onClick={onDismiss}
-                className="mt-1 text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors"
-              >
-                Dismiss this panel
-              </button>
+              <div className="flex items-center gap-3 mt-1">
+                {onStartTour && (
+                  <button
+                    onClick={onStartTour}
+                    className="text-[10px] text-primary hover:text-primary/80 font-medium transition-colors flex items-center gap-1"
+                  >
+                    <Map className="h-3 w-3" />
+                    Replay tour
+                  </button>
+                )}
+                <button
+                  onClick={onDismiss}
+                  className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors"
+                >
+                  Dismiss this panel
+                </button>
+              </div>
             </div>
           ) : (
             steps.map((step, idx) => {
