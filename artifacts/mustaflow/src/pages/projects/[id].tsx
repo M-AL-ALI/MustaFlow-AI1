@@ -65,6 +65,7 @@ import {
   DatabaseZap,
   Map,
   Square,
+  Github,
 } from "lucide-react";
 import { SuggestionChips } from "./components/suggestion-chips";
 import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
@@ -93,6 +94,7 @@ import {
   getGetCveScanStatusQueryKey,
   useAcknowledgeCveScan,
 } from "@workspace/api-client-react";
+import { GithubTab } from "./components/github-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
@@ -513,6 +515,7 @@ const ADVANCED_TABS = [
   { label: "Security", value: "security", icon: ShieldCheck },
   { label: "AI Memory", value: "knowledge", icon: BrainCircuit },
   { label: "Database", value: "database", icon: DatabaseZap },
+  { label: "Git", value: "git", icon: Github },
   { label: "Logs", value: "logs", icon: Wrench },
   { label: "Resources", value: "resources", icon: BookOpen },
   { label: "Analytics", value: "analytics", icon: Activity },
@@ -2873,6 +2876,7 @@ export default function ProjectWorkspacePage() {
               />
             )}
             {activeTab === "database" && <DatabaseTab projectId={projectId} />}
+            {activeTab === "git" && <GithubTab projectId={projectId} />}
             {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
             {activeTab === "analytics" && <AnalyticsTab project={project} />}
             {activeTab === "resources" && <ResourcesTab />}

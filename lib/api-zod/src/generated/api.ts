@@ -2671,6 +2671,34 @@ export const GetGithubSyncStatusResponse = zod.object({
 
 
 /**
+ * @summary List recent commits from the connected GitHub repository
+ */
+export const ListGithubCommitsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const listGithubCommitsQueryPerPageDefault = 20;
+export const listGithubCommitsQueryPerPageMax = 50;
+
+
+
+export const ListGithubCommitsQueryParams = zod.object({
+  "per_page": zod.coerce.number().max(listGithubCommitsQueryPerPageMax).default(listGithubCommitsQueryPerPageDefault)
+})
+
+export const ListGithubCommitsResponse = zod.object({
+  "commits": zod.array(zod.object({
+  "sha": zod.string(),
+  "shortSha": zod.string(),
+  "message": zod.string(),
+  "author": zod.string(),
+  "date": zod.coerce.date().nullish(),
+  "htmlUrl": zod.string()
+}))
+})
+
+
+/**
  * @summary List branches in the connected repository
  */
 export const ListGithubBranchesParams = zod.object({

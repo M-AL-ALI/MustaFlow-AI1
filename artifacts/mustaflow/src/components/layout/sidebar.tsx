@@ -159,6 +159,7 @@ function SecurityNavItem() {
   const { isSignedIn } = useUser();
   const { data } = useGetSecurityBadgeCount({
     query: {
+      queryKey: getGetSecurityBadgeCountQueryKey(),
       enabled: !!isSignedIn,
       queryKey: getGetSecurityBadgeCountQueryKey(),
       refetchInterval: 60000,

@@ -83,6 +83,7 @@ import type {
   GetContainerLogsParams,
   GetPublishReadinessParams,
   GetSecretAuditLogParams,
+  GithubCommitsResult,
   GithubConnectInput,
   GithubCreateBranchInput,
   GithubOpenPrInput,
@@ -103,6 +104,7 @@ import type {
   ListCveFindingsParams,
   ListDeployments200,
   ListGithubBranches200,
+  ListGithubCommitsParams,
   ListGithubRepositoriesParams,
   ListKnowledgeParams,
   ListMobileBuilds200,
@@ -7820,6 +7822,95 @@ export function useGetGithubSyncStatus<TData = Awaited<ReturnType<typeof getGith
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetGithubSyncStatusQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListGithubCommitsUrl = (id: number,
+    params?: ListGithubCommitsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/github/commits?${stringifiedParams}` : `/api/projects/${id}/github/commits`
+}
+
+/**
+ * @summary List recent commits from the connected GitHub repository
+ */
+export const listGithubCommits = async (id: number,
+    params?: ListGithubCommitsParams, options?: RequestInit): Promise<GithubCommitsResult> => {
+
+  return customFetch<GithubCommitsResult>(getListGithubCommitsUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListGithubCommitsQueryKey = (id: number,
+    params?: ListGithubCommitsParams,) => {
+    return [
+    `/api/projects/${id}/github/commits`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListGithubCommitsQueryOptions = <TData = Awaited<ReturnType<typeof listGithubCommits>>, TError = ErrorType<ApiError>>(id: number,
+    params?: ListGithubCommitsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGithubCommits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListGithubCommitsQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listGithubCommits>>> = ({ signal }) => listGithubCommits(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listGithubCommits>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListGithubCommitsQueryResult = NonNullable<Awaited<ReturnType<typeof listGithubCommits>>>
+export type ListGithubCommitsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List recent commits from the connected GitHub repository
+ */
+
+export function useListGithubCommits<TData = Awaited<ReturnType<typeof listGithubCommits>>, TError = ErrorType<ApiError>>(
+ id: number,
+    params?: ListGithubCommitsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGithubCommits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListGithubCommitsQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -536,6 +536,68 @@ router.post(
   },
 );
 
+// ── GET /api/projects/:id/github/commits ─────────────────────────────────────
+
+interface GithubApiCommitEntry {
+  sha: string;
+  commit: {
+    message: string;
+    author: { name: string; date: string } | null;
+  };
+  html_url: string;
+}
+
+router.get(
+  "/projects/:id/github/commits",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const conn = await db
+      .select()
+      .from(projectGithubConnectionsTable)
+      .where(eq(projectGithubConnectionsTable.projectId, projectId))
+      .limit(1);
+
+    if (!conn[0]?.repositoryOwner || !conn[0]?.repositoryName) {
+      res.status(400).json({ error: "No repository selected" });
+      return;
+    }
+
+    let token: string;
+    try {
+      token = encryptionService.decrypt(conn[0].encryptedToken);
+    } catch {
+      res.status(400).json({ error: "Stored GitHub token is unreadable. Reconnect." });
+      return;
+    }
+
+    const { repositoryOwner: owner, repositoryName: repo } = conn[0];
+    const branch = conn[0].defaultBranch ?? "main";
+    const perPage = Math.min(Number(req.query.per_page ?? 20), 50);
+
+    try {
+      const commits = (await githubFetch(
+        `/repos/${owner}/${repo}/commits?sha=${branch}&per_page=${perPage}`,
+        token,
+      )) as GithubApiCommitEntry[];
+
+      res.json({
+        commits: commits.map((c) => ({
+          sha: c.sha,
+          shortSha: c.sha.slice(0, 7),
+          message: c.commit.message.split("\n")[0] ?? c.commit.message,
+          author: c.commit.author?.name ?? "Unknown",
+          date: c.commit.author?.date ?? null,
+          htmlUrl: c.html_url,
+        })),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to fetch commits";
+      res.status(400).json({ error: message });
+    }
+  },
+);
+
 // ── GET /api/projects/:id/github/sync-status ─────────────────────────────────
 
 router.get(

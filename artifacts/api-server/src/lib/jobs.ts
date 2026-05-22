@@ -59,6 +59,7 @@ import {
   mapEasStatusToDeploymentStatus,
   type EasPlatform,
 } from "./eas";
+import { autoCommitProjectFiles } from "./github";
 
 /** Credit cost per AI call, keyed by agentMode. */
 const CREDIT_COST: Record<string, number> = {
@@ -1853,6 +1854,51 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           completedAt: sql`now()`,
         })
         .where(eq(agentTasksTable.id, taskId));
+
+      // Fire-and-forget GitHub auto-commit — push all project files to the
+      // connected GitHub repo (if any). Non-blocking; failure adds a warn to
+      // the task report but never affects the build status.
+      {
+        const autoCommitProjectId = projectId;
+        const autoCommitProjectName = project.name;
+        const autoCommitTaskId = taskId;
+        const autoCommitReport = report;
+        setImmediate(() => {
+          void (async () => {
+            try {
+              const result = await autoCommitProjectFiles(
+                autoCommitProjectId,
+                autoCommitProjectName,
+              );
+              if (!result.ok) {
+                logger.warn(
+                  { projectId: autoCommitProjectId, taskId: autoCommitTaskId },
+                  `GitHub auto-commit warning: ${result.message}`,
+                );
+                db.update(agentTasksTable)
+                  .set({
+                    report: {
+                      ...autoCommitReport,
+                      warnings: [...(autoCommitReport.warnings ?? []), result.message],
+                    },
+                  })
+                  .where(eq(agentTasksTable.id, autoCommitTaskId))
+                  .catch((err: unknown) =>
+                    logger.warn(
+                      { err, taskId: autoCommitTaskId },
+                      "Failed to persist GitHub auto-commit warning",
+                    ),
+                  );
+              }
+            } catch (err) {
+              logger.warn(
+                { err, projectId: autoCommitProjectId },
+                "GitHub auto-commit threw (non-fatal)",
+              );
+            }
+          })();
+        });
+      }
 
       // Fire-and-forget code-smell scan — runs after task is already "completed"
       // so it never delays pipeline completion or the user-facing response.

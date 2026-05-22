@@ -1452,6 +1452,20 @@ export interface GithubRepositoriesResult {
   repositories: GithubRepository[];
 }
 
+export interface GithubCommit {
+  sha: string;
+  shortSha: string;
+  message: string;
+  author: string;
+  /** @nullable */
+  date?: string | null;
+  htmlUrl: string;
+}
+
+export interface GithubCommitsResult {
+  commits: GithubCommit[];
+}
+
 export interface GithubSyncStatusResult {
   syncStatus: string;
   /** @nullable */
@@ -2382,6 +2396,13 @@ export type OpenGithubPr200 = {
   prUrl: string;
   prNumber: number;
   title: string;
+};
+
+export type ListGithubCommitsParams = {
+/**
+ * @maximum 50
+ */
+per_page?: number;
 };
 
 export type ListGithubBranches200BranchesItem = {

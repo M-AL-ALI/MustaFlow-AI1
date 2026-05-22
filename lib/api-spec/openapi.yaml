@@ -2184,6 +2184,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/github/commits:
+    get:
+      operationId: listGithubCommits
+      tags: [projects]
+      summary: List recent commits from the connected GitHub repository
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - {
+            name: per_page,
+            in: query,
+            required: false,
+            schema: { type: integer, default: 20, maximum: 50 },
+          }
+      responses:
+        "200":
+          description: List of commits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubCommitsResult"
+        "400":
+          description: GitHub not connected or no repository selected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/github/branches:
     get:
       operationId: listGithubBranches
@@ -4082,6 +4109,26 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/GithubRepository"
+
+    GithubCommit:
+      type: object
+      required: [sha, shortSha, message, author, htmlUrl]
+      properties:
+        sha: { type: string }
+        shortSha: { type: string }
+        message: { type: string }
+        author: { type: string }
+        date: { type: ["string", "null"], format: date-time }
+        htmlUrl: { type: string }
+
+    GithubCommitsResult:
+      type: object
+      required: [commits]
+      properties:
+        commits:
+          type: array
+          items:
+            $ref: "#/components/schemas/GithubCommit"
 
     GithubSyncStatusResult:
       type: object
