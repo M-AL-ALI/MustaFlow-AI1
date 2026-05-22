@@ -10,6 +10,9 @@ import {
   useListTasks,
   useRollbackVersion,
   useListSuggestions,
+  useGetMyPreferences,
+  useUpdateMyPreferences,
+  getGetMyPreferencesQueryKey,
   getGetProjectQueryKey,
   getListMessagesQueryKey,
   getListProjectFilesQueryKey,
@@ -568,13 +571,20 @@ export default function ProjectWorkspacePage() {
     const params = new URLSearchParams(window.location.search);
     return params.get("credits_success") === "1";
   });
-  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+  // Optimistic local state — seeded from localStorage so there's no flicker while the API loads.
+  const [onboardingDismissedLocal, setOnboardingDismissedLocal] = useState(() => {
     try {
       return localStorage.getItem(`mustaflow_onboarding_dismissed_${projectId}`) === "1";
     } catch {
       return false;
     }
   });
+  const { data: userPreferences } = useGetMyPreferences({
+    query: { staleTime: 60_000, queryKey: getGetMyPreferencesQueryKey() },
+  });
+  const { mutate: updatePreferences } = useUpdateMyPreferences();
+  // True when the API confirms dismissal OR the local optimistic state is set.
+  const onboardingDismissed = userPreferences?.dismissedOnboarding ?? onboardingDismissedLocal;
   // Tracks whether onboarding was ever activated for this project (set when versions === 0 on
   // first load). Prevents the checklist from appearing on existing projects that already have builds.
   const [onboardingStarted, setOnboardingStarted] = useState(() => {
@@ -1576,7 +1586,7 @@ export default function ProjectWorkspacePage() {
                         hasViewed={hasViewedPreview}
                         isPublished={project?.status === "published"}
                         onDismiss={() => {
-                          setOnboardingDismissed(true);
+                          setOnboardingDismissedLocal(true);
                           try {
                             localStorage.setItem(
                               `mustaflow_onboarding_dismissed_${projectId}`,
@@ -1585,6 +1595,7 @@ export default function ProjectWorkspacePage() {
                           } catch {
                             // ignore storage errors
                           }
+                          updatePreferences({ data: { dismissedOnboarding: true } });
                         }}
                         onNavigatePreview={() => setActiveTab("preview")}
                         onNavigatePublishing={() => setActiveTab("publishing")}

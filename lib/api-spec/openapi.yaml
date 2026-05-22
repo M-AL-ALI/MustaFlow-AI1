@@ -28,6 +28,8 @@ tags:
     description: User workspaces (containers for projects)
   - name: credits
     description: User credits and billing
+  - name: preferences
+    description: Current user preferences (persisted to DB)
   - name: builds
     description: EAS mobile cloud builds (iOS / Android)
   - name: admin
@@ -1261,6 +1263,40 @@ paths:
                 required: [error]
                 properties:
                   error: { type: string }
+
+  /me/preferences:
+    get:
+      operationId: getMyPreferences
+      tags: [preferences]
+      summary: Get current user preferences
+      responses:
+        "200":
+          description: User preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPreferences"
+        "401":
+          description: Not authenticated
+    patch:
+      operationId: updateMyPreferences
+      tags: [preferences]
+      summary: Update current user preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePreferencesBody"
+      responses:
+        "200":
+          description: Updated user preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPreferences"
+        "401":
+          description: Not authenticated
 
   /credits:
     get:
@@ -3318,6 +3354,19 @@ components:
         testflightUrl: { type: ["string", "null"] }
         note: { type: ["string", "null"] }
         logs: { type: string }
+
+    UserPreferences:
+      type: object
+      required: [userId, dismissedOnboarding, updatedAt]
+      properties:
+        userId: { type: string }
+        dismissedOnboarding: { type: boolean }
+        updatedAt: { type: string, format: date-time }
+
+    UpdatePreferencesBody:
+      type: object
+      properties:
+        dismissedOnboarding: { type: boolean }
 
     UserCredit:
       type: object

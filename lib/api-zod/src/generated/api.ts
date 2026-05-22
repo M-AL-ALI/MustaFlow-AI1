@@ -1748,6 +1748,30 @@ export const SetProjectSubdomainResponse = zod.object({
 
 
 /**
+ * @summary Get current user preferences
+ */
+export const GetMyPreferencesResponse = zod.object({
+  "userId": zod.string(),
+  "dismissedOnboarding": zod.boolean(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Update current user preferences
+ */
+export const UpdateMyPreferencesBody = zod.object({
+  "dismissedOnboarding": zod.boolean().optional()
+})
+
+export const UpdateMyPreferencesResponse = zod.object({
+  "userId": zod.string(),
+  "dismissedOnboarding": zod.boolean(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Get current user credit balance
  */
 export const GetUserCreditsResponse = zod.object({

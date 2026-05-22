@@ -16,3 +16,4 @@ export * from "./suggestions";
 export * from "./container-logs";
 export * from "./db-snapshots";
 export * from "./github";
+export * from "./user-preferences";

@@ -1118,6 +1118,16 @@ export interface MobileBuildLogsResult {
   logs?: string;
 }
 
+export interface UserPreferences {
+  userId: string;
+  dismissedOnboarding: boolean;
+  updatedAt: string;
+}
+
+export interface UpdatePreferencesBody {
+  dismissedOnboarding?: boolean;
+}
+
 export interface UserCredit {
   userId: string;
   balance: number;
