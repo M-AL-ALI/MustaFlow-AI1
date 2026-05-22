@@ -22,6 +22,7 @@ import {
   Navigation,
   Loader2,
   MessageCircle,
+  Wand2,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -229,15 +230,16 @@ function MarkdownMessage({
             ? {
                 pre({ children, ...props }) {
                   return (
-                    <div className="relative group">
+                    <div>
                       <pre {...props}>{children}</pre>
                       <button
                         onClick={() => {
                           const code = extractCodeText(children).replace(/\n$/, "");
                           if (code.trim()) onApply(code.trim());
                         }}
-                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 transition-all"
+                        className="flex items-center gap-1.5 mt-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 hover:border-primary/40 transition-colors"
                       >
+                        <Wand2 className="h-3 w-3 shrink-0" />
                         Apply to app
                       </button>
                     </div>
