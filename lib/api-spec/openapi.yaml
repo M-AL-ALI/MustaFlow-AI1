@@ -3133,6 +3133,9 @@ components:
         autoFixOnCheckFailure:
           type: boolean
           description: "When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves."
+        autoFixWarningsAfterBuild:
+          type: boolean
+          description: "When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -3188,6 +3191,7 @@ components:
           type: boolean
           description: "Enable or disable the critical-findings publish gate for this project."
         autoFixOnCheckFailure: { type: boolean }
+        autoFixWarningsAfterBuild: { type: boolean }
 
     MobileAppSettingsInput:
       type: object

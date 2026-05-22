@@ -9,6 +9,7 @@ import { extractPageMap } from "../lib/page-map";
 import { logger } from "../lib/logger";
 import { writeFileToContainer } from "../lib/container";
 import { runEslintFix } from "../lib/checks/eslint-runner";
+import { applyProjectEslintFixes } from "../lib/eslint-fix-all";
 
 const router: IRouter = Router();
 
@@ -396,125 +397,34 @@ router.post(
         ? new Set(body.fileIds as number[])
         : null;
 
-    const rows = await db
-      .select()
-      .from(projectFilesTable)
-      .where(eq(projectFilesTable.projectId, projectId))
-      .orderBy(asc(projectFilesTable.path));
-
-    type PerFileResult = {
-      fileId: number;
-      path: string;
-      supported: boolean;
-      changed: boolean;
-      fixedCount: number;
-      remainingCount: number;
-      errorCount: number;
-      before?: string;
-      after?: string;
-    };
-
-    const results: PerFileResult[] = [];
-    const updates: Array<{ id: number; output: string }> = [];
-
-    for (const row of rows) {
-      const before = runEslintFix({ path: row.path, content: row.content, ruleIds: [] });
-      if (!before.supported) {
-        // Skip non-JS/TS files silently — no entry in the summary keeps the
-        // UI focused on files the user can actually act on.
-        continue;
-      }
-
-      // Issue count *before* fixing = issues that existed in the original file.
-      const beforeIssues = runEslintFix({
-        path: row.path,
-        content: row.content,
-        // Passing a single-element ruleId list that never matches forces the
-        // fixer into "lint-only" mode so `remaining` reports the full set.
-        ruleIds: ["__mustaflow_noop__"],
-      });
-      const totalBefore = beforeIssues.remaining.length;
-
-      const after = before;
-      const fixedCount = Math.max(0, totalBefore - after.remaining.length);
-      const errorCount = after.remaining.filter((r) => r.severity === "error").length;
-
-      const entry: PerFileResult = {
-        fileId: row.id,
-        path: row.path,
-        supported: true,
-        changed: after.changed,
-        fixedCount,
-        remainingCount: after.remaining.length,
-        errorCount,
-      };
-      if (dryRun && after.changed) {
-        entry.before = row.content;
-        entry.after = after.output;
-      }
-      results.push(entry);
-
-      if (after.changed && (requestedFileIds === null || requestedFileIds.has(row.id))) {
-        updates.push({ id: row.id, output: after.output });
-      }
-    }
+    const fix = await applyProjectEslintFixes(projectId, {
+      dryRun,
+      fileIds: requestedFileIds,
+    });
 
     let snapshotVersionId: number | null = null;
-    if (!dryRun && updates.length > 0) {
+    if (!dryRun && fix.filesFixed > 0) {
       // Snapshot the pre-fix file set so the user has a rollback target.
-      const snapshot = rows.map((r) => ({
-        path: r.path,
-        content: r.content,
-        mimeType: r.mimeType,
-      }));
       const [version] = await db
         .insert(projectVersionsTable)
         .values({
           projectId,
-          label: `Auto-fix (${updates.length} file${updates.length === 1 ? "" : "s"})`,
+          label: `Auto-fix (${fix.filesFixed} file${fix.filesFixed === 1 ? "" : "s"})`,
           note: "Snapshot taken before project-wide ESLint auto-fix.",
-          changelogEntry: `ESLint auto-fix applied to ${updates.length} file${updates.length === 1 ? "" : "s"}`,
-          filesSnapshot: snapshot,
+          changelogEntry: `ESLint auto-fix applied to ${fix.filesFixed} file${fix.filesFixed === 1 ? "" : "s"}`,
+          filesSnapshot: fix.preFixFiles,
         })
         .returning();
       snapshotVersionId = version?.id ?? null;
-
-      const now = new Date();
-      for (const u of updates) {
-        await db
-          .update(projectFilesTable)
-          .set({ content: u.output, updatedAt: now })
-          .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, u.id)));
-      }
     }
 
-    // Totals reflect the subset that was actually written (or would be written, on dry-run
-    // with no subset filter). filesScanned still tracks every lintable file we considered.
-    const appliedIds = new Set(updates.map((u) => u.id));
-    const consideredAsApplied = !dryRun && requestedFileIds !== null;
-    const totals = results.reduce(
-      (acc, r) => {
-        acc.filesScanned += 1;
-        const isApplied = consideredAsApplied ? appliedIds.has(r.fileId) : r.changed;
-        if (isApplied) {
-          acc.filesFixed += 1;
-          acc.fixedCount += r.fixedCount;
-        }
-        if (!isApplied && r.changed) {
-          // Selected-out files still have their remaining (un-applied) issues.
-          acc.remainingCount += r.remainingCount + r.fixedCount;
-        } else {
-          acc.remainingCount += r.remainingCount;
-        }
-        return acc;
-      },
-      { filesScanned: 0, filesFixed: 0, fixedCount: 0, remainingCount: 0 },
-    );
-
     res.json({
-      ...totals,
+      filesScanned: fix.filesScanned,
+      filesFixed: fix.filesFixed,
+      fixedCount: fix.fixedCount,
+      remainingCount: fix.remainingCount,
       snapshotVersionId,
-      results,
+      results: fix.results,
     });
   },
 );

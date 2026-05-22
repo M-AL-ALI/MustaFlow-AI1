@@ -286,6 +286,8 @@ export interface Project {
   dismissedFindingHashes?: string[] | null;
   /** When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves. */
   autoFixOnCheckFailure?: boolean;
+  /** When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false. */
+  autoFixWarningsAfterBuild?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -379,6 +381,7 @@ export interface ProjectUpdate {
   /** Enable or disable the critical-findings publish gate for this project. */
   blockPublishOnCritical?: boolean;
   autoFixOnCheckFailure?: boolean;
+  autoFixWarningsAfterBuild?: boolean;
 }
 
 export interface MobileAppSettingsInput {

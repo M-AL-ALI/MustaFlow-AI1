@@ -97,6 +97,11 @@ export const projectsTable = pgTable("projects", {
   // task using the failed checks' fixPrompts after every build that has failing checks.
   // Auto-fix only fires once per build (not on auto-fix tasks themselves).
   autoFixOnCheckFailure: boolean("auto_fix_on_check_failure").notNull().default(false),
+  // autoFixWarningsAfterBuild: when true, the build pipeline runs project-wide
+  // ESLint auto-fix at the end of every successful build (before the version
+  // snapshot is taken, so the saved snapshot reflects the post-fix state).
+  // Default false — opt-in.
+  autoFixWarningsAfterBuild: boolean("auto_fix_warnings_after_build").notNull().default(false),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

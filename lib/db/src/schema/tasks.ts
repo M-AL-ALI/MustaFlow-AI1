@@ -90,6 +90,12 @@ export type TaskReport = {
     typecheckPassed: boolean | null;
   } | null;
   summary?: string;
+  autoFixSummary?: {
+    filesScanned: number;
+    filesFixed: number;
+    fixedCount: number;
+    remainingCount: number;
+  } | null;
 };
 
 export const agentTasksTable = pgTable(

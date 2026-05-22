@@ -22,4 +22,5 @@ export interface ProjectUpdate {
   /** Enable or disable the critical-findings publish gate for this project. */
   blockPublishOnCritical?: boolean;
   autoFixOnCheckFailure?: boolean;
+  autoFixWarningsAfterBuild?: boolean;
 }

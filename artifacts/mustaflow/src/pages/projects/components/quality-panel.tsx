@@ -799,6 +799,13 @@ function ChecksSection({
     });
   };
 
+  const handleAutoFixAfterBuildToggle = () => {
+    updateProject({
+      id: projectId,
+      data: { autoFixWarningsAfterBuild: !project?.autoFixWarningsAfterBuild },
+    });
+  };
+
   const allRuns = runs ?? [];
 
   // Platform-aware filtering: ESLint runs for both web and mobile; TypeScript only for mobile.
@@ -870,6 +877,43 @@ function ChecksSection({
           <div
             className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
               autoFixEnabled ? "translate-x-3.5" : "translate-x-0.5"
+            }`}
+          />
+        </div>
+      </button>
+
+      <button
+        onClick={handleAutoFixAfterBuildToggle}
+        disabled={isUpdatingProject}
+        className={`w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+          (project?.autoFixWarningsAfterBuild ?? false)
+            ? "border-primary/40 bg-primary/5 hover:bg-primary/10"
+            : "border-border bg-card hover:bg-muted/30"
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <Bolt
+            className={`h-3.5 w-3.5 shrink-0 ${(project?.autoFixWarningsAfterBuild ?? false) ? "text-primary" : "text-muted-foreground"}`}
+          />
+          <div className="min-w-0">
+            <div className="text-xs font-medium text-foreground leading-tight">
+              Auto-fix ESLint warnings after every build
+            </div>
+            <div className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+              {(project?.autoFixWarningsAfterBuild ?? false)
+                ? "Runs project-wide ESLint auto-fix after every successful build"
+                : "Enable to silently fix ESLint warnings after every build"}
+            </div>
+          </div>
+        </div>
+        <div
+          className={`relative shrink-0 h-4 w-7 rounded-full transition-colors ${
+            (project?.autoFixWarningsAfterBuild ?? false) ? "bg-primary" : "bg-muted"
+          }`}
+        >
+          <div
+            className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+              (project?.autoFixWarningsAfterBuild ?? false) ? "translate-x-3.5" : "translate-x-0.5"
             }`}
           />
         </div>

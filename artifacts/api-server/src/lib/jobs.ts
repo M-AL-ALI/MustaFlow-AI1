@@ -1676,6 +1676,38 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       // ── End Task Agent staging gate ────────────────────────────────────────
 
+      // ── Auto-fix ESLint warnings after build ──────────────────────────────
+      // When project.autoFixWarningsAfterBuild is enabled, run project-wide
+      // ESLint auto-fix BEFORE the version snapshot so the snapshot reflects
+      // the post-fix state. Non-fatal — any error is logged and skipped.
+      if (project.autoFixWarningsAfterBuild) {
+        try {
+          await emitEvent(taskId, "narration", "Auto-fixing ESLint warnings…");
+          const { applyProjectEslintFixes } = await import("./eslint-fix-all");
+          const fix = await applyProjectEslintFixes(projectId);
+          report.autoFixSummary = {
+            filesScanned: fix.filesScanned,
+            filesFixed: fix.filesFixed,
+            fixedCount: fix.fixedCount,
+            remainingCount: fix.remainingCount,
+          };
+          if (fix.fixedCount > 0) {
+            const msg = `Auto-fixed ${fix.fixedCount} ESLint issue${fix.fixedCount === 1 ? "" : "s"} across ${fix.filesFixed} file${fix.filesFixed === 1 ? "" : "s"}.`;
+            await emitEvent(taskId, "narration", msg);
+            logger.info(
+              { projectId, taskId, ...report.autoFixSummary },
+              "Post-build auto-fix complete",
+            );
+          }
+        } catch (autoFixErr) {
+          logger.warn(
+            { err: autoFixErr, projectId, taskId },
+            "Post-build auto-fix failed (non-fatal)",
+          );
+        }
+      }
+      // ── End auto-fix ESLint warnings after build ──────────────────────────
+
       await emitEvent(
         taskId,
         "narration",
