@@ -166,6 +166,7 @@ import type {
   UnpublishContainer200,
   UnpublishProject200,
   UpdatePreferencesBody,
+  UpdateTaskBody,
   UploadUrlRequest,
   UploadUrlResponse,
   UserCredit,
@@ -2726,6 +2727,80 @@ export const useCancelTask = <TError = ErrorType<ApiError>,
       return useMutation(getCancelTaskMutationOptions(options));
     }
 
+export const getUpdateTaskUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}`
+}
+
+/**
+ * @summary Update editable task fields (e.g. custom testScript)
+ */
+export const updateTask = async (id: number,
+    taskId: number,
+    updateTaskBody: UpdateTaskBody, options?: RequestInit): Promise<AgentTask> => {
+
+  return customFetch<AgentTask>(getUpdateTaskUrl(id,taskId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateTaskBody,)
+  }
+);}
+
+
+
+
+export const getUpdateTaskMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTask>>, TError,{id: number;taskId: number;data: BodyType<UpdateTaskBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateTask>>, TError,{id: number;taskId: number;data: BodyType<UpdateTaskBody>}, TContext> => {
+
+const mutationKey = ['updateTask'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateTask>>, {id: number;taskId: number;data: BodyType<UpdateTaskBody>}> = (props) => {
+          const {id,taskId,data} = props ?? {};
+
+          return  updateTask(id,taskId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateTaskMutationResult = NonNullable<Awaited<ReturnType<typeof updateTask>>>
+    export type UpdateTaskMutationBody = BodyType<UpdateTaskBody>
+    export type UpdateTaskMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Update editable task fields (e.g. custom testScript)
+ */
+export const useUpdateTask = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTask>>, TError,{id: number;taskId: number;data: BodyType<UpdateTaskBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateTask>>,
+        TError,
+        {id: number;taskId: number;data: BodyType<UpdateTaskBody>},
+        TContext
+      > => {
+      return useMutation(getUpdateTaskMutationOptions(options));
+    }
+
 export const getRerunTaskTestsUrl = (id: number,
     taskId: number,) => {
 
@@ -2736,7 +2811,7 @@ export const getRerunTaskTestsUrl = (id: number,
 }
 
 /**
- * @summary Re-run AI-generated browser tests for a completed task
+ * @summary Re-run browser tests for a completed task (uses saved custom script if set, otherwise AI-generates)
  */
 export const rerunTaskTests = async (id: number,
     taskId: number, options?: RequestInit): Promise<RerunTestsResult> => {
@@ -2785,7 +2860,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RerunTaskTestsMutationError = ErrorType<ApiError>
 
     /**
- * @summary Re-run AI-generated browser tests for a completed task
+ * @summary Re-run browser tests for a completed task (uses saved custom script if set, otherwise AI-generates)
  */
 export const useRerunTaskTests = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rerunTaskTests>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}

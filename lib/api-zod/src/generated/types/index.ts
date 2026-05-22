@@ -270,6 +270,7 @@ export * from './triggerChecksResult';
 export * from './unpublishContainer200';
 export * from './unpublishProject200';
 export * from './updatePreferencesBody';
+export * from './updateTaskBody';
 export * from './uploadUrlRequest';
 export * from './uploadUrlResponse';
 export * from './userCredit';

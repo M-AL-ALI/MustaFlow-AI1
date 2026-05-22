@@ -673,11 +673,39 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/tasks/{taskId}:
+    patch:
+      operationId: updateTask
+      tags: [tasks]
+      summary: Update editable task fields (e.g. custom testScript)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTaskBody"
+      responses:
+        "200":
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTask"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/tasks/{taskId}/rerun-tests:
     post:
       operationId: rerunTaskTests
       tags: [tasks]
-      summary: Re-run AI-generated browser tests for a completed task
+      summary: Re-run browser tests for a completed task (uses saved custom script if set, otherwise AI-generates)
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
         - { name: taskId, in: path, required: true, schema: { type: integer } }
@@ -3297,6 +3325,13 @@ components:
           type: string
           enum: [main, background, plan, converse]
         prompt: { type: string }
+
+    UpdateTaskBody:
+      type: object
+      properties:
+        testScript:
+          type: ["string", "null"]
+          description: User-authored JSON test plan. When set, re-running tests uses this instead of AI-generating a new one.
 
     ProjectVersion:
       type: object

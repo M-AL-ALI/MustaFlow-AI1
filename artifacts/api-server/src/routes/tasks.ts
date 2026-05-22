@@ -12,6 +12,8 @@ import {
   ApplyTaskStagingParams,
   DiscardTaskStagingParams,
   RerunTaskTestsParams,
+  UpdateTaskBody,
+  UpdateTaskParams,
 } from "@workspace/api-zod";
 import { requireProjectOwnership } from "../lib/auth";
 import {
@@ -284,6 +286,67 @@ router.post(
   },
 );
 
+router.patch(
+  "/projects/:id/tasks/:taskId",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = UpdateTaskParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    const parsed = UpdateTaskBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const [existing] = await db
+      .select()
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.id, params.data.taskId),
+          eq(agentTasksTable.projectId, params.data.id),
+        ),
+      )
+      .limit(1);
+
+    if (!existing) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    // Merge testScript into the existing report, preserving all existing fields
+    const baseReport = existing.report ?? {
+      userRequest: "",
+      filesCreated: [],
+      filesChanged: [],
+      filesRemoved: [],
+      previewUpdated: false,
+      warnings: [],
+      integrationsNeeded: [],
+    };
+    const updatedReport = {
+      ...baseReport,
+      testScript: parsed.data.testScript ?? null,
+    };
+
+    const [task] = await db
+      .update(agentTasksTable)
+      .set({ report: updatedReport })
+      .where(eq(agentTasksTable.id, params.data.taskId))
+      .returning();
+
+    if (!task) {
+      res.status(500).json({ error: "Failed to update task" });
+      return;
+    }
+
+    res.json(task);
+  },
+);
+
 router.post(
   "/projects/:id/tasks/:taskId/rerun-tests",
   requireProjectOwnership,
@@ -321,11 +384,17 @@ router.post(
       return;
     }
 
+    // Pass the saved testScript (if any) so custom plans are used instead of AI re-generation
+    const savedTestScript = task.report?.testScript ?? null;
+
     // Kick off tests in the background
     setImmediate(() => {
-      void runAppTestingJob(params.data.id, params.data.taskId, project.name ?? project.kind).catch(
-        (err) => req.log.warn({ err, taskId: params.data.taskId }, "Rerun tests failed"),
-      );
+      void runAppTestingJob(
+        params.data.id,
+        params.data.taskId,
+        project.name ?? project.kind,
+        savedTestScript,
+      ).catch((err) => req.log.warn({ err, taskId: params.data.taskId }, "Rerun tests failed"));
     });
 
     res.json({ queued: true, taskId: params.data.taskId, projectId: params.data.id });

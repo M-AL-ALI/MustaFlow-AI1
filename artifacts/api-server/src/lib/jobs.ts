@@ -3037,8 +3037,9 @@ export async function runAppTestingJob(
   projectId: number,
   taskId: number,
   projectDescription: string,
+  savedTestScript?: string | null,
 ): Promise<void> {
-  logger.info({ projectId, taskId }, "App testing job starting");
+  logger.info({ projectId, taskId, hasSavedScript: !!savedTestScript }, "App testing job starting");
 
   // Load index.html from DB
   const [indexFile] = await db
@@ -3057,9 +3058,26 @@ export async function runAppTestingJob(
     return;
   }
 
-  // Generate test plan via AI
-  const { runTestGenerationPipeline } = await import("./builder");
-  const testPlan = await runTestGenerationPipeline(indexFile.content, projectDescription);
+  let testPlan: Awaited<ReturnType<typeof import("./builder").runTestGenerationPipeline>>;
+
+  if (savedTestScript) {
+    // Use user-saved test script instead of AI generation
+    try {
+      testPlan = JSON.parse(savedTestScript) as typeof testPlan;
+      logger.info({ projectId, taskId }, "Using saved custom test script");
+    } catch (err) {
+      logger.warn(
+        { err, projectId, taskId },
+        "Failed to parse saved testScript — falling back to AI generation",
+      );
+      const { runTestGenerationPipeline } = await import("./builder");
+      testPlan = await runTestGenerationPipeline(indexFile.content, projectDescription);
+    }
+  } else {
+    // Generate test plan via AI
+    const { runTestGenerationPipeline } = await import("./builder");
+    testPlan = await runTestGenerationPipeline(indexFile.content, projectDescription);
+  }
 
   if (!testPlan) {
     logger.warn({ projectId, taskId }, "Test generation returned null — skipping");

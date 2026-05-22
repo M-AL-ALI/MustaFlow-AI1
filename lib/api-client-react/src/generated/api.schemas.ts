@@ -704,6 +704,14 @@ export interface AgentTaskInput {
   prompt?: string;
 }
 
+export interface UpdateTaskBody {
+  /**
+     * User-authored JSON test plan. When set, re-running tests uses this instead of AI-generating a new one.
+     * @nullable
+     */
+  testScript?: string | null;
+}
+
 export type ProjectVersionPlanSnapshot = { [key: string]: unknown } | null;
 
 export interface ProjectVersion {

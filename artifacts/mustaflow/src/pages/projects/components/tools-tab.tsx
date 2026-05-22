@@ -25,6 +25,11 @@ import {
   Clock,
   ShieldCheck,
   Github,
+  FlaskConical,
+  RefreshCw,
+  Loader2,
+  PenLine,
+  AlertTriangle,
 } from "lucide-react";
 import { IntegrationsRegistry } from "./integrations-registry";
 import { GithubTab } from "./github-tab";
@@ -40,6 +45,10 @@ import {
   getGetProjectFileQueryKey,
   useListVersions,
   getListVersionsQueryKey,
+  useListTasks,
+  getListTasksQueryKey,
+  useUpdateTask,
+  useRerunTaskTests,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -785,6 +794,306 @@ function SecretRowWithAudit({
   );
 }
 
+function TestPlanEditor({ projectId }: { projectId: number }) {
+  const queryClient = useQueryClient();
+  const { data: tasks, isLoading } = useListTasks(projectId, {
+    query: { enabled: !!projectId, queryKey: getListTasksQueryKey(projectId) },
+  });
+
+  // Find the most recent task that has test results or a testScript
+  const taskWithTests = tasks?.find(
+    (t) =>
+      (t.report as { testScript?: string | null } | null | undefined)?.testScript != null ||
+      (t.report as { testResults?: unknown[] | null } | null | undefined)?.testResults != null,
+  );
+
+  const savedScript =
+    (taskWithTests?.report as { testScript?: string | null } | null | undefined)?.testScript ??
+    null;
+
+  const [editedScript, setEditedScript] = useState<string>("");
+  const [isEditing, setIsEditing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+
+  const updateTask = useUpdateTask();
+  const rerunTests = useRerunTaskTests();
+
+  useEffect(() => {
+    if (!isEditing && savedScript) {
+      try {
+        setEditedScript(JSON.stringify(JSON.parse(savedScript), null, 2));
+      } catch {
+        setEditedScript(savedScript);
+      }
+      setParseError(null);
+    }
+  }, [savedScript, isEditing]);
+
+  const handleEdit = () => {
+    if (savedScript) {
+      try {
+        setEditedScript(JSON.stringify(JSON.parse(savedScript), null, 2));
+      } catch {
+        setEditedScript(savedScript);
+      }
+    } else {
+      setEditedScript(
+        JSON.stringify(
+          {
+            steps: [
+              { action: "navigate", value: "/" },
+              { action: "waitForSelector", selector: "body" },
+              { action: "assertText", selector: "body", value: "" },
+            ],
+          },
+          null,
+          2,
+        ),
+      );
+    }
+    setParseError(null);
+    setIsEditing(true);
+  };
+
+  const handleScriptChange = (value: string) => {
+    setEditedScript(value);
+    try {
+      JSON.parse(value);
+      setParseError(null);
+    } catch (e) {
+      setParseError(e instanceof Error ? e.message : "Invalid JSON");
+    }
+  };
+
+  const handleSave = () => {
+    if (!taskWithTests || parseError) return;
+    try {
+      JSON.parse(editedScript);
+    } catch {
+      return;
+    }
+    updateTask.mutate(
+      { id: projectId, taskId: taskWithTests.id, data: { testScript: editedScript } },
+      {
+        onSuccess: () => {
+          setIsEditing(false);
+          void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+        },
+      },
+    );
+  };
+
+  const handleRerun = () => {
+    if (!taskWithTests) return;
+    rerunTests.mutate(
+      { id: projectId, taskId: taskWithTests.id },
+      {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+        },
+      },
+    );
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading test plans...
+      </div>
+    );
+  }
+
+  if (!taskWithTests) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
+        <FlaskConical className="h-8 w-8 opacity-30" />
+        <p className="text-sm font-medium">No test plan yet</p>
+        <p className="text-xs max-w-xs leading-relaxed">
+          After a build completes, the AI generates a test plan and runs it automatically. The test
+          plan will appear here so you can review and customize it.
+        </p>
+      </div>
+    );
+  }
+
+  const testResults =
+    (
+      taskWithTests.report as
+        | { testResults?: Array<{ name: string; passed: boolean; durationMs: number }> | null }
+        | null
+        | undefined
+    )?.testResults ?? null;
+  const testRanAt =
+    (taskWithTests.report as { testRanAt?: string | null } | null | undefined)?.testRanAt ?? null;
+  const isCustom = savedScript != null;
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <FlaskConical className="h-4 w-4 text-primary" />
+            Test Plan
+            {isCustom && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-medium">
+                Custom
+              </span>
+            )}
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {isCustom
+              ? "Using your custom test script. The AI will not overwrite it on re-run."
+              : "AI-generated test plan from the last build."}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {isEditing ? (
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setIsEditing(false);
+                  setParseError(null);
+                }}
+                className="text-xs h-7"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSave}
+                disabled={!!parseError || updateTask.isPending}
+                className="text-xs h-7"
+              >
+                {updateTask.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <Save className="h-3 w-3 mr-1" />
+                )}
+                Save
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button size="sm" variant="outline" onClick={handleEdit} className="text-xs h-7">
+                <PenLine className="h-3 w-3 mr-1" />
+                Edit
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRerun}
+                disabled={rerunTests.isPending}
+                className="text-xs h-7"
+              >
+                {rerunTests.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <RefreshCw className="h-3 w-3 mr-1" />
+                )}
+                Re-run
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Last run summary */}
+      {testResults && !isEditing && (
+        <div className="border border-border rounded-lg p-3 bg-card space-y-2">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="font-semibold text-foreground/80">Last run</span>
+            {testRanAt && (
+              <span className="text-muted-foreground/60">
+                {new Date(testRanAt).toLocaleString()}
+              </span>
+            )}
+            <span className="ml-auto flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3 text-green-400" />
+              <span className="text-green-400">
+                {testResults.filter((r) => r.passed).length} passed
+              </span>
+              {testResults.filter((r) => !r.passed).length > 0 && (
+                <>
+                  <XCircle className="h-3 w-3 text-red-400 ml-1" />
+                  <span className="text-red-400">
+                    {testResults.filter((r) => !r.passed).length} failed
+                  </span>
+                </>
+              )}
+            </span>
+          </div>
+          <ul className="space-y-0.5">
+            {testResults.map((r, i) => (
+              <li key={i} className="flex items-center gap-1.5 text-[11px]">
+                {r.passed ? (
+                  <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+                ) : (
+                  <XCircle className="h-3 w-3 text-red-400 shrink-0" />
+                )}
+                <span className={r.passed ? "text-foreground/70" : "text-foreground"}>
+                  {r.name}
+                </span>
+                <span className="ml-auto text-muted-foreground/40 text-[10px]">
+                  {r.durationMs}ms
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Editor */}
+      {isEditing ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Edit the JSON test plan below. Each step has an{" "}
+              <code className="bg-muted px-1 rounded text-[11px]">action</code> and optional fields.
+            </p>
+          </div>
+          {parseError && (
+            <div className="flex items-start gap-1.5 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded p-2">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>{parseError}</span>
+            </div>
+          )}
+          <textarea
+            className="w-full h-[400px] bg-[#0d1117] text-[#d4d4d4] font-mono text-xs p-4 rounded-lg border border-border resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
+            value={editedScript}
+            onChange={(e) => handleScriptChange(e.target.value)}
+            spellCheck={false}
+          />
+        </div>
+      ) : (
+        savedScript && (
+          <div className="rounded-lg border border-border overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-muted border-b border-border">
+              <span className="text-[11px] font-mono text-muted-foreground">test-plan.json</span>
+              <span className="text-[10px] text-muted-foreground/50">
+                read-only — click Edit to modify
+              </span>
+            </div>
+            <pre className="bg-[#0d1117] text-[#d4d4d4] font-mono text-xs p-4 overflow-x-auto max-h-[400px] overflow-y-auto">
+              <code>
+                {(() => {
+                  try {
+                    return JSON.stringify(JSON.parse(savedScript), null, 2);
+                  } catch {
+                    return savedScript;
+                  }
+                })()}
+              </code>
+            </pre>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 export function ToolsTab({
   projectId,
   projectKind,
@@ -884,6 +1193,9 @@ export function ToolsTab({
             </TabsTrigger>
             <TabsTrigger value="quality">
               <ShieldCheck className="h-4 w-4 mr-2" /> Quality
+            </TabsTrigger>
+            <TabsTrigger value="tests">
+              <FlaskConical className="h-4 w-4 mr-2" /> Tests
             </TabsTrigger>
             {isMobile && (
               <TabsTrigger value="modules">
@@ -1122,6 +1434,10 @@ export function ToolsTab({
                 projectKind={projectKind}
                 onSendMessage={onSendMessage}
               />
+            </TabsContent>
+
+            <TabsContent value="tests" className="h-full m-0 p-4">
+              <TestPlanEditor projectId={projectId} />
             </TabsContent>
 
             {isMobile && (

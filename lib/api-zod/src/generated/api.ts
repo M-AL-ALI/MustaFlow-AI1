@@ -927,7 +927,56 @@ export const CancelTaskResponse = zod.object({
 
 
 /**
- * @summary Re-run AI-generated browser tests for a completed task
+ * @summary Update editable task fields (e.g. custom testScript)
+ */
+export const UpdateTaskParams = zod.object({
+  "id": zod.coerce.number(),
+  "taskId": zod.coerce.number()
+})
+
+export const UpdateTaskBody = zod.object({
+  "testScript": zod.string().nullish().describe('User-authored JSON test plan. When set, re-running tests uses this instead of AI-generating a new one.')
+})
+
+export const UpdateTaskResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "title": zod.string(),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
+  "prompt": zod.string().nullish(),
+  "result": zod.string().nullish(),
+  "queueBatchId": zod.string().nullish(),
+  "queueIndex": zod.number().nullish(),
+  "report": zod.object({
+  "userRequest": zod.string().optional(),
+  "filesCreated": zod.array(zod.string()).optional(),
+  "filesChanged": zod.array(zod.string()).optional(),
+  "filesRemoved": zod.array(zod.string()).optional(),
+  "previewUpdated": zod.boolean().optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "nextRecommendation": zod.string().optional(),
+  "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
+  "knowledgeApplied": zod.array(zod.object({
+  "title": zod.string().optional(),
+  "category": zod.string().optional()
+})).optional(),
+  "versionId": zod.number().nullish()
+}).nullish(),
+  "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish(),
+  "elapsedSeconds": zod.number().nullish()
+})
+
+
+/**
+ * @summary Re-run browser tests for a completed task (uses saved custom script if set, otherwise AI-generates)
  */
 export const RerunTaskTestsParams = zod.object({
   "id": zod.coerce.number(),
