@@ -50,6 +50,7 @@ import {
   type WiringEdge,
   type WiringPage,
 } from "./page-detail-panel";
+import { BlocksPanel } from "./blocks-panel";
 import { EdgeDetailPanel, type PageMapEdgeState } from "./edge-detail-panel";
 
 type Platform = "web" | "ios" | "android";
@@ -813,9 +814,7 @@ export function PageMapTab({
     (targetNodeId: string) => {
       if (!selectedNodeId || selectedNodeId === targetNodeId) return;
       // Avoid duplicate edges between same pair
-      const exists = edges.some(
-        (e) => e.source === selectedNodeId && e.target === targetNodeId,
-      );
+      const exists = edges.some((e) => e.source === selectedNodeId && e.target === targetNodeId);
       if (exists) return;
       const newEdge: Edge = {
         id: `edge-user-${Date.now()}`,
@@ -1027,8 +1026,8 @@ export function PageMapTab({
           <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
           <span className="text-[11px] text-amber-200">
             <span className="font-semibold">{issuesCount}</span>{" "}
-            {issuesCount === 1 ? "page has" : "pages have"} wiring issues — not linked or
-            goes nowhere.
+            {issuesCount === 1 ? "page has" : "pages have"} wiring issues — not linked or goes
+            nowhere.
           </span>
           <Button
             size="sm"
@@ -1112,12 +1111,8 @@ export function PageMapTab({
           incoming={selectedIncoming}
           outgoing={selectedOutgoing}
           availableTargets={availableTargets}
-          isOrphan={
-            selectedNodeId ? !!connectivity.get(selectedNodeId)?.isOrphan : false
-          }
-          isDeadEnd={
-            selectedNodeId ? !!connectivity.get(selectedNodeId)?.isDeadEnd : false
-          }
+          isOrphan={selectedNodeId ? !!connectivity.get(selectedNodeId)?.isOrphan : false}
+          isDeadEnd={selectedNodeId ? !!connectivity.get(selectedNodeId)?.isDeadEnd : false}
           onClose={() => setSelectedNodeId(null)}
           onSave={handleDetailSave}
           onFileOpen={handleFileOpen}
@@ -1127,6 +1122,15 @@ export function PageMapTab({
           onWireTo={handleWireTo}
           onUnwire={handleUnwire}
           onAskAiToWire={handleAskAiToWire}
+          blocksSlot={
+            selectedNode && !selectedNode.planned && selectedNode.filePath ? (
+              <BlocksPanel
+                projectId={projectId}
+                filePath={selectedNode.filePath}
+                onAskAiToAdapt={onSwitchToChat}
+              />
+            ) : null
+          }
         />
         <EdgeDetailPanel
           edge={selectedNodeId ? null : selectedEdgeState}

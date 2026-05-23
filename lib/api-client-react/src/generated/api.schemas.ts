@@ -1225,6 +1225,40 @@ export interface PageMapResponse {
   pageMapData: PageMapData;
 }
 
+export interface FileBlock {
+  /** Stable hash-derived block ID (e.g. blk_a1b2c3d4) */
+  id: string;
+  /** HTML tag name (header, section, etc.) */
+  tag: string;
+  /** Human-readable label (text snippet or tag name) */
+  label: string;
+  textSnippet: string;
+}
+
+export interface FileBlocksResponse {
+  fileId: number;
+  filePath: string;
+  /** False when the HTML couldn't be parsed (e.g. badly malformed). UI should hide reorder controls in this case. */
+  parseOk: boolean;
+  blocks: FileBlock[];
+}
+
+export interface ReorderBlocksResponse {
+  changed: boolean;
+  fileId: number;
+  parseOk?: boolean;
+  blocks?: FileBlock[];
+}
+
+export interface MoveBlockResponse {
+  sourceFileId: number;
+  targetFileId: number;
+  sourcePath: string;
+  targetPath: string;
+  /** The exact HTML that was moved (used by the UI for an "AI adapt" follow-up prompt). */
+  movedSnippet: string;
+}
+
 export interface CreditTransaction {
   id: number;
   userId: string;
@@ -2372,6 +2406,18 @@ export const AnalyzePageMapPlatform = {
   ios: 'ios',
   android: 'android',
 } as const;
+
+export type ReorderFileBlocksBody = {
+  order: string[];
+};
+
+export type MoveBlockBetweenFilesBody = {
+  sourceFileId: number;
+  blockId: string;
+  targetFileId: number;
+  /** When set, the moved block is inserted directly above this target block. When omitted, the block is appended after the last block in the target file. */
+  beforeBlockId?: string | null;
+};
 
 export type UnpublishProject200 = {
   projectId: number;

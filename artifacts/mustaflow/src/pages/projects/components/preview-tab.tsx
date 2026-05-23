@@ -285,28 +285,31 @@ export function PreviewTab({
   const [urlInput, setUrlInput] = useState<string>("/");
   const [routesOpen, setRoutesOpen] = useState(false);
 
-  const navigateTo = useCallback((rawPath: string) => {
-    const normalized = (() => {
-      let p = rawPath.trim();
-      if (!p) p = "/";
-      if (!p.startsWith("/")) p = "/" + p;
-      return p;
-    })();
-    setCurrentPath(normalized);
-    setUrlInput(normalized);
-    setPathHistory((prev) => {
-      const trimmed = prev.slice(0, historyIndex + 1);
-      if (trimmed[trimmed.length - 1] === normalized) return trimmed;
-      return [...trimmed, normalized];
-    });
-    setHistoryIndex((prev) => {
-      const trimmedLen = pathHistory.slice(0, prev + 1).length;
-      const lastSame = pathHistory.slice(0, prev + 1)[trimmedLen - 1] === normalized;
-      return lastSame ? prev : prev + 1;
-    });
-    setIframeKey((k) => k + 1);
-    setRoutesOpen(false);
-  }, [historyIndex, pathHistory]);
+  const navigateTo = useCallback(
+    (rawPath: string) => {
+      const normalized = (() => {
+        let p = rawPath.trim();
+        if (!p) p = "/";
+        if (!p.startsWith("/")) p = "/" + p;
+        return p;
+      })();
+      setCurrentPath(normalized);
+      setUrlInput(normalized);
+      setPathHistory((prev) => {
+        const trimmed = prev.slice(0, historyIndex + 1);
+        if (trimmed[trimmed.length - 1] === normalized) return trimmed;
+        return [...trimmed, normalized];
+      });
+      setHistoryIndex((prev) => {
+        const trimmedLen = pathHistory.slice(0, prev + 1).length;
+        const lastSame = pathHistory.slice(0, prev + 1)[trimmedLen - 1] === normalized;
+        return lastSame ? prev : prev + 1;
+      });
+      setIframeKey((k) => k + 1);
+      setRoutesOpen(false);
+    },
+    [historyIndex, pathHistory],
+  );
 
   const goBack = useCallback(() => {
     setHistoryIndex((idx) => {
@@ -374,7 +377,6 @@ export function PreviewTab({
     const sep = path.includes("?") ? "&" : "?";
     return `/api/projects/${project.id}/preview${path}${sep}t=${iframeKey}`;
   })();
-
 
   // After a build completes for a react-vite project, resync the WC with fresh files.
   // We detect build completion via project.status transitioning away from "building".
@@ -1397,11 +1399,11 @@ export function PreviewTab({
             <div className="flex items-start gap-2 bg-purple-500/10 border border-purple-500/20 rounded-lg px-2.5 py-2">
               <Info className="h-3 w-3 text-purple-300 shrink-0 mt-0.5" />
               <span className="flex-1 text-[11px] text-purple-200/90 leading-relaxed">
-                This window shows an{" "}
-                <span className="font-semibold">interactive mockup</span> of your mobile app
-                rendered in the browser. Buttons give visual feedback so you can walk the flow, but
-                anything that needs the phone&apos;s camera, GPS, push, deep links, or a backend
-                only runs on a real device — scan the Expo Go QR above to test for real.
+                This window shows an <span className="font-semibold">interactive mockup</span> of
+                your mobile app rendered in the browser. Buttons give visual feedback so you can
+                walk the flow, but anything that needs the phone&apos;s camera, GPS, push, deep
+                links, or a backend only runs on a real device — scan the Expo Go QR above to test
+                for real.
               </span>
             </div>
 
@@ -1410,7 +1412,11 @@ export function PreviewTab({
                 <div className="flex items-center gap-2 mb-1.5">
                   <Plug className="h-3 w-3 text-purple-300 shrink-0" />
                   <span className="text-[11px] font-semibold text-purple-200">
-                    Secrets needed for full functionality ({setSecretNames.size > 0 ? `${requiredSecretsFromReport.length - missingSecrets.length}/${requiredSecretsFromReport.length} set` : `0/${requiredSecretsFromReport.length} set`})
+                    Secrets needed for full functionality (
+                    {setSecretNames.size > 0
+                      ? `${requiredSecretsFromReport.length - missingSecrets.length}/${requiredSecretsFromReport.length} set`
+                      : `0/${requiredSecretsFromReport.length} set`}
+                    )
                   </span>
                   {onJumpToSecrets && missingSecrets.length > 0 && (
                     <button

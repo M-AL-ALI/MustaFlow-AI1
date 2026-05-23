@@ -1913,6 +1913,75 @@ export const AnalyzePageMapResponse = zod.object({
 })
 
 
+/**
+ * @summary List top-level HTML blocks in a file (header / nav / main / section / article / aside / footer / form, plus any element with data-block)
+ */
+export const GetFileBlocksParams = zod.object({
+  "id": zod.coerce.number(),
+  "fileId": zod.coerce.number()
+})
+
+export const GetFileBlocksResponse = zod.object({
+  "fileId": zod.number(),
+  "filePath": zod.string(),
+  "parseOk": zod.boolean().describe('False when the HTML couldn\'t be parsed (e.g. badly malformed). UI should hide reorder controls in this case.'),
+  "blocks": zod.array(zod.object({
+  "id": zod.string().describe('Stable hash-derived block ID (e.g. blk_a1b2c3d4)'),
+  "tag": zod.string().describe('HTML tag name (header, section, etc.)'),
+  "label": zod.string().describe('Human-readable label (text snippet or tag name)'),
+  "textSnippet": zod.string()
+}))
+})
+
+
+/**
+ * @summary Reorder blocks within a single HTML file. Omitted IDs keep their relative position.
+ */
+export const ReorderFileBlocksParams = zod.object({
+  "id": zod.coerce.number(),
+  "fileId": zod.coerce.number()
+})
+
+export const ReorderFileBlocksBody = zod.object({
+  "order": zod.array(zod.string())
+})
+
+export const ReorderFileBlocksResponse = zod.object({
+  "changed": zod.boolean(),
+  "fileId": zod.number(),
+  "parseOk": zod.boolean().optional(),
+  "blocks": zod.array(zod.object({
+  "id": zod.string().describe('Stable hash-derived block ID (e.g. blk_a1b2c3d4)'),
+  "tag": zod.string().describe('HTML tag name (header, section, etc.)'),
+  "label": zod.string().describe('Human-readable label (text snippet or tag name)'),
+  "textSnippet": zod.string()
+})).optional()
+})
+
+
+/**
+ * @summary Move a single block from one HTML file to another within the same project
+ */
+export const MoveBlockBetweenFilesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const MoveBlockBetweenFilesBody = zod.object({
+  "sourceFileId": zod.number(),
+  "blockId": zod.string(),
+  "targetFileId": zod.number(),
+  "beforeBlockId": zod.string().nullish().describe('When set, the moved block is inserted directly above this target block. When omitted, the block is appended after the last block in the target file.')
+})
+
+export const MoveBlockBetweenFilesResponse = zod.object({
+  "sourceFileId": zod.number(),
+  "targetFileId": zod.number(),
+  "sourcePath": zod.string(),
+  "targetPath": zod.string(),
+  "movedSnippet": zod.string().describe('The exact HTML that was moved (used by the UI for an \"AI adapt\" follow-up prompt).')
+})
+
+
 export const PublishProjectParams = zod.object({
   "id": zod.coerce.number()
 })

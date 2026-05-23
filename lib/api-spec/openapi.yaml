@@ -1273,6 +1273,79 @@ paths:
               schema:
                 $ref: "#/components/schemas/PageMapResponse"
 
+  /projects/{id}/files/{fileId}/blocks:
+    get:
+      operationId: getFileBlocks
+      tags: [projects]
+      summary: List top-level HTML blocks in a file (header / nav / main / section / article / aside / footer / form, plus any element with data-block)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: fileId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Parsed block list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileBlocksResponse"
+
+  /projects/{id}/files/{fileId}/blocks/reorder:
+    post:
+      operationId: reorderFileBlocks
+      tags: [projects]
+      summary: Reorder blocks within a single HTML file. Omitted IDs keep their relative position.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: fileId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order]
+              properties:
+                order:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Updated block list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReorderBlocksResponse"
+
+  /projects/{id}/blocks/move:
+    post:
+      operationId: moveBlockBetweenFiles
+      tags: [projects]
+      summary: Move a single block from one HTML file to another within the same project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceFileId, blockId, targetFileId]
+              properties:
+                sourceFileId: { type: integer }
+                blockId: { type: string }
+                targetFileId: { type: integer }
+                beforeBlockId:
+                  type: string
+                  nullable: true
+                  description: When set, the moved block is inserted directly above this target block. When omitted, the block is appended after the last block in the target file.
+      responses:
+        "200":
+          description: Move applied to both files
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoveBlockResponse"
+
   /projects/{id}/publish:
     post:
       operationId: publishProject
@@ -3903,6 +3976,53 @@ components:
       required: [pageMapData]
       properties:
         pageMapData: { $ref: "#/components/schemas/PageMapData" }
+
+    FileBlock:
+      type: object
+      required: [id, tag, label, textSnippet]
+      properties:
+        id: { type: string, description: Stable hash-derived block ID (e.g. blk_a1b2c3d4) }
+        tag:
+          type: string
+          description: "HTML tag name (header, section, etc.)"
+        label: { type: string, description: Human-readable label (text snippet or tag name) }
+        textSnippet: { type: string }
+
+    FileBlocksResponse:
+      type: object
+      required: [fileId, filePath, parseOk, blocks]
+      properties:
+        fileId: { type: integer }
+        filePath: { type: string }
+        parseOk:
+          type: boolean
+          description: False when the HTML couldn't be parsed (e.g. badly malformed). UI should hide reorder controls in this case.
+        blocks:
+          type: array
+          items: { $ref: "#/components/schemas/FileBlock" }
+
+    ReorderBlocksResponse:
+      type: object
+      required: [changed, fileId]
+      properties:
+        changed: { type: boolean }
+        fileId: { type: integer }
+        parseOk: { type: boolean }
+        blocks:
+          type: array
+          items: { $ref: "#/components/schemas/FileBlock" }
+
+    MoveBlockResponse:
+      type: object
+      required: [sourceFileId, targetFileId, sourcePath, targetPath, movedSnippet]
+      properties:
+        sourceFileId: { type: integer }
+        targetFileId: { type: integer }
+        sourcePath: { type: string }
+        targetPath: { type: string }
+        movedSnippet:
+          type: string
+          description: The exact HTML that was moved (used by the UI for an "AI adapt" follow-up prompt).
 
     CreditTransaction:
       type: object

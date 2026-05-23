@@ -71,6 +71,7 @@ import type {
   DestroyContainer200,
   DisconnectGithub200,
   DuplicateProjectResult,
+  FileBlocksResponse,
   FileSearchResult,
   GenerateImageInput,
   GenerateImageResponse,
@@ -118,6 +119,8 @@ import type {
   MobileBuildLog,
   MobileBuildLogsResult,
   MobileBuildQueued,
+  MoveBlockBetweenFilesBody,
+  MoveBlockResponse,
   OpenGithubPr200,
   PackageInstallInput,
   PackageManagerResult,
@@ -143,6 +146,8 @@ import type {
   PublishContainer200,
   PublishResult,
   ReadinessResult,
+  ReorderBlocksResponse,
+  ReorderFileBlocksBody,
   RerunTestsResult,
   RevokeAdminRole200,
   RollbackInput,
@@ -4742,6 +4747,234 @@ export const useAnalyzePageMap = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getAnalyzePageMapMutationOptions(options));
+    }
+
+export const getGetFileBlocksUrl = (id: number,
+    fileId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files/${fileId}/blocks`
+}
+
+/**
+ * @summary List top-level HTML blocks in a file (header / nav / main / section / article / aside / footer / form, plus any element with data-block)
+ */
+export const getFileBlocks = async (id: number,
+    fileId: number, options?: RequestInit): Promise<FileBlocksResponse> => {
+
+  return customFetch<FileBlocksResponse>(getGetFileBlocksUrl(id,fileId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFileBlocksQueryKey = (id: number,
+    fileId: number,) => {
+    return [
+    `/api/projects/${id}/files/${fileId}/blocks`
+    ] as const;
+    }
+
+
+export const getGetFileBlocksQueryOptions = <TData = Awaited<ReturnType<typeof getFileBlocks>>, TError = ErrorType<unknown>>(id: number,
+    fileId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFileBlocks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFileBlocksQueryKey(id,fileId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFileBlocks>>> = ({ signal }) => getFileBlocks(id,fileId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && fileId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFileBlocks>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFileBlocksQueryResult = NonNullable<Awaited<ReturnType<typeof getFileBlocks>>>
+export type GetFileBlocksQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List top-level HTML blocks in a file (header / nav / main / section / article / aside / footer / form, plus any element with data-block)
+ */
+
+export function useGetFileBlocks<TData = Awaited<ReturnType<typeof getFileBlocks>>, TError = ErrorType<unknown>>(
+ id: number,
+    fileId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFileBlocks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFileBlocksQueryOptions(id,fileId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getReorderFileBlocksUrl = (id: number,
+    fileId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files/${fileId}/blocks/reorder`
+}
+
+/**
+ * @summary Reorder blocks within a single HTML file. Omitted IDs keep their relative position.
+ */
+export const reorderFileBlocks = async (id: number,
+    fileId: number,
+    reorderFileBlocksBody: ReorderFileBlocksBody, options?: RequestInit): Promise<ReorderBlocksResponse> => {
+
+  return customFetch<ReorderBlocksResponse>(getReorderFileBlocksUrl(id,fileId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      reorderFileBlocksBody,)
+  }
+);}
+
+
+
+
+export const getReorderFileBlocksMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderFileBlocks>>, TError,{id: number;fileId: number;data: BodyType<ReorderFileBlocksBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reorderFileBlocks>>, TError,{id: number;fileId: number;data: BodyType<ReorderFileBlocksBody>}, TContext> => {
+
+const mutationKey = ['reorderFileBlocks'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reorderFileBlocks>>, {id: number;fileId: number;data: BodyType<ReorderFileBlocksBody>}> = (props) => {
+          const {id,fileId,data} = props ?? {};
+
+          return  reorderFileBlocks(id,fileId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReorderFileBlocksMutationResult = NonNullable<Awaited<ReturnType<typeof reorderFileBlocks>>>
+    export type ReorderFileBlocksMutationBody = BodyType<ReorderFileBlocksBody>
+    export type ReorderFileBlocksMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Reorder blocks within a single HTML file. Omitted IDs keep their relative position.
+ */
+export const useReorderFileBlocks = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderFileBlocks>>, TError,{id: number;fileId: number;data: BodyType<ReorderFileBlocksBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reorderFileBlocks>>,
+        TError,
+        {id: number;fileId: number;data: BodyType<ReorderFileBlocksBody>},
+        TContext
+      > => {
+      return useMutation(getReorderFileBlocksMutationOptions(options));
+    }
+
+export const getMoveBlockBetweenFilesUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/blocks/move`
+}
+
+/**
+ * @summary Move a single block from one HTML file to another within the same project
+ */
+export const moveBlockBetweenFiles = async (id: number,
+    moveBlockBetweenFilesBody: MoveBlockBetweenFilesBody, options?: RequestInit): Promise<MoveBlockResponse> => {
+
+  return customFetch<MoveBlockResponse>(getMoveBlockBetweenFilesUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      moveBlockBetweenFilesBody,)
+  }
+);}
+
+
+
+
+export const getMoveBlockBetweenFilesMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof moveBlockBetweenFiles>>, TError,{id: number;data: BodyType<MoveBlockBetweenFilesBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof moveBlockBetweenFiles>>, TError,{id: number;data: BodyType<MoveBlockBetweenFilesBody>}, TContext> => {
+
+const mutationKey = ['moveBlockBetweenFiles'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof moveBlockBetweenFiles>>, {id: number;data: BodyType<MoveBlockBetweenFilesBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  moveBlockBetweenFiles(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MoveBlockBetweenFilesMutationResult = NonNullable<Awaited<ReturnType<typeof moveBlockBetweenFiles>>>
+    export type MoveBlockBetweenFilesMutationBody = BodyType<MoveBlockBetweenFilesBody>
+    export type MoveBlockBetweenFilesMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Move a single block from one HTML file to another within the same project
+ */
+export const useMoveBlockBetweenFiles = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof moveBlockBetweenFiles>>, TError,{id: number;data: BodyType<MoveBlockBetweenFilesBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof moveBlockBetweenFiles>>,
+        TError,
+        {id: number;data: BodyType<MoveBlockBetweenFilesBody>},
+        TContext
+      > => {
+      return useMutation(getMoveBlockBetweenFilesMutationOptions(options));
     }
 
 export const getPublishProjectUrl = (id: number,) => {

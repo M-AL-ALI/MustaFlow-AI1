@@ -130,10 +130,7 @@ export function normalizePath(p: string): string {
 }
 
 // Exported for unit tests.
-export function extractStaticEdges(
-  files: BuilderFile[],
-  nodes: PageMapNode[],
-): PageMapEdge[] {
+export function extractStaticEdges(files: BuilderFile[], nodes: PageMapNode[]): PageMapEdge[] {
   // Index of normalized full path → node id, plus a basename → node id index
   // used only as a fallback when the resolved relative path doesn't match.
   // Basename fallback skips collisions (multiple files with the same name in
@@ -452,9 +449,7 @@ export async function extractPageMapForFiles(
     // model missed due to its 3000-char per-file truncation. External .js
     // files are not scanned: their navigation can't be reliably attributed
     // to a single source page.
-    const scanFiles = files.filter(
-      (f) => f.mimeType === "text/html" || f.path.endsWith(".html"),
-    );
+    const scanFiles = files.filter((f) => f.mimeType === "text/html" || f.path.endsWith(".html"));
     const staticEdges = extractStaticEdges(scanFiles, aiNodes);
 
     // Dedupe by source+target pair; AI edges win (they carry semantic
@@ -465,11 +460,7 @@ export async function extractPageMapForFiles(
       ...staticEdges.filter((e) => !aiPairs.has(`${e.source}->${e.target}`)),
     ];
 
-    const merged = mergeWithExisting(
-      aiNodes,
-      mergedAiAndStatic,
-      existingMap ?? EMPTY_PLATFORM,
-    );
+    const merged = mergeWithExisting(aiNodes, mergedAiAndStatic, existingMap ?? EMPTY_PLATFORM);
     return merged;
   } catch (err) {
     logger.error({ err }, "extractPageMap AI call failed");

@@ -55,10 +55,7 @@ describe("normalizePath", () => {
 
 describe("extractStaticEdges — relative path resolution", () => {
   it("resolves '../about.html' from a nested source against source dir", () => {
-    const nodes = [
-      node("page-post", "blog/post.html"),
-      node("page-about", "about.html"),
-    ];
+    const nodes = [node("page-post", "blog/post.html"), node("page-about", "about.html")];
     const files = [html("blog/post.html", `<a href="../about.html">About</a>`)];
     const edges = extractStaticEdges(files, nodes);
     expect(edges).toHaveLength(1);
@@ -66,24 +63,16 @@ describe("extractStaticEdges — relative path resolution", () => {
   });
 
   it("resolves absolute '/about.html' the same regardless of source dir", () => {
-    const nodes = [
-      node("page-post", "blog/post.html"),
-      node("page-about", "about.html"),
-    ];
+    const nodes = [node("page-post", "blog/post.html"), node("page-about", "about.html")];
     const files = [html("blog/post.html", `<a href="/about.html">A</a>`)];
     expect(extractStaticEdges(files, nodes)).toHaveLength(1);
   });
 
   it("resolves sibling links via source-relative path", () => {
-    const nodes = [
-      node("page-a", "blog/a.html"),
-      node("page-b", "blog/b.html"),
-    ];
+    const nodes = [node("page-a", "blog/a.html"), node("page-b", "blog/b.html")];
     const files = [html("blog/a.html", `<a href="b.html">B</a>`)];
     const edges = extractStaticEdges(files, nodes);
-    expect(edges).toEqual([
-      expect.objectContaining({ source: "page-a", target: "page-b" }),
-    ]);
+    expect(edges).toEqual([expect.objectContaining({ source: "page-a", target: "page-b" })]);
   });
 });
 
@@ -107,10 +96,7 @@ describe("extractStaticEdges — basename fallback ambiguity", () => {
   });
 
   it("still resolves duplicate-basename targets when the full path matches", () => {
-    const nodes = [
-      node("page-a-idx", "a/index.html"),
-      node("page-b-idx", "b/index.html"),
-    ];
+    const nodes = [node("page-a-idx", "a/index.html"), node("page-b-idx", "b/index.html")];
     const files = [html("a/index.html", `<a href="../b/index.html">B</a>`)];
     const edges = extractStaticEdges(files, nodes);
     expect(edges).toEqual([
@@ -139,7 +125,9 @@ describe("extractStaticEdges — pattern coverage and skipping", () => {
       `,
       ),
     ];
-    const targets = extractStaticEdges(files, nodes).map((e) => e.target).sort();
+    const targets = extractStaticEdges(files, nodes)
+      .map((e) => e.target)
+      .sort();
     expect(targets).toEqual(["page-dash", "page-login", "page-profile"]);
   });
 

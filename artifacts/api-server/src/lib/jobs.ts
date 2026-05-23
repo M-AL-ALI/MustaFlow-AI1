@@ -1716,8 +1716,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             "generating_code",
             "First pass returned no changes — retrying with stricter instruction…",
           );
-          const stricterPrompt =
-            `${userPrompt}\n\n[SYSTEM] The previous attempt returned zero file changes for a request that clearly asks for code modifications. You MUST now return at least one concrete file modification in the "files" array that addresses the request. If the request is genuinely ambiguous, pick the most likely interpretation and ship a minimal change.`;
+          const stricterPrompt = `${userPrompt}\n\n[SYSTEM] The previous attempt returned zero file changes for a request that clearly asks for code modifications. You MUST now return at least one concrete file modification in the "files" array that addresses the request. If the request is genuinely ambiguous, pick the most likely interpretation and ship a minimal change.`;
           const retryStackArgs = { ...stackRefineArgs, userPrompt: stricterPrompt };
           try {
             const retryResult = isMobileProject

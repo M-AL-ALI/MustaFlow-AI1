@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import {
   X,
   ExternalLink,
@@ -72,6 +72,12 @@ type PageDetailPanelProps = {
   onWireTo?: (targetNodeId: string) => void;
   onUnwire?: (edgeId: string) => void;
   onAskAiToWire?: (node: PageMapNodeState) => void;
+  /**
+   * Optional slot rendered below the file path on built pages. Used to host
+   * the BlocksPanel (drag-to-reorder + cross-page move) without coupling this
+   * UI-only component to project/file fetching.
+   */
+  blocksSlot?: ReactNode;
 };
 
 export function PageDetailPanel({
@@ -90,6 +96,7 @@ export function PageDetailPanel({
   onWireTo,
   onUnwire,
   onAskAiToWire,
+  blocksSlot,
 }: PageDetailPanelProps) {
   const [label, setLabel] = useState("");
   const [pageType, setPageType] = useState<PageType>("other");
@@ -236,9 +243,7 @@ export function PageDetailPanel({
             </span>
           </div>
           {incoming.length === 0 ? (
-            <div className="text-[11px] text-muted-foreground italic px-1">
-              Nothing links here.
-            </div>
+            <div className="text-[11px] text-muted-foreground italic px-1">Nothing links here.</div>
           ) : (
             <div className="space-y-1">
               {incoming.map(({ edgeId, page }) => (
@@ -357,6 +362,9 @@ export function PageDetailPanel({
             </button>
           </div>
         )}
+
+        {/* Blocks panel — hosted by parent (drag-to-reorder + cross-file move) */}
+        {!node.planned && blocksSlot}
 
         {/* Metadata badges */}
         <div className="flex flex-wrap gap-1.5">

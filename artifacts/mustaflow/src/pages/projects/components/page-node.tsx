@@ -217,13 +217,14 @@ export const PageNode = memo(function PageNode({
   }
 
   const hasWiringIssue = !!data.isOrphan || !!data.isDeadEnd;
-  const issueLabel = data.isOrphan && data.isDeadEnd
-    ? "Not linked · goes nowhere"
-    : data.isOrphan
-      ? "Not linked from anywhere"
-      : data.isDeadEnd
-        ? "Goes nowhere"
-        : null;
+  const issueLabel =
+    data.isOrphan && data.isDeadEnd
+      ? "Not linked · goes nowhere"
+      : data.isOrphan
+        ? "Not linked from anywhere"
+        : data.isDeadEnd
+          ? "Goes nowhere"
+          : null;
 
   return (
     <div
