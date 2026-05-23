@@ -21,6 +21,7 @@ import TermsPage from "./pages/terms";
 import PrivacyPage from "./pages/privacy";
 import HelpPage from "./pages/help";
 import AdminPage from "./pages/admin";
+import TrashPage from "./pages/trash";
 import BillingPage from "./pages/billing";
 import PublishedPage from "./pages/published";
 import IntegrationsPage from "./pages/integrations";
@@ -367,6 +368,13 @@ function ClerkProviderWithRoutes() {
                       <AdminPage />
                     </AppLayout>
                   </AdminGuard>
+                </Protected>
+              </Route>
+              <Route path="/trash">
+                <Protected>
+                  <AppLayout>
+                    <TrashPage />
+                  </AppLayout>
                 </Protected>
               </Route>
               <Route path="/billing">

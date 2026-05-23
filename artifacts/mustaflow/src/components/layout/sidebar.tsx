@@ -18,6 +18,7 @@ import {
   PanelLeftClose,
   Zap,
   AlertTriangle,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser, useClerk } from "@clerk/react";
@@ -43,6 +44,7 @@ const SECONDARY_NAV_ITEMS = [
 ];
 
 const TERTIARY_NAV_ITEMS = [
+  { name: "Trash", href: "/trash", icon: Trash2 },
   { name: "Learn", href: "/learn", icon: GraduationCap },
   { name: "Help Center", href: "/help", icon: HelpCircle },
 ];

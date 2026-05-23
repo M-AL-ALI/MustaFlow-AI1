@@ -588,6 +588,42 @@ paths:
         "204":
           description: Deleted
 
+  /projects/trash:
+    get:
+      operationId: listTrashedProjects
+      tags: [projects]
+      summary: List soft-deleted projects for the current user (within 30-day recovery window)
+      responses:
+        "200":
+          description: List of trashed projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+
+  /projects/{id}/restore:
+    post:
+      operationId: restoreProject
+      tags: [projects]
+      summary: Restore a soft-deleted project (clears deletedAt)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found or recovery window expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/summary:
     get:
       operationId: getProjectsSummary

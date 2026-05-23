@@ -2378,6 +2378,153 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       return useMutation(getDeleteProjectMutationOptions(options));
     }
 
+export const getListTrashedProjectsUrl = () => {
+
+
+
+
+  return `/api/projects/trash`
+}
+
+/**
+ * @summary List soft-deleted projects for the current user (within 30-day recovery window)
+ */
+export const listTrashedProjects = async ( options?: RequestInit): Promise<Project[]> => {
+
+  return customFetch<Project[]>(getListTrashedProjectsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTrashedProjectsQueryKey = () => {
+    return [
+    `/api/projects/trash`
+    ] as const;
+    }
+
+
+export const getListTrashedProjectsQueryOptions = <TData = Awaited<ReturnType<typeof listTrashedProjects>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTrashedProjects>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTrashedProjectsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTrashedProjects>>> = ({ signal }) => listTrashedProjects({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTrashedProjects>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListTrashedProjectsQueryResult = NonNullable<Awaited<ReturnType<typeof listTrashedProjects>>>
+export type ListTrashedProjectsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List soft-deleted projects for the current user (within 30-day recovery window)
+ */
+
+export function useListTrashedProjects<TData = Awaited<ReturnType<typeof listTrashedProjects>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTrashedProjects>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListTrashedProjectsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getRestoreProjectUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/restore`
+}
+
+/**
+ * @summary Restore a soft-deleted project (clears deletedAt)
+ */
+export const restoreProject = async (id: number, options?: RequestInit): Promise<Project> => {
+
+  return customFetch<Project>(getRestoreProjectUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRestoreProjectMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof restoreProject>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['restoreProject'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof restoreProject>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  restoreProject(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RestoreProjectMutationResult = NonNullable<Awaited<ReturnType<typeof restoreProject>>>
+
+    export type RestoreProjectMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Restore a soft-deleted project (clears deletedAt)
+ */
+export const useRestoreProject = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof restoreProject>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getRestoreProjectMutationOptions(options));
+    }
+
 export const getGetProjectsSummaryUrl = () => {
 
 

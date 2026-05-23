@@ -144,7 +144,7 @@ The intended user journey is: Login → create project → build app → preview
 - **Publishing v1 (no CDN)**: The public URL `/api/p/:slug/` is served by the API server from DB-stored snapshot content. It is truly public (no auth). A real CDN/static-hosting push is Phase 5.
 - **Project hard-delete recovery**: Soft-deleted projects are invisible in the UI and cannot be self-served recovered. An admin SQL query is needed to restore them.
 - **Credits billing**: Credits are enforced in the builder but top-up/purchase flow is a future milestone (Stripe). Users who run out must be manually granted credits via the `grantCredits` helper or a direct SQL update.
-- **Admin dashboard**: The `/admin` page is a placeholder. Real admin RBAC (role column, server-side guard) is a future milestone.
+- **Admin dashboard**: Fully implemented. `user_roles` table (`user|admin|owner`), `requireAdmin` middleware on all `/api/admin/*` routes, frontend `AdminGuard` redirects non-admins. Bootstrap via `ADMIN_USER_IDS` env var (comma-separated). Grant/revoke/list/stats/launch-readiness/audit-log endpoints all live.
 
 ## Phase C — Server-Side Containers Per Project
 

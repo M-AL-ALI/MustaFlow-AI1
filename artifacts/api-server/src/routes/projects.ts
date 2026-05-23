@@ -1121,6 +1121,68 @@ export default function HomeScreen() {
   res.status(201).json(GetProjectResponse.parse(project));
 });
 
+// ── Trash / soft-delete recovery ──────────────────────────────────────────────
+// Soft-deleted projects (deletedAt IS NOT NULL) remain in the DB for a 30-day
+// recovery window. After 30 days they're still retained server-side (no purger
+// runs in v1) but the Trash UI hides them as "expired" so users don't expect
+// recovery.
+//
+// IMPORTANT: these routes are declared BEFORE "/projects/:id" so the literal
+// "/projects/trash" path is not shadowed by the parameterized route. Likewise
+// "/projects/:id/restore" must be declared before any conflicting handlers.
+const TRASH_RECOVERY_DAYS = 30;
+
+router.get("/projects/trash", async (req, res): Promise<void> => {
+  const userId = req.userId ?? "demo-user";
+  const rows = await db
+    .select()
+    .from(projectsTable)
+    .where(
+      and(
+        eq(projectsTable.ownerId, userId),
+        sql`${projectsTable.deletedAt} IS NOT NULL`,
+        sql`${projectsTable.deletedAt} > now() - interval '${sql.raw(String(TRASH_RECOVERY_DAYS))} days'`,
+      ),
+    )
+    .orderBy(desc(projectsTable.deletedAt));
+  const parsed = ListProjectsResponse.parse(rows);
+  res.json(parsed);
+});
+
+router.post("/projects/:id/restore", async (req, res): Promise<void> => {
+  const params = DeleteProjectParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  // Manual ownership check — requireProjectOwnership filters by activeProjects
+  // (deletedAt IS NULL) so it would 404 every trashed project.
+  const [project] = await db
+    .update(projectsTable)
+    .set({ deletedAt: null, updatedAt: sql`now()` })
+    .where(
+      and(
+        eq(projectsTable.id, params.data.id),
+        eq(projectsTable.ownerId, userId),
+        sql`${projectsTable.deletedAt} IS NOT NULL`,
+        sql`${projectsTable.deletedAt} > now() - interval '${sql.raw(String(TRASH_RECOVERY_DAYS))} days'`,
+      ),
+    )
+    .returning();
+  if (!project) {
+    res
+      .status(404)
+      .json({ error: "Project not found, not owned by you, or recovery window expired" });
+    return;
+  }
+  res.json(GetProjectResponse.parse(project));
+});
+
 router.get("/projects/:id", requireProjectOwnership, async (req, res): Promise<void> => {
   const params = GetProjectParams.safeParse(req.params);
   if (!params.success) {

@@ -762,6 +762,103 @@ export const DeleteProjectParams = zod.object({
 
 
 /**
+ * @summary List soft-deleted projects for the current user (within 30-day recovery window)
+ */
+export const listTrashedProjectsResponseHealthScoreMin = 0;
+export const listTrashedProjectsResponseHealthScoreMax = 100;
+
+
+
+export const ListTrashedProjectsResponseItem = zod.object({
+  "id": zod.number(),
+  "workspaceId": zod.number().nullish(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'mobile-cross', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "platform": zod.enum(['web', 'ios', 'android', 'cross']).optional(),
+  "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']),
+  "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
+  "lastTaskSummary": zod.string().nullish(),
+  "summary": zod.string().nullish(),
+  "publicSlug": zod.string().nullish(),
+  "siteTitle": zod.string().nullish(),
+  "metaDescription": zod.string().nullish(),
+  "themeColor": zod.string().nullish(),
+  "mobilePreviewUrl": zod.string().nullish(),
+  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
+  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
+  "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
+  "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
+  "healthScore": zod.number().min(listTrashedProjectsResponseHealthScoreMin).max(listTrashedProjectsResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
+  "stack": zod.enum(['react-vite', 'nextjs', 'node-api', 'python-flask', 'python-fastapi']).optional().describe('Technology stack chosen at project creation. Immutable — duplicate the project to change stack.'),
+  "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
+  "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
+  "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
+  "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
+  "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
+  "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const ListTrashedProjectsResponse = zod.array(ListTrashedProjectsResponseItem)
+
+
+/**
+ * @summary Restore a soft-deleted project (clears deletedAt)
+ */
+export const RestoreProjectParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const restoreProjectResponseHealthScoreMin = 0;
+export const restoreProjectResponseHealthScoreMax = 100;
+
+
+
+export const RestoreProjectResponse = zod.object({
+  "id": zod.number(),
+  "workspaceId": zod.number().nullish(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'mobile-cross', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
+  "platform": zod.enum(['web', 'ios', 'android', 'cross']).optional(),
+  "status": zod.enum(['draft', 'building', 'testing', 'published', 'failed']),
+  "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
+  "lastTaskSummary": zod.string().nullish(),
+  "summary": zod.string().nullish(),
+  "publicSlug": zod.string().nullish(),
+  "siteTitle": zod.string().nullish(),
+  "metaDescription": zod.string().nullish(),
+  "themeColor": zod.string().nullish(),
+  "mobilePreviewUrl": zod.string().nullish(),
+  "containerId": zod.string().nullish().describe('Fly.io Machine ID for this project\'s dev container. Null = not provisioned.'),
+  "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']).optional().describe('Current dev container lifecycle state.'),
+  "containerUrl": zod.string().nullish().describe('Proxy URL to reach the container\'s dev server.'),
+  "prodContainerId": zod.string().nullish().describe('Fly.io Machine ID for the live production container. Null = not deployed.'),
+  "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
+  "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
+  "healthScore": zod.number().min(restoreProjectResponseHealthScoreMin).max(restoreProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
+  "stack": zod.enum(['react-vite', 'nextjs', 'node-api', 'python-flask', 'python-fastapi']).optional().describe('Technology stack chosen at project creation. Immutable — duplicate the project to change stack.'),
+  "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
+  "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
+  "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
+  "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
+  "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
+  "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Dashboard aggregate counts
  */
 export const getProjectsSummaryResponseRecentItemHealthScoreMin = 0;
