@@ -29,6 +29,11 @@ import {
   PackageOpen,
   ServerCrash,
   Wifi,
+  ArrowLeft,
+  ArrowRight,
+  Home,
+  Camera,
+  ListTree,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -269,7 +274,107 @@ export function PreviewTab({
 
   const hasFiles = (files?.length ?? 0) > 0;
   const isLoading = filesLoading && files === undefined;
-  const previewSrc = `/api/projects/${project.id}/preview/?t=${iframeKey}`;
+
+  // ── In-preview navigation: path stack, editable URL, routes dropdown ──
+  // Iframe is sandboxed without same-origin, so we cannot read the iframe's
+  // own location changes. The URL bar reflects explicit navigations made
+  // from this toolbar (typing a path, clicking back/forward, picking a route).
+  const [currentPath, setCurrentPath] = useState<string>("/");
+  const [pathHistory, setPathHistory] = useState<string[]>(["/"]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const [urlInput, setUrlInput] = useState<string>("/");
+  const [routesOpen, setRoutesOpen] = useState(false);
+
+  const navigateTo = useCallback((rawPath: string) => {
+    const normalized = (() => {
+      let p = rawPath.trim();
+      if (!p) p = "/";
+      if (!p.startsWith("/")) p = "/" + p;
+      return p;
+    })();
+    setCurrentPath(normalized);
+    setUrlInput(normalized);
+    setPathHistory((prev) => {
+      const trimmed = prev.slice(0, historyIndex + 1);
+      if (trimmed[trimmed.length - 1] === normalized) return trimmed;
+      return [...trimmed, normalized];
+    });
+    setHistoryIndex((prev) => {
+      const trimmedLen = pathHistory.slice(0, prev + 1).length;
+      const lastSame = pathHistory.slice(0, prev + 1)[trimmedLen - 1] === normalized;
+      return lastSame ? prev : prev + 1;
+    });
+    setIframeKey((k) => k + 1);
+    setRoutesOpen(false);
+  }, [historyIndex, pathHistory]);
+
+  const goBack = useCallback(() => {
+    setHistoryIndex((idx) => {
+      const next = Math.max(0, idx - 1);
+      const path = pathHistory[next] ?? "/";
+      setCurrentPath(path);
+      setUrlInput(path);
+      setIframeKey((k) => k + 1);
+      return next;
+    });
+  }, [pathHistory]);
+
+  const goForward = useCallback(() => {
+    setHistoryIndex((idx) => {
+      const next = Math.min(pathHistory.length - 1, idx + 1);
+      const path = pathHistory[next] ?? "/";
+      setCurrentPath(path);
+      setUrlInput(path);
+      setIframeKey((k) => k + 1);
+      return next;
+    });
+  }, [pathHistory]);
+
+  const goHome = useCallback(() => {
+    navigateTo("/");
+  }, [navigateTo]);
+
+  const canGoBack = historyIndex > 0;
+  const canGoForward = historyIndex < pathHistory.length - 1;
+
+  // Routes — derived from project files.
+  //   • Top-level *.html → web routes (`/`, `/about.html`, …)
+  //   • app/**/*.tsx (excluding _layout.tsx) → informational entries (Expo Router structure)
+  const routes = (() => {
+    const all = files ?? [];
+    const webRoutes = all
+      .filter((f) => /^[^/]+\.html$/.test(f.path))
+      .map((f) => ({
+        label: f.path === "index.html" ? "/" : `/${f.path}`,
+        path: f.path === "index.html" ? "/" : `/${f.path}`,
+        kind: "web" as const,
+      }));
+    const expoRoutes = all
+      .filter((f) => f.path.startsWith("app/") && /\.(tsx|jsx)$/.test(f.path))
+      .filter((f) => !/(^|\/)_layout\.(tsx|jsx)$/.test(f.path))
+      .map((f) => {
+        // app/index.tsx → /, app/(tabs)/home.tsx → /home, app/foo/[id].tsx → /foo/[id]
+        let r = f.path.replace(/^app\//, "").replace(/\.(tsx|jsx)$/, "");
+        r = r.replace(/\([^)]+\)\//g, ""); // strip route groups
+        r = r === "index" ? "/" : "/" + r.replace(/\/index$/, "");
+        return { label: r, path: r, kind: "expo" as const, fileId: f.id };
+      });
+    // Dedupe by path
+    const seen = new Set<string>();
+    return [...webRoutes, ...expoRoutes].filter((r) => {
+      if (seen.has(r.path)) return false;
+      seen.add(r.path);
+      return true;
+    });
+  })();
+
+  // Compose the iframe src from currentPath + cache-buster
+  const previewSrc = (() => {
+    const path = currentPath === "/" ? "/" : currentPath;
+    const sep = path.includes("?") ? "&" : "?";
+    return `/api/projects/${project.id}/preview${path}${sep}t=${iframeKey}`;
+  })();
+
 
   // After a build completes for a react-vite project, resync the WC with fresh files.
   // We detect build completion via project.status transitioning away from "building".
@@ -405,6 +510,31 @@ export function PreviewTab({
   const errorCount = consoleEntries.filter((e) => e.level === "error").length;
   const warnCount = consoleEntries.filter((e) => e.level === "warn").length;
 
+  // Snapshot → AI: drop a structured note into the chat composer for the next AI turn.
+  const snapshotToAi = useCallback(() => {
+    const target = onFixPrompt ?? onAutoSendPrompt;
+    if (!target) return;
+    const consoleSummary =
+      errorCount > 0
+        ? ` There ${errorCount === 1 ? "is" : "are"} ${errorCount} console error${errorCount === 1 ? "" : "s"}.`
+        : warnCount > 0
+          ? ` There ${warnCount === 1 ? "is" : "are"} ${warnCount} console warning${warnCount === 1 ? "" : "s"}.`
+          : "";
+    const deviceSummary = `${DEVICE_LABELS[device]}${isMobile ? ` (${platform === "ios" ? "iOS" : "Android"} frame)` : ""}`;
+    target(
+      `Look at the current preview state and help me improve it.\n\n- Path: ${currentPath}\n- Device: ${deviceSummary}${consoleSummary}\n\nPlease describe what you'd change next or fix specific issues.`,
+    );
+  }, [
+    onFixPrompt,
+    onAutoSendPrompt,
+    errorCount,
+    warnCount,
+    device,
+    isMobile,
+    platform,
+    currentPath,
+  ]);
+
   // Shared iframe renderer.
   // For react-vite projects with a live WebContainer dev server, the iframe points
   // at the WC-provided URL (no sandbox needed — WC handles its own isolation).
@@ -537,6 +667,152 @@ export function PreviewTab({
             ))}
           </div>
         )}
+
+        {/* ── Cluster divider ── */}
+        {hasFiles && <div className="h-5 w-px bg-border shrink-0" />}
+
+        {/* ── Navigation cluster: Back / Forward / Refresh / Home / URL bar / Routes ── */}
+        {hasFiles && (
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={goBack}
+              disabled={!canGoBack}
+              title="Back"
+              aria-label="Back"
+              className={cn(
+                "h-7 w-7 inline-flex items-center justify-center rounded-md transition-colors",
+                canGoBack
+                  ? "text-foreground hover:bg-muted"
+                  : "text-muted-foreground/40 cursor-not-allowed",
+              )}
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={goForward}
+              disabled={!canGoForward}
+              title="Forward"
+              aria-label="Forward"
+              className={cn(
+                "h-7 w-7 inline-flex items-center justify-center rounded-md transition-colors",
+                canGoForward
+                  ? "text-foreground hover:bg-muted"
+                  : "text-muted-foreground/40 cursor-not-allowed",
+              )}
+            >
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={refresh}
+              title="Refresh preview"
+              aria-label="Refresh"
+              className="h-7 w-7 inline-flex items-center justify-center rounded-md text-foreground hover:bg-muted transition-colors"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={goHome}
+              title="Home (/)"
+              aria-label="Home"
+              className="h-7 w-7 inline-flex items-center justify-center rounded-md text-foreground hover:bg-muted transition-colors"
+            >
+              <Home className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Editable URL bar */}
+        {hasFiles && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              navigateTo(urlInput);
+            }}
+            className="flex-1 min-w-[140px] max-w-md shrink"
+          >
+            <div className="flex items-center gap-1.5 px-2 py-1 bg-muted border border-border rounded-md focus-within:border-primary/40 focus-within:bg-background transition-colors">
+              <Globe className="h-3 w-3 text-muted-foreground shrink-0" />
+              <input
+                type="text"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                onFocus={(e) => e.currentTarget.select()}
+                spellCheck={false}
+                autoComplete="off"
+                placeholder="/"
+                className="flex-1 min-w-0 bg-transparent border-0 outline-none text-[11px] font-mono text-foreground placeholder:text-muted-foreground/50"
+                aria-label="Preview path"
+              />
+            </div>
+          </form>
+        )}
+
+        {/* Routes dropdown */}
+        {hasFiles && routes.length > 0 && (
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setRoutesOpen((o) => !o)}
+              title={`Routes (${routes.length})`}
+              className={cn(
+                "flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border transition-colors",
+                routesOpen
+                  ? "bg-primary/15 text-primary border-primary/30"
+                  : "bg-muted text-muted-foreground border-border hover:text-foreground",
+              )}
+            >
+              <ListTree className="h-3 w-3" />
+              <span className="hidden sm:inline">Routes</span>
+              <span className="text-[9px] font-bold opacity-60">{routes.length}</span>
+              <ChevronDown className="h-2.5 w-2.5 opacity-60" />
+            </button>
+            {routesOpen && (
+              <div className="absolute top-full left-0 mt-2 z-50 w-64 max-h-72 overflow-y-auto bg-popover border border-border rounded-xl shadow-2xl p-1">
+                {routes.map((r) => (
+                  <button
+                    key={`${r.kind}:${r.path}`}
+                    onClick={() => {
+                      if (r.kind === "web") {
+                        navigateTo(r.path);
+                      } else {
+                        setRoutesOpen(false);
+                        if ("fileId" in r && r.fileId && onOpenFileInEditor) {
+                          onOpenFileInEditor(r.fileId);
+                        }
+                      }
+                    }}
+                    className={cn(
+                      "w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px] hover:bg-muted transition-colors",
+                      r.kind === "web" && r.path === currentPath
+                        ? "bg-primary/10 text-primary"
+                        : "text-foreground",
+                    )}
+                    title={
+                      r.kind === "web" ? `Navigate to ${r.path}` : `Open source file for ${r.path}`
+                    }
+                  >
+                    {r.kind === "web" ? (
+                      <Globe className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <Smartphone className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="font-mono truncate flex-1">{r.label}</span>
+                    {r.kind === "expo" && (
+                      <span className="text-[9px] px-1 rounded bg-muted text-muted-foreground shrink-0">
+                        source
+                      </span>
+                    )}
+                  </button>
+                ))}
+                <div className="px-2 py-1 mt-1 border-t border-border text-[10px] text-muted-foreground">
+                  Web routes navigate the preview. Expo routes open the source file.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Cluster divider ── */}
+        {hasFiles && <div className="h-5 w-px bg-border shrink-0" />}
 
         {/* QR code panel — shown for web projects that are published */}
         {!isMobile && hasFiles && (
@@ -908,22 +1184,32 @@ export function PreviewTab({
           </button>
         )}
 
-        {/* Action buttons */}
+        {/* ── Share / Snapshot / Focus cluster ── */}
         <div className="flex items-center gap-1 shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={refresh}
-            title="Refresh preview"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" asChild title="Open in new tab">
-            <a href={previewSrc} target="_blank" rel="noreferrer">
-              <ExternalLink className="h-3.5 w-3.5" />
-            </a>
-          </Button>
+          {hasFiles && (onFixPrompt || onAutoSendPrompt) && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={snapshotToAi}
+              title="Snapshot to AI — drop current path + console state into the chat composer"
+            >
+              <Camera className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {hasFiles && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              asChild
+              title="Open preview in new tab"
+            >
+              <a href={previewSrc} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </Button>
+          )}
           {onToggleFocusMode && (
             <Button
               variant="ghost"
