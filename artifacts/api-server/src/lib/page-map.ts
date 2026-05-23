@@ -94,6 +94,145 @@ Rules:
 - Only include nodes for actual pages (not CSS/JS/image files).
 - If you detect no navigation between pages, return an empty edges array.`;
 
+// ---------------------------------------------------------------------------
+// Static (deterministic) link extraction.
+//
+// The AI pass is fuzzy and only sees the first 3000 chars of each file. This
+// helper scans the FULL text of every HTML/JS file with simple regexes to
+// recover navigation links the model might have missed:
+//   - <a href="...">
+//   - <form action="...">
+//   - window.location[.href|.assign|.replace](...)
+//   - location.href = "..."
+//   - history.pushState(..., "...")
+//
+// Returns edges keyed to existing AI node IDs (by filePath). Same-pair edges
+// are deduped against the AI edges in the caller. The static edges are still
+// marked aiGenerated=true so user-drawn (manual) edges are preserved during
+// merge — the distinction matters only for user-vs-machine ownership, not
+// for which extractor produced them.
+// ---------------------------------------------------------------------------
+// Normalize a path: strip leading "./" or "/", collapse "..": resolve against
+// the source directory so "../about.html" from "blog/post.html" → "about.html".
+function normalizePath(p: string): string {
+  const parts = p.replace(/^\/+/, "").split("/");
+  const out: string[] = [];
+  for (const seg of parts) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      out.pop();
+    } else {
+      out.push(seg);
+    }
+  }
+  return out.join("/");
+}
+
+function extractStaticEdges(
+  files: BuilderFile[],
+  nodes: PageMapNode[],
+): PageMapEdge[] {
+  // Index of normalized full path → node id, plus a basename → node id index
+  // used only as a fallback when the resolved relative path doesn't match.
+  // Basename fallback skips collisions (multiple files with the same name in
+  // different dirs) to avoid wrong attributions.
+  const fullPathToNodeId = new Map<string, string>();
+  const basenameCounts = new Map<string, number>();
+  const basenameToNodeId = new Map<string, string>();
+  for (const n of nodes) {
+    if (!n.filePath) continue;
+    const normalized = normalizePath(n.filePath);
+    fullPathToNodeId.set(normalized, n.id);
+    const basename = normalized.split("/").pop() ?? "";
+    if (basename) {
+      basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
+      basenameToNodeId.set(basename, n.id);
+    }
+  }
+  // Drop ambiguous basenames so we don't misroute.
+  for (const [name, count] of basenameCounts) {
+    if (count > 1) basenameToNodeId.delete(name);
+  }
+
+  const resolveTarget = (raw: string, sourceDir: string): string | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    // Skip anchors, schemes, absolute / protocol-relative URLs.
+    if (
+      trimmed.startsWith("#") ||
+      trimmed.startsWith("mailto:") ||
+      trimmed.startsWith("tel:") ||
+      trimmed.startsWith("javascript:") ||
+      /^https?:\/\//i.test(trimmed) ||
+      /^\/\//.test(trimmed)
+    ) {
+      return null;
+    }
+    // Strip query/hash before resolution.
+    const cleaned = trimmed.split(/[?#]/)[0];
+    if (!cleaned) return null;
+    // Resolve relative paths against the source file's directory.
+    const resolved = cleaned.startsWith("/")
+      ? normalizePath(cleaned)
+      : normalizePath(sourceDir ? `${sourceDir}/${cleaned}` : cleaned);
+    if (fullPathToNodeId.has(resolved)) return fullPathToNodeId.get(resolved)!;
+    // Fallback: try basename (only when unambiguous).
+    const basename = resolved.split("/").pop() ?? "";
+    return basenameToNodeId.get(basename) ?? null;
+  };
+
+  const seen = new Set<string>(); // dedupe pairs within static pass
+  const out: PageMapEdge[] = [];
+
+  // Patterns are intentionally tolerant: single or double quotes, optional
+  // whitespace, common forms only. We're augmenting, not replacing, the AI pass.
+  const HREF_RE = /href\s*=\s*["']([^"'#][^"']*)["']/gi;
+  const ACTION_RE = /action\s*=\s*["']([^"'#][^"']*)["']/gi;
+  const LOC_RE =
+    /(?:window\.)?location(?:\.href|\.assign|\.replace)?\s*(?:=|\(\s*)\s*["']([^"']+)["']/gi;
+  const PUSHSTATE_RE = /history\.pushState\s*\([^,]*,[^,]*,\s*["']([^"']+)["']/gi;
+
+  for (const f of files) {
+    const sourceFilePath = normalizePath(f.path);
+    const sourceNodeId = fullPathToNodeId.get(sourceFilePath);
+    // We only emit edges whose source is itself a mapped page. Inline <script>
+    // blocks inside HTML pages are picked up here automatically because we
+    // scan the full file text. External .js files are not scanned: their
+    // navigation can't be attributed to a single source page reliably.
+    if (!sourceNodeId) continue;
+    const sourceDir = sourceFilePath.includes("/")
+      ? sourceFilePath.slice(0, sourceFilePath.lastIndexOf("/"))
+      : "";
+
+    const text = f.content;
+    const candidates: string[] = [];
+    for (const re of [HREF_RE, ACTION_RE, LOC_RE, PUSHSTATE_RE]) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) {
+        if (m[1]) candidates.push(m[1]);
+      }
+    }
+
+    for (const raw of candidates) {
+      const targetId = resolveTarget(raw, sourceDir);
+      if (!targetId || targetId === sourceNodeId) continue;
+      const key = `${sourceNodeId}->${targetId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        id: `edge-static-${sourceNodeId}-${targetId}`,
+        source: sourceNodeId,
+        target: targetId,
+        connectionType: "nav",
+        aiGenerated: true,
+      });
+    }
+  }
+
+  return out;
+}
+
 function buildAutoLayout(nodes: PageMapNode[]): PageMapNode[] {
   const COLS = 3;
   const X_STEP = 280;
@@ -306,7 +445,29 @@ export async function extractPageMapForFiles(
         aiGenerated: true,
       }));
 
-    const merged = mergeWithExisting(aiNodes, aiEdges, existingMap ?? EMPTY_PLATFORM);
+    // Augment AI edges with a deterministic regex scan of the full HTML
+    // contents (inline <script> blocks included). This recovers links the
+    // model missed due to its 3000-char per-file truncation. External .js
+    // files are not scanned: their navigation can't be reliably attributed
+    // to a single source page.
+    const scanFiles = files.filter(
+      (f) => f.mimeType === "text/html" || f.path.endsWith(".html"),
+    );
+    const staticEdges = extractStaticEdges(scanFiles, aiNodes);
+
+    // Dedupe by source+target pair; AI edges win (they carry semantic
+    // connectionType info like auth-gate/redirect that regex can't infer).
+    const aiPairs = new Set(aiEdges.map((e) => `${e.source}->${e.target}`));
+    const mergedAiAndStatic = [
+      ...aiEdges,
+      ...staticEdges.filter((e) => !aiPairs.has(`${e.source}->${e.target}`)),
+    ];
+
+    const merged = mergeWithExisting(
+      aiNodes,
+      mergedAiAndStatic,
+      existingMap ?? EMPTY_PLATFORM,
+    );
     return merged;
   } catch (err) {
     logger.error({ err }, "extractPageMap AI call failed");
