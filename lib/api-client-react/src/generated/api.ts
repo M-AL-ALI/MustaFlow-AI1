@@ -100,6 +100,8 @@ import type {
   KnowledgeInput,
   KnowledgeUpdate,
   ListAdminRoles200,
+  ListBackgroundJobsParams,
+  ListBackgroundJobsResponse,
   ListBillingTransactions200,
   ListCreditTransactions200,
   ListCveFindingsParams,
@@ -6627,6 +6629,90 @@ export const useUpdateMyPreferences = <TError = ErrorType<void>,
       > => {
       return useMutation(getUpdateMyPreferencesMutationOptions(options));
     }
+
+export const getListBackgroundJobsUrl = (params?: ListBackgroundJobsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/background-jobs?${stringifiedParams}` : `/api/background-jobs`
+}
+
+/**
+ * @summary List the signed-in user's recent background tasks across all projects (Task
+ */
+export const listBackgroundJobs = async (params?: ListBackgroundJobsParams, options?: RequestInit): Promise<ListBackgroundJobsResponse> => {
+
+  return customFetch<ListBackgroundJobsResponse>(getListBackgroundJobsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListBackgroundJobsQueryKey = (params?: ListBackgroundJobsParams,) => {
+    return [
+    `/api/background-jobs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListBackgroundJobsQueryOptions = <TData = Awaited<ReturnType<typeof listBackgroundJobs>>, TError = ErrorType<unknown>>(params?: ListBackgroundJobsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listBackgroundJobs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListBackgroundJobsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listBackgroundJobs>>> = ({ signal }) => listBackgroundJobs(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listBackgroundJobs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListBackgroundJobsQueryResult = NonNullable<Awaited<ReturnType<typeof listBackgroundJobs>>>
+export type ListBackgroundJobsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the signed-in user's recent background tasks across all projects (Task
+ */
+
+export function useListBackgroundJobs<TData = Awaited<ReturnType<typeof listBackgroundJobs>>, TError = ErrorType<unknown>>(
+ params?: ListBackgroundJobsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listBackgroundJobs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListBackgroundJobsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetUserCreditsUrl = () => {
 

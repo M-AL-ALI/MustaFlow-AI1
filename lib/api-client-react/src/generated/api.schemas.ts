@@ -689,6 +689,18 @@ export const AgentTaskUserFeedback = {
   negative: 'negative',
 } as const;
 
+/**
+ * Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.
+ * @nullable
+ */
+export type AgentTaskRunMode = typeof AgentTaskRunMode[keyof typeof AgentTaskRunMode] | null;
+
+
+export const AgentTaskRunMode = {
+  foreground: 'foreground',
+  background: 'background',
+} as const;
+
 export interface AgentTask {
   id: number;
   projectId: number;
@@ -722,6 +734,74 @@ export interface AgentTask {
   completedAt?: string | null;
   /** @nullable */
   elapsedSeconds?: number | null;
+  /**
+     * Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.
+     * @nullable
+     */
+  runMode?: AgentTaskRunMode;
+  /**
+     * Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.
+     * @nullable
+     */
+  wallClockCapMs?: number | null;
+  /**
+     * Credits deducted upfront for background tasks. Refunded on cancel/discard; cleared on apply/complete.
+     * @nullable
+     */
+  creditsReserved?: number | null;
+  /** @nullable */
+  pausedAt?: string | null;
+  /**
+     * Set when a Task Agent staging snapshot is applied.
+     * @nullable
+     */
+  appliedAt?: string | null;
+  /** @nullable */
+  discardedAt?: string | null;
+}
+
+export type BackgroundJobStatus = typeof BackgroundJobStatus[keyof typeof BackgroundJobStatus];
+
+
+export const BackgroundJobStatus = {
+  queued: 'queued',
+  planning: 'planning',
+  building: 'building',
+  testing: 'testing',
+  needs_approval: 'needs_approval',
+  needs_review: 'needs_review',
+  completed: 'completed',
+  failed: 'failed',
+  canceled: 'canceled',
+  discarded: 'discarded',
+} as const;
+
+export type BackgroundJobRunMode = typeof BackgroundJobRunMode[keyof typeof BackgroundJobRunMode];
+
+
+export const BackgroundJobRunMode = {
+  foreground: 'foreground',
+  background: 'background',
+} as const;
+
+export interface BackgroundJob {
+  id: number;
+  projectId: number;
+  projectName: string;
+  title?: string;
+  status: BackgroundJobStatus;
+  runMode: BackgroundJobRunMode;
+  /** @nullable */
+  creditsReserved?: number | null;
+  createdAt: string;
+  /** @nullable */
+  startedAt?: string | null;
+  /** @nullable */
+  completedAt?: string | null;
+}
+
+export interface ListBackgroundJobsResponse {
+  jobs: BackgroundJob[];
 }
 
 export type AgentTaskInputKind = typeof AgentTaskInputKind[keyof typeof AgentTaskInputKind];
@@ -2517,6 +2597,26 @@ export type ListDeployments200 = {
 export type SetProjectSubdomain400 = {
   error: string;
 };
+
+export type ListBackgroundJobsParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * active = queued|planning|building|needs_review; all = include completed/failed/canceled/discarded too.
+ */
+status?: ListBackgroundJobsStatus;
+};
+
+export type ListBackgroundJobsStatus = typeof ListBackgroundJobsStatus[keyof typeof ListBackgroundJobsStatus];
+
+
+export const ListBackgroundJobsStatus = {
+  active: 'active',
+  all: 'all',
+} as const;
 
 export type ListCreditTransactions200 = {
   transactions: CreditTransaction[];

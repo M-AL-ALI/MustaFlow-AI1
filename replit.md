@@ -238,6 +238,19 @@ The intended user journey is: Login → create project → build app → preview
 - **Migration**: `pnpm --filter @workspace/scripts run migrate-policy-audit` — creates `tool_audit` table + `projects.policy_strictness` column (uses `IF NOT EXISTS`; safe to re-run).
 - **Back-compat**: `isCommandAllowed` in `agent-loop.ts` is retained as a thin shim around `evaluateRunCommand` for any pre-existing callers/tests.
 
+## Phase D — Long-running background workflows (Task #509)
+
+- **Background mode toggle**: existing per-chat `runInBackground` flag now opts a build/refine job into the background pipeline rather than blocking the chat.
+- **Per-mode wall-clock cap**: `BACKGROUND_WALL_CLOCK_MS` in `jobs.ts` (lite 10m / eco 15m / power 25m / pro 30m). `backgroundWallClockFor(mode)` returns the cap; passed through `JobInput.wallClockCapMs` into `agent-loop.ts` via the new optional `wallClockMs` input (clamped to [60s, 30min]).
+- **Credit reservation**: background jobs deduct credits upfront at enqueue (in `messages.ts`) and stamp `agent_tasks.credits_reserved`. The pre-flight check + post-success deduction in `runJob` and the apply-path deduction in `applyTaskAgentStaging` both skip when `creditsReserved` is set, so users never double-pay.
+- **Refund paths**: cancel (`routes/tasks.ts`), discard (`discardTaskAgentStaging`), and the boot scan all refund via `refundCredits()` (positive `manual_adjustment` entry, description prefixed "Refund:"). Refunds are best-effort, non-fatal.
+- **Apply / discard timestamps**: `agent_tasks.applied_at` / `discarded_at` stamped by the Task Agent staging gate so the UI can show the review-gate outcome alongside completion.
+- **Boot scan**: `failStuckBackgroundTasksOnBoot()` runs once at server startup (invoked from `index.ts`). Any background task still in `building`/`planning` from a previous process is marked `failed` with `"Interrupted by server restart. Please retry."`, its reserved credits are refunded, the event stream gets a final `failed` event, and the project queue is drained.
+- **Cross-project background list**: `GET /api/background-jobs?status=active|all&limit=N` (in `routes/background-jobs.ts`) returns the signed-in user's recent background tasks joined to their project name. Active = `queued|planning|building|needs_review`.
+- **Global panel**: `BackgroundJobsPanel` (in `components/background-jobs-panel.tsx`) is mounted in the sidebar under Platform → Security. Polls every 8s; expandable list links to each project workspace.
+- **DB columns added**: `agent_tasks.run_mode` (default `foreground`), `paused_at`, `applied_at`, `discarded_at`, `wall_clock_cap_ms`, `credits_reserved`, plus index on `(run_mode, status)`. Migration: `pnpm --filter @workspace/scripts run migrate-background-jobs` (idempotent — `IF NOT EXISTS`).
+- **OpenAPI additions**: `AgentTask` schema extended with `runMode/wallClockCapMs/creditsReserved/pausedAt/appliedAt/discardedAt`; new `BackgroundJob` + `ListBackgroundJobsResponse` schemas; new `GET /background-jobs` operation. Tie-breaker added in `lib/api-zod/src/index.ts` for `ListBackgroundJobsResponse` (same dual-emit issue as `GetPublishReadinessParams`).
+
 ## Gotchas
 
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. It also runs `typecheck:libs`, which will fail if generated types break consumers — fix consumers, don't suppress. The `codegen-drift` validation check (`pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated`) catches any drift between the spec and committed generated files — run it (or let CI run it) after every spec edit.

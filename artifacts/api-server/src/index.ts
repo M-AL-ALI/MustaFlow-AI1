@@ -7,6 +7,7 @@ import { createTerminalServer } from "./lib/terminal";
 import { ensureFlyApp } from "./lib/container";
 import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
 import { startCveScheduler } from "./lib/cve-scheduler";
+import { failStuckBackgroundTasksOnBoot } from "./lib/jobs";
 
 const execFileAsync = promisify(execFile);
 
@@ -40,6 +41,10 @@ void ensureFlyApp();
 
 // Start the daily CVE audit scheduler (fires 30 s after startup, then every 24 h)
 startCveScheduler();
+
+// Task #509: Mark any background tasks that were mid-flight when the process died
+// as failed and refund their reserved credits. Best-effort — non-fatal on errors.
+void failStuckBackgroundTasksOnBoot();
 
 // Create an HTTP server so we can attach WebSocket upgrade handlers alongside Express.
 const server = createServer(app);

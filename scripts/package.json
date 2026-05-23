@@ -23,6 +23,7 @@
     "migrate-architect-review": "tsx ./src/migrate-architect-review.ts",
     "migrate-prod-logs": "tsx ./src/migrate-prod-logs.ts",
     "migrate-policy-audit": "tsx ./src/migrate-policy-audit.ts",
+    "migrate-background-jobs": "tsx ./src/migrate-background-jobs.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

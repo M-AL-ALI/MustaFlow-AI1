@@ -8,6 +8,7 @@
 import type { AgentTaskAgentIdentity } from './agentTaskAgentIdentity';
 import type { AgentTaskKind } from './agentTaskKind';
 import type { AgentTaskReport } from './agentTaskReport';
+import type { AgentTaskRunMode } from './agentTaskRunMode';
 import type { AgentTaskStagingSnapshot } from './agentTaskStagingSnapshot';
 import type { AgentTaskStatus } from './agentTaskStatus';
 import type { AgentTaskUserFeedback } from './agentTaskUserFeedback';
@@ -45,4 +46,28 @@ export interface AgentTask {
   completedAt?: Date | null;
   /** @nullable */
   elapsedSeconds?: number | null;
+  /**
+     * Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.
+     * @nullable
+     */
+  runMode?: AgentTaskRunMode;
+  /**
+     * Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.
+     * @nullable
+     */
+  wallClockCapMs?: number | null;
+  /**
+     * Credits deducted upfront for background tasks. Refunded on cancel/discard; cleared on apply/complete.
+     * @nullable
+     */
+  creditsReserved?: number | null;
+  /** @nullable */
+  pausedAt?: Date | null;
+  /**
+     * Set when a Task Agent staging snapshot is applied.
+     * @nullable
+     */
+  appliedAt?: Date | null;
+  /** @nullable */
+  discardedAt?: Date | null;
 }

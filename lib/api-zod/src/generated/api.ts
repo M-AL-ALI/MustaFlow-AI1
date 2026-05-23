@@ -1082,7 +1082,13 @@ export const ListTasksResponseItem = zod.object({
   "createdAt": zod.coerce.date(),
   "startedAt": zod.coerce.date().nullish(),
   "completedAt": zod.coerce.date().nullish(),
-  "elapsedSeconds": zod.number().nullish()
+  "elapsedSeconds": zod.number().nullish(),
+  "runMode": zod.union([zod.literal('foreground'),zod.literal('background'),zod.literal(null)]).nullish().describe('Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.'),
+  "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
+  "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
+  "pausedAt": zod.coerce.date().nullish(),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "discardedAt": zod.coerce.date().nullish()
 })
 export const ListTasksResponse = zod.array(ListTasksResponseItem)
 
@@ -1145,7 +1151,13 @@ export const CancelTaskResponse = zod.object({
   "createdAt": zod.coerce.date(),
   "startedAt": zod.coerce.date().nullish(),
   "completedAt": zod.coerce.date().nullish(),
-  "elapsedSeconds": zod.number().nullish()
+  "elapsedSeconds": zod.number().nullish(),
+  "runMode": zod.union([zod.literal('foreground'),zod.literal('background'),zod.literal(null)]).nullish().describe('Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.'),
+  "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
+  "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
+  "pausedAt": zod.coerce.date().nullish(),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "discardedAt": zod.coerce.date().nullish()
 })
 
 
@@ -1194,7 +1206,13 @@ export const UpdateTaskResponse = zod.object({
   "createdAt": zod.coerce.date(),
   "startedAt": zod.coerce.date().nullish(),
   "completedAt": zod.coerce.date().nullish(),
-  "elapsedSeconds": zod.number().nullish()
+  "elapsedSeconds": zod.number().nullish(),
+  "runMode": zod.union([zod.literal('foreground'),zod.literal('background'),zod.literal(null)]).nullish().describe('Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.'),
+  "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
+  "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
+  "pausedAt": zod.coerce.date().nullish(),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "discardedAt": zod.coerce.date().nullish()
 })
 
 
@@ -1254,7 +1272,13 @@ export const ApplyTaskStagingResponse = zod.object({
   "createdAt": zod.coerce.date(),
   "startedAt": zod.coerce.date().nullish(),
   "completedAt": zod.coerce.date().nullish(),
-  "elapsedSeconds": zod.number().nullish()
+  "elapsedSeconds": zod.number().nullish(),
+  "runMode": zod.union([zod.literal('foreground'),zod.literal('background'),zod.literal(null)]).nullish().describe('Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.'),
+  "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
+  "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
+  "pausedAt": zod.coerce.date().nullish(),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "discardedAt": zod.coerce.date().nullish()
 })
 
 
@@ -1299,7 +1323,13 @@ export const DiscardTaskStagingResponse = zod.object({
   "createdAt": zod.coerce.date(),
   "startedAt": zod.coerce.date().nullish(),
   "completedAt": zod.coerce.date().nullish(),
-  "elapsedSeconds": zod.number().nullish()
+  "elapsedSeconds": zod.number().nullish(),
+  "runMode": zod.union([zod.literal('foreground'),zod.literal('background'),zod.literal(null)]).nullish().describe('Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.'),
+  "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
+  "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
+  "pausedAt": zod.coerce.date().nullish(),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "discardedAt": zod.coerce.date().nullish()
 })
 
 
@@ -1365,7 +1395,13 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "createdAt": zod.coerce.date(),
   "startedAt": zod.coerce.date().nullish(),
   "completedAt": zod.coerce.date().nullish(),
-  "elapsedSeconds": zod.number().nullish()
+  "elapsedSeconds": zod.number().nullish(),
+  "runMode": zod.union([zod.literal('foreground'),zod.literal('background'),zod.literal(null)]).nullish().describe('Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.'),
+  "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
+  "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
+  "pausedAt": zod.coerce.date().nullish(),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "discardedAt": zod.coerce.date().nullish()
 })
 
 
@@ -2523,6 +2559,35 @@ export const UpdateMyPreferencesResponse = zod.object({
   "userId": zod.string(),
   "dismissedOnboarding": zod.boolean(),
   "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary List the signed-in user's recent background tasks across all projects (Task
+ */
+export const listBackgroundJobsQueryLimitDefault = 30;
+export const listBackgroundJobsQueryLimitMax = 100;
+
+export const listBackgroundJobsQueryStatusDefault = `active`;
+
+export const ListBackgroundJobsQueryParams = zod.object({
+  "limit": zod.coerce.number().min(1).max(listBackgroundJobsQueryLimitMax).default(listBackgroundJobsQueryLimitDefault),
+  "status": zod.enum(['active', 'all']).default(listBackgroundJobsQueryStatusDefault).describe('active = queued|planning|building|needs_review; all = include completed\/failed\/canceled\/discarded too.')
+})
+
+export const ListBackgroundJobsResponse = zod.object({
+  "jobs": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "projectName": zod.string(),
+  "title": zod.string().optional(),
+  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
+  "runMode": zod.enum(['foreground', 'background']),
+  "creditsReserved": zod.number().nullish(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish()
+}))
 })
 
 

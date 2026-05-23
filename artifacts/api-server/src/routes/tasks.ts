@@ -23,6 +23,8 @@ import {
   runAppTestingJob,
   cancelActiveJob,
 } from "../lib/jobs";
+import { refundCredits } from "./credits";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -151,17 +153,57 @@ router.post(
     cancelActiveJob(params.data.taskId);
 
     // Attempt a conditional update: cancel if the task is queued, building, or planning.
-    const [task] = await db
-      .update(agentTasksTable)
-      .set({ status: "canceled", completedAt: sql`now()` })
-      .where(
-        and(
-          eq(agentTasksTable.id, params.data.taskId),
-          eq(agentTasksTable.projectId, params.data.id),
-          inArray(agentTasksTable.status, ["queued", "building", "planning"]),
-        ),
-      )
-      .returning();
+    // IMPORTANT: capture the pre-update reserved-credits amount in the SAME UPDATE
+    // via `returning()` (the returned row reflects values BEFORE we set them in this
+    // statement is FALSE — Postgres returns the post-update row). So we must read it
+    // first under a transaction. Use a transaction with SELECT + UPDATE to avoid the
+    // ordering bug where setting creditsReserved=null erases the refund amount.
+    const cancelResult = await db.transaction(async (tx) => {
+      const [pre] = await tx
+        .select({
+          id: agentTasksTable.id,
+          status: agentTasksTable.status,
+          creditsReserved: agentTasksTable.creditsReserved,
+        })
+        .from(agentTasksTable)
+        .where(
+          and(
+            eq(agentTasksTable.id, params.data.taskId),
+            eq(agentTasksTable.projectId, params.data.id),
+          ),
+        )
+        .limit(1);
+
+      if (!pre) return { task: null, reserved: 0 };
+      if (!["queued", "building", "planning"].includes(pre.status)) {
+        return { task: pre, reserved: 0, alreadyTerminal: true };
+      }
+
+      const [updated] = await tx
+        .update(agentTasksTable)
+        .set({ status: "canceled", completedAt: sql`now()`, creditsReserved: null })
+        .where(eq(agentTasksTable.id, pre.id))
+        .returning();
+
+      return { task: updated ?? pre, reserved: pre.creditsReserved ?? 0 };
+    });
+
+    const task = cancelResult.task && !cancelResult.alreadyTerminal ? cancelResult.task : null;
+
+    // Refund the captured pre-update amount (Task #509 — background jobs).
+    if (task && cancelResult.reserved > 0) {
+      const [proj] = await db
+        .select({ ownerId: projectsTable.ownerId })
+        .from(projectsTable)
+        .where(eq(projectsTable.id, params.data.id))
+        .limit(1);
+      if (proj?.ownerId) {
+        void refundCredits(proj.ownerId, cancelResult.reserved, {
+          projectId: params.data.id,
+          description: `Background task #${task.id} canceled`,
+        }).catch((err) => logger.warn({ err, taskId: task.id }, "Credit refund failed"));
+      }
+    }
 
     if (!task) {
       // Either the task doesn't exist or it's already in a terminal state.

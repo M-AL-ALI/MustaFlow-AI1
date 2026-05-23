@@ -91,6 +91,37 @@ export async function deductCredits(
   return { newBalance };
 }
 
+// Refund credits — used when a background job is canceled, discarded, or fails
+// after its credits were reserved upfront at enqueue time.
+export async function refundCredits(
+  userId: string,
+  amount: number,
+  opts: { projectId?: number; description: string },
+): Promise<number> {
+  if (amount <= 0) {
+    const c = await getOrCreateCredits(userId);
+    return c.balance;
+  }
+  const credits = await getOrCreateCredits(userId);
+  const newBalance = credits.balance + amount;
+
+  await db
+    .update(userCreditsTable)
+    .set({ balance: newBalance, updatedAt: sql`now()` })
+    .where(eq(userCreditsTable.userId, userId));
+
+  await db.insert(creditTransactionsTable).values({
+    userId,
+    projectId: opts.projectId ?? null,
+    type: "manual_adjustment",
+    amount,
+    description: `Refund: ${opts.description}`,
+    balanceAfter: newBalance,
+  });
+
+  return newBalance;
+}
+
 // Internal helper to grant credits (starter grant, admin adjustment, etc.)
 export async function grantCredits(
   userId: string,

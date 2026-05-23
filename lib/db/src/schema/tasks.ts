@@ -224,6 +224,20 @@ export const agentTasksTable = pgTable(
     userFeedback: text("user_feedback"),
     queueBatchId: text("queue_batch_id"),
     queueIndex: integer("queue_index"),
+    // Task #509 — long-running background workflows.
+    // "foreground" = blocks the chat HTTP request until it returns.
+    // "background" = enqueued via setImmediate; the chat unblocks immediately;
+    // the user reviews/applies/discards the result from a global panel.
+    runMode: text("run_mode").notNull().default("foreground"),
+    // Per-mode wall-clock cap (ms). Overrides the default AGENTIC_BUILDER_WALL_CLOCK_MS
+    // for this specific job. Background jobs may run up to 30 min.
+    wallClockCapMs: integer("wall_clock_cap_ms"),
+    // Credits reserved at enqueue for a background job. Held until apply (finalises),
+    // discard/cancel (refund), or terminal failure (refund).
+    creditsReserved: integer("credits_reserved"),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    discardedAt: timestamp("discarded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),

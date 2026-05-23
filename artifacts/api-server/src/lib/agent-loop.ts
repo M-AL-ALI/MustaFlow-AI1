@@ -75,6 +75,12 @@ export interface AgentLoopInput {
   policyStrictness?: PolicyStrictness | null;
   /** Owning task id — used to tag audit rows. */
   taskId?: number | null;
+  /**
+   * Per-run wall-clock cap (ms). Overrides the global AGENTIC_BUILDER_WALL_CLOCK_MS
+   * default — used by background jobs which run longer than foreground ones.
+   * Clamped to [60_000, 30 * 60_000].
+   */
+  wallClockMs?: number;
   onEvent: AgentLoopEvent;
   signal: AbortSignal;
 }
@@ -616,6 +622,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let totalTokens = 0;
 
   const startedAt = Date.now();
+  const wallClockMs =
+    typeof input.wallClockMs === "number" && Number.isFinite(input.wallClockMs)
+      ? Math.min(30 * 60_000, Math.max(60_000, Math.floor(input.wallClockMs)))
+      : WALL_CLOCK_MS;
   let lastError = "";
   let consecutiveErrors = 0;
   let terminationReason: AgentLoopReport["terminationReason"] = "model-stopped";
@@ -651,7 +661,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       terminationReason = "aborted";
       break;
     }
-    if (Date.now() - startedAt > WALL_CLOCK_MS) {
+    if (Date.now() - startedAt > wallClockMs) {
       terminationReason = "wall-clock";
       break;
     }

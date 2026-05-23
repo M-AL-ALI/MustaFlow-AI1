@@ -1807,6 +1807,30 @@ paths:
         "401":
           description: Not authenticated
 
+  /background-jobs:
+    get:
+      operationId: listBackgroundJobs
+      tags: [tasks]
+      summary: List the signed-in user's recent background tasks across all projects (Task #509).
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [active, all]
+            default: active
+          description: "active = queued|planning|building|needs_review; all = include completed/failed/canceled/discarded too."
+      responses:
+        "200":
+          description: List of background jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListBackgroundJobsResponse"
+
   /credits:
     get:
       operationId: getUserCredits
@@ -3546,6 +3570,65 @@ components:
         startedAt: { type: ["string", "null"], format: date-time }
         completedAt: { type: ["string", "null"], format: date-time }
         elapsedSeconds: { type: ["integer", "null"] }
+        runMode:
+          type: ["string", "null"]
+          enum: [foreground, background, null]
+          description: "Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation."
+        wallClockCapMs:
+          type: ["integer", "null"]
+          description: "Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks."
+        creditsReserved:
+          type: ["integer", "null"]
+          description: "Credits deducted upfront for background tasks. Refunded on cancel/discard; cleared on apply/complete."
+        pausedAt:
+          type: ["string", "null"]
+          format: date-time
+        appliedAt:
+          type: ["string", "null"]
+          format: date-time
+          description: "Set when a Task Agent staging snapshot is applied."
+        discardedAt:
+          type: ["string", "null"]
+          format: date-time
+
+    BackgroundJob:
+      type: object
+      required: [id, projectId, projectName, status, createdAt, runMode]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        projectName: { type: string }
+        title: { type: string }
+        status:
+          type: string
+          enum:
+            [
+              queued,
+              planning,
+              building,
+              testing,
+              needs_approval,
+              needs_review,
+              completed,
+              failed,
+              canceled,
+              discarded,
+            ]
+        runMode:
+          type: string
+          enum: [foreground, background]
+        creditsReserved: { type: ["integer", "null"] }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: ["string", "null"], format: date-time }
+        completedAt: { type: ["string", "null"], format: date-time }
+
+    ListBackgroundJobsResponse:
+      type: object
+      required: [jobs]
+      properties:
+        jobs:
+          type: array
+          items: { $ref: "#/components/schemas/BackgroundJob" }
 
     AgentTaskInput:
       type: object

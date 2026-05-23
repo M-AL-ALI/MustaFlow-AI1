@@ -49,7 +49,7 @@ import { logger } from "./logger";
 import { writeKnowledge } from "./knowledge";
 import { generateEmbedding, cosineSimilarity } from "./embeddings";
 import type { DiffSummary } from "@workspace/db";
-import { getOrCreateCredits, deductCredits } from "../routes/credits";
+import { getOrCreateCredits, deductCredits, refundCredits } from "../routes/credits";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
 import { runAudit } from "./auditor";
@@ -75,12 +75,28 @@ import {
 } from "./architect";
 
 /** Credit cost per AI call, keyed by agentMode. */
-const CREDIT_COST: Record<string, number> = {
+export const CREDIT_COST: Record<string, number> = {
   lite: 1,
   eco: 2,
   power: 5,
   pro: 10,
 };
+
+/**
+ * Per-mode wall-clock cap for long-running background workflows (Task #509).
+ * Foreground jobs use the lower default in agent-loop.ts. Background jobs may
+ * run up to 30 minutes — these caps gate when the loop must give up.
+ */
+export const BACKGROUND_WALL_CLOCK_MS: Record<string, number> = {
+  lite: 10 * 60_000,
+  eco: 15 * 60_000,
+  power: 25 * 60_000,
+  pro: 30 * 60_000,
+};
+
+export function backgroundWallClockFor(mode: AgentMode | string): number {
+  return BACKGROUND_WALL_CLOCK_MS[mode] ?? 15 * 60_000;
+}
 
 /** OpenAI model per agent mode — kept in sync with builder.ts for analytics recording. */
 const MODEL_FOR_MODE: Record<AgentMode, string> = {
@@ -147,6 +163,10 @@ export interface JobInput {
   queueBatchId?: string | null;
   queueIndex?: number | null;
   queueTotalCount?: number | null;
+  /** "background" jobs run with extended wall-clock + skip post-success deduction. */
+  runMode?: "foreground" | "background";
+  /** Wall-clock cap (ms) to pass into the agent loop. */
+  wallClockCapMs?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -985,15 +1005,28 @@ async function drainNextProjectTask(projectId: number): Promise<void> {
 
   const drainedImageAttachments = await hydrateTaskAttachments(nextTask.attachments);
 
+  // Forward persisted execution context so the drained task runs identically
+  // to its original enqueue (Task #509): runMode, wallClockCapMs, agentIdentity.
   enqueueJob({
     taskId: nextTask.id,
     projectId,
     kind: hasFiles ? "refine" : "build",
     userPrompt: nextTask.prompt ?? "",
     agentMode: (project.agentMode as AgentMode) ?? "power",
+    agentIdentity: (nextTask.agentIdentity as AgentIdentity | undefined) ?? undefined,
     imageAttachments: drainedImageAttachments,
+    runMode: (nextTask.runMode as "foreground" | "background" | undefined) ?? undefined,
+    wallClockCapMs: nextTask.wallClockCapMs ?? undefined,
   });
-  logger.info({ projectId, nextTaskId: nextTask.id }, "Drained next project-level queued task");
+  logger.info(
+    {
+      projectId,
+      nextTaskId: nextTask.id,
+      runMode: nextTask.runMode,
+      agentIdentity: nextTask.agentIdentity,
+    },
+    "Drained next project-level queued task",
+  );
 }
 
 async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
@@ -1162,8 +1195,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
     }
 
     // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
+    // For background jobs (Task #509) the credits were already reserved at enqueue,
+    // so the pre-flight check + post-success deduction is skipped here.
     const creditCost = CREDIT_COST[agentMode] ?? 1;
-    if (project.ownerId) {
+    const creditsAlreadyReserved =
+      input.runMode === "background" ||
+      (await db
+        .select({ reserved: agentTasksTable.creditsReserved })
+        .from(agentTasksTable)
+        .where(eq(agentTasksTable.id, taskId))
+        .limit(1)
+        .then((r) => (r[0]?.reserved ?? null) !== null));
+    if (project.ownerId && !creditsAlreadyReserved) {
       const credits = await getOrCreateCredits(project.ownerId);
       if (credits.balance < creditCost) {
         const msg = `Insufficient credits. This ${agentMode} build costs ${creditCost} credit(s) but your balance is ${credits.balance}. Top up in Billing to continue.`;
@@ -1293,6 +1336,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                   null,
                 taskId,
+                wallClockMs: input.wallClockCapMs,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
               });
@@ -1642,6 +1686,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                   null,
                 taskId,
+                wallClockMs: input.wallClockCapMs,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
               });
@@ -2987,7 +3032,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
 
       // --- Deduct credits after a successful AI build/refine ---
-      if (project.ownerId) {
+      // Skip when credits were reserved upfront (background jobs — Task #509).
+      if (project.ownerId && !creditsAlreadyReserved) {
         void deductCredits(project.ownerId, creditCost, {
           type: kind,
           description: `${kind === "build" ? "Build" : "Refine"} (${agentMode}) — project ${projectId}`,
@@ -3180,10 +3226,28 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         (err.message === "Build cancelled" || abortController.signal.aborted)
       ) {
         await emitEvent(taskId, "cancelled", "Build cancelled by user.");
-        await db
-          .update(agentTasksTable)
-          .set({ status: "canceled", completedAt: sql`now()` })
-          .where(eq(agentTasksTable.id, taskId));
+        // Atomically transition to canceled and clear reserved credits, capturing
+        // the prior reserved amount so we can refund exactly once (Task #509).
+        const cancelTx = await db.transaction(async (tx) => {
+          const [pre] = await tx
+            .select({ creditsReserved: agentTasksTable.creditsReserved })
+            .from(agentTasksTable)
+            .where(eq(agentTasksTable.id, taskId))
+            .limit(1);
+          await tx
+            .update(agentTasksTable)
+            .set({ status: "canceled", completedAt: sql`now()`, creditsReserved: null })
+            .where(eq(agentTasksTable.id, taskId));
+          return { reserved: pre?.creditsReserved ?? 0 };
+        });
+        if (cancelTx.reserved > 0 && project.ownerId) {
+          void refundCredits(project.ownerId, cancelTx.reserved, {
+            projectId,
+            description: `Background task #${taskId} canceled mid-run`,
+          }).catch((err) =>
+            logger.warn({ err, taskId }, "Credit refund failed on abort (non-fatal)"),
+          );
+        }
         // Drain queued tasks so the project queue isn't stalled behind this cancelled build.
         void drainNextProjectTask(projectId).catch((err) =>
           logger.warn({ err, projectId, taskId }, "Failed to drain project task after cancel"),
@@ -3382,7 +3446,8 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     versionId: version?.id ?? null,
   };
 
-  // Mark task completed + clear staging snapshot
+  // Mark task completed + clear staging snapshot + stamp appliedAt (Task #509).
+  // Also clear creditsReserved so refunds on a future no-op cancel don't double-credit.
   await db
     .update(agentTasksTable)
     .set({
@@ -3390,12 +3455,14 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       report: finalReport,
       stagingSnapshot: null,
       completedAt: sql`now()`,
+      appliedAt: sql`now()`,
+      creditsReserved: null,
     })
     .where(
       and(
         eq(agentTasksTable.id, taskId),
         // Guard against cancel race: if cancel already wrote "canceled", don't overwrite it.
-        inArray(agentTasksTable.status, ["building", "planning"]),
+        inArray(agentTasksTable.status, ["building", "planning", "needs_review"]),
       ),
     );
 
@@ -3486,8 +3553,9 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     tags: ["task-agent", "applied"],
   });
 
-  // Credit deduction (post-success, non-fatal)
-  if (project.ownerId) {
+  // Credit deduction (post-success, non-fatal).
+  // Background jobs (Task #509) reserved credits at enqueue — skip double-charging.
+  if (project.ownerId && task.creditsReserved === null) {
     const creditCost = CREDIT_COST[agentMode] ?? 1;
     void deductCredits(project.ownerId, creditCost, {
       type: "refine",
@@ -3510,6 +3578,7 @@ export async function discardTaskAgentStaging(taskId: number, projectId: number)
       status: agentTasksTable.status,
       projectId: agentTasksTable.projectId,
       queueBatchId: agentTasksTable.queueBatchId,
+      creditsReserved: agentTasksTable.creditsReserved,
     })
     .from(agentTasksTable)
     .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)))
@@ -3520,8 +3589,29 @@ export async function discardTaskAgentStaging(taskId: number, projectId: number)
 
   await db
     .update(agentTasksTable)
-    .set({ status: "discarded", stagingSnapshot: null, completedAt: sql`now()` })
+    .set({
+      status: "discarded",
+      stagingSnapshot: null,
+      completedAt: sql`now()`,
+      discardedAt: sql`now()`,
+      creditsReserved: null,
+    })
     .where(eq(agentTasksTable.id, taskId));
+
+  // Refund reserved credits (Task #509 — background jobs).
+  if (task.creditsReserved && task.creditsReserved > 0) {
+    const [proj] = await db
+      .select({ ownerId: projectsTable.ownerId })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId))
+      .limit(1);
+    if (proj?.ownerId) {
+      void refundCredits(proj.ownerId, task.creditsReserved, {
+        projectId,
+        description: `Background task #${taskId} discarded`,
+      }).catch((err) => logger.warn({ err, taskId }, "Credit refund failed (non-fatal)"));
+    }
+  }
 
   // Drain the project queue (discard opens the gate too)
   void drainNextProjectTask(projectId).catch((err) =>
@@ -4137,4 +4227,91 @@ export function enqueueCveAutoProtectJob(input: CveAutoProtectInput): void {
       );
     });
   });
+}
+
+/**
+ * Boot scan (Task #509): mark stuck building/planning background tasks as failed,
+ * refund any reserved credits, and unblock their project queues. Runs once at
+ * server startup — any background task that was mid-flight when the process died
+ * cannot be resumed, so we surface a clear failure and refund the user.
+ */
+export async function failStuckBackgroundTasksOnBoot(): Promise<void> {
+  try {
+    const stuck = await db
+      .select({
+        id: agentTasksTable.id,
+        projectId: agentTasksTable.projectId,
+        creditsReserved: agentTasksTable.creditsReserved,
+      })
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.runMode, "background"),
+          inArray(agentTasksTable.status, ["building", "planning"]),
+        ),
+      );
+
+    if (stuck.length === 0) return;
+
+    for (const t of stuck) {
+      const msg = "Interrupted by server restart. Please retry.";
+      await db
+        .update(agentTasksTable)
+        .set({
+          status: "failed",
+          result: msg,
+          completedAt: sql`now()`,
+          creditsReserved: null,
+        })
+        .where(eq(agentTasksTable.id, t.id));
+
+      if (t.creditsReserved && t.creditsReserved > 0) {
+        const [proj] = await db
+          .select({ ownerId: projectsTable.ownerId })
+          .from(projectsTable)
+          .where(eq(projectsTable.id, t.projectId))
+          .limit(1);
+        if (proj?.ownerId) {
+          void refundCredits(proj.ownerId, t.creditsReserved, {
+            projectId: t.projectId,
+            description: `Background task #${t.id} interrupted by server restart`,
+          }).catch((err) =>
+            logger.warn({ err, taskId: t.id }, "Boot-scan refund failed (non-fatal)"),
+          );
+        }
+      }
+
+      void emitEvent(t.id, "failed", msg).catch(() => undefined);
+    }
+
+    // Drain every project that had a stuck background task — this kicks off any
+    // queued tasks that were waiting behind the stuck one and never got a chance
+    // to run after the prior process died.
+    const drainedProjects = new Set<number>();
+    for (const t of stuck) {
+      if (drainedProjects.has(t.projectId)) continue;
+      drainedProjects.add(t.projectId);
+      void drainNextProjectTask(t.projectId).catch(() => undefined);
+    }
+
+    // Also drain any project that has a queued background task even if no row
+    // was building/planning at crash time — covers the case where the prior
+    // process died between dequeue-attempts.
+    const queued = await db
+      .select({ projectId: agentTasksTable.projectId })
+      .from(agentTasksTable)
+      .where(and(eq(agentTasksTable.runMode, "background"), eq(agentTasksTable.status, "queued")));
+    for (const q of queued) {
+      if (drainedProjects.has(q.projectId)) continue;
+      drainedProjects.add(q.projectId);
+      void drainNextProjectTask(q.projectId).catch(() => undefined);
+    }
+
+    logger.info(
+      { count: stuck.length, drainedProjects: drainedProjects.size },
+      "Boot scan: marked stuck background tasks as failed; drained project queues",
+    );
+  } catch (err) {
+    logger.warn({ err }, "Boot scan for stuck background tasks failed (non-fatal)");
+  }
 }

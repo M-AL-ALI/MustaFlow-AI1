@@ -26,7 +26,15 @@ import {
 } from "../lib/builder";
 import type { ConversationTurn, ConverseImageAttachment } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
-import { enqueueJob, runJob, resolveAgentIdentity, type AgentIdentity } from "../lib/jobs";
+import {
+  enqueueJob,
+  runJob,
+  resolveAgentIdentity,
+  type AgentIdentity,
+  CREDIT_COST,
+  backgroundWallClockFor,
+} from "../lib/jobs";
+import { deductCredits, getOrCreateCredits } from "./credits";
 import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
 import { fetchAttachmentAsDataUri } from "./images";
@@ -341,14 +349,16 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     const hasFiles = (existing?.c ?? 0) > 0;
     const kind = hasFiles ? "refine" : "build";
 
-    // Check for an active build/refine — prevent concurrent runs for the same project
+    // Check for an active build/refine — prevent concurrent runs for the same project.
+    // needs_review is included so a queued Task Agent staging that hasn't been
+    // applied/discarded yet blocks new runs (Task #509 review-gate serialization).
     const [activeTask] = await db
       .select({ id: agentTasksTable.id })
       .from(agentTasksTable)
       .where(
         and(
           eq(agentTasksTable.projectId, project.id),
-          inArray(agentTasksTable.status, ["building", "planning"]),
+          inArray(agentTasksTable.status, ["building", "planning", "needs_review"]),
         ),
       )
       .limit(1);
@@ -358,6 +368,33 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     const resolvedAgentIdentity: AgentIdentity =
       (explicitAgentIdentity as AgentIdentity | undefined) ??
       resolveAgentIdentity(content, hasFiles, runInBackground, hasActiveTask, Boolean(planMode));
+
+    // Per-mode wall-clock cap for background runs (Task #509).
+    const wallClockCapMs = runInBackground ? backgroundWallClockFor(mode) : null;
+
+    // Reserve credits upfront for background runs. Foreground runs deduct on success.
+    // If the user can't afford it, refuse before creating the task row.
+    let reservedCredits: number | null = null;
+    if (runInBackground && project.ownerId) {
+      const cost = CREDIT_COST[mode] ?? 1;
+      const credits = await getOrCreateCredits(project.ownerId);
+      if (credits.balance < cost) {
+        res.status(402).json({
+          error: `Insufficient credits. A background ${mode} run reserves ${cost} credit(s) but your balance is ${credits.balance}. Top up in Billing.`,
+        });
+        return;
+      }
+      const deduct = await deductCredits(project.ownerId, cost, {
+        type: kind === "build" ? "build" : "refine",
+        description: `Reserve for background task — project ${project.id} (${mode})`,
+        projectId: project.id,
+      });
+      if ("insufficient" in deduct) {
+        res.status(402).json({ error: "Insufficient credits to reserve background run." });
+        return;
+      }
+      reservedCredits = cost;
+    }
 
     const [task] = await db
       .insert(agentTasksTable)
@@ -370,6 +407,9 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         prompt: content,
         attachments: imageAttachments.length > 0 ? imageAttachments : null,
         agentIdentity: resolvedAgentIdentity,
+        runMode: runInBackground ? "background" : "foreground",
+        wallClockCapMs,
+        creditsReserved: reservedCredits,
       })
       .returning();
     if (!task) {
@@ -400,6 +440,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         agentIdentity: resolvedAgentIdentity,
         conversationHistory,
         imageAttachments: jobImageAttachments,
+        runMode: "background",
+        wallClockCapMs: wallClockCapMs ?? undefined,
       });
       assistantContent = `I've queued this in the Background Agent. Task #${task.id} is running and I'll post the report back here when it's done.`;
       plan = { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>;

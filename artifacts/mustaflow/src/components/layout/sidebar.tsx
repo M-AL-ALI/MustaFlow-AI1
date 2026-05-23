@@ -29,6 +29,7 @@ import {
 import { useState, useEffect, useCallback } from "react";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
+import { BackgroundJobsPanel } from "@/components/background-jobs-panel";
 
 const NAV_ITEMS = [
   { name: "Home", href: "/", icon: Home },
@@ -342,6 +343,7 @@ function SidebarInner({
         <div>
           <NavGroup items={SECONDARY_NAV_ITEMS} title="Platform" />
           <SecurityNavItem />
+          <BackgroundJobsPanel />
         </div>
         <AdminNavItem />
       </div>
