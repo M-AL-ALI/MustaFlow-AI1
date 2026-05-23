@@ -251,6 +251,19 @@ The intended user journey is: Login → create project → build app → preview
 - **DB columns added**: `agent_tasks.run_mode` (default `foreground`), `paused_at`, `applied_at`, `discarded_at`, `wall_clock_cap_ms`, `credits_reserved`, plus index on `(run_mode, status)`. Migration: `pnpm --filter @workspace/scripts run migrate-background-jobs` (idempotent — `IF NOT EXISTS`).
 - **OpenAPI additions**: `AgentTask` schema extended with `runMode/wallClockCapMs/creditsReserved/pausedAt/appliedAt/discardedAt`; new `BackgroundJob` + `ListBackgroundJobsResponse` schemas; new `GET /background-jobs` operation. Tie-breaker added in `lib/api-zod/src/index.ts` for `ListBackgroundJobsResponse` (same dual-emit issue as `GetPublishReadinessParams`).
 
+## Per-task skills system (Task #506)
+
+- **What it is**: Markdown instruction packs the agent loop can pull on demand. Each lives at `skills/<name>/SKILL.md` (workspace root) with YAML-ish frontmatter (`name`, `description`, `triggers`).
+- **Starter skills**: `react-vite`, `expo-mobile`, `auth-clerk`, `stripe-payments`, `postgres-drizzle`.
+- **System prompt index**: At the start of every agent loop run, `listEnabledSkills()` + `formatSkillIndex()` inject a compact "Available skills" block (name + one-line description + triggers) into `buildSystemPrompt`. Disabled skills are excluded.
+- **`load_skill` tool**: Added to the agent loop tool catalog. Returns the SKILL.md body when the model picks one. Per-loop cache (`loadedSkills: Map<string, SkillManifest>`) guarantees a repeat load is a free cache hit (no double-count, no second DB write).
+- **Telemetry**: `builder_skills` table (`name PK, enabled, load_count, last_loaded_at, updated_at`). Every first load in a run bumps `load_count`. Loaded skill names are persisted on `TaskReport.agentLoop.skillsLoaded`.
+- **Loader**: `artifacts/api-server/src/lib/builder-skills.ts` — reads from disk with a 30s cache, walks multiple candidate paths (`BUILDER_SKILLS_DIR` env override → `cwd/skills` → `cwd/../../skills` → dist-relative). No YAML dep; tiny inline frontmatter parser.
+- **Admin UI**: New "Builder Skills" panel in `/admin` shows name, description, byte size, load count, last-loaded timestamp, triggers, and an Enable/Disable button. Uses raw `fetch` against `/api/admin/skills` (no OpenAPI codegen churn).
+- **Routes**: `GET /api/admin/skills` and `PATCH /api/admin/skills/:name` (`{ enabled: boolean }`), both gated by `requireAdmin`.
+- **Migration**: `pnpm --filter @workspace/scripts run migrate-builder-skills` creates the `builder_skills` table. Safe to re-run (uses `IF NOT EXISTS`).
+- **Out of scope (intentional)**: user-uploaded skills, per-project overrides, marketplace, executable skill bodies.
+
 ## Gotchas
 
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. It also runs `typecheck:libs`, which will fail if generated types break consumers — fix consumers, don't suppress. The `codegen-drift` validation check (`pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated`) catches any drift between the spec and committed generated files — run it (or let CI run it) after every spec edit.

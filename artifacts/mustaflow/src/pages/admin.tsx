@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ShieldCheck,
   Users,
@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   BrainCircuit,
   Activity,
+  BookOpen,
 } from "lucide-react";
 import {
   useGetAdminMe,
@@ -385,6 +386,8 @@ export default function AdminPage() {
         )}
       </div>
 
+      <SkillsPanel />
+
       <div className="border border-border rounded-xl bg-card overflow-hidden">
         <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -556,6 +559,150 @@ const ACTION_COLORS: Record<string, string> = {
   verified: "text-green-500 bg-green-500/10",
   verification_failed: "text-yellow-500 bg-yellow-500/10",
 };
+
+// ─── Skills panel (per-task skills system, Task #506) ──────────────────────
+type SkillSummary = {
+  name: string;
+  description: string;
+  triggers: string[];
+  enabled: boolean;
+  loadCount: number;
+  lastLoadedAt: string | null;
+  bytes: number;
+};
+
+function SkillsPanel() {
+  const [skills, setSkills] = useState<SkillSummary[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingName, setPendingName] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/skills");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { skills: SkillSummary[] };
+      setSkills(json.skills);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  async function toggle(name: string, enabled: boolean) {
+    setPendingName(name);
+    try {
+      const res = await fetch(`/api/admin/skills/${encodeURIComponent(name)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSkills((cur) => (cur ? cur.map((s) => (s.name === name ? { ...s, enabled } : s)) : cur));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setPendingName(null);
+    }
+  }
+
+  return (
+    <div className="border border-border rounded-xl bg-card overflow-hidden">
+      <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <BookOpen className="h-3.5 w-3.5" />
+          Builder Skills
+          {skills && (
+            <span className="text-muted-foreground font-normal normal-case tracking-normal">
+              — {skills.length} registered
+            </span>
+          )}
+        </h3>
+        <button
+          onClick={() => void reload()}
+          className="text-muted-foreground hover:text-foreground"
+          title="Refresh"
+        >
+          <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
+        </button>
+      </div>
+
+      <div className="px-4 py-3 border-b border-border text-xs text-muted-foreground">
+        Skills are markdown instruction sets the agent loop can pull on demand via{" "}
+        <code className="font-mono">load_skill</code>. Disabling a skill hides it from the system
+        prompt index and rejects load requests.
+      </div>
+
+      {error && (
+        <div className="px-4 py-3 text-sm text-destructive border-b border-border">{error}</div>
+      )}
+
+      {!skills && loading && (
+        <div className="px-4 py-6 text-sm text-muted-foreground text-center">Loading skills…</div>
+      )}
+
+      {skills && skills.length === 0 && (
+        <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+          No skill files found on disk. Add files under{" "}
+          <code className="font-mono">skills/&lt;name&gt;/SKILL.md</code>.
+        </div>
+      )}
+
+      {skills && skills.length > 0 && (
+        <div className="divide-y divide-border">
+          {skills.map((s) => (
+            <div key={s.name} className="px-4 py-3 text-sm flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <code className="font-mono text-xs font-semibold text-foreground">{s.name}</code>
+                  <span
+                    className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
+                      s.enabled
+                        ? "bg-green-500/10 text-green-500"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {s.enabled ? "enabled" : "disabled"}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">{s.description}</p>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-[10px] text-muted-foreground/80">
+                  <span>{s.bytes.toLocaleString()} bytes</span>
+                  <span>
+                    loaded <span className="text-foreground font-medium">{s.loadCount}</span> time
+                    {s.loadCount === 1 ? "" : "s"}
+                  </span>
+                  {s.lastLoadedAt && <span>last {new Date(s.lastLoadedAt).toLocaleString()}</span>}
+                  {s.triggers.length > 0 && (
+                    <span className="truncate">triggers: {s.triggers.slice(0, 6).join(", ")}</span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => void toggle(s.name, !s.enabled)}
+                disabled={pendingName === s.name}
+                className={`shrink-0 text-xs font-medium px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${
+                  s.enabled
+                    ? "border-border text-foreground hover:bg-muted"
+                    : "border-primary/40 text-primary hover:bg-primary/10"
+                }`}
+              >
+                {pendingName === s.name ? "…" : s.enabled ? "Disable" : "Enable"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AuditLogRow({ entry }: { entry: AdminAuditLogEntry }) {
   const colorClass = ACTION_COLORS[entry.action] ?? "text-muted-foreground bg-muted";

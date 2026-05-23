@@ -25,6 +25,7 @@ import {
 import { and, gte } from "drizzle-orm";
 import { requireAdmin } from "../lib/adminAuth";
 import { errorsPerDay } from "../lib/prodLogs";
+import { listAllSkillsForAdmin, setSkillEnabled } from "../lib/builder-skills";
 
 const router: IRouter = Router();
 
@@ -444,6 +445,31 @@ router.get("/admin/blocked-commands", async (req, res): Promise<void> => {
     perProject,
     samples,
   });
+});
+
+// ── GET /api/admin/skills ─────────────────────────────────────────────────────
+// Lists every builder skill from disk, merged with DB enable/disable + load counts.
+router.get("/admin/skills", async (_req, res): Promise<void> => {
+  const skills = await listAllSkillsForAdmin();
+  res.json({ skills });
+});
+
+// ── PATCH /api/admin/skills/:name ─────────────────────────────────────────────
+// Body: { enabled: boolean }. Toggles whether the skill appears in the agent
+// loop's skill index and whether load_skill returns its content.
+router.patch("/admin/skills/:name", async (req, res): Promise<void> => {
+  const name = String(req.params.name ?? "").trim();
+  if (!name || name.length > 120) {
+    res.status(400).json({ error: "Invalid skill name" });
+    return;
+  }
+  const body = (req.body ?? {}) as { enabled?: unknown };
+  if (typeof body.enabled !== "boolean") {
+    res.status(400).json({ error: "Body must include { enabled: boolean }" });
+    return;
+  }
+  await setSkillEnabled(name, body.enabled);
+  res.json({ name, enabled: body.enabled });
 });
 
 export default router;

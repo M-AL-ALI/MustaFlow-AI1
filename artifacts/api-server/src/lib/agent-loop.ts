@@ -46,6 +46,12 @@ import {
   type PolicyStrictness,
 } from "./policy";
 import { db, toolAuditTable } from "@workspace/db";
+import {
+  listEnabledSkills,
+  loadSkillContent,
+  formatSkillIndex,
+  type SkillManifest,
+} from "./builder-skills";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -128,6 +134,8 @@ export type AgentLoopReport = {
   toolCalls: ToolCallRecord[];
   commandsRun: CommandRecord[];
   checkResults: CheckResultRecord[];
+  /** Skill names the model invoked `load_skill` for during this run. */
+  skillsLoaded: string[];
 };
 
 export type AgentLoopResult = {
@@ -442,6 +450,25 @@ const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "load_skill",
+      description:
+        "Load the full instructions for a named skill from the registry. Call this BEFORE generating code for a stack/feature listed in the 'Available skills' section. Returns the SKILL.md body. Loading the same skill twice in one run is free — it returns the cached content.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Skill name exactly as listed in the 'Available skills' section.",
+          },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "finalize",
       description:
         "Signal that the build is complete. Provide a 1-3 sentence summary for the user. Call this only after all required checks pass.",
@@ -466,6 +493,7 @@ function buildSystemPrompt(
   input: AgentLoopInput,
   stack: StackId,
   profile: { checks: CheckSpec[] },
+  skillsIndex: string,
 ) {
   const checkList = profile.checks.map((c) => `  • ${c.id} (${c.label})`).join("\n");
   const isStatic = stack === "static-html";
@@ -508,6 +536,7 @@ function buildSystemPrompt(
     "## Diagnosing a broken published app",
     "- If the user's request mentions that the published/deployed app is broken, failing, throwing errors, or behaving unexpectedly in production — your FIRST action MUST be `fetch_prod_logs` to inspect grouped browser errors, recent requests, and the latest health-check before reading or editing files. Use the failure signatures it returns to target your fix.",
     "- After fixing, re-run the per-stack checks and finalize as usual. If `fetch_prod_logs` shows zero errors and the user still reports breakage, fall back to normal investigation.",
+    skillsIndex ? `\n${skillsIndex}` : "",
     input.knowledgeContext ? `\n## Lessons from prior builds\n${input.knowledgeContext}` : "",
     input.planContext
       ? `\n## Plan to execute\n${JSON.stringify(input.planContext).slice(0, 2400)}`
@@ -633,8 +662,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let finalWarnings: string[] = [];
   let finalized = false;
 
+  // Per-task skill registry: load index for the system prompt, then cache
+  // already-loaded skills in this Map so a repeated load_skill is a free
+  // cache hit (no double-count, no second LLM trip into the body).
+  const enabledSkills = await listEnabledSkills();
+  const skillsIndex = formatSkillIndex(enabledSkills);
+  const loadedSkills = new Map<string, SkillManifest>();
+
   const messages: ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(input, stack, profile) },
+    { role: "system", content: buildSystemPrompt(input, stack, profile, skillsIndex) },
   ];
 
   // Seed context: current file manifest
@@ -745,6 +781,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         commandsRun,
         step,
         containerState,
+        loadedSkills,
       });
       const durationMs = Date.now() - tStart;
 
@@ -920,6 +957,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         toolCalls,
         commandsRun,
         checkResults,
+        skillsLoaded: Array.from(loadedSkills.keys()),
       },
     };
   }
@@ -970,6 +1008,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       toolCalls,
       commandsRun,
       checkResults,
+      skillsLoaded: Array.from(loadedSkills.keys()),
     },
   };
 }
@@ -1094,6 +1133,9 @@ interface ToolCtx {
   step: number;
   /** Mutable container state: id may be filled in via on-demand provisioning. */
   containerState: { id: string | null; installed: boolean };
+  /** Per-loop cache of loaded skills — guarantees no double-count and a free
+   *  cache hit if the model re-loads the same skill mid-run. */
+  loadedSkills: Map<string, SkillManifest>;
 }
 
 /**
@@ -1623,6 +1665,32 @@ async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: st
           observation: `ERROR: fetch_prod_logs failed: ${String((err as Error).message ?? err)}`,
         };
       }
+    }
+    case "load_skill": {
+      const skillName = typeof args.name === "string" ? args.name.trim() : "";
+      if (!skillName) return { ok: false, observation: "ERROR: load_skill requires { name }" };
+      if (skillName.length > 120) return { ok: false, observation: "ERROR: skill name too long" };
+      const cached = ctx.loadedSkills.get(skillName);
+      if (cached) {
+        // Cache hit: do NOT re-emit the body — the original load is already in
+        // conversation state, so re-injecting it would double-count tokens.
+        return {
+          ok: true,
+          observation: `Skill "${skillName}" was already loaded earlier this run (${cached.body.length} bytes). The full body is already in your conversation context — scroll back to the earlier load_skill observation instead of reloading.`,
+        };
+      }
+      const manifest = await loadSkillContent(skillName);
+      if (!manifest) {
+        return {
+          ok: false,
+          observation: `ERROR: skill "${skillName}" not found or disabled. Use a name listed in 'Available skills'.`,
+        };
+      }
+      ctx.loadedSkills.set(skillName, manifest);
+      return {
+        ok: true,
+        observation: `# Skill: ${manifest.name}\n${manifest.description}\n\n${manifest.body}`,
+      };
     }
     case "finalize": {
       return { ok: true, observation: "finalized" };

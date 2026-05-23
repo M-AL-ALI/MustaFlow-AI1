@@ -191,6 +191,12 @@ export type TaskReport = {
       durationMs: number;
       message: string;
     }>;
+    /**
+     * Per-task skills loaded during this build (Task #506). Empty array when
+     * the model did not invoke `load_skill`. Each entry is a skill name from
+     * the registry.
+     */
+    skillsLoaded?: string[];
   } | null;
 };
 
