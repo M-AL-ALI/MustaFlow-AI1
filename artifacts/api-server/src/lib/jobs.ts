@@ -64,6 +64,7 @@ import {
   type EasPlatform,
 } from "./eas";
 import { autoCommitProjectFiles } from "./github";
+import { fetchAttachmentAsDataUri } from "../routes/images.js";
 
 /** Credit cost per AI call, keyed by agentMode. */
 const CREDIT_COST: Record<string, number> = {
@@ -133,6 +134,8 @@ export interface JobInput {
   /** Structured plan from the Planning Agent (injected into build/refine prompt). */
   planContext?: Record<string, unknown> | null;
   conversationHistory?: ConversationTurn[];
+  /** Vision image attachments (data URIs) the user uploaded with this prompt. */
+  imageAttachments?: Array<{ dataUri: string; alt?: string }>;
   queueBatchId?: string | null;
   queueIndex?: number | null;
   queueTotalCount?: number | null;
@@ -889,6 +892,8 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
     .from(agentTasksTable)
     .where(eq(agentTasksTable.queueBatchId, completedTask.queueBatchId));
 
+  const drainedImageAttachments = await hydrateTaskAttachments(nextTask.attachments);
+
   enqueueJob({
     taskId: nextTask.id,
     projectId: completedTask.projectId,
@@ -896,10 +901,32 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
     userPrompt: nextTask.prompt ?? "",
     agentMode: (project.agentMode as AgentMode) ?? "power",
     conversationHistory,
+    imageAttachments: drainedImageAttachments,
     queueBatchId: completedTask.queueBatchId,
     queueIndex: nextTask.queueIndex ?? undefined,
     queueTotalCount: batchTasks.length,
   });
+}
+
+/**
+ * Load object-storage URLs persisted on agent_tasks.attachments and resolve them
+ * into data URIs the builder pipelines can hand to the vision model. Returns
+ * undefined when the task had no attachments (so the JobInput shape stays clean).
+ */
+async function hydrateTaskAttachments(
+  raw: unknown,
+): Promise<Array<{ dataUri: string; alt?: string }> | undefined> {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const hydrated: Array<{ dataUri: string; alt?: string }> = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const url = (entry as { url?: unknown }).url;
+    if (typeof url !== "string" || url.length === 0) continue;
+    const alt = (entry as { alt?: unknown }).alt;
+    const dataUri = await fetchAttachmentAsDataUri(url);
+    if (dataUri) hydrated.push({ dataUri, alt: typeof alt === "string" ? alt : undefined });
+  }
+  return hydrated.length > 0 ? hydrated : undefined;
 }
 
 /**
@@ -948,12 +975,15 @@ async function drainNextProjectTask(projectId: number): Promise<void> {
     .from(sql`(select 1 from project_files where project_id = ${projectId} limit 1) as f`);
   const hasFiles = (fileRow?.c ?? 0) > 0;
 
+  const drainedImageAttachments = await hydrateTaskAttachments(nextTask.attachments);
+
   enqueueJob({
     taskId: nextTask.id,
     projectId,
     kind: hasFiles ? "refine" : "build",
     userPrompt: nextTask.prompt ?? "",
     agentMode: (project.agentMode as AgentMode) ?? "power",
+    imageAttachments: drainedImageAttachments,
   });
   logger.info({ projectId, nextTaskId: nextTask.id }, "Drained next project-level queued task");
 }
@@ -990,6 +1020,7 @@ export async function runJob(input: JobInput): Promise<void> {
     projectId,
     kind,
     conversationHistory,
+    imageAttachments,
     queueBatchId,
     queueIndex,
     queueTotalCount,
@@ -1220,6 +1251,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           knowledgeContext: knowledgeContext || undefined,
           planContext: input.planContext ?? null,
           conversationSummary,
+          imageAttachments,
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
           signal,
         };
@@ -1234,6 +1266,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               knowledgeContext: knowledgeContext || undefined,
               activeModuleIds,
               configuredSecretNames,
+              imageAttachments,
               onEvent: async (type, message) => emitEvent(taskId, type, message),
               signal,
             })
@@ -1248,6 +1281,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 databaseContext,
                 planContext: input.planContext ?? null,
                 conversationSummary,
+                imageAttachments,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
                 signal,
               })
@@ -1269,6 +1303,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         databaseContext,
                         planContext: input.planContext ?? null,
                         conversationSummary,
+                        imageAttachments,
                         signal,
                       });
 
@@ -1296,6 +1331,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             knowledgeContext: knowledgeContext || undefined,
             planContext: input.planContext ?? null,
             conversationSummary,
+            imageAttachments,
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
             signal,
           };
@@ -1310,6 +1346,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 databaseContext,
                 planContext: input.planContext ?? null,
                 conversationSummary,
+                imageAttachments,
                 signal,
               })
             : isNextjsProject
@@ -1327,6 +1364,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         agentMode: buildEscalationMode,
                         conversationHistory,
                         knowledgeContext: knowledgeContext || undefined,
+                        imageAttachments,
                         databaseContext,
                         planContext: input.planContext ?? null,
                         conversationSummary,
@@ -1512,6 +1550,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
           planContext: input.planContext ?? null,
           conversationSummary,
+          imageAttachments,
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
           signal,
         };
@@ -1527,6 +1566,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               knowledgeContext: knowledgeContext || undefined,
               activeModuleIds,
               configuredSecretNames,
+              imageAttachments,
               onEvent: async (type, message) => emitEvent(taskId, type, message),
               signal,
             })
@@ -1543,6 +1583,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                 planContext: input.planContext ?? null,
                 conversationSummary,
+                imageAttachments,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
                 signal,
               })
@@ -1567,6 +1608,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                         planContext: input.planContext ?? null,
                         conversationSummary,
+                        imageAttachments,
                         signal,
                       });
 
@@ -1596,6 +1638,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
             planContext: input.planContext ?? null,
             conversationSummary,
+            imageAttachments,
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
           };
           const escalatedResult = isReactViteProject
@@ -1611,6 +1654,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                 planContext: input.planContext ?? null,
                 conversationSummary,
+                imageAttachments,
               })
             : isNextjsProject
               ? await runNextjsRefinePipeline(escalatedStackRefineArgs)
@@ -1633,6 +1677,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
                         planContext: input.planContext ?? null,
                         conversationSummary,
+                        imageAttachments,
                       });
           wasEscalated = true;
           agentMode = refineEscalationMode;

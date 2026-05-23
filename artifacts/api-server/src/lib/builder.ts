@@ -1557,6 +1557,48 @@ export function scanCodeSmells(files: BuilderFile[]): string[] {
   return smells;
 }
 
+export interface BuilderImageAttachment {
+  dataUri: string;
+  alt?: string;
+}
+
+/**
+ * Append a user-role message to the messages array. If image attachments are
+ * provided, sends the prompt + images as multimodal content parts so vision
+ * models can actually read uploaded screenshots/mockups.
+ */
+function pushUserMessageWithImages(
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  userPrompt: string,
+  imageAttachments?: BuilderImageAttachment[],
+): void {
+  if (!imageAttachments || imageAttachments.length === 0) {
+    messages.push({ role: "user", content: userPrompt });
+    return;
+  }
+  const parts: Array<
+    { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
+  > = [
+    {
+      type: "text",
+      text:
+        userPrompt +
+        "\n\n[The user has attached " +
+        imageAttachments.length +
+        " image(s) above. Carefully look at each image, identify the visible UI elements, layout, colours, text, and any errors or issues shown, and use that to inform what you build or fix.]",
+    },
+  ];
+  for (const att of imageAttachments) {
+    parts.push({ type: "image_url", image_url: { url: att.dataUri } });
+  }
+  // OpenAI Chat Completions accepts arrays of content parts on user messages.
+  // Our local message type is narrowed to `string`; cast at this single boundary.
+  messages.push({
+    role: "user",
+    content: parts as unknown as string,
+  });
+}
+
 async function callWithRetry(
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
   model: string,
@@ -2203,6 +2245,7 @@ export async function runBuildPipeline(args: {
   planContext?: Record<string, unknown> | null;
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
+  imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<BuilderResult> {
@@ -2217,6 +2260,7 @@ export async function runBuildPipeline(args: {
     databaseContext,
     planContext,
     conversationSummary,
+    imageAttachments,
     onEvent,
     signal,
   } = args;
@@ -2308,7 +2352,7 @@ export async function runBuildPipeline(args: {
     }
   }
 
-  messages.push({ role: "user", content: userPrompt });
+  pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Generating app blueprint and code…");
   const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "build", signal);
@@ -2591,6 +2635,7 @@ export async function runRefinePipeline(args: {
   planContext?: Record<string, unknown> | null;
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
+  imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<{
@@ -2616,6 +2661,7 @@ export async function runRefinePipeline(args: {
     unchangedFilesHint,
     planContext,
     conversationSummary,
+    imageAttachments,
     onEvent,
     signal,
   } = args;
@@ -2700,7 +2746,7 @@ export async function runRefinePipeline(args: {
     }
   }
 
-  messages.push({ role: "user", content: userPrompt });
+  pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Applying change request with AI…");
   const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "refine", signal);
@@ -3199,6 +3245,7 @@ export async function runReactViteBuildPipeline(args: {
   planContext?: Record<string, unknown> | null;
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
+  imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<BuilderResult> {
@@ -3213,6 +3260,7 @@ export async function runReactViteBuildPipeline(args: {
     databaseContext,
     planContext,
     conversationSummary,
+    imageAttachments,
     onEvent,
     signal,
   } = args;
@@ -3294,7 +3342,7 @@ export async function runReactViteBuildPipeline(args: {
     }
   }
 
-  messages.push({ role: "user", content: userPrompt });
+  pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Generating React + Vite project with AI…");
   const parsed = await callWithRetry(
@@ -3444,6 +3492,7 @@ export async function runReactViteRefinePipeline(args: {
   planContext?: Record<string, unknown> | null;
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
+  imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<{
@@ -3469,6 +3518,7 @@ export async function runReactViteRefinePipeline(args: {
     unchangedFilesHint,
     planContext,
     conversationSummary,
+    imageAttachments,
     onEvent,
     signal,
   } = args;
@@ -3552,7 +3602,7 @@ export async function runReactViteRefinePipeline(args: {
     }
   }
 
-  messages.push({ role: "user", content: userPrompt });
+  pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Applying change request to React + Vite project…");
   const parsed = await callWithRetry(
@@ -4695,6 +4745,7 @@ type StackBuildArgs = {
   planContext?: Record<string, unknown> | null;
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
+  imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
 };
@@ -4712,6 +4763,7 @@ type StackRefineArgs = {
   planContext?: Record<string, unknown> | null;
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
+  imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
 };
@@ -4731,6 +4783,7 @@ async function runStackBuildPipeline(
     integrationContext,
     planContext,
     conversationSummary,
+    imageAttachments,
     onEvent,
     signal,
   } = args;
@@ -4795,7 +4848,7 @@ async function runStackBuildPipeline(
     }
   }
 
-  messages.push({ role: "user", content: userPrompt });
+  pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", `Generating ${stackLabel} project with AI…`);
   const parsed = await callWithRetry(
@@ -4895,6 +4948,7 @@ async function runStackRefinePipeline(
     unchangedFilesHint,
     planContext,
     conversationSummary,
+    imageAttachments,
     onEvent,
     signal,
   } = args;
@@ -4959,7 +5013,7 @@ async function runStackRefinePipeline(
     }
   }
 
-  messages.push({ role: "user", content: userPrompt });
+  pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", `Applying change request to ${stackLabel} project…`);
   const parsed = await callWithRetry(
@@ -5167,6 +5221,7 @@ export async function runMobileBuildPipeline(args: {
   knowledgeContext?: string;
   activeModuleIds?: string[];
   configuredSecretNames?: string[];
+  imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<MobileBuilderResult> {
@@ -5179,6 +5234,7 @@ export async function runMobileBuildPipeline(args: {
     knowledgeContext,
     activeModuleIds,
     configuredSecretNames,
+    imageAttachments,
     onEvent,
     signal,
   } = args;
@@ -5220,7 +5276,7 @@ export async function runMobileBuildPipeline(args: {
     }
   }
 
-  messages.push({ role: "user", content: userPrompt });
+  pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Generating Expo/React Native app blueprint…");
   const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "mobile-build", signal);
@@ -5562,6 +5618,7 @@ export async function runMobileRefinePipeline(args: {
   knowledgeContext?: string;
   activeModuleIds?: string[];
   configuredSecretNames?: string[];
+  imageAttachments?: BuilderImageAttachment[];
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<{
@@ -5585,6 +5642,7 @@ export async function runMobileRefinePipeline(args: {
     knowledgeContext,
     activeModuleIds,
     configuredSecretNames,
+    imageAttachments,
     onEvent,
     signal,
   } = args;
@@ -5623,7 +5681,7 @@ export async function runMobileRefinePipeline(args: {
     }
   }
 
-  messages.push({ role: "user", content: userPrompt });
+  pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Applying change request to Expo project…");
   const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "mobile-refine", signal);

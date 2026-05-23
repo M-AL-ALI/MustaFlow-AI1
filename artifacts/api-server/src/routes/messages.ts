@@ -368,6 +368,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         kind: runInBackground ? "background" : "main",
         status: hasActiveTask ? "queued" : "planning",
         prompt: content,
+        attachments: imageAttachments.length > 0 ? imageAttachments : null,
         agentIdentity: resolvedAgentIdentity,
       })
       .returning();
@@ -375,6 +376,16 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       res.status(500).json({ error: "Failed to enqueue task" });
       return;
     }
+
+    // Load image attachments as data URIs once, so build/refine paths can pass them
+    // to the vision model just like the converse path does.
+    const builderImageAttachments: Array<{ dataUri: string; alt?: string }> = [];
+    for (const att of imageAttachments) {
+      const dataUri = await fetchAttachmentAsDataUri(att.url);
+      if (dataUri) builderImageAttachments.push({ dataUri, alt: att.alt });
+    }
+    const jobImageAttachments =
+      builderImageAttachments.length > 0 ? builderImageAttachments : undefined;
 
     if (hasActiveTask) {
       assistantContent = `Your request has been queued as Task #${task.id}. It will run automatically when the current build finishes.`;
@@ -388,6 +399,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         agentMode: mode,
         agentIdentity: resolvedAgentIdentity,
         conversationHistory,
+        imageAttachments: jobImageAttachments,
       });
       assistantContent = `I've queued this in the Background Agent. Task #${task.id} is running and I'll post the report back here when it's done.`;
       plan = { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>;
@@ -400,6 +412,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         agentMode: mode,
         agentIdentity: resolvedAgentIdentity,
         conversationHistory,
+        imageAttachments: jobImageAttachments,
       });
       const [refreshed] = await db
         .select()

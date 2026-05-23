@@ -139,6 +139,11 @@ export const agentTasksTable = pgTable(
     stagingSnapshot:
       jsonb("staging_snapshot").$type<Array<{ path: string; content: string; mimeType: string }>>(),
     prompt: text("prompt"),
+    // Image attachments uploaded with the prompt that created this task. Persisted
+    // here so queued tasks (status="queued") can hand their images off to the
+    // builder pipelines when the queue eventually drains. Stored as object-storage
+    // refs (url + alt), not data URIs, to keep rows small.
+    attachments: jsonb("attachments").$type<Array<{ url: string; alt?: string }>>(),
     result: text("result"),
     report: jsonb("report").$type<TaskReport>(),
     userFeedback: text("user_feedback"),
