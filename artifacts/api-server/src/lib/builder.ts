@@ -1803,6 +1803,8 @@ Focus on:
 7. JavaScript/TypeScript that references undefined functions, hooks, or imports — including missing imports from "expo-router", "react-native", or "nativewind"
 8. Screens that are completely empty or contain only placeholder content when real content was requested
 9. Critical validator errors that were not resolved in the file set
+10. index.html web-preview interactivity: every visible <button> and role="button" element MUST either have a real JS onclick handler OR a data-mock="..." attribute. (Anchor tags with a non-empty href="..." count as a real handler via native navigation — do not flag those.) A button with neither is a bug — users see "the preview is broken". Verify the mockAction helper script + #mock-toast element are present in index.html.
+11. User-request coverage: walk the original user request line by line. For each concrete feature the user named (e.g. "login screen", "camera scanner", "save to favorites", "checkout flow"), verify there is a corresponding screen file under app/ AND a matching visible affordance in index.html. Missing coverage IS an issue_found.
 
 Do NOT flag:
 - Web-only concerns (HTML semantics, CSS specificity, document.querySelector, etc.) — this is React Native
@@ -4265,7 +4267,7 @@ function autoCorrectPackageJson(files: BuilderFile[], detectedModuleIds: string[
 }
 
 const MOBILE_PREVIEW_NOTE = `MOBILE WEB PREVIEW (index.html) — REQUIRED:
-You MUST include an index.html file that is a beautiful, realistic web preview of the mobile app.
+You MUST include an index.html file that is a beautiful, realistic, AND INTERACTIVE web preview of the mobile app.
 - Render inside a mobile phone frame: max-w-[390px] mx-auto, dark phone shell around the content
 - Show the app's main screen with realistic mock data
 - Use Tailwind CDN: <script src="https://cdn.tailwindcss.com"></script>
@@ -4276,7 +4278,53 @@ You MUST include an index.html file that is a beautiful, realistic web preview o
 - No emojis — use lucide icons only
 - Mobile touch targets: min 44px height for interactive elements
 - Include a "Scan with Expo Go" badge or note in the preview header
-- Keep under 20,000 chars for the preview HTML`;
+- Keep under 20,000 chars for the preview HTML
+
+INTERACTIVITY — MANDATORY (this is the #1 reason users say "the preview is broken"):
+Every visible button, tab, link, form input, switch, fab, list item, and clickable card in the preview MUST be wired with an inline JavaScript handler that gives immediate visual feedback when clicked. Static-only mockups are NOT acceptable.
+
+You MUST inline this exact helper near the top of <body> (or at the end of body before lucide.createIcons()):
+
+<div id="mock-toast" class="hidden fixed bottom-20 left-1/2 -translate-x-1/2 z-50 max-w-[90%] px-3 py-2 rounded-lg bg-zinc-800 text-white text-xs shadow-lg border border-zinc-700"></div>
+<script>
+  (function(){
+    var t = document.getElementById('mock-toast');
+    var timer = null;
+    window.mockAction = function(msg){
+      if(!t) return;
+      t.textContent = msg + '  ·  Simulated';
+      t.classList.remove('hidden');
+      if(timer) clearTimeout(timer);
+      timer = setTimeout(function(){ t.classList.add('hidden'); }, 1800);
+    };
+    // Auto-wire any element with data-mock that the author forgot to wire explicitly
+    document.addEventListener('click', function(e){
+      var el = e.target.closest('[data-mock]');
+      if(el){ e.preventDefault(); window.mockAction(el.getAttribute('data-mock') || 'Action'); }
+    });
+    // Tab switching for elements that share data-mock-tab="<id>"
+    document.addEventListener('click', function(e){
+      var el = e.target.closest('[data-tab-target]');
+      if(!el) return;
+      var target = el.getAttribute('data-tab-target');
+      document.querySelectorAll('[data-tab-panel]').forEach(function(p){
+        p.classList.toggle('hidden', p.getAttribute('data-tab-panel') !== target);
+      });
+      document.querySelectorAll('[data-tab-target]').forEach(function(t){
+        t.classList.toggle('text-primary', t.getAttribute('data-tab-target') === target);
+      });
+    });
+  })();
+</script>
+
+WIRING RULES for index.html:
+1. Every <button>, <a>, role="button" element, and clickable card MUST either:
+   (a) have a real working JS handler (form validation, tab switching, modal open/close, list filter, theme toggle, etc.) — preferred for things that can actually work in a browser, OR
+   (b) carry a data-mock="<short description>" attribute describing what it would do on the real device (e.g. data-mock="Open camera to scan receipt" or data-mock="Upload to Supabase storage"). The inline helper above will auto-show the toast.
+2. Tab bars: use data-tab-target on tab buttons and data-tab-panel on the panels — the helper will show/hide.
+3. Form inputs MUST be focusable and accept typing; submit buttons MUST either validate inline OR carry data-mock.
+4. Include a small fixed footer ribbon (text-[10px] text-zinc-500) at the bottom of the phone frame: "Interactive mockup — real device features run in Expo Go".
+5. NEVER leave a visible button without either a handler or a data-mock attribute. A non-responsive button in the preview is a bug.`;
 
 const MOBILE_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Builder. You generate complete, production-ready Expo/React Native projects from a single user request. You output ONLY valid JSON — no prose, no markdown fences.
 

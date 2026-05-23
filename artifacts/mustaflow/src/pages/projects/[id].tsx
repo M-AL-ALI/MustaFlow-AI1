@@ -2766,6 +2766,16 @@ export default function ProjectWorkspacePage() {
                 containerStatus={containerStatus}
                 containerUrl={containerUrl}
                 onStartContainer={handleStartContainer}
+                latestReport={(() => {
+                  const latest = [...(messages ?? [])].reverse().find((m) => {
+                    const p = m.plan as ChatPlanPayload | null | undefined;
+                    return p && typeof p === "object" && (p as { kind?: string }).kind === "report";
+                  });
+                  if (!latest) return null;
+                  const payload = latest.plan as { kind: "report"; report: TaskReport };
+                  return payload.report ?? null;
+                })()}
+                onJumpToSecrets={() => setActiveTab("tools-files")}
               />
             )}
             {activeTab === "code" && (

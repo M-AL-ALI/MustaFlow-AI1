@@ -34,7 +34,12 @@ import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { STATUS_LABELS, type UseWebContainerResult } from "@/hooks/use-web-container";
 import { cn } from "@/lib/utils";
-import { useListProjectFiles, getListProjectFilesQueryKey } from "@workspace/api-client-react";
+import {
+  useListProjectFiles,
+  getListProjectFilesQueryKey,
+  useListSecrets,
+  getListSecretsQueryKey,
+} from "@workspace/api-client-react";
 
 type Platform = "web" | "ios" | "android";
 type DeviceFrame = "desktop" | "tablet" | "mobile";
@@ -69,6 +74,21 @@ type Project = {
   publicSlug?: string | null;
 };
 
+type ReadinessReport = {
+  integrationsNeeded?: Array<{
+    name: string;
+    why: string;
+    keysNeeded: string[];
+    environment?: "test" | "production";
+  }>;
+  modulesWired?: Array<{
+    id: string;
+    name?: string;
+    secretsConsumed?: string[];
+  }>;
+  nativeFeatures?: string[];
+};
+
 type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
 
 type PreviewTabProps = {
@@ -87,6 +107,10 @@ type PreviewTabProps = {
   containerUrl?: string | null;
   /** Called when user clicks "Wake container" from the preview overlay. */
   onStartContainer?: () => void;
+  /** Most recent build report — used to populate the mobile readiness panel. */
+  latestReport?: ReadinessReport | null;
+  /** Switch to the Secrets / Tools panel so the user can fill in missing keys. */
+  onJumpToSecrets?: () => void;
 };
 
 // ─── Security note ────────────────────────────────────────────────────────────
@@ -115,8 +139,46 @@ export function PreviewTab({
   containerStatus,
   containerUrl,
   onStartContainer,
+  latestReport,
+  onJumpToSecrets,
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
+  const [readinessDismissed, setReadinessDismissed] = useState(false);
+  // Secrets — used by the mobile readiness panel to flag missing keys
+  const { data: projectSecrets } = useListSecrets(project.id, {
+    query: { queryKey: getListSecretsQueryKey(project.id), enabled: !!project.id && isMobile },
+  });
+  const setSecretNames = new Set(
+    (projectSecrets ?? [])
+      .map((s) => (s as { name?: string }).name)
+      .filter((n): n is string => typeof n === "string" && n.length > 0),
+  );
+  const requiredSecretsFromReport = (() => {
+    if (!latestReport) return [] as string[];
+    const out = new Set<string>();
+    for (const integ of latestReport.integrationsNeeded ?? []) {
+      for (const k of integ.keysNeeded ?? []) if (typeof k === "string" && k) out.add(k);
+    }
+    for (const mod of latestReport.modulesWired ?? []) {
+      for (const k of mod.secretsConsumed ?? []) if (typeof k === "string" && k) out.add(k);
+    }
+    return Array.from(out);
+  })();
+  const missingSecrets = requiredSecretsFromReport.filter((k) => !setSecretNames.has(k));
+  // Re-surface the panel whenever the report's required secrets or native features change
+  // (e.g. a new build introduces additional integrations the user hasn't set up yet).
+  const readinessSignature = [
+    ...requiredSecretsFromReport,
+    "::native::",
+    ...(latestReport?.nativeFeatures ?? []),
+  ].join("|");
+  useEffect(() => {
+    setReadinessDismissed(false);
+  }, [readinessSignature]);
+  const showMobileReadiness =
+    isMobile &&
+    !readinessDismissed &&
+    (requiredSecretsFromReport.length > 0 || (latestReport?.nativeFeatures?.length ?? 0) > 0);
   const isReactVite = project.projectFormat === "react-vite" && !isMobile;
   const [platform, setPlatform] = useState<Platform>("web");
   const [device, setDevice] = useState<DeviceFrame>(isMobile ? "mobile" : "desktop");
@@ -1025,6 +1087,106 @@ export function PreviewTab({
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Mobile preview readiness panel — explains why buttons may not "work" + secret checklist */}
+      {showMobileReadiness && (
+        <div className="shrink-0 border-b border-purple-500/20 bg-purple-500/8">
+          <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
+            <Smartphone className="h-3.5 w-3.5 text-purple-300 shrink-0" />
+            <span className="flex-1 text-[11px] font-semibold text-purple-300">
+              Mobile preview readiness — what works here vs. on a real device
+            </span>
+            <button
+              onClick={() => setReadinessDismissed(true)}
+              className="shrink-0 text-purple-300/60 hover:text-purple-300 transition-colors"
+              title="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="px-3 pb-2 space-y-1.5">
+            <div className="flex items-start gap-2 bg-purple-500/10 border border-purple-500/20 rounded-lg px-2.5 py-2">
+              <Info className="h-3 w-3 text-purple-300 shrink-0 mt-0.5" />
+              <span className="flex-1 text-[11px] text-purple-200/90 leading-relaxed">
+                This window shows an{" "}
+                <span className="font-semibold">interactive mockup</span> of your mobile app
+                rendered in the browser. Buttons give visual feedback so you can walk the flow, but
+                anything that needs the phone&apos;s camera, GPS, push, deep links, or a backend
+                only runs on a real device — scan the Expo Go QR above to test for real.
+              </span>
+            </div>
+
+            {requiredSecretsFromReport.length > 0 && (
+              <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg px-2.5 py-2">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Plug className="h-3 w-3 text-purple-300 shrink-0" />
+                  <span className="text-[11px] font-semibold text-purple-200">
+                    Secrets needed for full functionality ({setSecretNames.size > 0 ? `${requiredSecretsFromReport.length - missingSecrets.length}/${requiredSecretsFromReport.length} set` : `0/${requiredSecretsFromReport.length} set`})
+                  </span>
+                  {onJumpToSecrets && missingSecrets.length > 0 && (
+                    <button
+                      onClick={onJumpToSecrets}
+                      className="ml-auto shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-purple-500/25 border border-purple-500/40 text-purple-100 hover:bg-purple-500/40 transition-colors whitespace-nowrap"
+                    >
+                      Set up secrets
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {requiredSecretsFromReport.map((key) => {
+                    const isSet = setSecretNames.has(key);
+                    return (
+                      <span
+                        key={key}
+                        className={cn(
+                          "inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border",
+                          isSet
+                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                            : "bg-amber-500/10 border-amber-500/30 text-amber-300",
+                        )}
+                        title={isSet ? "Set" : "Not set — buttons that use this will be no-ops"}
+                      >
+                        {isSet ? (
+                          <Check className="h-2.5 w-2.5" />
+                        ) : (
+                          <AlertTriangle className="h-2.5 w-2.5" />
+                        )}
+                        {key}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {(latestReport?.nativeFeatures?.length ?? 0) > 0 && (
+              <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg px-2.5 py-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <Smartphone className="h-3 w-3 text-purple-300 shrink-0" />
+                  <span className="text-[11px] font-semibold text-purple-200">
+                    Device-only features in this app
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {(latestReport?.nativeFeatures ?? []).map((f) => (
+                    <span
+                      key={f}
+                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border bg-blue-500/10 border-blue-500/30 text-blue-300"
+                    >
+                      <Smartphone className="h-2.5 w-2.5" />
+                      {f}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-[10px] text-purple-300/60 mt-1">
+                  These need a real phone — they will be simulated in the preview but only run on
+                  device through Expo Go.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
