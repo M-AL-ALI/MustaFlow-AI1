@@ -56,6 +56,33 @@ interface QueueRow {
   text: string;
 }
 
+type SpeechRecognitionResultEvent = {
+  resultIndex: number;
+  results: ArrayLike<{
+    isFinal: boolean;
+    0: { transcript: string };
+  }>;
+};
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((e: SpeechRecognitionResultEvent) => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: new () => SpeechRecognitionLike;
+    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
 export type ComposerAttachment = {
   kind: "image";
   url: string;
@@ -274,6 +301,15 @@ export function QueueComposer({
   const dragItemId = useRef<string | null>(null);
   const textareaRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
 
+  // ── Voice dictation (Web Speech API) ──────────────────────────────────────
+  const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceSessionIdRef = useRef<number>(0);
+  const voiceBaseTextRef = useRef<string>("");
+  const voiceTargetRowIdRef = useRef<string | null>(null);
+  const voiceSupported = useMemo(() => getSpeechRecognitionCtor() !== null, []);
+
   const isMultiRow = rows.length > 1;
 
   useEffect(() => {
@@ -305,6 +341,23 @@ export function QueueComposer({
   }, []);
 
   const removeRow = useCallback((id: string) => {
+    if (voiceTargetRowIdRef.current === id) {
+      voiceSessionIdRef.current += 1;
+      const rec = recognitionRef.current;
+      if (rec) {
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        try {
+          rec.abort();
+        } catch {
+          // ignore
+        }
+      }
+      recognitionRef.current = null;
+      voiceTargetRowIdRef.current = null;
+      setIsListening(false);
+    }
     setRows((prev) => {
       if (prev.length <= 1) return prev;
       return prev.filter((r) => r.id !== id);
@@ -312,6 +365,22 @@ export function QueueComposer({
   }, []);
 
   const clearQueue = useCallback(() => {
+    // Stop any active dictation — the row it was targeting is about to disappear.
+    voiceSessionIdRef.current += 1;
+    const rec = recognitionRef.current;
+    if (rec) {
+      rec.onresult = null;
+      rec.onerror = null;
+      rec.onend = null;
+      try {
+        rec.abort();
+      } catch {
+        // ignore
+      }
+    }
+    recognitionRef.current = null;
+    voiceTargetRowIdRef.current = null;
+    setIsListening(false);
     const newId = crypto.randomUUID();
     setRows([{ id: newId, text: "" }]);
     if (onPromptValueChange) onPromptValueChange("");
@@ -322,9 +391,159 @@ export function QueueComposer({
   const VARIANT_B_SUFFIX =
     "\n\n[VARIANT B — Design direction: bold, rich, dark palette, vibrant accent colors, eye-catching visuals]";
 
+  const stopVoiceDictation = useCallback(() => {
+    // Invalidate any in-flight session so late callbacks are ignored.
+    voiceSessionIdRef.current += 1;
+    const rec = recognitionRef.current;
+    if (rec) {
+      rec.onresult = null;
+      rec.onerror = null;
+      rec.onend = null;
+      try {
+        rec.abort();
+      } catch {
+        // ignore — already stopped
+      }
+    }
+    recognitionRef.current = null;
+    voiceTargetRowIdRef.current = null;
+    setIsListening(false);
+  }, []);
+
+  const startVoiceDictation = useCallback(() => {
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) {
+      setVoiceError(
+        "Voice input isn't supported in this browser — try Chrome, Edge, or Safari on desktop.",
+      );
+      return;
+    }
+    if (isListening) {
+      stopVoiceDictation();
+      return;
+    }
+    // Tear down any lingering instance before starting a fresh session.
+    if (recognitionRef.current) {
+      const old = recognitionRef.current;
+      old.onresult = null;
+      old.onerror = null;
+      old.onend = null;
+      try {
+        old.abort();
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    }
+    setVoiceError(null);
+    const targetRow = rows[0];
+    if (!targetRow) return;
+    voiceTargetRowIdRef.current = targetRow.id;
+    voiceBaseTextRef.current = targetRow.text;
+    voiceSessionIdRef.current += 1;
+    const sessionId = voiceSessionIdRef.current;
+
+    const rec = new Ctor();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || "en-US";
+    rec.onresult = (event) => {
+      if (voiceSessionIdRef.current !== sessionId) return; // stale session
+      let finalText = "";
+      let interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const r = event.results[i];
+        if (!r) continue;
+        const transcript = r[0]?.transcript ?? "";
+        if (r.isFinal) finalText += transcript;
+        else interimText += transcript;
+      }
+      const base = voiceBaseTextRef.current;
+      if (finalText) {
+        voiceBaseTextRef.current = (base + (base && !base.endsWith(" ") ? " " : "") + finalText)
+          .replace(/\s+/g, " ")
+          .trimStart();
+      }
+      const combined =
+        voiceBaseTextRef.current +
+        (interimText
+          ? (voiceBaseTextRef.current && !voiceBaseTextRef.current.endsWith(" ") ? " " : "") +
+            interimText
+          : "");
+      const rowId = voiceTargetRowIdRef.current;
+      if (!rowId) return;
+      // Conditional write + mirror updateRow's side effects in one pass.
+      // If the row no longer exists (sent / cleared / removed), auto-stop.
+      let rowStillExists = false;
+      let isSingleRow = false;
+      setRows((prev) => {
+        rowStillExists = prev.some((r) => r.id === rowId);
+        isSingleRow = prev.length === 1;
+        if (!rowStillExists) return prev;
+        return prev.map((r) => (r.id === rowId ? { ...r, text: combined } : r));
+      });
+      if (!rowStillExists) {
+        stopVoiceDictation();
+        return;
+      }
+      if (isSingleRow) {
+        if (onPromptValueChange) onPromptValueChange(combined);
+        onPromptForRouting(combined);
+      }
+    };
+    rec.onerror = (e) => {
+      if (voiceSessionIdRef.current !== sessionId) return;
+      const code = e?.error ?? "";
+      if (code === "not-allowed" || code === "service-not-allowed") {
+        setVoiceError(
+          "Microphone access blocked. Allow microphone access in your browser to dictate.",
+        );
+      } else if (code === "no-speech") {
+        setVoiceError(null);
+      } else if (code) {
+        setVoiceError(`Voice input error: ${code}`);
+      }
+      setIsListening(false);
+    };
+    rec.onend = () => {
+      if (voiceSessionIdRef.current !== sessionId) return;
+      setIsListening(false);
+      recognitionRef.current = null;
+      voiceTargetRowIdRef.current = null;
+    };
+    recognitionRef.current = rec;
+    try {
+      rec.start();
+      setIsListening(true);
+    } catch (err) {
+      setVoiceError(
+        `Could not start voice input: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      setIsListening(false);
+    }
+  }, [isListening, rows, stopVoiceDictation, onPromptValueChange, onPromptForRouting]);
+
+  // Cleanup recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // ignore
+        }
+        recognitionRef.current = null;
+      }
+    };
+  }, []);
+
   const handleSend = useCallback(async () => {
     const messages = rows.map((r) => r.text.trim()).filter(Boolean);
     if (messages.length === 0) return;
+    // Stop voice dictation before sending so late callbacks can't mutate the cleared composer.
+    if (isListening || recognitionRef.current) {
+      stopVoiceDictation();
+    }
 
     // Variant mode: expand a single prompt into two variant tasks sent as a batch
     if (variantMode && messages.length === 1) {
@@ -397,6 +616,8 @@ export function QueueComposer({
     onBatchStarted,
     onPromptValueChange,
     attachments,
+    isListening,
+    stopVoiceDictation,
   ]);
 
   const handleKeyDown = useCallback(
@@ -540,6 +761,47 @@ export function QueueComposer({
             </button>
           )}
 
+          {(isListening || voiceError) && (
+            <div
+              className={cn(
+                "mx-3 mt-1 mb-0.5 flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[10px]",
+                isListening
+                  ? "bg-red-500/10 text-red-300 border border-red-500/20"
+                  : "bg-amber-500/10 text-amber-300 border border-amber-500/20",
+              )}
+              role="status"
+              aria-live="polite"
+            >
+              <span className="flex items-center gap-1.5">
+                {isListening && (
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+                )}
+                {isListening
+                  ? "Listening — speak now. Review and edit the transcript before pressing Send."
+                  : voiceError}
+              </span>
+              {isListening && (
+                <button
+                  type="button"
+                  onClick={stopVoiceDictation}
+                  className="text-[10px] font-medium text-red-300 hover:text-red-200 underline underline-offset-2"
+                >
+                  Stop
+                </button>
+              )}
+              {!isListening && voiceError && (
+                <button
+                  type="button"
+                  onClick={() => setVoiceError(null)}
+                  className="text-muted-foreground/70 hover:text-foreground"
+                  aria-label="Dismiss"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
+
           {(attachments.length > 0 || uploadingCount > 0) && (
             <div className="px-3 pt-1.5 flex flex-wrap gap-1.5">
               {attachments.map((a, i) => {
@@ -660,8 +922,25 @@ export function QueueComposer({
                   <Paintbrush2 className="h-3.5 w-3.5" />
                 </button>
                 <button
-                  className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
-                  title="Voice"
+                  type="button"
+                  onClick={startVoiceDictation}
+                  disabled={!voiceSupported}
+                  className={cn(
+                    "w-6 h-6 flex items-center justify-center rounded-md transition-colors",
+                    isListening
+                      ? "text-red-400 bg-red-500/15 hover:bg-red-500/25 animate-pulse"
+                      : "text-muted-foreground hover:text-foreground hover:bg-background/60",
+                    !voiceSupported && "opacity-40 cursor-not-allowed",
+                  )}
+                  title={
+                    !voiceSupported
+                      ? "Voice input not supported in this browser"
+                      : isListening
+                        ? "Stop dictation — review the transcript before sending"
+                        : "Dictate by voice — transcript appears here so you can edit before sending"
+                  }
+                  aria-pressed={isListening}
+                  aria-label={isListening ? "Stop voice dictation" : "Start voice dictation"}
                 >
                   <Mic className="h-3.5 w-3.5" />
                 </button>
