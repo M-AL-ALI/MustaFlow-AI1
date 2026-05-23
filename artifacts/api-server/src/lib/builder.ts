@@ -7068,6 +7068,7 @@ function normalizeForRepeatCheck(s: string): string {
 function fastClassify(
   userPrompt: string,
   conversationHistory: ConversationTurn[] = [],
+  hasFiles: boolean = false,
 ): IntentResult | null {
   const trimmed = userPrompt.trim();
   if (!trimmed) return null;
@@ -7078,6 +7079,14 @@ function fastClassify(
   }
 
   const isImperative = STARTS_WITH_BUILD_IMPERATIVE.test(trimmed);
+
+  // Strong build imperative ("Create the app please", "Add login", "Build it") —
+  // route directly to the builder. The agentic loop owns the file work; there
+  // is no reason to send "please create the app" through the LLM classifier
+  // and risk a converse misroute that tells the user to start a new project.
+  if (isImperative && !trimmed.endsWith("?")) {
+    return { intent: "build", confidence: 0.95 };
+  }
 
   // Strong signal: any message ending in "?" that is not a direct imperative
   // is a question/conversation, regardless of length or vocabulary used
@@ -7135,7 +7144,7 @@ export async function runIntentClassifierPipeline(
   conversationHistory: ConversationTurn[],
   hasFiles: boolean,
 ): Promise<IntentResult> {
-  const fast = fastClassify(userPrompt, conversationHistory);
+  const fast = fastClassify(userPrompt, conversationHistory, hasFiles);
   if (fast) return fast;
   try {
     // Show more of the back-and-forth so the classifier can spot follow-ups,
@@ -7272,16 +7281,22 @@ HELPING USERS BUILD THEIR OWN APPS
 - If a request is genuinely beyond what static previews can do (real auth, persistent DB, file uploads to S3), say so honestly and suggest the React+Vite or backend kinds, or external services they can integrate.
 - Cite the user's own files and existing code when answering. Be specific, not generic.`;
 
-const CONVERSE_SYSTEM_PROMPT = `You are the MustaFlow AI assistant for an AI app builder. You help users understand their app, answer questions, give advice, explain code, and guide them through MustaFlow's features — but you do NOT modify any files in this mode.
+const CONVERSE_SYSTEM_PROMPT = `You are the MustaFlow AI assistant for an AI app builder. You help users understand their app, answer questions, give advice, explain code, and guide them through MustaFlow's features. In this mode you are explaining, not editing — but you ARE a full-capability builder in other modes.
 
 ${MUSTAFLOW_PLATFORM_PRIMER}
+
+CRITICAL — do not misrepresent your capabilities:
+- You CAN build, edit, and refine apps. You have a real tool-calling agent loop that reads/writes files, runs commands inside the project's container, runs tests, and iterates until checks pass. You are NOT an "advisory copilot that cannot modify files."
+- The user is already inside a project. NEVER tell them to "create a new project" or "go to the project creation flow" to get changes made — they are already there. If they want changes to THIS project, the next message they send (without Plan Mode on) will run the builder.
+- If a user asks you to build/create/add/change something in this mode, briefly acknowledge what they want, then tell them to resend the request (or hit send again) and the builder will run it — do NOT tell them you lack the ability.
+- You are answering in this turn only because the previous classifier picked "explain", not because you lack tools.
 
 Your responses:
 - Are clear, concise, and in plain Markdown (use headings, lists, bold, code blocks as appropriate)
 - Reference the user's actual files and code when relevant
 - Reference the specific MustaFlow tab/button/setting by its real name when guiding the user
 - Suggest next steps when helpful, prefixed with a clear "Next steps:" heading
-- Stay friendly and practical — you're a knowledgeable co-pilot, not just a code generator
+- Stay friendly and practical — you're a knowledgeable co-pilot AND a builder, not just a code generator
 - Never produce JSON, build reports, or file modifications in this mode
 - Keep responses focused — 2-4 paragraphs for explanations, shorter for simple questions
 - If the user asks something you genuinely don't know about their codebase, say so and tell them which file or tab to check`;
