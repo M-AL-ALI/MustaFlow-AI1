@@ -7,6 +7,7 @@
  */
 import type { ProjectUpdateAgentMode } from './projectUpdateAgentMode';
 import type { ProjectUpdateDefaultAgent } from './projectUpdateDefaultAgent';
+import type { ProjectUpdatePolicyStrictness } from './projectUpdatePolicyStrictness';
 import type { ProjectUpdateStatus } from './projectUpdateStatus';
 
 export interface ProjectUpdate {
@@ -14,6 +15,7 @@ export interface ProjectUpdate {
   description?: string;
   status?: ProjectUpdateStatus;
   agentMode?: ProjectUpdateAgentMode;
+  policyStrictness?: ProjectUpdatePolicyStrictness;
   /** User's preferred agent for this project. */
   defaultAgent?: ProjectUpdateDefaultAgent;
   siteTitle?: string;

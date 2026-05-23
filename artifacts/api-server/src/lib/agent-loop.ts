@@ -33,14 +33,19 @@ import type { AgentMode } from "./ai";
 import type { BuilderFile, BuilderResult, Blueprint, ConversationTurn } from "./builder";
 import type { TaskReport } from "@workspace/db";
 import { logger } from "./logger";
+import { CHECK_PROFILES, resolveStackId, type CheckSpec, type StackId } from "./check-profiles";
 import {
-  CHECK_PROFILES,
-  RUN_COMMAND_BLOCKLIST,
-  RUN_COMMAND_WHITELIST,
-  resolveStackId,
-  type CheckSpec,
-  type StackId,
-} from "./check-profiles";
+  DEFAULT_POLICY_STRICTNESS,
+  PER_CALL_STDOUT_CAP,
+  PER_CALL_TIMEOUT_CAP_MS,
+  PER_CALL_TIMEOUT_DEFAULT_MS,
+  PKG_INSTALL_TIMEOUT_MS,
+  evaluatePkgInstall,
+  evaluateRunCommand,
+  isPolicyStrictness,
+  type PolicyStrictness,
+} from "./policy";
+import { db, toolAuditTable } from "@workspace/db";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -66,6 +71,10 @@ export interface AgentLoopInput {
   existingFiles: BuilderFile[];
   /** Fly.io machine id, when the project has a provisioned container. */
   containerId?: string | null;
+  /** Project policy strictness (safe|standard|permissive). Defaults to "standard". */
+  policyStrictness?: PolicyStrictness | null;
+  /** Owning task id — used to tag audit rows. */
+  taskId?: number | null;
   onEvent: AgentLoopEvent;
   signal: AbortSignal;
 }
@@ -137,7 +146,7 @@ const WALL_CLOCK_MS = Math.max(
   parseInt(process.env.AGENTIC_BUILDER_WALL_CLOCK_MS ?? "480000", 10),
 );
 const REPEATED_ERROR_CAP = 3;
-const MAX_OBSERVATION_CHARS = 8_000;
+const MAX_OBSERVATION_CHARS = PER_CALL_STDOUT_CAP;
 const MAX_FILE_BYTES = 64_000;
 
 const MODEL_FOR_MODE: Record<AgentMode, string> = {
@@ -165,38 +174,11 @@ export function sanitizePath(rawPath: unknown): string | null {
   return trimmed;
 }
 
-/** Read-only inspection commands the agent can always invoke. */
-const READ_ONLY_INSPECTORS = new Set([
-  "ls",
-  "cat",
-  "head",
-  "tail",
-  "grep",
-  "rg",
-  "find",
-  "wc",
-  "echo",
-  "pwd",
-  "true",
-  "false",
-]);
-
-/** Shell-metacharacters that allow command chaining or substitution. */
-const SHELL_METACHAR_RE = /[;&|`$<>]|\$\(/;
-
 /**
- * Decide whether an argv is allowed to run.
- *
- * Layered policy:
- *  1. Global blocklist substring scan (destructive ops, network exfil patterns).
- *  2. Reject shell wrappers (`sh -lc`/`bash -c`) whose inner command contains
- *     chaining or substitution metachars (`;`, `&`, `|`, backticks, `$(...)`,
- *     redirection). This prevents `npm install; curl https://...` bypasses.
- *  3. Per-stack allow list: an argv must EITHER (a) be a read-only inspector,
- *     (b) match the install command for this stack, OR (c) match one of the
- *     stack's declared check argvs exactly. This keeps execution within the
- *     vetted command set declared in CHECK_PROFILES — generic whitelist
- *     bypasses via wrapper flags are not allowed.
+ * Back-compat shim — older call sites and tests import `isCommandAllowed`.
+ * Delegates to the policy module, using the default "standard" strictness.
+ * New code should call `evaluateRunCommand` from ./policy directly with the
+ * project's configured strictness.
  */
 export function isCommandAllowed(
   argv: string[],
@@ -205,63 +187,8 @@ export function isCommandAllowed(
     installCmd: string[] | null;
   },
 ): { ok: boolean; reason?: string } {
-  if (!Array.isArray(argv) || argv.length === 0) {
-    return { ok: false, reason: "empty argv" };
-  }
-  const joined = argv.join(" ").toLowerCase();
-  for (const bad of RUN_COMMAND_BLOCKLIST) {
-    if (joined.includes(bad.toLowerCase())) {
-      return { ok: false, reason: `blocked pattern: ${bad.trim()}` };
-    }
-  }
-
-  const first = argv[0]?.toLowerCase() ?? "";
-
-  // 2. Shell-wrapper handling — reject inner chaining/substitution.
-  if ((first === "sh" || first === "bash") && argv.length >= 3) {
-    const inner = (argv[argv.length - 1] ?? "").trim();
-    if (inner.length === 0) return { ok: false, reason: "empty shell command" };
-    if (SHELL_METACHAR_RE.test(inner)) {
-      // Allow only if the inner exactly matches one of the stack's declared argvs
-      const matchesDeclared = policy.allowedExactArgvs.some(
-        (declared) =>
-          declared[0] === argv[0] &&
-          declared[1] === argv[1] &&
-          declared[declared.length - 1] === argv[argv.length - 1],
-      );
-      const matchesInstall =
-        policy.installCmd?.[0] === argv[0] &&
-        policy.installCmd?.[1] === argv[1] &&
-        policy.installCmd?.[policy.installCmd.length - 1] === argv[argv.length - 1];
-      if (!matchesDeclared && !matchesInstall) {
-        return { ok: false, reason: "shell chaining/substitution not allowed in ad-hoc commands" };
-      }
-    }
-    const innerHead = inner.split(/\s+/)[0]?.toLowerCase() ?? "";
-    if (!RUN_COMMAND_WHITELIST.some((w) => innerHead === w || innerHead.startsWith(`${w}/`))) {
-      return { ok: false, reason: `binary not in whitelist: ${innerHead}` };
-    }
-  } else {
-    const head = first.split("/").pop() ?? "";
-    if (!RUN_COMMAND_WHITELIST.includes(head)) {
-      return { ok: false, reason: `binary not in whitelist: ${head}` };
-    }
-  }
-
-  // 3. Per-stack allow-list. Read-only inspectors are always allowed.
-  const headForCheck = first === "sh" || first === "bash" ? "" : (first.split("/").pop() ?? "");
-  if (READ_ONLY_INSPECTORS.has(headForCheck)) return { ok: true };
-
-  const sameArgv = (a: string[], b: string[]) =>
-    a.length === b.length && a.every((tok, i) => tok === b[i]);
-  if (policy.installCmd && sameArgv(argv, policy.installCmd)) return { ok: true };
-  if (policy.allowedExactArgvs.some((d) => sameArgv(argv, d))) return { ok: true };
-
-  return {
-    ok: false,
-    reason:
-      "command not in this stack's allow-list — use one of the declared checks, the install command, or a read-only inspector",
-  };
+  const r = evaluateRunCommand(argv, DEFAULT_POLICY_STRICTNESS, policy);
+  return r.ok ? { ok: true } : { ok: false, reason: r.reason };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -425,7 +352,7 @@ const TOOLS: ChatCompletionTool[] = [
     function: {
       name: "run_command",
       description:
-        "Run a shell command inside the project's container (or an in-process validator for static-html / mobile projects). Argv must be from the per-stack whitelist. Returns combined stdout+stderr (truncated).",
+        "Run a shell command inside the project's container (or an in-process validator for static-html / mobile projects). Pass argv as an array; avoid shell metacharacters (;, &, |, redirects, backticks, $()). Destructive ops, raw network tools (curl/wget/nc/ssh), and inline code-eval flags are blocked by policy. For installing dependencies, use `pkg_install` instead — it is faster, structured, and surfaces version conflicts cleanly. Returns combined stdout+stderr (truncated).",
       parameters: {
         type: "object",
         properties: {
@@ -437,6 +364,34 @@ const TOOLS: ChatCompletionTool[] = [
           timeout_ms: { type: "integer" },
         },
         required: ["argv"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "pkg_install",
+      description:
+        "Install a package into the project. Use this instead of running raw npm/pip via run_command — it is structured, validated, and audited. Manager picks the registry: npm/pnpm/yarn use the npm registry, pip uses PyPI.",
+      parameters: {
+        type: "object",
+        properties: {
+          manager: {
+            type: "string",
+            enum: ["npm", "pnpm", "yarn", "pip"],
+          },
+          pkg: {
+            type: "string",
+            description: 'Package name (e.g. "zod", "@types/node", "fastapi").',
+          },
+          version: {
+            type: "string",
+            description:
+              'Optional version spec. npm/pnpm/yarn: semver range like "^3.22.0" or "latest". pip: PEP 440 spec like "2.5.0" or ">=1.0,<2".',
+          },
+        },
+        required: ["manager", "pkg"],
         additionalProperties: false,
       },
     },
@@ -509,11 +464,12 @@ function buildSystemPrompt(
   const checkList = profile.checks.map((c) => `  • ${c.id} (${c.label})`).join("\n");
   const isStatic = stack === "static-html";
   const isMobile = stack === "mobile-cross";
+  const strictness = input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS;
   const platformNote = isStatic
     ? "This is a STATIC web app (HTML/CSS/JS + Tailwind/lucide via CDN). No npm or build tools — `run_command` is restricted to in-process validators."
     : isMobile
       ? "This is a MOBILE cross-platform app (Expo SDK 52 / Expo Router v3 / NativeWind v4). Generate an Expo project AND an index.html web preview. `run_command` is restricted to in-process structural validators."
-      : `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command.`;
+      : `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
   return [
     `You are MustaFlow's agentic app builder. Your job is to ${input.mode === "build" ? "create" : "refine"} a working ${stack} application that satisfies the user's request.`,
     "",
@@ -533,7 +489,9 @@ function buildSystemPrompt(
     `- Maximum ${STEP_CAP} tool-calling steps.`,
     `- Maximum ${Math.round(WALL_CLOCK_MS / 60000)} minutes wall-clock.`,
     `- After ${REPEATED_ERROR_CAP} consecutive failures of the same operation, the loop aborts.`,
-    "- `run_command` argv is whitelisted; destructive commands are blocked.",
+    `- Policy strictness for this project: ${strictness}.`,
+    "- `run_command` deny-list blocks destructive ops, raw network sockets (curl/wget/nc/ssh), `| sh` pipelines, and inline code-eval flags.",
+    "- `pkg_install` is the only sanctioned way to add dependencies (manager + package + optional version).",
     "- All file paths are sandboxed to the project root — no `..`, no absolute paths.",
     "",
     "## Output discipline",
@@ -1018,6 +976,86 @@ async function safeEvent(fn: AgentLoopEvent, type: string, msg: string): Promise
   }
 }
 
+/**
+ * Best-effort extraction of the resolved version from a package manager's
+ * stdout. Returns null when nothing matches — the structured tool result
+ * still includes the raw output for the model to fall back on.
+ */
+function extractInstalledVersion(
+  manager: "npm" | "pnpm" | "yarn" | "pip",
+  pkg: string,
+  output: string,
+): string | null {
+  const esc = pkg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns: RegExp[] = [];
+  if (manager === "npm" || manager === "pnpm" || manager === "yarn") {
+    // "+ pkg@1.2.3", "added pkg@1.2.3", "pkg 1.2.3"
+    patterns.push(new RegExp(`${esc}@(\\d[\\w.+\\-]*)`));
+    patterns.push(new RegExp(`${esc}\\s+(\\d[\\w.+\\-]*)`));
+  } else if (manager === "pip") {
+    // "Successfully installed pkg-1.2.3"
+    patterns.push(new RegExp(`Successfully installed[^\\n]*${esc}-(\\d[\\w.+\\-]*)`, "i"));
+    patterns.push(new RegExp(`${esc}==(\\d[\\w.+\\-]*)`));
+  }
+  for (const p of patterns) {
+    const m = output.match(p);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
+/** Detect lockfile mutation hints in manager output. Best-effort. */
+function detectLockfileTouched(
+  manager: "npm" | "pnpm" | "yarn" | "pip",
+  output: string,
+): { lockfile: string; touched: boolean } | null {
+  const lockfile =
+    manager === "npm"
+      ? "package-lock.json"
+      : manager === "pnpm"
+        ? "pnpm-lock.yaml"
+        : manager === "yarn"
+          ? "yarn.lock"
+          : null;
+  if (!lockfile) return null;
+  // Most managers mention writing/updating the lockfile or list "added N packages".
+  const touched = /lock|added \d+ package|updated|wrote/i.test(output);
+  return { lockfile, touched };
+}
+
+async function writeToolAudit(
+  ctx: ToolCtx,
+  row: {
+    toolName: string;
+    argv: string[];
+    exitCode: number;
+    durationMs: number;
+    blocked: boolean;
+    blockReason: string | null;
+    stdoutTail: string;
+    stderrTail: string;
+  },
+): Promise<void> {
+  try {
+    await db.insert(toolAuditTable).values({
+      projectId: ctx.input.projectId,
+      taskId: ctx.input.taskId ?? null,
+      toolName: row.toolName,
+      stack: ctx.stack,
+      argv: row.argv,
+      exitCode: row.exitCode,
+      stdoutTail: row.stdoutTail.slice(0, 400),
+      stderrTail: row.stderrTail.slice(0, 400),
+      durationMs: row.durationMs,
+      blocked: row.blocked,
+      blockReason: row.blockReason,
+      policyStrictness: ctx.input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS,
+    });
+  } catch (err) {
+    logger.warn({ err, projectId: ctx.input.projectId }, "tool_audit insert failed (non-fatal)");
+  }
+}
+
 function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
@@ -1275,21 +1313,41 @@ async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: st
           observation: `[${kind}] exit=${r.exitCode}\n${r.output}`,
         };
       }
-      const check = isCommandAllowed(argv, {
+      const strictness = ctx.input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS;
+      const check = evaluateRunCommand(argv, strictness, {
         allowedExactArgvs: ctx.profile.checks.map((c) => c.argv),
         installCmd: ctx.profile.installCmd,
       });
       if (!check.ok) {
+        const reason = check.reason ?? "not allowed";
         const rec: CommandRecord = {
           step,
           argv,
           exitCode: 126,
           durationMs: 0,
           stdoutPreview: "",
-          stderrPreview: `BLOCKED: ${check.reason ?? "not allowed"}`,
+          stderrPreview: `BLOCKED: ${reason}`,
         };
         commandsRun.push(rec);
-        return { ok: false, observation: `BLOCKED: ${check.reason ?? "not allowed"}` };
+        await writeToolAudit(ctx, {
+          toolName: "run_command",
+          argv,
+          exitCode: 126,
+          durationMs: 0,
+          blocked: true,
+          blockReason: reason,
+          stdoutTail: "",
+          stderrTail: `BLOCKED: ${reason}`,
+        });
+        return {
+          ok: false,
+          observation: JSON.stringify({
+            blocked: true,
+            reason,
+            policyStrictness: strictness,
+            argv,
+          }),
+        };
       }
       // In-process magic prefix
       if (argv[0] === "__inprocess__") {
@@ -1332,8 +1390,8 @@ async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: st
 
       const timeoutMs =
         typeof args.timeout_ms === "number" && args.timeout_ms > 0
-          ? Math.min(args.timeout_ms, 5 * 60_000)
-          : 2 * 60_000;
+          ? Math.min(args.timeout_ms, PER_CALL_TIMEOUT_CAP_MS)
+          : PER_CALL_TIMEOUT_DEFAULT_MS;
       const t = Date.now();
       const r = await execWithTimeout(
         containerState.id!,
@@ -1342,14 +1400,25 @@ async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: st
         timeoutMs,
         input.signal,
       );
-      const exitCode = r.ok ? 0 : 1;
+      const dur = Date.now() - t;
+      const exitCode = r.timedOut ? 124 : r.ok ? 0 : 1;
       commandsRun.push({
         step,
         argv,
         exitCode,
-        durationMs: Date.now() - t,
+        durationMs: dur,
         stdoutPreview: r.ok ? r.output.slice(0, 400) : "",
         stderrPreview: r.ok ? "" : r.output.slice(0, 400),
+      });
+      await writeToolAudit(ctx, {
+        toolName: "run_command",
+        argv,
+        exitCode,
+        durationMs: dur,
+        blocked: false,
+        blockReason: null,
+        stdoutTail: r.ok ? r.output.slice(-400) : "",
+        stderrTail: r.ok ? "" : r.output.slice(-400),
       });
       if (r.aborted) return { ok: false, observation: "ERROR: aborted by user" };
       if (r.timedOut)
@@ -1357,6 +1426,139 @@ async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: st
       return {
         ok: r.ok,
         observation: `exit=${exitCode}\n${r.output.slice(0, MAX_OBSERVATION_CHARS)}`,
+      };
+    }
+    case "pkg_install": {
+      const strictness = ctx.input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS;
+      const decision = evaluatePkgInstall(
+        { manager: args.manager, pkg: args.pkg, version: args.version },
+        strictness,
+      );
+      if (!decision.ok) {
+        const reason = decision.reason;
+        await writeToolAudit(ctx, {
+          toolName: "pkg_install",
+          argv: [String(args.manager ?? "?"), String(args.pkg ?? "?"), String(args.version ?? "")],
+          exitCode: 126,
+          durationMs: 0,
+          blocked: true,
+          blockReason: reason,
+          stdoutTail: "",
+          stderrTail: `BLOCKED: ${reason}`,
+        });
+        return {
+          ok: false,
+          observation: JSON.stringify({
+            blocked: true,
+            reason,
+            policyStrictness: strictness,
+            manager: args.manager ?? null,
+            pkg: args.pkg ?? null,
+            version: args.version ?? null,
+          }),
+        };
+      }
+      if (stack === "static-html" || stack === "mobile-cross") {
+        const reason = "pkg_install not available for this stack";
+        await writeToolAudit(ctx, {
+          toolName: "pkg_install",
+          argv: decision.argv,
+          exitCode: 126,
+          durationMs: 0,
+          blocked: true,
+          blockReason: reason,
+          stdoutTail: "",
+          stderrTail: `BLOCKED: ${reason}`,
+        });
+        return {
+          ok: false,
+          observation: JSON.stringify({
+            blocked: true,
+            reason,
+            policyStrictness: strictness,
+            manager: decision.manager,
+            pkg: decision.pkg,
+            version: decision.version,
+          }),
+        };
+      }
+      if (!containerState.id) {
+        const prov = await ensureContainerProvisioned(ctx);
+        if (!prov.ok) {
+          return {
+            ok: false,
+            observation: `ERROR: cannot provision container: ${prov.reason ?? "unknown"}`,
+          };
+        }
+      }
+      await safeEvent(
+        input.onEvent,
+        "narration",
+        `Installing ${decision.pkg}${decision.version ? `@${decision.version}` : ""} via ${decision.manager}…`,
+      );
+      const t = Date.now();
+      const r = await execWithTimeout(
+        containerState.id!,
+        decision.argv,
+        input.projectId,
+        PKG_INSTALL_TIMEOUT_MS,
+        input.signal,
+      );
+      const dur = Date.now() - t;
+      const exitCode = r.timedOut ? 124 : r.ok ? 0 : 1;
+      commandsRun.push({
+        step,
+        argv: decision.argv,
+        exitCode,
+        durationMs: dur,
+        stdoutPreview: r.ok ? r.output.slice(0, 400) : "",
+        stderrPreview: r.ok ? "" : r.output.slice(0, 400),
+      });
+      await writeToolAudit(ctx, {
+        toolName: "pkg_install",
+        argv: decision.argv,
+        exitCode,
+        durationMs: dur,
+        blocked: false,
+        blockReason: null,
+        stdoutTail: r.ok ? r.output.slice(-400) : "",
+        stderrTail: r.ok ? "" : r.output.slice(-400),
+      });
+      if (r.aborted) return { ok: false, observation: "ERROR: aborted by user" };
+      if (r.timedOut)
+        return {
+          ok: false,
+          observation: JSON.stringify({
+            ok: false,
+            manager: decision.manager,
+            pkg: decision.pkg,
+            requestedVersion: decision.version || null,
+            installedVersion: null,
+            lockfileDelta: null,
+            exitCode,
+            timedOut: true,
+            error: `pkg_install exceeded ${PKG_INSTALL_TIMEOUT_MS}ms timeout`,
+          }),
+        };
+      // Best-effort: extract the resolved/installed version from the manager
+      // output (npm/pnpm/pip all print it). Lockfile delta is left null when
+      // we can't cheaply diff it — the model can call list_files on the
+      // lockfile if it needs more detail.
+      const installedVersion = extractInstalledVersion(decision.manager, decision.pkg, r.output);
+      const lockfileDelta = detectLockfileTouched(decision.manager, r.output);
+      return {
+        ok: r.ok,
+        observation: JSON.stringify({
+          ok: r.ok,
+          manager: decision.manager,
+          pkg: decision.pkg,
+          requestedVersion: decision.version || null,
+          installedVersion,
+          lockfileDelta,
+          exitCode,
+          timedOut: false,
+          output: r.output.slice(0, MAX_OBSERVATION_CHARS),
+        }),
       };
     }
     case "report_progress": {

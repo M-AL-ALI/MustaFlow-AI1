@@ -20,7 +20,9 @@ import {
   creditTransactionsTable,
   deploymentLogsTable,
   secretAuditLogTable,
+  toolAuditTable,
 } from "@workspace/db";
+import { and, gte } from "drizzle-orm";
 import { requireAdmin } from "../lib/adminAuth";
 import { errorsPerDay } from "../lib/prodLogs";
 
@@ -400,6 +402,47 @@ router.get("/admin/audit-log", async (req, res): Promise<void> => {
     total: totalRow?.total ?? 0,
     limit,
     offset,
+  });
+});
+
+// ── GET /api/admin/blocked-commands ───────────────────────────────────────────
+// Returns blocked-command counts per project over the last N days, plus a
+// sample of recent blocked rows. Used by the admin dashboard tile.
+// Query params: days (1–90, default 7), sampleLimit (1–100, default 25)
+router.get("/admin/blocked-commands", async (req, res): Promise<void> => {
+  const rawDays = Number(req.query["days"] ?? 7);
+  const rawSample = Number(req.query["sampleLimit"] ?? 25);
+  const days = Math.min(Math.max(1, isNaN(rawDays) ? 7 : rawDays), 90);
+  const sampleLimit = Math.min(Math.max(1, isNaN(rawSample) ? 25 : rawSample), 100);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const perProject = await db
+    .select({
+      projectId: toolAuditTable.projectId,
+      blocked: count(),
+    })
+    .from(toolAuditTable)
+    .where(and(eq(toolAuditTable.blocked, true), gte(toolAuditTable.createdAt, since)))
+    .groupBy(toolAuditTable.projectId)
+    .orderBy(desc(count()));
+
+  const [totalRow] = await db
+    .select({ total: count() })
+    .from(toolAuditTable)
+    .where(and(eq(toolAuditTable.blocked, true), gte(toolAuditTable.createdAt, since)));
+
+  const samples = await db
+    .select()
+    .from(toolAuditTable)
+    .where(and(eq(toolAuditTable.blocked, true), gte(toolAuditTable.createdAt, since)))
+    .orderBy(desc(toolAuditTable.createdAt))
+    .limit(sampleLimit);
+
+  res.json({
+    sinceDays: days,
+    totalBlocked: totalRow?.total ?? 0,
+    perProject,
+    samples,
   });
 });
 

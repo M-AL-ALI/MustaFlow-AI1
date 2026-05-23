@@ -119,6 +119,18 @@ export const ProjectAgentMode = {
 } as const;
 
 /**
+ * Controls the agent loop's command policy. safe = legacy whitelist; standard (default) = broad allow + deny-list; permissive = admin-only, skips registry allowlist.
+ */
+export type ProjectPolicyStrictness = typeof ProjectPolicyStrictness[keyof typeof ProjectPolicyStrictness];
+
+
+export const ProjectPolicyStrictness = {
+  safe: 'safe',
+  standard: 'standard',
+  permissive: 'permissive',
+} as const;
+
+/**
  * Current dev container lifecycle state.
  */
 export type ProjectContainerStatus = typeof ProjectContainerStatus[keyof typeof ProjectContainerStatus];
@@ -220,6 +232,8 @@ export interface Project {
   platform?: ProjectPlatform;
   status: ProjectStatus;
   agentMode: ProjectAgentMode;
+  /** Controls the agent loop's command policy. safe = legacy whitelist; standard (default) = broad allow + deny-list; permissive = admin-only, skips registry allowlist. */
+  policyStrictness?: ProjectPolicyStrictness;
   /**
      * Soft-delete timestamp. Present only on /projects/trash responses; null/omitted for active projects.
      * @nullable
@@ -363,6 +377,15 @@ export const ProjectUpdateAgentMode = {
   pro: 'pro',
 } as const;
 
+export type ProjectUpdatePolicyStrictness = typeof ProjectUpdatePolicyStrictness[keyof typeof ProjectUpdatePolicyStrictness];
+
+
+export const ProjectUpdatePolicyStrictness = {
+  safe: 'safe',
+  standard: 'standard',
+  permissive: 'permissive',
+} as const;
+
 /**
  * User's preferred agent for this project.
  */
@@ -380,6 +403,7 @@ export interface ProjectUpdate {
   description?: string;
   status?: ProjectUpdateStatus;
   agentMode?: ProjectUpdateAgentMode;
+  policyStrictness?: ProjectUpdatePolicyStrictness;
   /** User's preferred agent for this project. */
   defaultAgent?: ProjectUpdateDefaultAgent;
   siteTitle?: string;

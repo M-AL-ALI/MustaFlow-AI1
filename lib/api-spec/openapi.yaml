@@ -3168,6 +3168,10 @@ components:
         agentMode:
           type: string
           enum: [lite, eco, power, pro]
+        policyStrictness:
+          type: string
+          enum: [safe, standard, permissive]
+          description: "Controls the agent loop's command policy. safe = legacy whitelist; standard (default) = broad allow + deny-list; permissive = admin-only, skips registry allowlist."
         deletedAt:
           {
             type: ["string", "null"],
@@ -3298,6 +3302,9 @@ components:
         agentMode:
           type: string
           enum: [lite, eco, power, pro]
+        policyStrictness:
+          type: string
+          enum: [safe, standard, permissive]
         defaultAgent:
           type: string
           enum: [planning, task, main]

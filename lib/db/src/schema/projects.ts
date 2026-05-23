@@ -107,6 +107,11 @@ export const projectsTable = pgTable("projects", {
   // returns a structured verdict + findings. Critical/fail verdicts trigger one auto-fix turn.
   // Charged as a separate flat-rate credit (2 credits). Default true — opt-out per project.
   architectReviewEnabled: boolean("architect_review_enabled").notNull().default(true),
+  // policyStrictness: controls how strict the agent loop's command policy is.
+  // "safe"       — legacy whitelist (read-only inspectors + declared check argvs only).
+  // "standard"   — broad allow with deny-list (default).
+  // "permissive" — admin-only; skips registry allowlist for pkg_install.
+  policyStrictness: text("policy_strictness").notNull().default("standard"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

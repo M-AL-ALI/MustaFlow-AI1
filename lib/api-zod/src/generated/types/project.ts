@@ -12,6 +12,7 @@ import type { ProjectDbStatus } from './projectDbStatus';
 import type { ProjectDefaultAgent } from './projectDefaultAgent';
 import type { ProjectKind } from './projectKind';
 import type { ProjectPlatform } from './projectPlatform';
+import type { ProjectPolicyStrictness } from './projectPolicyStrictness';
 import type { ProjectProdContainerStatus } from './projectProdContainerStatus';
 import type { ProjectProjectFormat } from './projectProjectFormat';
 import type { ProjectStack } from './projectStack';
@@ -28,6 +29,8 @@ export interface Project {
   platform?: ProjectPlatform;
   status: ProjectStatus;
   agentMode: ProjectAgentMode;
+  /** Controls the agent loop's command policy. safe = legacy whitelist; standard (default) = broad allow + deny-list; permissive = admin-only, skips registry allowlist. */
+  policyStrictness?: ProjectPolicyStrictness;
   /**
      * Soft-delete timestamp. Present only on /projects/trash responses; null/omitted for active projects.
      * @nullable

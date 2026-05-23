@@ -1289,6 +1289,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 planContext: input.planContext ?? null,
                 existingFiles: [],
                 containerId: project.containerId ?? null,
+                policyStrictness:
+                  (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
+                  null,
+                taskId,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
               });
@@ -1634,6 +1638,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 planContext: input.planContext ?? null,
                 existingFiles,
                 containerId: project.containerId ?? null,
+                policyStrictness:
+                  (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
+                  null,
+                taskId,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
               });

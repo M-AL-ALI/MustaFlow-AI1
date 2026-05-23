@@ -1217,6 +1217,24 @@ router.patch("/projects/:id", requireProjectOwnership, async (req, res): Promise
     return;
   }
 
+  // Permissive policy strictness is admin-only: it relaxes the egress
+  // allowlist on pkg_install (private registries) and is therefore reserved
+  // for internal/trusted projects. Owners can freely choose between `safe`
+  // and `standard`.
+  const requestedStrictness = (parsed.data as { policyStrictness?: string }).policyStrictness;
+  if (requestedStrictness === "permissive") {
+    const { getAuth } = await import("@clerk/express");
+    const { isAdminUser } = await import("../lib/adminAuth");
+    const userId = getAuth(req).userId;
+    const allowed = userId ? await isAdminUser(userId) : false;
+    if (!allowed) {
+      res.status(403).json({
+        error: "Only admins can enable 'permissive' policy strictness.",
+      });
+      return;
+    }
+  }
+
   const [project] = await db
     .update(projectsTable)
     .set({ ...parsed.data, updatedAt: sql`now()` })

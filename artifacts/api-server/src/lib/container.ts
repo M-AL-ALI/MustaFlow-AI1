@@ -151,6 +151,17 @@ export async function createContainer(
         cpus: 1,
         memory_mb: 512,
       },
+      // Container hardening (Task #510): no extra writable mounts (rootfs is
+      // the base image — Fly machines don't grant a writable rootfs by
+      // default beyond the running container layer; /app is the only place
+      // the agent should write to). DNS pinned to public resolvers. A true
+      // Fly egress allowlist would require a wireguard side-car (out of
+      // scope here — see replit.md "Egress hardening" notes). Privileged
+      // mode is off by default and never requested here.
+      mounts: [],
+      dns: {
+        nameservers: ["1.1.1.1", "8.8.8.8"],
+      },
       services: [
         {
           ports: [
