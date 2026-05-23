@@ -28,6 +28,7 @@ import {
   RefreshCw,
   XCircle,
   FileCode,
+  Sparkles,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -155,6 +156,9 @@ type TaskReport = {
       networkFailures: Array<{ url: string; status: number | null; message: string }>;
       screenshotBase64?: string | null;
     }>;
+  } | null;
+  agentLoop?: {
+    skillsLoaded?: string[];
   } | null;
 };
 
@@ -767,6 +771,25 @@ function InlineReportCard({
       )}
       {report.architectReview && !report.architectReview.skipped && (
         <ArchitectReviewCard review={report.architectReview} />
+      )}
+      {report.agentLoop?.skillsLoaded && report.agentLoop.skillsLoaded.length > 0 && (
+        <div className="pt-1.5 border-t border-border/40">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground mb-1">
+            <Sparkles className="h-3 w-3 shrink-0 text-primary/70" />
+            <span>Skills used ({report.agentLoop.skillsLoaded.length})</span>
+          </div>
+          <div className="flex flex-wrap gap-1 pl-4">
+            {report.agentLoop.skillsLoaded.map((skill) => (
+              <span
+                key={skill}
+                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary border border-primary/20"
+                title={`Skill loaded: ${skill}`}
+              >
+                {skill}
+              </span>
+            ))}
+          </div>
+        </div>
       )}
       {report.critiquePass?.autoFixed && (
         <div className="pt-1.5 border-t border-border">
