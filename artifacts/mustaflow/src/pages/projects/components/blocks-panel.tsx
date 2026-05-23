@@ -63,6 +63,7 @@ export function BlocksPanel({ projectId, filePath, onAskAiToAdapt }: Props) {
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const [movedBanner, setMovedBanner] = useState<{
     label: string;
+    sourcePath: string;
     targetPath: string;
     snippet: string;
   } | null>(null);
@@ -76,9 +77,16 @@ export function BlocksPanel({ projectId, filePath, onAskAiToAdapt }: Props) {
     });
   }, [queryClient, projectId, fileId]);
 
+  // Serialize edits: a single user-driven reorder/move is in flight at a time.
+  // Without this, rapid drags issue concurrent UPDATEs on the same file from
+  // stale read snapshots and the last server response wins (not the last user
+  // action), which can scramble order or — for cross-file moves — duplicate a
+  // block across files. The pending flag also disables the drag handle / select.
+  const isMutating = reorderMut.isPending || moveMut.isPending;
+
   const handleDrop = useCallback(
     (targetIdx: number) => {
-      if (dragIndex == null || dragIndex === targetIdx) {
+      if (dragIndex == null || dragIndex === targetIdx || isMutating) {
         setDragIndex(null);
         setOverIndex(null);
         return;
@@ -94,13 +102,18 @@ export function BlocksPanel({ projectId, filePath, onAskAiToAdapt }: Props) {
       setDragIndex(null);
       setOverIndex(null);
     },
-    [dragIndex, blocks, reorderMut, projectId, fileId, invalidateBlocks],
+    [dragIndex, blocks, reorderMut, projectId, fileId, invalidateBlocks, isMutating],
   );
 
   const handleMove = useCallback(
     (block: { id: string; label: string; tag: string }, targetFileId: number) => {
+      if (isMutating) return;
       const targetFile = allFiles.find((f) => f.id === targetFileId);
       if (!targetFile) return;
+      // Capture sourcePath at request time so the banner's "Ask AI to adapt"
+      // prompt references the file the user actually moved *from*, even if
+      // they switch the selected page before clicking the button.
+      const sourcePathAtRequest = filePath;
       moveMut.mutate(
         {
           id: projectId,
@@ -114,6 +127,7 @@ export function BlocksPanel({ projectId, filePath, onAskAiToAdapt }: Props) {
           onSuccess: (result) => {
             setMovedBanner({
               label: block.label,
+              sourcePath: sourcePathAtRequest,
               targetPath: result.targetPath,
               snippet: result.movedSnippet,
             });
@@ -125,7 +139,7 @@ export function BlocksPanel({ projectId, filePath, onAskAiToAdapt }: Props) {
         },
       );
     },
-    [allFiles, moveMut, projectId, fileId, invalidateBlocks, queryClient],
+    [allFiles, moveMut, projectId, fileId, filePath, invalidateBlocks, queryClient, isMutating],
   );
 
   if (!isHtml || !currentFile) return null;
@@ -163,8 +177,12 @@ export function BlocksPanel({ projectId, filePath, onAskAiToAdapt }: Props) {
             return (
               <li
                 key={block.id}
-                draggable
+                draggable={!isMutating}
                 onDragStart={(e) => {
+                  if (isMutating) {
+                    e.preventDefault();
+                    return;
+                  }
                   setDragIndex(idx);
                   e.dataTransfer.effectAllowed = "move";
                 }}
@@ -197,16 +215,23 @@ export function BlocksPanel({ projectId, filePath, onAskAiToAdapt }: Props) {
                   {block.label}
                 </span>
                 {otherHtmlFiles.length > 0 && (
-                  <div className="relative shrink-0">
+                  <div
+                    className={cn(
+                      "relative shrink-0 rounded-sm focus-within:ring-2 focus-within:ring-primary/60",
+                      isMutating && "opacity-50",
+                    )}
+                  >
                     <select
                       value=""
+                      disabled={isMutating}
                       onChange={(e) => {
                         const v = Number(e.target.value);
                         if (Number.isFinite(v) && v > 0) handleMove(block, v);
                         e.currentTarget.value = "";
                       }}
+                      aria-label={`Move "${block.label}" to another file`}
                       title="Move to another file"
-                      className="appearance-none w-5 h-5 opacity-0 absolute inset-0 cursor-pointer"
+                      className="appearance-none w-5 h-5 opacity-0 absolute inset-0 cursor-pointer disabled:cursor-not-allowed"
                     >
                       <option value="">Move to…</option>
                       {otherHtmlFiles.map((f) => (
@@ -215,7 +240,10 @@ export function BlocksPanel({ projectId, filePath, onAskAiToAdapt }: Props) {
                         </option>
                       ))}
                     </select>
-                    <ArrowRightLeft className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition-opacity pointer-events-none" />
+                    <ArrowRightLeft
+                      aria-hidden="true"
+                      className="h-3 w-3 text-muted-foreground opacity-40 group-hover:opacity-80 group-focus-within:opacity-80 transition-opacity pointer-events-none"
+                    />
                   </div>
                 )}
               </li>
@@ -248,7 +276,7 @@ export function BlocksPanel({ projectId, filePath, onAskAiToAdapt }: Props) {
                 onClick={() => {
                   onAskAiToAdapt(
                     [
-                      `I just moved a block ("${movedBanner.label}") from "${filePath}" to "${movedBanner.targetPath}".`,
+                      `I just moved a block ("${movedBanner.label}") from "${movedBanner.sourcePath}" to "${movedBanner.targetPath}".`,
                       `The moved HTML snippet is:`,
                       "```html",
                       movedBanner.snippet,

@@ -198,21 +198,31 @@ router.post(
     }
     // Persist both updates atomically: a cross-file move must never leave the
     // source mutated without the corresponding insert into the target (that
-    // would drop the user's content). Wrapping both UPDATEs in a transaction
-    // rolls back the source delete if the target write fails.
+    // would drop the user's content). The row-count assertions inside the
+    // transaction also abort the move on a stale/concurrent-delete read so we
+    // don't silently no-op the source while still writing the target (which
+    // would duplicate the block across files).
     await db.transaction(async (tx) => {
-      await tx
+      const srcUpdate = await tx
         .update(projectFilesTable)
         .set({ content: srcAfter, updatedAt: new Date() })
         .where(
           and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, sourceFileId)),
-        );
-      await tx
+        )
+        .returning({ id: projectFilesTable.id });
+      if (srcUpdate.length !== 1) {
+        throw new Error("Source file changed or was removed during move");
+      }
+      const dstUpdate = await tx
         .update(projectFilesTable)
         .set({ content: dstAfter, updatedAt: new Date() })
         .where(
           and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, targetFileId)),
-        );
+        )
+        .returning({ id: projectFilesTable.id });
+      if (dstUpdate.length !== 1) {
+        throw new Error("Target file changed or was removed during move");
+      }
     });
     req.log.info({ projectId, sourceFileId, targetFileId, blockId }, "Cross-file block move saved");
     fireSideEffects(projectId, src.row.path, srcAfter);
