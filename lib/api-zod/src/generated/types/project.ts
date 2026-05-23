@@ -101,6 +101,8 @@ export interface Project {
   autoFixOnCheckFailure?: boolean;
   /** When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false. */
   autoFixWarningsAfterBuild?: boolean;
+  /** When true, a second-opinion architect review runs after every successful build/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project. */
+  architectReviewEnabled?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

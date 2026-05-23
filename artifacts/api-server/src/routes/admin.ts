@@ -66,6 +66,34 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
   const [deployStats] = await db.select({ total: count() }).from(deploymentLogsTable);
   const [roleStats] = await db.select({ total: count() }).from(userRolesTable);
 
+  // Architect review stats (Task #507) — average findings per reviewed build over the
+  // last 30 days, plus verdict counts. Read from the JSON `report.architectReview`
+  // column on agent_tasks. Skipped reviews are excluded from the average.
+  const architectStatsRows = await db.execute<{
+    reviewed: string;
+    avg_findings: string | null;
+    pass: string;
+    partial: string;
+    fail: string;
+    auto_fixed: string;
+  }>(sql`
+    SELECT
+      COUNT(*) FILTER (WHERE COALESCE((report->'architectReview'->>'skipped')::boolean, false) = false) AS reviewed,
+      AVG(jsonb_array_length(report->'architectReview'->'findings')) FILTER (
+        WHERE COALESCE((report->'architectReview'->>'skipped')::boolean, false) = false
+      ) AS avg_findings,
+      COUNT(*) FILTER (WHERE report->'architectReview'->>'verdict' = 'pass') AS pass,
+      COUNT(*) FILTER (WHERE report->'architectReview'->>'verdict' = 'partial') AS partial,
+      COUNT(*) FILTER (WHERE report->'architectReview'->>'verdict' = 'fail') AS fail,
+      COUNT(*) FILTER (WHERE (report->'architectReview'->>'autoFixQueued')::boolean = true) AS auto_fixed
+    FROM agent_tasks
+    WHERE status = 'completed'
+      AND completed_at > now() - interval '30 days'
+      AND report ? 'architectReview'
+      AND report->'architectReview' IS NOT NULL
+  `);
+  const archRow = architectStatsRows.rows[0];
+
   res.json({
     projects: {
       total: projectStats?.total ?? 0,
@@ -77,6 +105,17 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
     },
     transactions: txStats?.total ?? 0,
     deployments: deployStats?.total ?? 0,
+    architectReviews: {
+      windowDays: 30,
+      reviewed: Number(archRow?.reviewed ?? 0),
+      avgFindingsPerBuild: archRow?.avg_findings
+        ? Number(Number(archRow.avg_findings).toFixed(2))
+        : 0,
+      passCount: Number(archRow?.pass ?? 0),
+      partialCount: Number(archRow?.partial ?? 0),
+      failCount: Number(archRow?.fail ?? 0),
+      autoFixesQueued: Number(archRow?.auto_fixed ?? 0),
+    },
   });
 });
 

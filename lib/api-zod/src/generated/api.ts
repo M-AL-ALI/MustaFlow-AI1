@@ -627,6 +627,7 @@ export const ListProjectsResponseItem = zod.object({
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
+  "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -692,6 +693,7 @@ export const GetProjectResponse = zod.object({
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
+  "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -712,7 +714,8 @@ export const UpdateProjectBody = zod.object({
   "themeColor": zod.string().optional(),
   "blockPublishOnCritical": zod.boolean().optional().describe('Enable or disable the critical-findings publish gate for this project.'),
   "autoFixOnCheckFailure": zod.boolean().optional(),
-  "autoFixWarningsAfterBuild": zod.boolean().optional()
+  "autoFixWarningsAfterBuild": zod.boolean().optional(),
+  "architectReviewEnabled": zod.boolean().optional().describe('Toggle the architect review subagent for this project.')
 })
 
 export const updateProjectResponseHealthScoreMin = 0;
@@ -754,6 +757,7 @@ export const UpdateProjectResponse = zod.object({
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
+  "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -806,6 +810,7 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
+  "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -858,6 +863,7 @@ export const RestoreProjectResponse = zod.object({
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
+  "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -909,6 +915,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
+  "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))
@@ -3402,7 +3409,16 @@ export const GetAdminStatsResponse = zod.object({
   "withRoles": zod.number()
 }),
   "transactions": zod.number(),
-  "deployments": zod.number()
+  "deployments": zod.number(),
+  "architectReviews": zod.object({
+  "windowDays": zod.number(),
+  "reviewed": zod.number(),
+  "avgFindingsPerBuild": zod.number(),
+  "passCount": zod.number(),
+  "partialCount": zod.number(),
+  "failCount": zod.number(),
+  "autoFixesQueued": zod.number()
+}).describe('Architect review subagent metrics over the recent window (default 30 days).')
 })
 
 

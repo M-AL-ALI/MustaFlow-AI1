@@ -293,6 +293,8 @@ export interface Project {
   autoFixOnCheckFailure?: boolean;
   /** When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false. */
   autoFixWarningsAfterBuild?: boolean;
+  /** When true, a second-opinion architect review runs after every successful build/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project. */
+  architectReviewEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -387,6 +389,8 @@ export interface ProjectUpdate {
   blockPublishOnCritical?: boolean;
   autoFixOnCheckFailure?: boolean;
   autoFixWarningsAfterBuild?: boolean;
+  /** Toggle the architect review subagent for this project. */
+  architectReviewEnabled?: boolean;
 }
 
 export interface MobileAppSettingsInput {
@@ -1324,11 +1328,26 @@ export type AdminStatsUsers = {
   withRoles: number;
 };
 
+/**
+ * Architect review subagent metrics over the recent window (default 30 days).
+ */
+export type AdminStatsArchitectReviews = {
+  windowDays: number;
+  reviewed: number;
+  avgFindingsPerBuild: number;
+  passCount: number;
+  partialCount: number;
+  failCount: number;
+  autoFixesQueued: number;
+};
+
 export interface AdminStats {
   projects: AdminStatsProjects;
   users: AdminStatsUsers;
   transactions: number;
   deployments: number;
+  /** Architect review subagent metrics over the recent window (default 30 days). */
+  architectReviews: AdminStatsArchitectReviews;
 }
 
 export type AdminLaunchCheckStatus = typeof AdminLaunchCheckStatus[keyof typeof AdminLaunchCheckStatus];

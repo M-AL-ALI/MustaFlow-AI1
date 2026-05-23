@@ -196,6 +196,18 @@ The intended user journey is: Login → create project → build app → preview
 - **Safety cap is per tool call, not per LLM turn**: `STEP_CAP` (default 25) caps `toolCalls.length`. The cap is checked at the top of each LLM turn AND mid-turn between individual tool-call executions, so a single response that emits many tool calls cannot exceed the budget.
 - **Adapter contract**: `loopResultToBuildResult` returns a real `BuilderResult` (with a synthesized `Blueprint`), and `loopResultToRefineResult` returns the existing refine-result shape — so the post-pipeline plumbing (secrets scan, cross-file consistency, snapshot, audits, knowledge writes, etc.) is unchanged.
 
+## Architect review subagent (Task #507)
+
+- Second-opinion deep reviewer that runs after a successful build/refine. Defined in `artifacts/api-server/src/lib/architect.ts` (`runArchitectReview` — gpt-5-mini JSON mode, Zod-validated, non-throwing).
+- Trigger gating (in `jobs.ts`): skips when `projects.architectReviewEnabled === false`, when there is no diff, or when changes are trivial (≤10 changed lines and no security-sensitive paths like auth/.env/schema/migrations/package.json/lockfiles/server/api).
+- Output: `TaskReport.architectReview` with `verdict` (pass | partial | fail), severity-ranked findings, recommended next actions, plus `isReReview` and `completedWithWarnings` flags. Rendered as `ArchitectReviewCard` in `chat-history.tsx`.
+- Auto-fix on `fail` or any `critical` finding: ONE chained refine task is enqueued via the standard `enqueueJob` path with a sentinel prompt (prefix `"The Architect Reviewer flagged this build"`). That task runs the normal refine pipeline, then re-runs the architect exactly once (no further fixes). If the re-review still fails, the report sets `completedWithWarnings = true`.
+- `completedWithWarnings` is report-scoped only — task status remains `"completed"`. The flag drives the warning banner in the architect card; there is no separate task status value.
+- Credits: flat `ARCHITECT_CREDIT_COST = 2` per architect run, deducted with `credit_transactions.type = "architect"` (separate row from the build's deduction) for per-task audit.
+- Per-project toggle: `projects.architectReviewEnabled` (default true). UI lives in the Quality panel (`quality-panel.tsx`) alongside the auto-fix toggles.
+- Admin metrics: `GET /api/admin/stats` returns `architectReviews` (30-day window): `reviewed`, `avgFindingsPerBuild`, `passCount/partialCount/failCount`, `autoFixesQueued`. Rendered as the Architect Review tile in `/admin`.
+- OpenAPI: `architectReviewEnabled` on Project + ProjectUpdate; `AdminStats.architectReviews` is a required typed object (no client-side casts).
+
 ## Gotchas
 
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. It also runs `typecheck:libs`, which will fail if generated types break consumers — fix consumers, don't suppress. The `codegen-drift` validation check (`pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated`) catches any drift between the spec and committed generated files — run it (or let CI run it) after every spec edit.

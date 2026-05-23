@@ -113,6 +113,27 @@ type TaskReport = {
     remainingIssues: string[];
     passed: boolean;
   } | null;
+  /** Architect review subagent output (Task #507) */
+  architectReview?: {
+    verdict: "pass" | "partial" | "fail";
+    summary: string;
+    findings: Array<{
+      severity: "critical" | "high" | "medium" | "low";
+      title: string;
+      detail: string;
+      file?: string | null;
+    }>;
+    nextActions: string[];
+    autoFixQueued: boolean;
+    autoFixTaskId?: number | null;
+    creditsCharged: number;
+    reviewedAt: string;
+    model: string;
+    skipped?: boolean;
+    skipReason?: string;
+    isReReview?: boolean;
+    completedWithWarnings?: boolean;
+  } | null;
 };
 
 type StructuredPlan = {
@@ -423,6 +444,143 @@ function AgentModePill({ mode }: { mode: string }) {
 
 const TESTS_PENDING_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Architect review card (Task #507) — verdict badge + collapsible findings.
+// ─────────────────────────────────────────────────────────────────────────────
+function ArchitectReviewCard({ review }: { review: NonNullable<TaskReport["architectReview"]> }) {
+  const [open, setOpen] = useState(false);
+  const verdictStyle = {
+    pass: {
+      icon: ShieldCheck,
+      label: "Pass",
+      classes: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    },
+    partial: {
+      icon: ShieldAlert,
+      label: "Partial",
+      classes: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    },
+    fail: {
+      icon: ShieldAlert,
+      label: "Fail",
+      classes: "bg-rose-500/10 text-rose-400 border-rose-500/30",
+    },
+  }[review.verdict];
+  const VerdictIcon = verdictStyle.icon;
+  const severityClasses: Record<string, string> = {
+    critical: "bg-rose-500/15 text-rose-400 border-rose-500/30",
+    high: "bg-orange-500/15 text-orange-400 border-orange-500/30",
+    medium: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    low: "bg-sky-500/15 text-sky-400 border-sky-500/30",
+  };
+  const findingCount = review.findings.length;
+
+  return (
+    <div className="pt-1.5 border-t border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 text-[11px] hover:opacity-80 transition-opacity"
+        data-testid="architect-review-toggle"
+      >
+        <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-violet-400" />
+        <span className="font-semibold text-foreground">
+          {review.isReReview ? "Architect re-review" : "Architect review"}
+        </span>
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold",
+            verdictStyle.classes,
+          )}
+        >
+          <VerdictIcon className="h-2.5 w-2.5" />
+          {verdictStyle.label}
+        </span>
+        {findingCount > 0 && (
+          <span className="text-muted-foreground">
+            {findingCount} finding{findingCount === 1 ? "" : "s"}
+          </span>
+        )}
+        {review.autoFixQueued && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300">
+            <Wand2 className="h-2.5 w-2.5" />
+            Auto-fix queued
+          </span>
+        )}
+        {review.completedWithWarnings && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
+            <AlertTriangle className="h-2.5 w-2.5" />
+            Completed with warnings
+          </span>
+        )}
+        {open ? (
+          <ChevronDown className="h-3 w-3 ml-auto text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 ml-auto text-muted-foreground" />
+        )}
+      </button>
+      <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">{review.summary}</p>
+      {open && (
+        <div className="mt-2 space-y-2">
+          {review.findings.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground italic">No findings.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {review.findings.map((f, i) => (
+                <li
+                  key={i}
+                  className="rounded-md border border-border bg-background/40 p-2 text-[11px]"
+                  data-testid={`architect-finding-${i}`}
+                >
+                  <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
+                        severityClasses[f.severity] ?? severityClasses.low,
+                      )}
+                    >
+                      {f.severity}
+                    </span>
+                    <span className="font-medium text-foreground">{f.title}</span>
+                    {f.file && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground font-mono">
+                        <FileCode className="h-2.5 w-2.5" />
+                        {f.file}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-muted-foreground leading-relaxed">{f.detail}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          {review.nextActions.length > 0 && (
+            <div className="rounded-md border border-border bg-background/40 p-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                Next actions
+              </p>
+              <ul className="space-y-0.5">
+                {review.nextActions.map((a, i) => (
+                  <li key={i} className="text-[11px] text-foreground flex gap-1.5">
+                    <span className="text-violet-400">›</span>
+                    <span>{a}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <p className="text-[10px] text-muted-foreground/70">
+            {review.creditsCharged > 0
+              ? `${review.creditsCharged} credit${review.creditsCharged === 1 ? "" : "s"} charged`
+              : "No credits charged"}
+            {review.model ? ` · ${review.model}` : ""}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InlineReportCard({
   report,
   onViewFile,
@@ -582,6 +740,9 @@ function InlineReportCard({
             </div>
           )}
         </div>
+      )}
+      {report.architectReview && !report.architectReview.skipped && (
+        <ArchitectReviewCard review={report.architectReview} />
       )}
       {report.critiquePass?.autoFixed && (
         <div className="pt-1.5 border-t border-border">

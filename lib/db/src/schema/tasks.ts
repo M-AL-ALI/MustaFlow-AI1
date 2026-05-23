@@ -122,6 +122,46 @@ export type TaskReport = {
    * Captures every tool call, command run, and check result for the run report
    * card. Absent for legacy single-shot builds.
    */
+  /**
+   * Populated when the architect review subagent runs after a successful
+   * build/refine. The architect is a second-opinion deep-review pass that
+   * inspects the user request + plan + diff + commands and returns a structured
+   * verdict + severity-ranked findings. Critical/fail verdicts trigger one
+   * auto-fix turn (a follow-up refine task with the findings as the prompt).
+   */
+  architectReview?: {
+    /** Overall verdict from the architect */
+    verdict: "pass" | "partial" | "fail";
+    /** One-line architect summary shown next to the verdict badge */
+    summary: string;
+    /** Severity-ranked findings (critical first) */
+    findings: Array<{
+      severity: "critical" | "high" | "medium" | "low";
+      title: string;
+      detail: string;
+      file?: string | null;
+    }>;
+    /** Concrete next actions the architect recommends */
+    nextActions: string[];
+    /** True if a follow-up auto-fix task was queued in response */
+    autoFixQueued: boolean;
+    /** Follow-up task id (when autoFixQueued is true) */
+    autoFixTaskId?: number | null;
+    /** Credits actually charged for this architect review (0 if skipped) */
+    creditsCharged: number;
+    /** ISO timestamp when the review completed */
+    reviewedAt: string;
+    /** Model used for the architect call */
+    model: string;
+    /** True if the review was skipped (e.g. project disabled, no diff, insufficient credits) */
+    skipped?: boolean;
+    /** Human-readable skip reason when skipped is true */
+    skipReason?: string;
+    /** True when this review was the second pass after an architect-triggered auto-fix */
+    isReReview?: boolean;
+    /** True when re-review still reported critical/fail — surfaced as a warning, no further fixes */
+    completedWithWarnings?: boolean;
+  } | null;
   agentLoop?: {
     stack: string;
     steps: number;

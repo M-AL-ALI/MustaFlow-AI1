@@ -13,6 +13,7 @@ export const CREDIT_TRANSACTION_TYPES = [
   "build",
   "refine",
   "plan",
+  "architect",
   "manual_adjustment",
   "purchase",
 ] as const;

@@ -24,6 +24,7 @@ export * from './adminRole';
 export * from './adminRoleInput';
 export * from './adminRoleInputRole';
 export * from './adminStats';
+export * from './adminStatsArchitectReviews';
 export * from './adminStatsProjects';
 export * from './adminStatsUsers';
 export * from './agentTask';

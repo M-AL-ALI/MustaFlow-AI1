@@ -65,6 +65,14 @@ import {
 } from "./eas";
 import { autoCommitProjectFiles } from "./github";
 import { fetchAttachmentAsDataUri } from "../routes/images.js";
+import {
+  runArchitectReview,
+  shouldTriggerAutoFix,
+  buildAutoFixPrompt,
+  toReportShape as architectToReportShape,
+  ARCHITECT_CREDIT_COST,
+  ARCHITECT_AUTOFIX_TITLE_PREFIX,
+} from "./architect";
 
 /** Credit cost per AI call, keyed by agentMode. */
 const CREDIT_COST: Record<string, number> = {
@@ -2269,6 +2277,250 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }
       }
       // ── End synchronous Drizzle migration ─────────────────────────────────
+
+      // ── Architect review subagent (Task #507) ─────────────────────────────
+      // Second-opinion deep review of the build/refine: receives user request +
+      // plan + diff + commands, returns structured findings.
+      //
+      // Lifecycle:
+      //   normal build/refine → architect → if fail/critical, queue one auto-fix
+      //                                     refine task and chain a re-review.
+      //   auto-fix task       → architect re-review (no further auto-fix).
+      //                         If still failing, mark completedWithWarnings so
+      //                         the unresolved findings surface in the UI.
+      //
+      // Trigger gating:
+      //   - Project opt-out (architectReviewEnabled=false) → skipped:"disabled".
+      //   - Empty diff → skipped:"no-diff".
+      //   - Trivial edit (≤ARCHITECT_LINE_THRESHOLD lines touched, no sensitive
+      //     paths) → skipped:"trivial-edit".
+      //
+      // Credits: flat ARCHITECT_CREDIT_COST per review (best-effort, non-fatal).
+      {
+        const isArchitectAutoFix = (input.userPrompt ?? "").startsWith(
+          "The Architect Reviewer flagged this build",
+        );
+        const totalFilesTouched =
+          (diffSummary?.filesAdded.length ?? 0) +
+          (diffSummary?.filesModified.length ?? 0) +
+          (diffSummary?.filesRemoved.length ?? 0);
+        const linesTouched = (diffSummary?.linesAdded ?? 0) + (diffSummary?.linesRemoved ?? 0);
+        // Heuristic: anything that materially affects auth, security, env,
+        // database schema, secrets, or build manifests deserves a review even
+        // on small diffs.
+        const SENSITIVE_PATH_PATTERNS = [
+          /(^|\/)auth/i,
+          /security/i,
+          /(^|\/)\.env/i,
+          /secrets?/i,
+          /schema/i,
+          /migration/i,
+          /package(-lock)?\.json$/i,
+          /pnpm-lock\.yaml$/i,
+          /drizzle/i,
+          /server/i,
+          /api/i,
+        ];
+        const touchedPathsList = [
+          ...(diffSummary?.filesAdded ?? []),
+          ...(diffSummary?.filesModified ?? []),
+          ...(diffSummary?.filesRemoved ?? []),
+        ];
+        const touchesSensitive = touchedPathsList.some((p) =>
+          SENSITIVE_PATH_PATTERNS.some((re) => re.test(p)),
+        );
+        const ARCHITECT_LINE_THRESHOLD = 10;
+        const isTrivialEdit =
+          totalFilesTouched > 0 && !touchesSensitive && linesTouched <= ARCHITECT_LINE_THRESHOLD;
+
+        // Architect auto-fix follow-up tasks MUST always get a re-review,
+        // even if the refine produced no diff or a tiny diff. The whole point
+        // of the chained task is to re-assess whether the auto-fix actually
+        // resolved the originally flagged critical/fail findings.
+        let skipReason: string | null = null;
+        if (!project.architectReviewEnabled) skipReason = "disabled";
+        else if (!isArchitectAutoFix && totalFilesTouched === 0) skipReason = "no-diff";
+        else if (!isArchitectAutoFix && isTrivialEdit) skipReason = "trivial-edit";
+
+        if (skipReason) {
+          report.architectReview = {
+            verdict: "pass",
+            summary:
+              skipReason === "disabled"
+                ? "Architect review disabled for this project."
+                : skipReason === "no-diff"
+                  ? "Architect review skipped — no file changes."
+                  : `Architect review skipped — trivial edit (${linesTouched} line${linesTouched === 1 ? "" : "s"}, no sensitive paths).`,
+            findings: [],
+            nextActions: [],
+            autoFixQueued: false,
+            autoFixTaskId: null,
+            creditsCharged: 0,
+            reviewedAt: new Date().toISOString(),
+            model: "",
+            skipped: true,
+            skipReason,
+          };
+        } else {
+          try {
+            await emitEvent(taskId, "narration", "Running architect review…");
+            const reviewDiff = {
+              filesAdded: diffSummary?.filesAdded ?? [],
+              filesModified: diffSummary?.filesModified ?? [],
+              filesRemoved: diffSummary?.filesRemoved ?? [],
+            };
+            const commandsRun = (report.agentLoop?.commandsRun ?? []).map((c) => ({
+              argv: c.argv,
+              exitCode: c.exitCode,
+            }));
+            // Pick a handful of touched files (capped) for citation context.
+            const touchedPaths = new Set<string>([
+              ...reviewDiff.filesAdded,
+              ...reviewDiff.filesModified,
+            ]);
+            const fileExcerpts = filesToSmellScan
+              .filter((f) => touchedPaths.has(f.path))
+              .slice(0, 6)
+              .map((f) => ({ path: f.path, content: f.content }));
+
+            const review = await runArchitectReview({
+              userRequest: userPrompt,
+              agentMode,
+              planContext: input.planContext ?? null,
+              diff: reviewDiff,
+              commandsRun,
+              fileExcerpts,
+              assistantSummary,
+              knownWarnings: report.warnings,
+            });
+
+            // Charge credits (best-effort — never block the build).
+            let creditsCharged = 0;
+            if (project.ownerId) {
+              try {
+                const debit = await deductCredits(project.ownerId, ARCHITECT_CREDIT_COST, {
+                  projectId,
+                  type: "architect",
+                  description: `Architect review for task #${taskId} (verdict: ${review.verdict}, findings: ${review.findings.length})`,
+                });
+                if (!("insufficient" in debit)) {
+                  creditsCharged = ARCHITECT_CREDIT_COST;
+                }
+              } catch (creditErr) {
+                logger.warn(
+                  { err: creditErr, projectId, taskId },
+                  "Architect credit deduction failed (non-fatal)",
+                );
+              }
+            }
+
+            // Decide auto-fix.
+            //   - Normal task with fail/critical verdict → queue ONE auto-fix
+            //     refine task. The follow-up task will run architect again
+            //     (re-review) but will NOT trigger another auto-fix.
+            //   - Auto-fix task with still-failing verdict → no more fixes;
+            //     mark completedWithWarnings so the unresolved findings stay
+            //     visible to the user.
+            let autoFixQueued = false;
+            let autoFixTaskId: number | null = null;
+            let completedWithWarnings = false;
+            const needsFix = shouldTriggerAutoFix(review);
+            if (needsFix && !isArchitectAutoFix) {
+              const fixPrompt = buildAutoFixPrompt(review);
+              const fixTitle =
+                `${ARCHITECT_AUTOFIX_TITLE_PREFIX} ${review.findings[0]?.title ?? review.verdict}`.slice(
+                  0,
+                  180,
+                );
+              try {
+                const autoFixResult = await pool.query<{ id: number }>(
+                  `INSERT INTO agent_tasks (project_id, title, kind, status, prompt)
+                   VALUES ($1, $2, 'background', 'queued', $3)
+                   ON CONFLICT (project_id, title)
+                   WHERE kind = 'background' AND status IN ('queued', 'building', 'planning')
+                   DO NOTHING
+                   RETURNING id`,
+                  [projectId, fixTitle, fixPrompt],
+                );
+                const followUp = autoFixResult.rows[0];
+                if (followUp) {
+                  autoFixQueued = true;
+                  autoFixTaskId = followUp.id;
+                  await db.insert(chatMessagesTable).values({
+                    projectId,
+                    role: "assistant",
+                    content: `Architect review verdict: **${review.verdict}**. ${review.summary} Queued an auto-fix (Task #${followUp.id}) to address the findings; the architect will re-review afterwards.`,
+                    agentMode,
+                    planMode: false,
+                    plan: {
+                      kind: "task-queued",
+                      taskId: followUp.id,
+                    } as unknown as Record<string, unknown>,
+                  });
+                  enqueueJob({
+                    taskId: followUp.id,
+                    projectId,
+                    kind: "refine",
+                    userPrompt: fixPrompt,
+                    agentMode,
+                  });
+                }
+              } catch (enqueueErr) {
+                logger.warn(
+                  { err: enqueueErr, projectId, taskId },
+                  "Failed to enqueue architect auto-fix (non-fatal)",
+                );
+              }
+            } else if (needsFix && isArchitectAutoFix) {
+              // Re-review after auto-fix still failing — surface as warning,
+              // do not loop.
+              completedWithWarnings = true;
+              report.warnings = [
+                ...(report.warnings ?? []),
+                `Architect re-review after auto-fix still reports "${review.verdict}". Unresolved findings (${review.findings.length}) require your attention.`,
+              ];
+              await db.insert(chatMessagesTable).values({
+                projectId,
+                role: "assistant",
+                content: `Architect re-review after auto-fix still reports **${review.verdict}**. ${review.summary} Unresolved findings will need your input — no further auto-fix attempts.`,
+                agentMode,
+                planMode: false,
+              });
+            }
+
+            report.architectReview = {
+              ...architectToReportShape(review, {
+                model: review.model,
+                autoFixQueued,
+                autoFixTaskId,
+                creditsCharged,
+              }),
+              isReReview: isArchitectAutoFix,
+              completedWithWarnings,
+            };
+
+            logger.info(
+              {
+                projectId,
+                taskId,
+                verdict: review.verdict,
+                findings: review.findings.length,
+                autoFixQueued,
+                creditsCharged,
+                isReReview: isArchitectAutoFix,
+                completedWithWarnings,
+              },
+              "Architect review complete",
+            );
+          } catch (architectErr) {
+            logger.warn(
+              { err: architectErr, projectId, taskId },
+              "Architect review threw — proceeding without (non-fatal)",
+            );
+          }
+        }
+      }
+      // ── End architect review ──────────────────────────────────────────────
 
       await db
         .update(agentTasksTable)

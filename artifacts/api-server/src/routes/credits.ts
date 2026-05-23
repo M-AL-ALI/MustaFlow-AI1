@@ -62,7 +62,7 @@ export async function deductCredits(
   amount: number,
   opts: {
     projectId?: number;
-    type: "build" | "refine" | "plan";
+    type: "build" | "refine" | "plan" | "architect";
     description: string;
   },
 ): Promise<{ newBalance: number } | { insufficient: true; balance: number }> {

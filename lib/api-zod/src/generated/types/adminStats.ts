@@ -5,6 +5,7 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { AdminStatsArchitectReviews } from './adminStatsArchitectReviews';
 import type { AdminStatsProjects } from './adminStatsProjects';
 import type { AdminStatsUsers } from './adminStatsUsers';
 
@@ -13,4 +14,6 @@ export interface AdminStats {
   users: AdminStatsUsers;
   transactions: number;
   deployments: number;
+  /** Architect review subagent metrics over the recent window (default 30 days). */
+  architectReviews: AdminStatsArchitectReviews;
 }

@@ -14,6 +14,7 @@ import {
   UserMinus,
   ScrollText,
   ChevronLeft,
+  BrainCircuit,
 } from "lucide-react";
 import {
   useGetAdminMe,
@@ -200,6 +201,40 @@ export default function AdminPage() {
           sub="credit transactions"
         />
       </div>
+
+      {stats &&
+        (() => {
+          const arch = stats.architectReviews;
+          if (!arch) return null;
+          return (
+            <div className="border border-border rounded-xl bg-card overflow-hidden">
+              <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <BrainCircuit className="h-3.5 w-3.5 text-violet-400" />
+                  Architect Review (last {arch.windowDays} days)
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {arch.reviewed} reviewed build{arch.reviewed === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border/40">
+                <ArchitectMetric
+                  label="Avg findings / build"
+                  value={arch.avgFindingsPerBuild.toFixed(2)}
+                  tone="neutral"
+                />
+                <ArchitectMetric label="Pass" value={String(arch.passCount)} tone="ok" />
+                <ArchitectMetric label="Partial" value={String(arch.partialCount)} tone="warn" />
+                <ArchitectMetric label="Fail" value={String(arch.failCount)} tone="error" />
+                <ArchitectMetric
+                  label="Auto-fixes queued"
+                  value={String(arch.autoFixesQueued)}
+                  tone="info"
+                />
+              </div>
+            </div>
+          );
+        })()}
 
       <div className="border border-border rounded-xl bg-card overflow-hidden">
         <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
@@ -578,6 +613,35 @@ function ReadinessRow({ check }: { check: AdminLaunchCheck }) {
         />
       </button>
       {expanded && <p className="mt-1.5 ml-5 text-xs text-muted-foreground">{check.note}</p>}
+    </div>
+  );
+}
+
+function ArchitectMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "ok" | "warn" | "error" | "info" | "neutral";
+}) {
+  const toneClass =
+    tone === "ok"
+      ? "text-emerald-500"
+      : tone === "warn"
+        ? "text-amber-500"
+        : tone === "error"
+          ? "text-destructive"
+          : tone === "info"
+            ? "text-violet-400"
+            : "text-foreground";
+  return (
+    <div className="bg-card px-4 py-3">
+      <div className={`text-lg font-semibold ${toneClass}`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">
+        {label}
+      </div>
     </div>
   );
 }

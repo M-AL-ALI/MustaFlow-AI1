@@ -102,6 +102,11 @@ export const projectsTable = pgTable("projects", {
   // snapshot is taken, so the saved snapshot reflects the post-fix state).
   // Default false — opt-in.
   autoFixWarningsAfterBuild: boolean("auto_fix_warnings_after_build").notNull().default(false),
+  // architectReviewEnabled: when true, a second-opinion architect review runs after every
+  // successful build/refine. The architect inspects user request + plan + diff + commands and
+  // returns a structured verdict + findings. Critical/fail verdicts trigger one auto-fix turn.
+  // Charged as a separate flat-rate credit (2 credits). Default true — opt-out per project.
+  architectReviewEnabled: boolean("architect_review_enabled").notNull().default(true),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
