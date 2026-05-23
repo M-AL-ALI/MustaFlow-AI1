@@ -6927,17 +6927,20 @@ export type IntentResult = {
   confidence: number;
 };
 
-const INTENT_CLASSIFIER_SYSTEM = `You are a router for an AI app-builder chat. Given the user's latest message and recent conversation history, classify the user's intent into exactly one of:
+const INTENT_CLASSIFIER_SYSTEM = `You are a router for an AI app-builder chat. Read the user's latest message in the context of the recent conversation and classify their true intent into exactly one of:
 
-- "converse": The user is asking a question, requesting an explanation, asking for advice, reacting to a previous result, or having a general conversation about their app. Examples: "How does my auth flow work?", "What's the difference between X and Y?", "Explain the file structure", "What does this code do?", "So what happened?", "Why did that fail?", "What do you mean?", "Can you explain that?", "Is this safe?", "Wait, what?", "Hmm", "ok", "thanks", "what's next?", "is it ready?".
-- "plan": The user wants a structured plan, architecture overview, or design spec before building. Examples: "Plan me a dashboard", "Design the data model", "What should I build first?", "Create an architecture plan for..."
-- "build": The user is explicitly requesting a code change — to create, modify, add, remove, fix, or refactor something in the app. The message MUST contain a clear action directed at the app's code. Examples: "Add a dark mode toggle", "Fix the login bug", "Create a settings page", "Remove the sidebar", "Make it mobile-friendly", "Change the header color to blue".
+- "converse": The user is asking a question, requesting an explanation, asking for advice, reacting to a previous result, pushing back on something you said, repeating or rephrasing an earlier question, expressing frustration or confusion, or just chatting about their app. This includes meta-conversation about how you behave ("why did you do that?", "you should understand me, not just keywords", "I asked the same thing"). Examples: "How does my auth flow work?", "What's the difference between X and Y?", "Explain the file structure", "So what happened?", "Why did that fail?", "What do you mean?", "Is this safe?", "Hmm", "ok", "thanks", "what's next?", "is it ready?", "no I meant…", "same question again", "you misunderstood".
+- "plan": The user wants a structured plan, architecture overview, or design spec BEFORE building. Examples: "Plan me a dashboard", "Design the data model", "What should I build first?", "Create an architecture plan for..."
+- "build": The user is unambiguously instructing you to change the code right now — to create, modify, add, remove, fix, or refactor something concrete in the app. The message must contain a clear action directed at the app's code. Examples: "Add a dark mode toggle", "Fix the login bug", "Create a settings page", "Remove the sidebar", "Make it mobile-friendly", "Change the header color to blue".
 
-Hard rules (apply BEFORE judging):
-1. If the message is a question (ends with "?", or starts with what/why/how/when/who/where/which/can/could/should/would/is/are/do/does/did) AND does not contain an explicit imperative to change the code → it is "converse", not "build".
-2. Short reactions ("ok", "thanks", "huh?", "hmm", "wait") → always "converse".
-3. Asking about a previous error or task result ("what happened?", "why did it fail?", "what went wrong?") → always "converse". Never treat this as "fix the last error" unless the user explicitly says "fix it" or "try again".
-4. "build" requires an explicit action verb pointed at the code (add/remove/change/fix/build/create/make/update/refactor/style/etc.) — being on-topic about the app is not enough.
+Reasoning principles (apply in order, BEFORE judging):
+1. If the message is a question (ends with "?", or starts with what/why/how/when/who/where/which/can/could/should/would/is/are/do/does/did) AND does not contain an explicit imperative to change the code → "converse".
+2. Short reactions, acknowledgments, emotions, or meta-comments about the conversation ("ok", "thanks", "hmm", "wait", "no", "that's wrong", "you didn't understand", "try again with explanation") → "converse" unless they also contain an explicit code-change instruction.
+3. Asking about a previous error, task result, or your behavior ("what happened?", "why did it fail?", "why did you build instead of answer?") → "converse". Do NOT treat this as "fix the last error" or "redo the build" unless the user explicitly says "fix it", "rebuild it", or "try again".
+4. **Repeat / rephrase detection**: If the user's current message is the same as, or a rephrasing of, something they already said and you responded to — especially if your previous response was a build report and they now seem to want an explanation instead — treat it as "converse". The user is course-correcting, not asking for another build.
+5. **Discussion mode**: If the message describes, theorizes, complains, philosophizes, or asks you to behave differently ("you should understand intent, not just keywords") → "converse".
+6. "build" requires an explicit action verb pointed at the code (add/remove/change/fix/build/create/make/update/refactor/style/etc.). Being on-topic about the app is not enough.
+7. When genuinely torn between "converse" and "build", choose "converse". A misrouted question is far more annoying than a missed build request — the user can always re-ask with an action verb.
 
 Respond with ONLY valid JSON: {"intent": "converse"|"plan"|"build", "confidence": 0.0-1.0}
 
@@ -6978,7 +6981,19 @@ const SHORT_REACTIONS = new Set([
 const STARTS_WITH_BUILD_IMPERATIVE =
   /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge|deploy|publish|undo|rollback|retry|try\s+again)\b/i;
 
-function fastClassify(userPrompt: string): IntentResult | null {
+/** Normalize a message for fuzzy "is this the same thing they just said?" comparison. */
+function normalizeForRepeatCheck(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function fastClassify(
+  userPrompt: string,
+  conversationHistory: ConversationTurn[] = [],
+): IntentResult | null {
   const trimmed = userPrompt.trim();
   if (!trimmed) return null;
 
@@ -6997,6 +7012,39 @@ function fastClassify(userPrompt: string): IntentResult | null {
     return { intent: "converse", confidence: 0.95 };
   }
 
+  // Repeat / rephrase detection: if the user is re-sending the same (or very
+  // similar) message they already sent, and we already responded, they are
+  // almost certainly course-correcting / asking for a different answer — not
+  // requesting another identical build. Force converse so the next reply is
+  // an explanation, not another build pass.
+  if (!isImperative && conversationHistory.length >= 2) {
+    const currentNorm = normalizeForRepeatCheck(trimmed);
+    if (currentNorm.length >= 6) {
+      const priorUserTurns = conversationHistory
+        .filter((t) => t.role === "user")
+        .slice(-3)
+        .map((t) => normalizeForRepeatCheck(t.content));
+      for (const prior of priorUserTurns) {
+        if (!prior) continue;
+        if (prior === currentNorm) {
+          return { intent: "converse", confidence: 0.95 };
+        }
+        // High-overlap rephrase: share most non-trivial tokens with a prior
+        // user turn (Jaccard ≥ 0.6 on 3+ char tokens).
+        const a = new Set(currentNorm.split(" ").filter((w) => w.length >= 3));
+        const b = new Set(prior.split(" ").filter((w) => w.length >= 3));
+        if (a.size >= 3 && b.size >= 3) {
+          let inter = 0;
+          for (const w of a) if (b.has(w)) inter++;
+          const union = a.size + b.size - inter;
+          if (union > 0 && inter / union >= 0.6) {
+            return { intent: "converse", confidence: 0.9 };
+          }
+        }
+      }
+    }
+  }
+
   // Short messages that start with a question word (what/why/how/...) and
   // are not direct imperatives are also reliably converse.
   const wordCount = trimmed.split(/\s+/).length;
@@ -7012,13 +7060,27 @@ export async function runIntentClassifierPipeline(
   conversationHistory: ConversationTurn[],
   hasFiles: boolean,
 ): Promise<IntentResult> {
-  const fast = fastClassify(userPrompt);
+  const fast = fastClassify(userPrompt, conversationHistory);
   if (fast) return fast;
   try {
-    const recentHistory = conversationHistory.slice(-4);
+    // Show more of the back-and-forth so the classifier can spot follow-ups,
+    // repeats, and course-corrections instead of judging each message in
+    // isolation.
+    const recentHistory = conversationHistory.slice(-8);
     const historyText =
       recentHistory.length > 0
-        ? recentHistory.map((t) => `${t.role}: ${t.content}`).join("\n")
+        ? recentHistory
+            .map((t) => {
+              // Trim very long assistant turns (build reports etc.) so the
+              // classifier sees the shape of the conversation, not a wall of
+              // generated text.
+              const body =
+                t.role === "assistant" && t.content.length > 600
+                  ? `${t.content.slice(0, 600)}… [truncated]`
+                  : t.content;
+              return `${t.role}: ${body}`;
+            })
+            .join("\n")
         : "";
 
     const userContent = [
@@ -7044,14 +7106,24 @@ export async function runIntentClassifierPipeline(
     const intent =
       parsed.intent === "converse" || parsed.intent === "plan" || parsed.intent === "build"
         ? parsed.intent
-        : hasFiles
-          ? "build"
-          : "converse";
+        : "converse";
     const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0.8;
+
+    // Bias toward converse on genuine ambiguity: an unwanted build is far
+    // more disruptive than an unwanted explanation. If the model picked
+    // "build" with low confidence and the message doesn't actually contain
+    // a build-action verb, downgrade to converse.
+    if (intent === "build" && confidence < 0.7 && !BUILD_ACTION_VERBS.test(userPrompt)) {
+      return { intent: "converse", confidence: 0.7 };
+    }
     return { intent, confidence };
   } catch (err) {
-    logger.warn({ err }, "Intent classifier failed, defaulting to build");
-    return { intent: hasFiles ? "build" : "converse", confidence: 0.8 };
+    // Safer fallback than "always build": if we can't classify and the
+    // message doesn't even contain a build verb, treat it as conversation.
+    logger.warn({ err }, "Intent classifier failed, falling back");
+    const fallbackIntent: IntentResult["intent"] =
+      hasFiles && BUILD_ACTION_VERBS.test(userPrompt) ? "build" : "converse";
+    return { intent: fallbackIntent, confidence: 0.6 };
   }
 }
 
