@@ -114,7 +114,8 @@ Rules:
 // ---------------------------------------------------------------------------
 // Normalize a path: strip leading "./" or "/", collapse "..": resolve against
 // the source directory so "../about.html" from "blog/post.html" → "about.html".
-function normalizePath(p: string): string {
+// Exported for unit tests.
+export function normalizePath(p: string): string {
   const parts = p.replace(/^\/+/, "").split("/");
   const out: string[] = [];
   for (const seg of parts) {
@@ -128,7 +129,8 @@ function normalizePath(p: string): string {
   return out.join("/");
 }
 
-function extractStaticEdges(
+// Exported for unit tests.
+export function extractStaticEdges(
   files: BuilderFile[],
   nodes: PageMapNode[],
 ): PageMapEdge[] {
