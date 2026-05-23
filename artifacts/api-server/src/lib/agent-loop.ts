@@ -1368,7 +1368,7 @@ function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
 // Tool executors
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface ToolCtx {
+export interface ToolCtx {
   name: string;
   args: Record<string, unknown>;
   workspace: FileWorkspace;
@@ -1592,7 +1592,7 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   ctx.containerState.installed = true;
 }
 
-async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: string }> {
+export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: string }> {
   const { name, args, workspace, stack, input, commandsRun, step, containerState } = ctx;
   if (input.signal.aborted) {
     return { ok: false, observation: "ERROR: aborted by user" };
