@@ -32,7 +32,10 @@ export default function TrashPage() {
       { id: p.id },
       {
         onSuccess: () => {
-          toast({ title: "Project restored", description: `"${p.name}" is back in your projects.` });
+          toast({
+            title: "Project restored",
+            description: `"${p.name}" is back in your projects.`,
+          });
           void queryClient.invalidateQueries({ queryKey: getListTrashedProjectsQueryKey() });
           void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
           void queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() });
@@ -55,7 +58,8 @@ export default function TrashPage() {
         <div>
           <h1 className="text-2xl font-semibold">Trash</h1>
           <p className="text-sm text-muted-foreground">
-            Deleted projects are kept for {RECOVERY_DAYS} days. After that they disappear from this list.
+            Deleted projects are kept for {RECOVERY_DAYS} days. After that they disappear from this
+            list.
           </p>
         </div>
       </header>

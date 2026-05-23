@@ -220,6 +220,11 @@ export interface Project {
   platform?: ProjectPlatform;
   status: ProjectStatus;
   agentMode: ProjectAgentMode;
+  /**
+     * Soft-delete timestamp. Present only on /projects/trash responses; null/omitted for active projects.
+     * @nullable
+     */
+  deletedAt?: string | null;
   /** @nullable */
   lastTaskSummary?: string | null;
   /** @nullable */

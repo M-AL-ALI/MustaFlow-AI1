@@ -3168,6 +3168,12 @@ components:
         agentMode:
           type: string
           enum: [lite, eco, power, pro]
+        deletedAt:
+          {
+            type: ["string", "null"],
+            format: date-time,
+            description: "Soft-delete timestamp. Present only on /projects/trash responses; null/omitted for active projects.",
+          }
         lastTaskSummary: { type: ["string", "null"] }
         summary: { type: ["string", "null"] }
         publicSlug: { type: ["string", "null"] }

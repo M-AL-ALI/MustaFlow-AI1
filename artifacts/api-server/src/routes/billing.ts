@@ -10,18 +10,25 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { createHmac } from "crypto";
-import { eq, desc } from "drizzle-orm";
-import { db, creditTransactionsTable } from "@workspace/db";
-import { grantCredits, getOrCreateCredits } from "./credits";
+import { eq, desc, sql } from "drizzle-orm";
+import {
+  db,
+  creditTransactionsTable,
+  stripeProcessedEventsTable,
+  userCreditsTable,
+} from "@workspace/db";
+import { getOrCreateCredits } from "./credits";
+import {
+  stripeAvailable,
+  getUncachableStripeClient,
+  invalidateStripeCredentialCache,
+} from "../lib/stripeClient";
+import { logger } from "../lib/logger";
 
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+// Stripe credentials come from the Replit Stripe connector at runtime
+// (via lib/stripeClient.ts). Falls back to STRIPE_SECRET_KEY env var if
+// the connector is not present (e.g. local dev outside Replit).
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
-const STRIPE_API_BASE = "https://api.stripe.com/v1";
-
-function stripeConfigured(): boolean {
-  return Boolean(STRIPE_SECRET_KEY);
-}
 
 export const CREDIT_PACKAGES = [
   {
@@ -29,7 +36,6 @@ export const CREDIT_PACKAGES = [
     label: "Starter Pack",
     credits: 500,
     priceUsd: 5,
-    priceId: process.env.STRIPE_PRICE_STARTER ?? null,
     description: "500 build credits — good for everyday building",
   },
   {
@@ -37,7 +43,6 @@ export const CREDIT_PACKAGES = [
     label: "Builder Pack",
     credits: 2500,
     priceUsd: 20,
-    priceId: process.env.STRIPE_PRICE_BUILDER ?? null,
     description: "2,500 build credits — best value for active builders",
   },
   {
@@ -45,70 +50,98 @@ export const CREDIT_PACKAGES = [
     label: "Power Pack",
     credits: 10000,
     priceUsd: 65,
-    priceId: process.env.STRIPE_PRICE_POWER ?? null,
     description: "10,000 build credits — for power users and teams",
   },
 ] as const;
 
 // ── Stripe webhook handler (shared between router and billingWebhookRouter) ───
+//
+// Security contract:
+// - In production (REPLIT_DEPLOYMENT=1): STRIPE_WEBHOOK_SECRET MUST be set and
+//   the signature MUST verify. Unverified or unsigned payloads are rejected.
+// - In dev: when STRIPE_WEBHOOK_SECRET is unset we log a warning and accept
+//   the payload (so local Stripe CLI testing without a secret still works).
+// - Every accepted event.id is recorded in stripe_processed_events with a
+//   unique primary key. Duplicate deliveries (Stripe retries / replays) skip
+//   the credit grant idempotently.
+const IS_PRODUCTION = process.env.REPLIT_DEPLOYMENT === "1";
+
 async function handleStripeWebhook(
   req: Parameters<Parameters<IRouter["post"]>[1]>[0],
   res: Parameters<Parameters<IRouter["post"]>[1]>[1],
 ): Promise<void> {
-  if (!stripeConfigured()) {
-    res.json({ ok: true, setupRequired: true });
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) {
+    // Return 5xx (NOT 200) so Stripe retries the delivery. Acking here would
+    // silently drop billable events during transient credential outages.
+    logger.error("Stripe client unavailable in webhook — returning 503 so Stripe retries");
+    res.status(503).json({ error: "Stripe client unavailable", willRetry: true });
     return;
   }
 
   const sig = req.headers["stripe-signature"] as string | undefined;
   const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody;
 
-  if (STRIPE_WEBHOOK_SECRET && sig && rawBody) {
-    try {
-      const parts = sig.split(",").reduce<Record<string, string>>((acc, part) => {
-        const [k, v] = part.split("=");
-        if (k && v) acc[k] = v;
-        return acc;
-      }, {});
-
-      const timestamp = parts["t"];
-      const receivedSig = parts["v1"];
-
-      if (!timestamp || !receivedSig) {
-        res.status(400).json({ error: "Invalid signature header" });
-        return;
-      }
-
-      const payload = `${timestamp}.${rawBody.toString()}`;
-      const expectedSig = createHmac("sha256", STRIPE_WEBHOOK_SECRET).update(payload).digest("hex");
-
-      if (expectedSig !== receivedSig) {
-        res.status(400).json({ error: "Webhook signature mismatch" });
-        return;
-      }
-    } catch {
-      res.status(400).json({ error: "Signature verification failed" });
-      return;
-    }
-  }
-
-  const event = req.body as {
-    type?: string;
-    data?: {
-      object?: {
+  type CheckoutEvent = {
+    id: string;
+    type: string;
+    data: {
+      object: {
         metadata?: { userId?: string; packageId?: string; credits?: string };
         payment_status?: string;
       };
     };
   };
+  let event: CheckoutEvent | null = null;
 
+  if (STRIPE_WEBHOOK_SECRET) {
+    if (!sig || !rawBody) {
+      res.status(400).json({ error: "Missing stripe-signature header or raw body" });
+      return;
+    }
+    try {
+      event = stripe.webhooks.constructEvent(
+        rawBody,
+        sig,
+        STRIPE_WEBHOOK_SECRET,
+      ) as unknown as CheckoutEvent;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "verify failed";
+      logger.warn({ err: msg }, "Stripe webhook signature verification failed");
+      res.status(400).json({ error: "Signature verification failed" });
+      return;
+    }
+  } else {
+    if (IS_PRODUCTION) {
+      logger.error("STRIPE_WEBHOOK_SECRET not set — refusing unverified webhook in production");
+      res.status(500).json({ error: "Webhook secret not configured" });
+      return;
+    }
+    logger.warn("STRIPE_WEBHOOK_SECRET not set — accepting unverified webhook (DEV ONLY)");
+    event = req.body as CheckoutEvent;
+  }
+
+  if (!event?.id || !event.type) {
+    res.status(400).json({ error: "Malformed event payload" });
+    return;
+  }
+
+  // Non-credit events: record idempotency, ack, done.
   if (event.type !== "checkout.session.completed") {
+    await db
+      .insert(stripeProcessedEventsTable)
+      .values({ eventId: event.id, type: event.type })
+      .onConflictDoNothing();
     res.json({ ok: true, type: event.type, processed: false });
     return;
   }
 
   const session = event.data?.object;
   if (session?.payment_status !== "paid") {
+    await db
+      .insert(stripeProcessedEventsTable)
+      .values({ eventId: event.id, type: event.type })
+      .onConflictDoNothing();
     res.json({ ok: true, processed: false, reason: "payment_status not paid" });
     return;
   }
@@ -128,13 +161,65 @@ async function handleStripeWebhook(
     return;
   }
 
-  const newBalance = await grantCredits(
-    userId,
-    credits,
-    `Stripe purchase: ${packageId ?? "unknown"} pack (${credits} credits)`,
-  );
+  // Atomic: insert event row + grant credits + write transaction in one tx.
+  // If anything throws, the event row rolls back so Stripe's retry can succeed.
+  // If event was already processed (concurrent retry won earlier), the insert
+  // returns 0 rows and we short-circuit to a duplicate ack.
+  try {
+    const result = await db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(stripeProcessedEventsTable)
+        .values({ eventId: event.id, type: event.type })
+        .onConflictDoNothing()
+        .returning({ eventId: stripeProcessedEventsTable.eventId });
 
-  res.json({ ok: true, userId, creditsGranted: credits, newBalance });
+      if (inserted.length === 0) return { duplicate: true as const };
+
+      // Ensure user_credits row exists (uses outer db, but the upsert is
+      // idempotent and any failure here will throw out of the transaction).
+      await getOrCreateCredits(userId);
+
+      const [updated] = await tx
+        .update(userCreditsTable)
+        .set({ balance: sql`${userCreditsTable.balance} + ${credits}`, updatedAt: sql`now()` })
+        .where(eq(userCreditsTable.userId, userId))
+        .returning({ balance: userCreditsTable.balance });
+
+      const newBalance = updated?.balance ?? 0;
+
+      await tx.insert(creditTransactionsTable).values({
+        userId,
+        type: "purchase",
+        amount: credits,
+        description: `Stripe purchase: ${packageId ?? "unknown"} pack (${credits} credits) [event ${event.id}]`,
+        balanceAfter: newBalance,
+      });
+
+      return { duplicate: false as const, newBalance };
+    });
+
+    if (result.duplicate) {
+      logger.info({ eventId: event.id, type: event.type }, "Stripe webhook duplicate — skipping");
+      res.json({ ok: true, duplicate: true, eventId: event.id });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      userId,
+      creditsGranted: credits,
+      newBalance: result.newBalance,
+      eventId: event.id,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    logger.error(
+      { err: msg, eventId: event.id, userId, credits },
+      "Stripe webhook credit grant failed — transaction rolled back, Stripe will retry",
+    );
+    // 500 so Stripe retries. The idempotency row was rolled back so retry can succeed.
+    res.status(500).json({ error: "Credit grant failed", willRetry: true });
+  }
 }
 
 // ── Public webhook router — mount BEFORE auth wall ────────────────────────────
@@ -172,16 +257,17 @@ router.get("/billing/transactions", async (req, res): Promise<void> => {
 });
 
 // GET /api/billing/packages
-router.get("/billing/packages", (_req, res): void => {
+router.get("/billing/packages", async (_req, res): Promise<void> => {
+  const configured = await stripeAvailable();
   res.json({
-    stripeConfigured: stripeConfigured(),
+    stripeConfigured: configured,
     packages: CREDIT_PACKAGES.map((p) => ({
       id: p.id,
       label: p.label,
       credits: p.credits,
       priceUsd: p.priceUsd,
       description: p.description,
-      available: stripeConfigured() && Boolean(p.priceId),
+      available: configured,
     })),
   });
 });
@@ -194,11 +280,12 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
     return;
   }
 
-  if (!stripeConfigured()) {
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) {
     res.json({
       setupRequired: true,
       message:
-        "Stripe is not configured. Set STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, and STRIPE_PRICE_* env vars to enable credit purchases.",
+        "Stripe is not configured. Connect the Stripe integration (or set STRIPE_SECRET_KEY) to enable credit purchases.",
       packages: CREDIT_PACKAGES,
     });
     return;
@@ -218,51 +305,37 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
     return;
   }
 
-  if (!pkg.priceId) {
-    res.status(400).json({
-      error: `Stripe price ID for package "${pkg.id}" is not configured. Set STRIPE_PRICE_${pkg.id.toUpperCase()} env var.`,
-    });
-    return;
-  }
-
   if (!successUrl || !cancelUrl) {
     res.status(400).json({ error: "successUrl and cancelUrl are required" });
     return;
   }
 
   try {
-    const params = new URLSearchParams({
+    // Use inline price_data instead of pre-created Stripe Price IDs so
+    // operators don't need to create products in the Stripe Dashboard first.
+    const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      "line_items[0][price]": pkg.priceId,
-      "line_items[0][quantity]": "1",
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: pkg.priceUsd * 100,
+            product_data: {
+              name: `MustaFlow ${pkg.label}`,
+              description: pkg.description,
+            },
+          },
+        },
+      ],
       success_url: successUrl,
       cancel_url: cancelUrl,
-      "metadata[userId]": userId,
-      "metadata[packageId]": pkg.id,
-      "metadata[credits]": String(pkg.credits),
-    });
-
-    const resp = await fetch(`${STRIPE_API_BASE}/checkout/sessions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
-        "Content-Type": "application/x-www-form-urlencoded",
+      metadata: {
+        userId,
+        packageId: pkg.id,
+        credits: String(pkg.credits),
       },
-      body: params.toString(),
     });
-
-    const session = (await resp.json()) as {
-      id?: string;
-      url?: string;
-      error?: { message: string };
-    };
-
-    if (!resp.ok || session.error) {
-      res.status(502).json({
-        error: session.error?.message ?? "Stripe session creation failed",
-      });
-      return;
-    }
 
     res.json({
       sessionId: session.id,
@@ -276,6 +349,11 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
+    // If Stripe rejects with auth error, drop the cached secret so the next
+    // request refetches from the connector (handles key rotation).
+    if (/api key|authentication|invalid_api_key/i.test(msg)) {
+      invalidateStripeCredentialCache();
+    }
     res.status(502).json({ error: `Stripe API error: ${msg}` });
   }
 });

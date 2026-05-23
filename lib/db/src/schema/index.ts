@@ -10,6 +10,7 @@ export * from "./secret-audit";
 export * from "./knowledge";
 export * from "./deployments";
 export * from "./credits";
+export * from "./stripeEvents";
 export * from "./userRoles";
 export * from "./analytics";
 export * from "./suggestions";
