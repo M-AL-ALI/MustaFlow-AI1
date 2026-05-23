@@ -2749,10 +2749,9 @@ export default function ProjectWorkspacePage() {
                   return payload.report?.nativeFeatures ?? [];
                 })()}
                 onFixPrompt={(text) => {
-                  setPrompt(text);
                   switchLeftPanel("chat");
                   if (isMobileLayout) setChatDrawerOpen(true);
-                  setTimeout(() => promptInputRef.current?.focus(), 50);
+                  send(text, { agentIntent: "build" });
                 }}
                 onAutoSendPrompt={(text) => {
                   switchLeftPanel("chat");

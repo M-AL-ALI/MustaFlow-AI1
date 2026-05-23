@@ -1699,6 +1699,99 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           );
         }
 
+        // Empty-refine retry guard: if the model returned 0 changed/removed files for a clearly
+        // actionable request (contains a build verb), retry once with a stricter user instruction
+        // appended. Prevents "explanation only, preview never updates" failure mode.
+        const BUILD_VERB_RE =
+          /\b(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge)\b/i;
+        const refineEmpty =
+          refineResult.changedFiles.length === 0 && refineResult.removedPaths.length === 0;
+        if (refineEmpty && BUILD_VERB_RE.test(userPrompt)) {
+          logger.info(
+            { taskId, projectId },
+            "Refine returned 0 changes for an action-style prompt — retrying with stricter instruction",
+          );
+          await emitEvent(
+            taskId,
+            "generating_code",
+            "First pass returned no changes — retrying with stricter instruction…",
+          );
+          const stricterPrompt =
+            `${userPrompt}\n\n[SYSTEM] The previous attempt returned zero file changes for a request that clearly asks for code modifications. You MUST now return at least one concrete file modification in the "files" array that addresses the request. If the request is genuinely ambiguous, pick the most likely interpretation and ship a minimal change.`;
+          const retryStackArgs = { ...stackRefineArgs, userPrompt: stricterPrompt };
+          try {
+            const retryResult = isMobileProject
+              ? await runMobileRefinePipeline({
+                  projectName: project.name,
+                  projectKind: project.kind,
+                  userPrompt: stricterPrompt,
+                  agentMode,
+                  existingFiles,
+                  conversationHistory,
+                  knowledgeContext: knowledgeContext || undefined,
+                  activeModuleIds,
+                  configuredSecretNames,
+                  imageAttachments,
+                  onEvent: async (type, message) => emitEvent(taskId, type, message),
+                  signal,
+                })
+              : isReactViteProject
+                ? await runReactViteRefinePipeline({
+                    projectName: project.name,
+                    projectKind: project.kind,
+                    userPrompt: stricterPrompt,
+                    agentMode,
+                    existingFiles,
+                    conversationHistory,
+                    knowledgeContext: knowledgeContext || undefined,
+                    databaseContext,
+                    unchangedFilesHint:
+                      unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                    planContext: input.planContext ?? null,
+                    conversationSummary,
+                    imageAttachments,
+                    onEvent: async (type, message) => emitEvent(taskId, type, message),
+                    signal,
+                  })
+                : isNextjsProject
+                  ? await runNextjsRefinePipeline(retryStackArgs)
+                  : isNodeApiProject
+                    ? await runNodeApiRefinePipeline(retryStackArgs)
+                    : isPythonFlaskProject
+                      ? await runFlaskRefinePipeline(retryStackArgs)
+                      : isPythonFastapiProject
+                        ? await runFastapiRefinePipeline(retryStackArgs)
+                        : await runRefinePipeline({
+                            projectName: project.name,
+                            projectKind: project.kind,
+                            userPrompt: stricterPrompt,
+                            agentMode,
+                            existingFiles,
+                            conversationHistory,
+                            knowledgeContext: knowledgeContext || undefined,
+                            databaseContext,
+                            unchangedFilesHint:
+                              unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                            planContext: input.planContext ?? null,
+                            conversationSummary,
+                            imageAttachments,
+                            signal,
+                          });
+            if (!retryResult.correctionFailed) {
+              refineResult = retryResult;
+              refineResult.report.warnings = [
+                "First pass returned no file changes — retried once with a stricter instruction.",
+                ...(refineResult.report.warnings ?? []),
+              ];
+            }
+          } catch (err) {
+            logger.warn(
+              { err, taskId, projectId },
+              "Empty-refine retry pass failed — using original result",
+            );
+          }
+        }
+
         // Secrets scan — redact before persisting
         const { files: sanitisedChangedFiles, findings: refineSecretFindings } = scanForSecrets(
           refineResult.changedFiles,
@@ -1739,7 +1832,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           taskId,
           "narration",
           changedCount === 0
-            ? "No files needed changing — your app is already up to date."
+            ? "I didn't change any files for this request — see the explanation in the report below."
             : `Writing ${changedCount} updated file${changedCount !== 1 ? "s" : ""} to the project.`,
         );
         // Guard: if the build was cancelled while the AI was responding, stop before touching files.

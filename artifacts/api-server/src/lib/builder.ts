@@ -155,6 +155,15 @@ REQUIRED META TAGS (every HTML file, no exceptions):
 
 const SELF_REVIEW_CLAUSE = `SELF-REVIEW REQUIREMENT: Before finalising your JSON response, silently review every generated file against the CODE QUALITY RULES. Fix any violations before writing the final response. Do not mention this review step in the output.`;
 
+const REFINE_BIAS_TO_ACTION = `BIAS TO ACTION — this is a CHANGE request, not a discussion:
+- The user expects file modifications. Default to making changes, not explaining why none are needed.
+- When the user says "fix", "change", "add", "update", "make", or describes a problem with the app, you MUST return at least one modified file in the "files" array. Do NOT respond with an empty "files" array plus an apology.
+- If a reported error is from external infrastructure (third-party API outage, browser warning unrelated to the codebase, native device behaviour that requires a real device, etc.), you may return zero file changes — but ONLY if you ALSO:
+    1. Set "summary" to clearly state what you did NOT change and exactly why ("I did not modify any files because the error originated from the OpenAI API, not your code.").
+    2. Provide a concrete next step the user can take in "nextRecommendation" (rephrase, share the failing input, configure a secret, etc.).
+- If the user's intent is ambiguous, make your best interpretation and ship a change — do not refuse. The user can always rollback to the previous version.
+- Never claim "your app is already up to date" unless you genuinely inspected every relevant file and confirmed no change is warranted.`;
+
 const PREVIEW_NOTE = `IMPORTANT preview-runtime constraints:
 - This is a static preview. Generate only safe, self-contained files: HTML, CSS, vanilla JS (or React via CDN inside <script type="text/babel">), images via public CDNs.
 - ALWAYS produce an index.html. Multi-page apps use additional .html files with relative links (e.g. <a href="./about.html">).
@@ -224,6 +233,8 @@ OUTPUT STRICT JSON matching this exact shape:
 The "files" array must contain every file needed. Always include "index.html" as path. CSS/JS files are optional; inline is fine.`;
 
 const REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE. You receive the current project files and a change request. You modify the affected files and return the FULL updated file contents.
+
+${REFINE_BIAS_TO_ACTION}
 
 For files larger than 3KB, you MAY also return a "patches" array to surgically update specific sections. Each patch has: { "path": string, "find": string, "replace": string } where "find" is a unique excerpt from the file and "replace" is the new content that should replace it. Prefer patches over full-file rewrites for large files with localised changes — smaller payloads, fewer regressions.
 
@@ -370,6 +381,8 @@ MIME types: .ts/.tsx → "application/typescript", .json → "application/json",
 The "files" array MUST include every file in the project. package.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, and src/index.css are REQUIRED.`;
 
 const REACT_VITE_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a React + Vite project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
+
+${REFINE_BIAS_TO_ACTION}
 
 TECH STACK: React 18 + TypeScript + Vite 5 + Tailwind CSS v3 + lucide-react
 
@@ -4322,6 +4335,8 @@ The files array MUST contain app.json, package.json, babel.config.js, tailwind.c
 
 const MOBILE_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Builder in CHANGE MODE. You receive the current Expo/React Native project files and a change request. You modify the affected files and return the FULL updated file contents.
 
+${REFINE_BIAS_TO_ACTION}
+
 ${MOBILE_PREVIEW_NOTE}
 
 OUTPUT STRICT JSON matching this exact shape:
@@ -4442,6 +4457,8 @@ The "files" array MUST include every file. package.json, next.config.js, src/app
 
 const NEXTJS_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Next.js 14 App Router project. You receive current project files and a change request. Return ONLY files that changed (full new content for each changed file).
 
+${REFINE_BIAS_TO_ACTION}
+
 TECH STACK: Next.js 14 App Router + TypeScript + Tailwind CSS v3 + lucide-react
 
 RULES:
@@ -4544,6 +4561,8 @@ The "files" array MUST include every file. package.json, tsconfig.json, src/inde
 
 const NODE_API_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Node.js + Express API project. You receive current project files and a change request. Return ONLY files that changed.
 
+${REFINE_BIAS_TO_ACTION}
+
 TECH STACK: Node.js 22 + TypeScript + Express 4 + Zod
 
 RULES:
@@ -4624,6 +4643,8 @@ MIME types: .py → "text/x-python", .txt → "text/plain", .html → "text/html
 The "files" array MUST include every file. requirements.txt and app.py are REQUIRED.`;
 
 const FLASK_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Python Flask project. You receive current project files and a change request. Return ONLY files that changed.
+
+${REFINE_BIAS_TO_ACTION}
 
 TECH STACK: Python 3.12 + Flask 3.x + flask-cors + python-dotenv
 
@@ -4707,6 +4728,8 @@ MIME types: .py → "text/x-python", .txt → "text/plain", .json → "applicati
 The "files" array MUST include every file. requirements.txt and main.py are REQUIRED.`;
 
 const FASTAPI_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Python FastAPI project. You receive current project files and a change request. Return ONLY files that changed.
+
+${REFINE_BIAS_TO_ACTION}
 
 TECH STACK: Python 3.12 + FastAPI 0.115 + Uvicorn + Pydantic v2 + python-dotenv
 
@@ -6283,6 +6306,8 @@ The "files" array MUST include every file in the project. package.json, src/inde
 
 const NODE_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Node.js / Express project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
 
+${REFINE_BIAS_TO_ACTION}
+
 TECH STACK: Node.js + Express 4 + plain JavaScript (CommonJS)
 
 RULES:
@@ -6357,6 +6382,8 @@ OUTPUT STRICT JSON:
 The "files" array MUST include every file in the project. requirements.txt, app.py, and index.html are REQUIRED.`;
 
 const PYTHON_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder in CHANGE MODE for a Python / Flask project. You receive the current project files and a change request. Return ONLY files that changed (full new content for each changed file).
+
+${REFINE_BIAS_TO_ACTION}
 
 TECH STACK: Python 3.12 + Flask 3 + flask-cors + python-dotenv
 
