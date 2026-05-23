@@ -42,6 +42,7 @@ import preferencesRouter from "./preferences";
 import checkRunsRouter from "./check-runs";
 import securityRouter from "./security";
 import testRunsRouter from "./test-runs";
+import prodLogsRouter, { publicProdLogRouter } from "./prod-logs";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -54,6 +55,7 @@ router.use(generalLimiter);
 router.use(healthRouter);
 router.use(publicRouter);
 router.use(analyticsRouter); // POST /p/:slug/analytics/ping (public ping)
+router.use(publicProdLogRouter); // POST /p/:slug/log (public browser error beacon)
 router.use(sslWebhookRouter); // POST /domain/ssl-webhook (Cloudflare → us)
 router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
 
@@ -154,6 +156,7 @@ router.use(preferencesRouter);
 router.use(checkRunsRouter);
 router.use(securityRouter);
 router.use(testRunsRouter);
+router.use(prodLogsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

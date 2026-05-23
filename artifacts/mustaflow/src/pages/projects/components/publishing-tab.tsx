@@ -49,6 +49,111 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
+// ─── Post-publish health banner (Task #511) ─────────────────────────────────
+function HealthCheckBanner({
+  projectId,
+  onShowProdErrors,
+}: {
+  projectId: number;
+  onShowProdErrors?: () => void;
+}) {
+  const [latest, setLatest] = useState<{
+    status: "passed" | "failed" | "partial";
+    rootStatus: number | null;
+    routesChecked: number;
+    routesFailed: number;
+    failureSummary: string | null;
+    createdAt: string;
+  } | null>(null);
+  const [running, setRunning] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/projects/${projectId}/health-checks`);
+      if (r.ok) {
+        const data = (await r.json()) as { latest: typeof latest };
+        setLatest(data.latest ?? null);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void load();
+    const t = setInterval(() => void load(), 30_000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  const runNow = useCallback(async () => {
+    setRunning(true);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/health-checks/run`, { method: "POST" });
+      if (r.ok) await load();
+    } catch {
+      /* ignore */
+    } finally {
+      setRunning(false);
+    }
+  }, [projectId, load]);
+
+  if (!latest) return null;
+
+  const tone =
+    latest.status === "passed"
+      ? "bg-green-500/5 border-green-500/30 text-green-400"
+      : latest.status === "partial"
+        ? "bg-amber-500/5 border-amber-500/30 text-amber-400"
+        : "bg-destructive/5 border-destructive/30 text-destructive";
+
+  const Icon =
+    latest.status === "passed"
+      ? CheckCircle2
+      : latest.status === "partial"
+        ? AlertTriangle
+        : XCircle;
+
+  return (
+    <div className={cn("border rounded-xl p-4 flex items-start gap-3", tone)}>
+      <Icon className="h-5 w-5 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold capitalize">Health check {latest.status}</span>
+          <span className="text-[11px] opacity-80">
+            · root {latest.rootStatus ?? "—"} · {latest.routesFailed}/{latest.routesChecked} routes
+            failed
+          </span>
+          <div className="ml-auto flex items-center gap-3">
+            {latest.status !== "passed" && onShowProdErrors && (
+              <button
+                type="button"
+                onClick={onShowProdErrors}
+                className="text-[11px] underline opacity-80 hover:opacity-100"
+              >
+                Show me prod errors
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void runNow()}
+              disabled={running}
+              className="text-[11px] underline opacity-80 hover:opacity-100 disabled:opacity-50"
+            >
+              {running ? "Running…" : "Re-check"}
+            </button>
+          </div>
+        </div>
+        {latest.failureSummary && (
+          <div className="text-[12px] opacity-90 mt-1">{latest.failureSummary}</div>
+        )}
+        <div className="text-[10px] opacity-60 mt-1">
+          Last run: {new Date(latest.createdAt).toLocaleString()}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CopyUrlButton({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -2129,6 +2234,7 @@ export function PublishingTab({
   onNavigateToSecret,
   onNavigateToMobileSettings,
   onNavigateToChecks,
+  onNavigateToLogs,
 }: {
   projectId: number;
   kind?: string;
@@ -2137,6 +2243,7 @@ export function PublishingTab({
   onNavigateToSecret?: (secretName: string) => void;
   onNavigateToMobileSettings?: () => void;
   onNavigateToChecks?: () => void;
+  onNavigateToLogs?: () => void;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
   const queryClient = useQueryClient();
@@ -2693,6 +2800,8 @@ export function PublishingTab({
             Complete all required steps before making your app live.
           </p>
         </div>
+
+        <HealthCheckBanner projectId={projectId} onShowProdErrors={onNavigateToLogs} />
 
         {/* Platform tabs — iOS/Android only visible for mobile projects */}
         <div className="flex gap-2">

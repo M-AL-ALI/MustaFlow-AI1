@@ -23,6 +23,8 @@ import {
   Smartphone,
   PlaySquare,
   ArrowUpRight,
+  Activity,
+  Bug,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -617,6 +619,236 @@ function MobileBuildRow({
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Production logs panel (Task #511) ──────────────────────────────────────
+type ProdLogRow = {
+  id: number;
+  ts: string;
+  kind: string;
+  method: string | null;
+  path: string | null;
+  status: number | null;
+  latencyMs: number | null;
+  errorClass: string | null;
+  message: string | null;
+};
+type ProdErrorGroup = {
+  id: number;
+  signature: string;
+  sampleMessage: string;
+  count: number;
+  lastSeen: string;
+  kind: string;
+};
+
+function ProdLogsPanel({ projectId }: { projectId: number }) {
+  const [open, setOpen] = useState(false);
+  const [logs, setLogs] = useState<ProdLogRow[]>([]);
+  const [groups, setGroups] = useState<ProdErrorGroup[]>([]);
+  const [view, setView] = useState<"errors" | "requests" | "server">("errors");
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!projectId) return;
+    setLoading(true);
+    try {
+      const [logsRes, groupsRes] = await Promise.all([
+        fetch(`/api/projects/${projectId}/prod-logs?limit=50`),
+        fetch(`/api/projects/${projectId}/prod-errors?limit=20`),
+      ]);
+      if (logsRes.ok) {
+        const data = (await logsRes.json()) as { logs: ProdLogRow[] };
+        setLogs(data.logs ?? []);
+      }
+      if (groupsRes.ok) {
+        const data = (await groupsRes.json()) as { groups: ProdErrorGroup[] };
+        setGroups(data.groups ?? []);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!open) return;
+    void refresh();
+    const timer = setInterval(() => void refresh(), 10_000);
+    return () => clearInterval(timer);
+  }, [open, refresh]);
+
+  const errorCount = groups.reduce((acc, g) => acc + (g.count ?? 0), 0);
+
+  return (
+    <div className="shrink-0 border-b border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-5 py-2.5 flex items-center gap-2 text-left hover:bg-muted/30 transition-colors"
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+        )}
+        <Activity className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-semibold">Production Logs</span>
+        {errorCount > 0 && (
+          <span className="ml-2 px-2 py-0.5 rounded-full bg-destructive/10 text-destructive text-[10px] font-medium border border-destructive/20">
+            {errorCount} error{errorCount !== 1 ? "s" : ""}
+          </span>
+        )}
+        <span className="ml-auto text-[10px] text-muted-foreground">From published deployment</span>
+      </button>
+      {open && (
+        <div className="px-5 pb-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setView("errors")}
+              className={cn(
+                "px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors",
+                view === "errors"
+                  ? "bg-primary/10 text-primary border-primary/20"
+                  : "text-muted-foreground border-border hover:bg-muted/30",
+              )}
+            >
+              <Bug className="inline h-3 w-3 mr-1" />
+              Errors ({groups.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("requests")}
+              className={cn(
+                "px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors",
+                view === "requests"
+                  ? "bg-primary/10 text-primary border-primary/20"
+                  : "text-muted-foreground border-border hover:bg-muted/30",
+              )}
+            >
+              Requests ({logs.filter((l) => l.kind === "request").length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("server")}
+              className={cn(
+                "px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors",
+                view === "server"
+                  ? "bg-primary/10 text-primary border-primary/20"
+                  : "text-muted-foreground border-border hover:bg-muted/30",
+              )}
+            >
+              Server ({logs.filter((l) => l.kind === "server").length})
+            </button>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={loading}
+              className="ml-auto text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+
+          {view === "errors" && (
+            <div className="space-y-1.5 max-h-64 overflow-y-auto rounded-md border border-border bg-muted/10">
+              {groups.length === 0 && (
+                <div className="text-[11px] text-muted-foreground text-center py-6">
+                  No browser errors recorded.
+                </div>
+              )}
+              {groups.map((g) => (
+                <div
+                  key={g.id}
+                  className="px-3 py-2 border-b border-border/40 last:border-b-0 text-[11px] flex items-start gap-2"
+                >
+                  <span className="px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-mono shrink-0">
+                    ×{g.count}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate font-mono text-foreground" title={g.sampleMessage}>
+                      {g.sampleMessage}
+                    </div>
+                    <div className="text-muted-foreground text-[10px] mt-0.5">
+                      sig {g.signature} · last {new Date(g.lastSeen).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {view === "server" && (
+            <div className="space-y-1 max-h-64 overflow-y-auto rounded-md border border-border bg-muted/10 font-mono text-[11px]">
+              {logs.filter((l) => l.kind === "server").length === 0 && (
+                <div className="text-[11px] text-muted-foreground text-center py-6 font-sans">
+                  No server logs recorded yet. Backend stacks emit container output here.
+                </div>
+              )}
+              {logs
+                .filter((l) => l.kind === "server")
+                .map((l) => {
+                  const isErr = !!l.errorClass;
+                  return (
+                    <div
+                      key={l.id}
+                      className="px-3 py-1 border-b border-border/40 last:border-b-0 flex items-start gap-2"
+                    >
+                      <span
+                        className={cn(
+                          "w-14 shrink-0 text-[10px] uppercase font-semibold",
+                          isErr ? "text-destructive" : "text-muted-foreground",
+                        )}
+                      >
+                        {isErr ? "stderr" : "stdout"}
+                      </span>
+                      <span className="flex-1 whitespace-pre-wrap break-all text-foreground">
+                        {l.message ?? ""}
+                      </span>
+                      <span className="shrink-0 text-muted-foreground text-[10px]">
+                        {new Date(l.ts).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+
+          {view === "requests" && (
+            <div className="space-y-1 max-h-64 overflow-y-auto rounded-md border border-border bg-muted/10 font-mono text-[11px]">
+              {logs.filter((l) => l.kind === "request").length === 0 && (
+                <div className="text-[11px] text-muted-foreground text-center py-6 font-sans">
+                  No requests recorded yet.
+                </div>
+              )}
+              {logs
+                .filter((l) => l.kind === "request")
+                .map((l) => {
+                  const s = l.status ?? 0;
+                  const cls =
+                    s >= 500 ? "text-destructive" : s >= 400 ? "text-amber-400" : "text-green-400";
+                  return (
+                    <div
+                      key={l.id}
+                      className="px-3 py-1 border-b border-border/40 last:border-b-0 flex items-center gap-2"
+                    >
+                      <span className={cn("w-10 shrink-0", cls)}>{s || "—"}</span>
+                      <span className="w-12 shrink-0 text-muted-foreground">{l.method}</span>
+                      <span className="flex-1 truncate text-foreground" title={l.path ?? ""}>
+                        {l.path}
+                      </span>
+                      <span className="shrink-0 text-muted-foreground">{l.latencyMs ?? 0}ms</span>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function LogsTab({
   projectId,
   kind,
@@ -673,6 +905,7 @@ export function LogsTab({
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
+      <ProdLogsPanel projectId={projectId} />
       {/* Header */}
       <div className="shrink-0 border-b border-border px-5 py-3 flex items-center gap-4">
         <div className="flex items-center gap-2">

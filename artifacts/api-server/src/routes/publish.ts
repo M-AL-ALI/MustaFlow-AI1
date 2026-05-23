@@ -24,6 +24,7 @@ import { generateOgSvg } from "../lib/ogImage";
 import { deployProductionContainer, destroyContainer } from "../lib/container";
 import { encryptionService } from "../lib/encryption";
 import { getUnresolvedCriticalFindings } from "./readiness";
+import { runPostPublishHealthCheck, recordHealthCheck, getDeclaredRoutes } from "../lib/prodLogs";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
@@ -173,23 +174,20 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   }
 
   // Mark the project published, store which snapshot is live, and save the slug.
-  // Best-effort inside setImmediate so the response returns immediately.
-  setImmediate(() => {
-    void db
-      .update(projectsTable)
-      .set({
-        status: "published",
-        publishedSnapshotId: deploymentVersion?.id ?? null,
-        publicSlug: slug,
-        prodContainerId,
-        prodContainerUrl,
-        prodContainerStatus,
-        updatedAt: new Date(),
-      })
-      .catch(() => {
-        /* best-effort */
-      });
-  });
+  // Must be awaited (not setImmediate) so downstream consumers — including the
+  // post-publish health check — observe the updated row.
+  await db
+    .update(projectsTable)
+    .set({
+      status: "published",
+      publishedSnapshotId: deploymentVersion?.id ?? null,
+      publicSlug: slug,
+      prodContainerId,
+      prodContainerUrl,
+      prodContainerStatus,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectsTable.id, projectId));
 
   void writeKnowledge({
     title: `Published: project ${projectId}`,
@@ -217,6 +215,49 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       .catch(() => {
         /* best-effort */
       });
+  });
+
+  // Post-publish health check — Task #511. Runs in the background so the
+  // publish response returns immediately. Writes a Knowledge Vault entry on
+  // failure and persists the outcome to prod_health_checks for the banner.
+  setImmediate(() => {
+    void (async () => {
+      try {
+        const routes = await getDeclaredRoutes(projectId);
+        const result = await runPostPublishHealthCheck({
+          projectId,
+          publicSlug: slug,
+          snapshotId: deploymentVersion?.id ?? null,
+          routes,
+        });
+        await recordHealthCheck({
+          projectId,
+          publicSlug: slug,
+          snapshotId: deploymentVersion?.id ?? null,
+          status: result.status,
+          rootStatus: result.rootStatus,
+          rootLatencyMs: result.rootLatencyMs,
+          routesChecked: result.routesChecked,
+          routesFailed: result.routesFailed,
+          failureSummary: result.failureSummary,
+        });
+        if (result.status !== "passed") {
+          await writeKnowledge({
+            title: `Health check ${result.status}: project ${projectId}`,
+            content: `Post-publish health check for project ${projectId} (slug ${slug}) returned status="${result.status}". ${
+              result.failureSummary ?? "No failure summary."
+            }`,
+            type: "health-check",
+            category: "event",
+            severity: result.status === "failed" ? "error" : "warning",
+            projectId,
+            userId: req.userId,
+          });
+        }
+      } catch (err) {
+        req.log.warn({ err, projectId }, "Post-publish health check failed (non-fatal)");
+      }
+    })();
   });
 
   res.json({

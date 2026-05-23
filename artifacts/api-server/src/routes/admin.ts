@@ -22,6 +22,7 @@ import {
   secretAuditLogTable,
 } from "@workspace/db";
 import { requireAdmin } from "../lib/adminAuth";
+import { errorsPerDay } from "../lib/prodLogs";
 
 const router: IRouter = Router();
 
@@ -94,6 +95,16 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
   `);
   const archRow = architectStatsRows.rows[0];
 
+  // Cross-project prod error totals (last 14 days) — Task #511 admin tile.
+  let errorsByDay: Array<{ day: string; count: number }> = [];
+  let errorsTotal = 0;
+  try {
+    errorsByDay = await errorsPerDay(14);
+    errorsTotal = errorsByDay.reduce((acc, r) => acc + (r.count ?? 0), 0);
+  } catch {
+    /* non-fatal */
+  }
+
   res.json({
     projects: {
       total: projectStats?.total ?? 0,
@@ -115,6 +126,10 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
       partialCount: Number(archRow?.partial ?? 0),
       failCount: Number(archRow?.fail ?? 0),
       autoFixesQueued: Number(archRow?.auto_fixed ?? 0),
+    },
+    prodErrors: {
+      last14Days: errorsTotal,
+      byDay: errorsByDay,
     },
   });
 });

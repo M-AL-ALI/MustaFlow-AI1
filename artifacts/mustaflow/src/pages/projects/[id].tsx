@@ -2859,6 +2859,7 @@ export default function ProjectWorkspacePage() {
                   setActiveTab("manage");
                 }}
                 onNavigateToChecks={() => setActiveTab("checks")}
+                onNavigateToLogs={() => setActiveTab("logs")}
               />
             )}
             {activeTab === "logs" && (

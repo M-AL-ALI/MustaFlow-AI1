@@ -7,6 +7,7 @@ import { db, projectsTable, projectVersionsTable } from "@workspace/db";
 import { guessMime } from "./builder";
 import { injectBridge } from "./consoleBridge";
 import { isBinaryMime } from "./binary-mime";
+import { recordProdLog, hashIp } from "./prodLogs";
 
 type SnapshotFile = { path: string; content: string; mimeType?: string };
 
@@ -20,6 +21,18 @@ function buildAnalyticsSnippet(slug: string): string {
   var s=document.cookie.match(/mf_view_session=([^;]+)/);
   var sid=s?s[1]:'';
   try{fetch('/api/p/${slug}/analytics/ping',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({referrer:document.referrer,path:location.pathname,sid:sid})});}catch(_){}
+})();</script>`;
+}
+
+/** Browser error beacon (Task #511). Posts unhandled errors + rejections to /api/p/:slug/log. */
+function buildErrorBeaconSnippet(slug: string): string {
+  return `<script>(function(){
+  var q=[],t=null,MAX=10;
+  function flush(){if(q.length===0)return;var payload={errors:q.splice(0,MAX)};try{fetch('/api/p/${slug}/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),keepalive:true});}catch(_){}t=null;}
+  function push(e){if(q.length>=20)return;q.push(e);if(!t)t=setTimeout(flush,1000);}
+  window.addEventListener('error',function(ev){push({message:String((ev&&ev.message)||'error'),stack:ev&&ev.error&&ev.error.stack?String(ev.error.stack).slice(0,3000):'',errorClass:ev&&ev.error&&ev.error.name?String(ev.error.name):'Error',url:location.pathname+location.search});});
+  window.addEventListener('unhandledrejection',function(ev){var r=ev&&ev.reason;push({message:String((r&&r.message)||r||'unhandledrejection'),stack:r&&r.stack?String(r.stack).slice(0,3000):'',errorClass:r&&r.name?String(r.name):'UnhandledRejection',url:location.pathname+location.search});});
+  window.addEventListener('beforeunload',flush);
 })();</script>`;
 }
 
@@ -59,7 +72,34 @@ export async function serveSnapshot(
   res: Response,
   projectId: number,
   filePath: string,
+  reqMeta?: {
+    method?: string;
+    ip?: string;
+    requestId?: string;
+    userAgent?: string;
+  },
 ): Promise<void> {
+  const startedAt = Date.now();
+  const writeRequestLog = (status: number, snapshotId: number | null): void => {
+    try {
+      recordProdLog({
+        projectId,
+        snapshotId,
+        kind: "request",
+        method: (reqMeta?.method ?? "GET").slice(0, 10),
+        path: ("/" + (filePath ?? "")).slice(0, 500),
+        status,
+        latencyMs: Date.now() - startedAt,
+        requestId: reqMeta?.requestId?.slice(0, 64) ?? null,
+        ipHash: hashIp(reqMeta?.ip ?? null),
+        userAgent: reqMeta?.userAgent?.slice(0, 200) ?? null,
+      });
+    } catch {
+      /* best-effort */
+    }
+  };
+  res.once("finish", () => writeRequestLog(res.statusCode, null));
+
   const [project] = await db
     .select({
       id: projectsTable.id,
@@ -164,12 +204,14 @@ export async function serveSnapshot(
     const isHtml = mime === "text/html";
     if (isHtml) {
       let html = injectBridge(file.content);
-      // Inject analytics snippet
+      // Inject analytics + error beacon snippets
       const analyticsSnippet = buildAnalyticsSnippet(slug);
+      const errorBeacon = buildErrorBeaconSnippet(slug);
+      const injected = analyticsSnippet + errorBeacon;
       if (/<\/body>/i.test(html)) {
-        html = html.replace(/<\/body>/i, `${analyticsSnippet}</body>`);
+        html = html.replace(/<\/body>/i, `${injected}</body>`);
       } else {
-        html += analyticsSnippet;
+        html += injected;
       }
       // Inject OG image meta
       const ogUrl = version.ogImageUrl ?? `/api/p/${slug}/og-image.svg`;

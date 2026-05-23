@@ -208,6 +208,21 @@ The intended user journey is: Login → create project → build app → preview
 - Admin metrics: `GET /api/admin/stats` returns `architectReviews` (30-day window): `reviewed`, `avgFindingsPerBuild`, `passCount/partialCount/failCount`, `autoFixesQueued`. Rendered as the Architect Review tile in `/admin`.
 - OpenAPI: `architectReviewEnabled` on Project + ProjectUpdate; `AdminStats.architectReviews` is a required typed object (no client-side casts).
 
+## Phase D — Post-deploy observability (Task #511)
+
+- **Tables**: `prod_logs` (raw request/browser/server/health rows; opaque IP hash), `prod_error_groups` (signature-grouped errors with count/firstSeen/lastSeen, unique on `(project_id, signature)`), `prod_health_checks` (post-publish synthetic outcomes). Apply with `pnpm --filter @workspace/scripts run migrate-prod-logs`.
+- **Helper**: `artifacts/api-server/src/lib/prodLogs.ts` — `recordProdLog` is fire-and-forget via `setImmediate`; `computeSignature` normalizes number tokens and the first stack frame; `upsertErrorGroup` uses `onConflictDoUpdate` with a manual update-or-insert fallback.
+- **Snapshot instrumentation**: `serveSnapshot.ts` records one `kind="request"` log per published page hit (method/path/status/latency/ipHash/requestId/userAgent) on `res.finish`, and injects a `buildErrorBeaconSnippet(slug)` script alongside the analytics snippet. The beacon batches `window.error` + `unhandledrejection` and POSTs to `/api/p/:slug/log` with `keepalive` so beforeunload errors still land.
+- **Routes**:
+  - Authed (project-scoped, in `prodLogsRouter`): `GET /api/projects/:id/prod-logs?kind=&limit=`, `GET /api/projects/:id/prod-errors`, `GET /api/projects/:id/health-checks`, `POST /api/projects/:id/health-checks/run` (requires project to be published).
+  - Public (in `publicProdLogRouter`, mounted before auth wall): `POST /api/p/:slug/log` — accepts `{ errors: [{message,stack?,errorClass?,url?}] }`, rate-limited in-memory to 30/min per IP+slug. Both routers fall under existing `/projects` and `/p` KNOWN_PREFIXES — no prefix changes needed.
+- **Frontend**: `logs-tab.tsx` has a collapsible "Production Logs" panel at the top with Errors / Requests tabs that polls every 10s while open. `publishing-tab.tsx` shows a `HealthCheckBanner` (passed/partial/failed tone) with a "Re-check" button right under the Publishing header. Both use plain `fetch` — no openapi.yaml changes, no codegen-drift impact.
+- **Agentic tool**: `fetch_prod_logs` added to `agent-loop.ts` TOOLS — returns top 10 grouped errors + recent raw logs + latest health check. Read-only; uses dynamic `import("./prodLogs")` to avoid loop init cost.
+- **Post-publish health check**: `publish.ts` runs `runPostPublishHealthCheck` (root + up to 10 declared `pageMapData.pages[].path`) in `setImmediate` after the publish response returns. Writes a Knowledge Vault entry on `partial`/`failed` (type `health-check`, severity `warning`/`error`). Base URL resolves to `https://{slug}.{PLATFORM_DOMAIN}` or `PROD_HEALTH_BASE_URL` env override.
+- **Admin tile**: `/api/admin/stats` now returns `prodErrors: { last14Days, byDay[] }` via `errorsPerDay()` aggregating `prod_logs` rows where kind in `(browser, server)`, grouped by day for the last 14 days.
+- **Retention worker**: `startProdLogRetentionWorker()` called from `app.ts` startup. Hourly sweep deletes rows older than `PROD_LOG_RETENTION_PAID` days (default 90). `PROD_LOG_RETENTION_FREE` (default 30) is read but applied as the longer ceiling until plan-tier detection is wired — paid users never lose data.
+- **Env vars (new, all optional)**: `PROD_LOG_RETENTION_FREE` (30), `PROD_LOG_RETENTION_PAID` (90), `PROD_HEALTH_BASE_URL` (override for synthetic check origin in dev).
+
 ## Gotchas
 
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. It also runs `typecheck:libs`, which will fail if generated types break consumers — fix consumers, don't suppress. The `codegen-drift` validation check (`pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated`) catches any drift between the spec and committed generated files — run it (or let CI run it) after every spec edit.

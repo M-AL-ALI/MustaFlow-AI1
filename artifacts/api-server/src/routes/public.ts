@@ -33,10 +33,20 @@ router.get("/p/:slug/{*splat}", async (req, res): Promise<void> => {
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
   const filePath = raw === "" ? "index.html" : raw;
 
+  const reqMeta = {
+    method: req.method,
+    ip:
+      (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ??
+      req.socket.remoteAddress ??
+      undefined,
+    requestId: typeof req.id === "string" ? req.id : String(req.id ?? ""),
+    userAgent: String(req.headers["user-agent"] ?? ""),
+  };
+
   // If slug looks like a pure integer, treat as legacy ID lookup.
   const maybeId = Number(slug);
   if (Number.isFinite(maybeId) && String(maybeId) === slug) {
-    await serveSnapshot(res, maybeId, filePath);
+    await serveSnapshot(res, maybeId, filePath, reqMeta);
     return;
   }
 
@@ -56,7 +66,7 @@ router.get("/p/:slug/{*splat}", async (req, res): Promise<void> => {
     return;
   }
 
-  await serveSnapshot(res, project.id, filePath);
+  await serveSnapshot(res, project.id, filePath, reqMeta);
 });
 
 export default router;

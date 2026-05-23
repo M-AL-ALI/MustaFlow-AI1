@@ -21,6 +21,7 @@
     "migrate-knowledge-embeddings": "tsx ./src/migrate-knowledge-embeddings.ts",
     "migrate-version-validation-status": "tsx ./src/migrate-version-validation-status.ts",
     "migrate-architect-review": "tsx ./src/migrate-architect-review.ts",
+    "migrate-prod-logs": "tsx ./src/migrate-prod-logs.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

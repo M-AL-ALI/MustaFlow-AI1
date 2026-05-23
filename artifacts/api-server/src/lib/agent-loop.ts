@@ -458,6 +458,29 @@ const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "fetch_prod_logs",
+      description:
+        "Fetch recent production logs and grouped errors from the live published snapshot of this project. Use when the user reports the deployed app is broken, asks why it's failing, or before refining a published project. Returns at most 20 raw rows plus the top 10 grouped errors.",
+      parameters: {
+        type: "object",
+        properties: {
+          kind: {
+            type: "string",
+            enum: ["request", "browser", "server", "all"],
+            description: "Filter by log kind. Default: 'all'.",
+          },
+          limit: {
+            type: "integer",
+            description: "Max raw log rows to return (1-50). Default 20.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "finalize",
       description:
         "Signal that the build is complete. Provide a 1-3 sentence summary for the user. Call this only after all required checks pass.",
@@ -517,6 +540,10 @@ function buildSystemPrompt(
     "- Never describe code in chat — write it with write_file / apply_patch.",
     "- `report_progress` is for ONE short sentence between major steps, not for explanations.",
     "- Avoid emojis in generated files and narration — use lucide icons in HTML output instead.",
+    "",
+    "## Diagnosing a broken published app",
+    "- If the user's request mentions that the published/deployed app is broken, failing, throwing errors, or behaving unexpectedly in production — your FIRST action MUST be `fetch_prod_logs` to inspect grouped browser errors, recent requests, and the latest health-check before reading or editing files. Use the failure signatures it returns to target your fix.",
+    "- After fixing, re-run the per-stack checks and finalize as usual. If `fetch_prod_logs` shows zero errors and the user still reports breakage, fall back to normal investigation.",
     input.knowledgeContext ? `\n## Lessons from prior builds\n${input.knowledgeContext}` : "",
     input.planContext
       ? `\n## Plan to execute\n${JSON.stringify(input.planContext).slice(0, 2400)}`
@@ -1334,6 +1361,56 @@ async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: st
     }
     case "report_progress": {
       return { ok: true, observation: "ok" };
+    }
+    case "fetch_prod_logs": {
+      try {
+        const { listProdLogs, listErrorGroups, latestHealthCheck } = await import("./prodLogs");
+        const kindArg = typeof args.kind === "string" ? args.kind : "all";
+        const limit = typeof args.limit === "number" ? Math.min(Math.max(args.limit, 1), 50) : 20;
+        const kindFilter = kindArg === "all" ? undefined : kindArg;
+        const [logs, groups, health] = await Promise.all([
+          listProdLogs({ projectId: input.projectId, kind: kindFilter, limit }),
+          listErrorGroups({ projectId: input.projectId, limit: 10 }),
+          latestHealthCheck(input.projectId),
+        ]);
+        const compactLogs = logs.map((r) => ({
+          ts: r.ts,
+          kind: r.kind,
+          method: r.method,
+          path: r.path,
+          status: r.status,
+          latencyMs: r.latencyMs,
+          errorClass: r.errorClass,
+          message: r.message?.slice(0, 200) ?? null,
+        }));
+        const compactGroups = groups.map((g) => ({
+          signature: g.signature,
+          sample: g.sampleMessage?.slice(0, 200) ?? "",
+          count: g.count,
+          firstSeen: g.firstSeen,
+          lastSeen: g.lastSeen,
+        }));
+        const payload = {
+          logs: compactLogs,
+          errorGroups: compactGroups,
+          health: health
+            ? {
+                status: health.status,
+                rootStatus: health.rootStatus,
+                routesFailed: health.routesFailed,
+                failureSummary: health.failureSummary,
+                createdAt: health.createdAt,
+              }
+            : null,
+          totals: { logs: compactLogs.length, groups: compactGroups.length },
+        };
+        return { ok: true, observation: JSON.stringify(payload) };
+      } catch (err) {
+        return {
+          ok: false,
+          observation: `ERROR: fetch_prod_logs failed: ${String((err as Error).message ?? err)}`,
+        };
+      }
     }
     case "finalize": {
       return { ok: true, observation: "finalized" };

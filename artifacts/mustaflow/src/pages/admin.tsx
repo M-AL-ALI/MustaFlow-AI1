@@ -15,6 +15,7 @@ import {
   ScrollText,
   ChevronLeft,
   BrainCircuit,
+  Activity,
 } from "lucide-react";
 import {
   useGetAdminMe,
@@ -235,6 +236,18 @@ export default function AdminPage() {
             </div>
           );
         })()}
+
+      <ProdErrorsTile
+        loading={loading}
+        last14Days={
+          (stats as { prodErrors?: { last14Days?: number } } | undefined)?.prodErrors?.last14Days ??
+          0
+        }
+        byDay={
+          (stats as { prodErrors?: { byDay?: Array<{ day: string; count: number }> } } | undefined)
+            ?.prodErrors?.byDay ?? []
+        }
+      />
 
       <div className="border border-border rounded-xl bg-card overflow-hidden">
         <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
@@ -578,6 +591,64 @@ function AuditLogRow({ entry }: { entry: AdminAuditLogEntry }) {
         <span className="text-[10px] text-muted-foreground/70">
           {dateStr} {timeStr}
         </span>
+      </div>
+    </div>
+  );
+}
+
+function ProdErrorsTile({
+  loading,
+  last14Days,
+  byDay,
+}: {
+  loading: boolean;
+  last14Days: number;
+  byDay: Array<{ day: string; count: number }>;
+}) {
+  const max = byDay.reduce((m, d) => Math.max(m, d.count ?? 0), 1);
+  return (
+    <div className="border border-border rounded-xl bg-card overflow-hidden">
+      <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <Activity className="h-3.5 w-3.5" />
+          Production Errors (last 14 days)
+        </h3>
+        <span
+          className={`text-xs font-semibold ${
+            last14Days > 0 ? "text-destructive" : "text-green-500"
+          }`}
+        >
+          {loading ? "…" : `${last14Days.toLocaleString()} total`}
+        </span>
+      </div>
+      <div className="px-4 py-4">
+        {byDay.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">
+            No production errors recorded in the last 14 days.
+          </p>
+        ) : (
+          <div className="flex items-end gap-1 h-24">
+            {byDay.map((d) => {
+              const pct = Math.max(2, Math.round((d.count / max) * 100));
+              return (
+                <div key={d.day} className="flex-1 flex flex-col items-center gap-1">
+                  <div className="w-full flex-1 flex items-end">
+                    <div
+                      className={`w-full rounded-sm ${
+                        d.count > 0 ? "bg-destructive/70" : "bg-muted"
+                      }`}
+                      style={{ height: `${pct}%` }}
+                      title={`${d.day}: ${d.count} error${d.count !== 1 ? "s" : ""}`}
+                    />
+                  </div>
+                  <span className="text-[9px] text-muted-foreground font-mono">
+                    {d.day.slice(5)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
