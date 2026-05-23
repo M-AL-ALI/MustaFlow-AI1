@@ -27,4 +27,5 @@ export interface ProjectUpdate {
   autoFixWarningsAfterBuild?: boolean;
   /** Toggle the architect review subagent for this project. */
   architectReviewEnabled?: boolean;
+  e2eEnabled?: boolean;
 }

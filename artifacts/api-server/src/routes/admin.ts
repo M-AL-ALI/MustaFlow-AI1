@@ -108,6 +108,34 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
     /* non-fatal */
   }
 
+  // ── E2E metrics: pass rate across agent tasks in the last 7 days ──
+  // Aggregates report->e2eResults JSON straight in Postgres so we don't pull
+  // every task row into Node. `e2eResults.passed`/`failed` are top-level keys
+  // on the E2eRunSummary, mirrored from the agent loop runner.
+  const e2eRow = await db.execute<{
+    runs: number;
+    passed: number;
+    failed: number;
+  }>(sql`
+    SELECT
+      COUNT(*)::int                                                   AS runs,
+      COALESCE(SUM((report->'e2eResults'->>'passed')::int), 0)::int   AS passed,
+      COALESCE(SUM((report->'e2eResults'->>'failed')::int), 0)::int   AS failed
+    FROM agent_tasks
+    WHERE created_at >= NOW() - INTERVAL '7 days'
+      AND report IS NOT NULL
+      AND report ? 'e2eResults'
+      AND report->'e2eResults' IS NOT NULL
+      AND report->'e2eResults' != 'null'::jsonb
+  `);
+  const e2eAgg = (e2eRow.rows?.[0] ?? { runs: 0, passed: 0, failed: 0 }) as {
+    runs: number;
+    passed: number;
+    failed: number;
+  };
+  const e2eTotal = e2eAgg.passed + e2eAgg.failed;
+  const passRate7d = e2eTotal > 0 ? e2eAgg.passed / e2eTotal : 0;
+
   res.json({
     projects: {
       total: projectStats?.total ?? 0,
@@ -133,6 +161,11 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
     prodErrors: {
       last14Days: errorsTotal,
       byDay: errorsByDay,
+    },
+    e2e: {
+      runs7d: e2eAgg.runs,
+      scenarios7d: e2eTotal,
+      passRate7d,
     },
   });
 });

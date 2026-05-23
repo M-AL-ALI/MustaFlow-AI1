@@ -31,7 +31,14 @@ import type {
 } from "openai/resources/chat/completions";
 import type { AgentMode } from "./ai";
 import type { BuilderFile, BuilderResult, Blueprint, ConversationTurn } from "./builder";
-import type { TaskReport } from "@workspace/db";
+import type { TaskReport, E2eRunSummary, E2eScenarioResult } from "@workspace/db";
+import {
+  runE2eScenarios,
+  runUserSpecs,
+  defaultSmokeScenarios,
+  discoverUserSpecs,
+  type E2eScenario,
+} from "./checks/e2e-runner";
 import { logger } from "./logger";
 import { CHECK_PROFILES, resolveStackId, type CheckSpec, type StackId } from "./check-profiles";
 import {
@@ -87,6 +94,10 @@ export interface AgentLoopInput {
    * Clamped to [60_000, 30 * 60_000].
    */
   wallClockMs?: number;
+  /** Live preview URL for the project (container proxy or static preview). Used for E2E. */
+  previewUrl?: string | null;
+  /** Per-project Playwright E2E enablement. Defaults true. */
+  e2eEnabled?: boolean;
   onEvent: AgentLoopEvent;
   signal: AbortSignal;
 }
@@ -136,6 +147,7 @@ export type AgentLoopReport = {
   checkResults: CheckResultRecord[];
   /** Skill names the model invoked `load_skill` for during this run. */
   skillsLoaded: string[];
+  e2eResults?: E2eRunSummary | null;
 };
 
 export type AgentLoopResult = {
@@ -413,6 +425,57 @@ const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "run_e2e",
+      description:
+        "Run Playwright end-to-end scenarios against the project's live preview URL. Captures pass/fail, console errors, network failures, and a screenshot on failure. If `scenarios` is omitted, the default smoke set (page loads, no console errors, primary button clickable) is used. Budget: 60s total, 10 scenarios max, 5MB screenshots max — enforced by the runner.",
+      parameters: {
+        type: "object",
+        properties: {
+          scenarios: {
+            type: "array",
+            description: "Optional list of scenarios. Omit to use the smoke defaults.",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                steps: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      action: {
+                        type: "string",
+                        enum: [
+                          "click",
+                          "fill",
+                          "expectVisible",
+                          "expectText",
+                          "waitFor",
+                          "noConsoleErrors",
+                        ],
+                      },
+                      selector: { type: "string" },
+                      value: { type: "string" },
+                      timeoutMs: { type: "integer" },
+                      optional: { type: "boolean" },
+                    },
+                    required: ["action"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ["name", "steps"],
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "report_progress",
       description:
         "Emit a short narrative step shown in the chat (one short sentence). Use sparingly between major actions.",
@@ -648,6 +711,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const toolCalls: ToolCallRecord[] = [];
   const commandsRun: CommandRecord[] = [];
   const checkResults: CheckResultRecord[] = [];
+  const e2eResults: E2eRunSummary[] = [];
+  // Task-level screenshot budget (5MB) shared across smoke, run_e2e tool, and re-run.
+  const screenshotBudget = { remaining: 5 * 1024 * 1024 };
   let totalTokens = 0;
 
   const startedAt = Date.now();
@@ -782,6 +848,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         step,
         containerState,
         loadedSkills,
+        e2eResults,
+        screenshotBudget,
       });
       const durationMs = Date.now() - tStart;
 
@@ -958,6 +1026,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         commandsRun,
         checkResults,
         skillsLoaded: Array.from(loadedSkills.keys()),
+        e2eResults: e2eResults[e2eResults.length - 1] ?? null,
       },
     };
   }
@@ -984,6 +1053,182 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     // keep finalized
   }
 
+  // ── Auto-smoke E2E after successful builds on web-runnable stacks ─────────
+  // Only fires on initial builds (mode === "build"), when checks passed, e2e
+  // is enabled for the project, and no run_e2e has happened yet. If failures
+  // are detected, we grant one extra LLM turn for the model to fix and then
+  // re-run smoke once.
+  // All stacks that produce something a browser can load: static apps,
+  // SPA dev servers, SSR frameworks, HTTP backends (when they serve a page),
+  // and mobile-cross (its index.html web preview). Auto-smoke runs on every
+  // successful build OR refine — per-project `e2eEnabled` is the master switch.
+  const webRunnable: StackId[] = [
+    "static-html",
+    "react-vite",
+    "nextjs",
+    "node-api",
+    "python-flask",
+    "python-fastapi",
+    "mobile-cross",
+  ];
+  const shouldAutoSmoke =
+    input.e2eEnabled !== false &&
+    !requiredFailed &&
+    !input.signal.aborted &&
+    webRunnable.includes(stack) &&
+    e2eResults.length === 0 &&
+    (input.previewUrl != null || stack === "static-html" || stack === "mobile-cross");
+
+  if (shouldAutoSmoke) {
+    const fallbackHtml =
+      stack === "static-html" ? (workspace.read("index.html")?.content ?? null) : null;
+    const previewUrl = input.previewUrl ?? null;
+    if (previewUrl || fallbackHtml) {
+      await safeEvent(input.onEvent, "narration", "Running smoke E2E…");
+      const smokeStart = Date.now();
+      const smokeRun = await runE2eScenarios({
+        targetUrl: previewUrl,
+        fallbackHtml,
+        scenarios: defaultSmokeScenarios(),
+        maxScreenshotBytes: screenshotBudget.remaining,
+        signal: input.signal,
+      });
+      screenshotBudget.remaining = Math.max(
+        screenshotBudget.remaining - estimateScreenshotBytes(smokeRun),
+        0,
+      );
+      const smokeElapsed = Date.now() - smokeStart;
+      if (previewUrl) {
+        const userSpecs = discoverUserSpecs(workspace.all());
+        if (userSpecs.length > 0) {
+          const userResults = await runUserSpecs({
+            specs: userSpecs,
+            baseUrl: previewUrl,
+            projectId: input.projectId,
+            containerId: containerState.id,
+            totalBudgetMs: Math.max(60_000 - smokeElapsed, 0),
+            maxSpecs: Math.max(10 - smokeRun.scenarios.length, 0),
+            signal: input.signal,
+          });
+          mergeUserResults(smokeRun, userResults);
+        }
+      }
+      e2eResults.push(smokeRun);
+
+      if (smokeRun.failed > 0 && !input.signal.aborted) {
+        smokeRun.autoFixAttempted = true;
+        await safeEvent(
+          input.onEvent,
+          "narration",
+          `E2E found ${smokeRun.failed} failure(s) — attempting one fix turn…`,
+        );
+        messages.push({
+          role: "system",
+          content:
+            `[e2e auto-fix] The smoke E2E pass found ${smokeRun.failed} failure(s). ` +
+            `You have ONE turn to fix them and call finalize. Failures:\n` +
+            renderE2eObservation(smokeRun).slice(0, MAX_OBSERVATION_CHARS),
+        });
+        try {
+          const fixResp = await openai.chat.completions.create(
+            { model, messages, tools: TOOLS, tool_choice: "auto" },
+            { signal: input.signal },
+          );
+          totalTokens += fixResp.usage?.total_tokens ?? 0;
+          const fixChoice = fixResp.choices[0];
+          const fixMsg = fixChoice?.message;
+          const fixToolReqs: ChatCompletionMessageToolCall[] = fixMsg?.tool_calls ?? [];
+          if (fixMsg) {
+            messages.push({
+              role: "assistant",
+              content: fixMsg.content ?? "",
+              tool_calls: fixToolReqs.length > 0 ? fixToolReqs : undefined,
+            });
+          }
+          for (const call of fixToolReqs.slice(0, 8)) {
+            if (call.type !== "function") continue;
+            if (toolCalls.length >= STEP_CAP) break;
+            let parsed: Record<string, unknown> = {};
+            try {
+              parsed = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+            } catch {
+              parsed = {};
+            }
+            const tStart = Date.now();
+            const r = await executeTool({
+              name: call.function.name,
+              args: parsed,
+              workspace,
+              stack,
+              profile,
+              input,
+              commandsRun,
+              step: step + 1,
+              containerState,
+              loadedSkills,
+              e2eResults,
+              screenshotBudget,
+            });
+            toolCalls.push({
+              step: step + 1,
+              tool: call.function.name,
+              args: redactArgs(parsed),
+              ok: r.ok,
+              durationMs: Date.now() - tStart,
+              preview: String(r.observation).slice(0, 400),
+            });
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: String(r.observation).slice(0, MAX_OBSERVATION_CHARS),
+            });
+          }
+          // Re-run smoke once if the fix turn produced any mutation
+          if (
+            fixToolReqs.some(
+              (c) =>
+                c.type === "function" &&
+                ["write_file", "apply_patch", "delete_file"].includes(c.function.name),
+            )
+          ) {
+            const reRun = await runE2eScenarios({
+              targetUrl: previewUrl,
+              fallbackHtml:
+                stack === "static-html" ? (workspace.read("index.html")?.content ?? null) : null,
+              scenarios: defaultSmokeScenarios(),
+              maxScreenshotBytes: screenshotBudget.remaining,
+              signal: input.signal,
+            });
+            screenshotBudget.remaining = Math.max(
+              screenshotBudget.remaining - estimateScreenshotBytes(reRun),
+              0,
+            );
+            if (previewUrl) {
+              const userSpecs = discoverUserSpecs(workspace.all());
+              if (userSpecs.length > 0) {
+                const userResults = await runUserSpecs({
+                  specs: userSpecs,
+                  baseUrl: previewUrl,
+                  projectId: input.projectId,
+                  containerId: containerState.id,
+                  totalBudgetMs: Math.max(60_000 - reRun.totalDurationMs, 0),
+                  maxSpecs: Math.max(10 - reRun.scenarios.length, 0),
+                  signal: input.signal,
+                });
+                mergeUserResults(reRun, userResults);
+              }
+            }
+            reRun.autoFixAttempted = true;
+            e2eResults.push(reRun);
+          }
+        } catch (err) {
+          logger.warn({ err }, "agent-loop: e2e auto-fix turn failed");
+        }
+      }
+    }
+  }
+
+  const lastE2e = e2eResults[e2eResults.length - 1] ?? null;
   const diff = workspace.diff();
   const allFiles = workspace.all();
 
@@ -1009,6 +1254,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       commandsRun,
       checkResults,
       skillsLoaded: Array.from(loadedSkills.keys()),
+      e2eResults: lastE2e,
     },
   };
 }
@@ -1136,6 +1382,117 @@ interface ToolCtx {
   /** Per-loop cache of loaded skills — guarantees no double-count and a free
    *  cache hit if the model re-loads the same skill mid-run. */
   loadedSkills: Map<string, SkillManifest>;
+  /** Accumulator for run_e2e tool invocations. */
+  e2eResults: E2eRunSummary[];
+  /**
+   * Task-level remaining screenshot byte budget (default 5MB), shared across
+   * every E2E run in this loop (smoke, run_e2e tool, auto-fix re-run). Each
+   * run decrements it by the sum of its base64-decoded screenshot sizes.
+   */
+  screenshotBudget: { remaining: number };
+}
+
+/**
+ * Estimate the on-disk byte count of all screenshots in an E2E summary by
+ * decoding base64 length back to bytes (length * 3/4, minus padding). Used
+ * to keep a single shared 5MB cap across multiple E2E runs in one task.
+ */
+function estimateScreenshotBytes(summary: E2eRunSummary): number {
+  let total = 0;
+  for (const sc of summary.scenarios) {
+    if (sc.screenshotBase64) {
+      total += Math.floor(sc.screenshotBase64.length * 0.75);
+    }
+  }
+  return total;
+}
+
+const E2E_ACTION_SET = new Set([
+  "click",
+  "fill",
+  "expectVisible",
+  "expectText",
+  "waitFor",
+  "noConsoleErrors",
+]);
+
+function normalizeScenario(raw: unknown): E2eScenario | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const name = typeof r.name === "string" ? r.name.slice(0, 120) : null;
+  const stepsIn = Array.isArray(r.steps) ? r.steps : null;
+  if (!name || !stepsIn) return null;
+  const steps: E2eScenario["steps"] = [];
+  for (const s of stepsIn.slice(0, 12)) {
+    if (!s || typeof s !== "object") continue;
+    const obj = s as Record<string, unknown>;
+    const action = typeof obj.action === "string" ? obj.action : "";
+    if (!E2E_ACTION_SET.has(action)) continue;
+    const selector = typeof obj.selector === "string" ? obj.selector.slice(0, 200) : "";
+    const value = typeof obj.value === "string" ? obj.value.slice(0, 200) : "";
+    const timeoutMs =
+      typeof obj.timeoutMs === "number"
+        ? Math.min(30_000, Math.max(100, obj.timeoutMs))
+        : undefined;
+    const optional = obj.optional === true;
+    switch (action) {
+      case "click":
+        if (!selector) continue;
+        steps.push({ action: "click", selector, optional });
+        break;
+      case "fill":
+        if (!selector) continue;
+        steps.push({ action: "fill", selector, value });
+        break;
+      case "expectVisible":
+        if (!selector) continue;
+        steps.push({ action: "expectVisible", selector });
+        break;
+      case "expectText":
+        if (!selector) continue;
+        steps.push({ action: "expectText", selector, value });
+        break;
+      case "waitFor":
+        if (!selector) continue;
+        steps.push({ action: "waitFor", selector, timeoutMs });
+        break;
+      case "noConsoleErrors":
+        steps.push({ action: "noConsoleErrors" });
+        break;
+    }
+  }
+  if (steps.length === 0) return null;
+  return { name, source: "smoke", steps };
+}
+
+function renderE2eObservation(summary: E2eRunSummary): string {
+  const header = summary.skippedReason
+    ? `E2E skipped: ${summary.skippedReason}`
+    : `E2E ${summary.passed} passed, ${summary.failed} failed (${summary.totalDurationMs}ms, target=${summary.targetUrl ?? "n/a"})`;
+  if (summary.scenarios.length === 0) return header;
+  const lines = summary.scenarios.map((s: E2eScenarioResult) => {
+    const tag = s.passed ? "PASS" : "FAIL";
+    const errs = s.consoleErrors.length > 0 ? ` consoleErrors=${s.consoleErrors.length}` : "";
+    const net = s.networkFailures.length > 0 ? ` networkFailures=${s.networkFailures.length}` : "";
+    return `  ${tag} ${s.name} — ${s.message.slice(0, 160)}${errs}${net}`;
+  });
+  const failures = summary.scenarios.filter((s) => !s.passed);
+  const detail = failures.slice(0, 3).flatMap((s) => {
+    const out: string[] = [];
+    if (s.consoleErrors.length > 0) {
+      out.push(`  ${s.name} console:\n    ${s.consoleErrors.slice(0, 3).join("\n    ")}`);
+    }
+    if (s.networkFailures.length > 0) {
+      out.push(
+        `  ${s.name} network:\n    ${s.networkFailures
+          .slice(0, 3)
+          .map((n) => `${n.status ?? "ERR"} ${n.url} ${n.message}`)
+          .join("\n    ")}`,
+      );
+    }
+    return out;
+  });
+  return [header, ...lines, ...(detail.length > 0 ? ["", ...detail] : [])].join("\n");
 }
 
 /**
@@ -1692,6 +2049,44 @@ async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: st
         observation: `# Skill: ${manifest.name}\n${manifest.description}\n\n${manifest.body}`,
       };
     }
+    case "run_e2e": {
+      if (input.e2eEnabled === false) {
+        return {
+          ok: false,
+          observation:
+            "ERROR: E2E testing is disabled for this project (project.e2eEnabled=false).",
+        };
+      }
+      const rawScenarios = Array.isArray(args.scenarios) ? (args.scenarios as unknown[]) : null;
+      const scenarios: E2eScenario[] = rawScenarios
+        ? rawScenarios.map((s) => normalizeScenario(s)).filter((s): s is E2eScenario => s !== null)
+        : defaultSmokeScenarios();
+      const fallbackHtml =
+        stack === "static-html" ? (workspace.read("index.html")?.content ?? null) : null;
+      const previewUrl = input.previewUrl ?? null;
+      if (!previewUrl && !fallbackHtml) {
+        return {
+          ok: false,
+          observation:
+            "ERROR: no preview URL available — start the project's container before running E2E (or build a static-html project with index.html).",
+        };
+      }
+      await safeEvent(input.onEvent, "narration", "Running Playwright E2E…");
+      const summary = await runE2eScenarios({
+        targetUrl: previewUrl,
+        scenarios,
+        fallbackHtml,
+        maxScreenshotBytes: ctx.screenshotBudget.remaining,
+        signal: input.signal,
+      });
+      ctx.screenshotBudget.remaining = Math.max(
+        ctx.screenshotBudget.remaining - estimateScreenshotBytes(summary),
+        0,
+      );
+      ctx.e2eResults.push(summary);
+      const obs = renderE2eObservation(summary);
+      return { ok: summary.failed === 0, observation: obs };
+    }
     case "finalize": {
       return { ok: true, observation: "finalized" };
     }
@@ -1878,6 +2273,17 @@ export function loopResultToRefineResult(
   };
 }
 
+function mergeUserResults(run: E2eRunSummary, userResults: E2eScenarioResult[]): void {
+  if (userResults.length === 0) return;
+  for (const r of userResults) {
+    run.scenarios.push(r);
+    if (r.message.startsWith("skipped")) run.skipped += 1;
+    else if (r.passed) run.passed += 1;
+    else run.failed += 1;
+    run.totalDurationMs += r.durationMs;
+  }
+}
+
 function buildTaskReport(result: AgentLoopResult, userRequest: string): TaskReport {
   const checkSummary =
     result.loopReport.checkResults.length === 0
@@ -1922,5 +2328,6 @@ function buildTaskReport(result: AgentLoopResult, userRequest: string): TaskRepo
       passed: !result.checksFailed,
     },
     agentLoop: result.loopReport,
+    e2eResults: result.loopReport.e2eResults ?? null,
   };
 }

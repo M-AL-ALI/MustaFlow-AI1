@@ -112,6 +112,10 @@ export const projectsTable = pgTable("projects", {
   // "standard"   — broad allow with deny-list (default).
   // "permissive" — admin-only; skips registry allowlist for pkg_install.
   policyStrictness: text("policy_strictness").notNull().default("standard"),
+  // e2eEnabled: when true, the agentic builder loop automatically runs a Playwright
+  // smoke E2E scenario set after every successful web build, and the `run_e2e` tool
+  // is available to the model. Default true. Disable for speed-over-coverage builds.
+  e2eEnabled: boolean("e2e_enabled").notNull().default(true),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

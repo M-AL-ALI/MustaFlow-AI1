@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AdminStatsArchitectReviews } from './adminStatsArchitectReviews';
+import type { AdminStatsE2e } from './adminStatsE2e';
 import type { AdminStatsProjects } from './adminStatsProjects';
 import type { AdminStatsUsers } from './adminStatsUsers';
 
@@ -16,4 +17,6 @@ export interface AdminStats {
   deployments: number;
   /** Architect review subagent metrics over the recent window (default 30 days). */
   architectReviews: AdminStatsArchitectReviews;
+  /** Platform-wide Playwright E2E metrics for the last 7 days. */
+  e2e: AdminStatsE2e;
 }

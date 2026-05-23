@@ -3282,6 +3282,9 @@ components:
         architectReviewEnabled:
           type: boolean
           description: "When true, a second-opinion architect review runs after every successful build/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project."
+        e2eEnabled:
+          type: boolean
+          description: "When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -3344,6 +3347,7 @@ components:
         architectReviewEnabled:
           type: boolean
           description: "Toggle the architect review subagent for this project."
+        e2eEnabled: { type: boolean }
 
     MobileAppSettingsInput:
       type: object
@@ -4225,7 +4229,7 @@ components:
 
     AdminStats:
       type: object
-      required: [projects, users, transactions, deployments, architectReviews]
+      required: [projects, users, transactions, deployments, architectReviews, e2e]
       properties:
         projects:
           type: object
@@ -4262,6 +4266,21 @@ components:
             partialCount: { type: integer }
             failCount: { type: integer }
             autoFixesQueued: { type: integer }
+        e2e:
+          type: object
+          required: [runs7d, scenarios7d, passRate7d]
+          description: "Platform-wide Playwright E2E metrics for the last 7 days."
+          properties:
+            runs7d:
+              {
+                type: integer,
+                description: "Number of agent tasks in the last 7 days that included an E2E run.",
+              }
+            scenarios7d: { type: integer, description: "Total scenarios executed in those runs." }
+            passRate7d:
+              type: number
+              format: float
+              description: "passed / (passed + failed) across the last 7 days, in [0, 1]. 0 when no scenarios ran."
 
     AdminLaunchCheck:
       type: object

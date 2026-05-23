@@ -1337,6 +1337,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   null,
                 taskId,
                 wallClockMs: input.wallClockCapMs,
+                previewUrl: project.containerUrl ?? null,
+                e2eEnabled: project.e2eEnabled ?? true,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
               });
@@ -1687,6 +1689,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   null,
                 taskId,
                 wallClockMs: input.wallClockCapMs,
+                previewUrl: project.containerUrl ?? null,
+                e2eEnabled: project.e2eEnabled ?? true,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
               });

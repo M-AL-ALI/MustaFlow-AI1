@@ -197,7 +197,47 @@ export type TaskReport = {
      * the registry.
      */
     skillsLoaded?: string[];
+    e2eResults?: E2eRunSummary | null;
   } | null;
+  /**
+   * Populated when Playwright end-to-end scenarios ran against the live preview
+   * (either via the agentic builder's `run_e2e` tool, the auto-smoke pass after
+   * a successful build, or a user-triggered re-run).
+   */
+  e2eResults?: E2eRunSummary | null;
+};
+
+/**
+ * One Playwright scenario execution.
+ * `screenshotBase64` is a thumbnail captured on failure only (~PNG, capped at
+ * roughly 200KB per scenario; total per task budget is 5 MB).
+ */
+export type E2eScenarioResult = {
+  name: string;
+  /** "smoke" = built-in scenario; "user" = discovered from tests/e2e/*.spec.ts. */
+  source: "smoke" | "user";
+  passed: boolean;
+  durationMs: number;
+  message: string;
+  consoleErrors: string[];
+  networkFailures: Array<{ url: string; status: number | null; message: string }>;
+  screenshotBase64?: string | null;
+};
+
+export type E2eRunSummary = {
+  targetUrl: string | null;
+  ranAt: string;
+  totalDurationMs: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  /** Reason the run was skipped (no preview URL, disabled, etc.). */
+  skippedReason?: string | null;
+  /** True when a budget cap (60s / 10 scenarios / 5MB screenshots) trimmed the run. */
+  budgetExceeded: boolean;
+  scenarios: E2eScenarioResult[];
+  /** True if an auto-fix turn was attempted after this run. */
+  autoFixAttempted: boolean;
 };
 
 export const agentTasksTable = pgTable(

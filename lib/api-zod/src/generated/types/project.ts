@@ -106,6 +106,8 @@ export interface Project {
   autoFixWarningsAfterBuild?: boolean;
   /** When true, a second-opinion architect review runs after every successful build/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project. */
   architectReviewEnabled?: boolean;
+  /** When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true. */
+  e2eEnabled?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

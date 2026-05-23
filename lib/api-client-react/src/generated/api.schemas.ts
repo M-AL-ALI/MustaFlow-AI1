@@ -309,6 +309,8 @@ export interface Project {
   autoFixWarningsAfterBuild?: boolean;
   /** When true, a second-opinion architect review runs after every successful build/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project. */
   architectReviewEnabled?: boolean;
+  /** When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true. */
+  e2eEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -415,6 +417,7 @@ export interface ProjectUpdate {
   autoFixWarningsAfterBuild?: boolean;
   /** Toggle the architect review subagent for this project. */
   architectReviewEnabled?: boolean;
+  e2eEnabled?: boolean;
 }
 
 export interface MobileAppSettingsInput {
@@ -1445,6 +1448,18 @@ export type AdminStatsArchitectReviews = {
   autoFixesQueued: number;
 };
 
+/**
+ * Platform-wide Playwright E2E metrics for the last 7 days.
+ */
+export type AdminStatsE2e = {
+  /** Number of agent tasks in the last 7 days that included an E2E run. */
+  runs7d: number;
+  /** Total scenarios executed in those runs. */
+  scenarios7d: number;
+  /** passed / (passed + failed) across the last 7 days, in [0, 1]. 0 when no scenarios ran. */
+  passRate7d: number;
+};
+
 export interface AdminStats {
   projects: AdminStatsProjects;
   users: AdminStatsUsers;
@@ -1452,6 +1467,8 @@ export interface AdminStats {
   deployments: number;
   /** Architect review subagent metrics over the recent window (default 30 days). */
   architectReviews: AdminStatsArchitectReviews;
+  /** Platform-wide Playwright E2E metrics for the last 7 days. */
+  e2e: AdminStatsE2e;
 }
 
 export type AdminLaunchCheckStatus = typeof AdminLaunchCheckStatus[keyof typeof AdminLaunchCheckStatus];

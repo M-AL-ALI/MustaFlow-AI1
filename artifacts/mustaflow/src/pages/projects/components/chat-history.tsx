@@ -133,6 +133,28 @@ type TaskReport = {
     skipReason?: string;
     isReReview?: boolean;
     completedWithWarnings?: boolean;
+  };
+  /** Playwright E2E run summary, populated by the agentic builder loop. */
+  e2eResults?: {
+    targetUrl: string | null;
+    ranAt: string;
+    totalDurationMs: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+    skippedReason?: string | null;
+    budgetExceeded: boolean;
+    autoFixAttempted: boolean;
+    scenarios: Array<{
+      name: string;
+      source: "smoke" | "user";
+      passed: boolean;
+      durationMs: number;
+      message: string;
+      consoleErrors: string[];
+      networkFailures: Array<{ url: string; status: number | null; message: string }>;
+      screenshotBase64?: string | null;
+    }>;
   } | null;
 };
 
@@ -601,6 +623,8 @@ function InlineReportCard({
   const [testsOpen, setTestsOpen] = useState(false);
   const [testScreenshot, setTestScreenshot] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [e2eOpen, setE2eOpen] = useState(false);
+  const [e2eScreenshot, setE2eScreenshot] = useState<string | null>(null);
   const rerunTests = useRerunTaskTests();
   const queryClient = useQueryClient();
 
@@ -1112,6 +1136,122 @@ function InlineReportCard({
                     </ul>
                   )}
                 </div>
+              )}
+            </div>
+          );
+        })()}
+      {report.e2eResults &&
+        (() => {
+          const e2e = report.e2eResults!;
+          const allPassed = e2e.failed === 0 && !e2e.skippedReason;
+          const ranAt = e2e.ranAt ? new Date(e2e.ranAt) : null;
+          return (
+            <div
+              className={`pt-1.5 border-t ${
+                e2e.skippedReason
+                  ? "border-border/40"
+                  : allPassed
+                    ? "border-green-500/20"
+                    : "border-red-500/20"
+              }`}
+            >
+              <button
+                className={`flex items-center gap-1.5 text-[10px] font-semibold w-full transition-colors ${
+                  e2e.skippedReason
+                    ? "text-muted-foreground"
+                    : allPassed
+                      ? "text-green-400 hover:text-green-300"
+                      : "text-red-400 hover:text-red-300"
+                }`}
+                onClick={() => setE2eOpen((o) => !o)}
+              >
+                <FlaskConical className="h-3 w-3 shrink-0" />
+                <span>
+                  {e2e.skippedReason
+                    ? `E2E skipped — ${e2e.skippedReason}`
+                    : `E2E — ${e2e.passed} passed${e2e.failed > 0 ? `, ${e2e.failed} failed` : ""}${e2e.autoFixAttempted ? " (auto-fix attempted)" : ""}`}
+                </span>
+                {ranAt && !e2e.skippedReason && (
+                  <span className="text-muted-foreground/50 font-normal ml-0.5">
+                    {format(ranAt, "HH:mm")}
+                  </span>
+                )}
+                {e2eOpen ? (
+                  <ChevronDown className="h-3 w-3 ml-auto shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3 w-3 ml-auto shrink-0" />
+                )}
+              </button>
+              {e2eOpen && e2e.scenarios.length > 0 && (
+                <ul className="mt-1.5 space-y-1 pl-1">
+                  {e2e.scenarios.map((s, i) => (
+                    <li key={i} className="text-[10px]">
+                      <div className="flex items-start gap-1.5">
+                        {s.passed ? (
+                          <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <XCircle className="h-3 w-3 text-red-400 shrink-0 mt-0.5" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <span className={s.passed ? "text-foreground/80" : "text-foreground"}>
+                            {s.name}
+                          </span>
+                          <span className="ml-1 text-muted-foreground/50 text-[9px]">
+                            [{s.source}]
+                          </span>
+                          {!s.passed && (
+                            <p className="text-muted-foreground mt-0.5 leading-relaxed">
+                              {s.message}
+                            </p>
+                          )}
+                          {s.consoleErrors.length > 0 && (
+                            <p className="text-red-300/80 mt-0.5 leading-relaxed text-[9px]">
+                              console: {s.consoleErrors.slice(0, 2).join(" · ")}
+                            </p>
+                          )}
+                          {s.networkFailures.length > 0 && (
+                            <p className="text-amber-300/80 mt-0.5 leading-relaxed text-[9px]">
+                              network: {s.networkFailures.length} failure(s)
+                            </p>
+                          )}
+                          {s.screenshotBase64 && (
+                            <div className="mt-1">
+                              <button
+                                className="text-[9px] text-primary/70 hover:text-primary underline"
+                                onClick={() =>
+                                  setE2eScreenshot(
+                                    e2eScreenshot === s.screenshotBase64
+                                      ? null
+                                      : s.screenshotBase64!,
+                                  )
+                                }
+                              >
+                                {e2eScreenshot === s.screenshotBase64
+                                  ? "Hide screenshot"
+                                  : "View screenshot"}
+                              </button>
+                              {e2eScreenshot === s.screenshotBase64 && (
+                                <img
+                                  src={`data:image/png;base64,${s.screenshotBase64}`}
+                                  alt="E2E failure screenshot"
+                                  className="mt-1 rounded border border-border/50 max-w-full"
+                                />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-muted-foreground/40 shrink-0 text-[9px] ml-auto">
+                          {s.durationMs}ms
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {e2eOpen && e2e.budgetExceeded && (
+                <p className="mt-1 text-[9px] text-muted-foreground/70">
+                  Budget cap reached — some scenarios or screenshots were trimmed.
+                </p>
               )}
             </div>
           );

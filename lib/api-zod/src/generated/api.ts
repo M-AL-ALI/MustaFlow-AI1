@@ -629,6 +629,7 @@ export const ListProjectsResponseItem = zod.object({
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
+  "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -696,6 +697,7 @@ export const GetProjectResponse = zod.object({
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
+  "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -718,7 +720,8 @@ export const UpdateProjectBody = zod.object({
   "blockPublishOnCritical": zod.boolean().optional().describe('Enable or disable the critical-findings publish gate for this project.'),
   "autoFixOnCheckFailure": zod.boolean().optional(),
   "autoFixWarningsAfterBuild": zod.boolean().optional(),
-  "architectReviewEnabled": zod.boolean().optional().describe('Toggle the architect review subagent for this project.')
+  "architectReviewEnabled": zod.boolean().optional().describe('Toggle the architect review subagent for this project.'),
+  "e2eEnabled": zod.boolean().optional()
 })
 
 export const updateProjectResponseHealthScoreMin = 0;
@@ -762,6 +765,7 @@ export const UpdateProjectResponse = zod.object({
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
+  "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -816,6 +820,7 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
+  "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -870,6 +875,7 @@ export const RestoreProjectResponse = zod.object({
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
+  "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -923,6 +929,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
+  "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))
@@ -3490,7 +3497,12 @@ export const GetAdminStatsResponse = zod.object({
   "partialCount": zod.number(),
   "failCount": zod.number(),
   "autoFixesQueued": zod.number()
-}).describe('Architect review subagent metrics over the recent window (default 30 days).')
+}).describe('Architect review subagent metrics over the recent window (default 30 days).'),
+  "e2e": zod.object({
+  "runs7d": zod.number().describe('Number of agent tasks in the last 7 days that included an E2E run.'),
+  "scenarios7d": zod.number().describe('Total scenarios executed in those runs.'),
+  "passRate7d": zod.number().describe('passed \/ (passed + failed) across the last 7 days, in [0, 1]. 0 when no scenarios ran.')
+}).describe('Platform-wide Playwright E2E metrics for the last 7 days.')
 })
 
 
