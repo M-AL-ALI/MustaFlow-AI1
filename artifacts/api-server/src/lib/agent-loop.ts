@@ -1,0 +1,1569 @@
+/**
+ * Agentic builder loop — Replit-Agent-style tool calling.
+ *
+ * Replaces the single-shot JSON-mode prompt with an iterative model loop that
+ * picks tools (read_file, write_file, list_files, search, run_command,
+ * apply_patch, report_progress, finalize), observes results, and continues
+ * until the configured checks pass or a safety limit is hit.
+ *
+ * Modes:
+ *   - In-process (static-html, mobile-cross): tool calls operate on an
+ *     in-memory file map; `run_command` only runs the in-process validators
+ *     declared in CHECK_PROFILES — there is no shell.
+ *   - Container (react-vite, node-api, nextjs, python-flask, python-fastapi):
+ *     tool calls are routed to the project's Fly.io container via
+ *     execInContainer / writeFileToContainer / syncFilesToContainer.
+ *
+ * Safety:
+ *   - Step cap (default 25), wall-clock budget (8 min), repeated-error cap (3).
+ *   - run_command argv whitelist + path sanitization (sandboxed to /app).
+ *   - Honours the per-task AbortController passed in from runJob.
+ *
+ * Credits: charged once per build by runJob — this loop never deducts credits
+ * itself.
+ */
+
+import { openai } from "@workspace/integrations-openai-ai-server";
+import type {
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+  ChatCompletionMessageToolCall,
+} from "openai/resources/chat/completions";
+import type { AgentMode } from "./ai";
+import type { BuilderFile, BuilderResult, Blueprint, ConversationTurn } from "./builder";
+import type { TaskReport } from "@workspace/db";
+import { logger } from "./logger";
+import {
+  CHECK_PROFILES,
+  RUN_COMMAND_BLOCKLIST,
+  RUN_COMMAND_WHITELIST,
+  resolveStackId,
+  type CheckSpec,
+  type StackId,
+} from "./check-profiles";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type AgentLoopMode = "build" | "refine";
+
+export type AgentLoopEvent = (eventType: string, message: string) => Promise<void> | void;
+
+export interface AgentLoopInput {
+  mode: AgentLoopMode;
+  projectId: number;
+  projectName: string;
+  projectKind: string;
+  projectFormat: string | null;
+  stack: string | null;
+  userPrompt: string;
+  agentMode: AgentMode;
+  conversationHistory?: ConversationTurn[];
+  knowledgeContext?: string;
+  planContext?: Record<string, unknown> | null;
+  /** Existing files (refine) or seed files (build, usually empty). */
+  existingFiles: BuilderFile[];
+  /** Fly.io machine id, when the project has a provisioned container. */
+  containerId?: string | null;
+  onEvent: AgentLoopEvent;
+  signal: AbortSignal;
+}
+
+export type ToolCallRecord = {
+  step: number;
+  tool: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  durationMs: number;
+  /** First ~400 chars of the observation returned to the model. */
+  preview: string;
+};
+
+export type CommandRecord = {
+  step: number;
+  argv: string[];
+  exitCode: number;
+  durationMs: number;
+  stdoutPreview: string;
+  stderrPreview: string;
+};
+
+export type CheckResultRecord = {
+  id: string;
+  label: string;
+  passed: boolean;
+  durationMs: number;
+  message: string;
+};
+
+export type AgentLoopReport = {
+  stack: StackId;
+  steps: number;
+  totalToolCalls: number;
+  totalTokens: number;
+  terminationReason:
+    | "finalized"
+    | "step-cap"
+    | "wall-clock"
+    | "repeated-error"
+    | "model-stopped"
+    | "aborted"
+    | "checks-failed";
+  toolCalls: ToolCallRecord[];
+  commandsRun: CommandRecord[];
+  checkResults: CheckResultRecord[];
+};
+
+export type AgentLoopResult = {
+  files: BuilderFile[];
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  assistantSummary: string;
+  warnings: string[];
+  loopReport: AgentLoopReport;
+  /** True when any required check failed and the agent could not recover. */
+  checksFailed: boolean;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STEP_CAP = Math.max(5, parseInt(process.env.AGENTIC_BUILDER_STEP_CAP ?? "25", 10));
+const WALL_CLOCK_MS = Math.max(
+  60_000,
+  parseInt(process.env.AGENTIC_BUILDER_WALL_CLOCK_MS ?? "480000", 10),
+);
+const REPEATED_ERROR_CAP = 3;
+const MAX_OBSERVATION_CHARS = 8_000;
+const MAX_FILE_BYTES = 64_000;
+
+const MODEL_FOR_MODE: Record<AgentMode, string> = {
+  lite: "gpt-5-nano",
+  eco: "gpt-5-mini",
+  power: "gpt-5.4",
+  pro: "gpt-5.4",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Path sanitization & command checks
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function sanitizePath(rawPath: unknown): string | null {
+  if (typeof rawPath !== "string") return null;
+  const trimmed = rawPath.trim().replace(/^\.?\/+/, "");
+  if (trimmed.length === 0 || trimmed.length > 512) return null;
+  if (trimmed.includes("..")) return null;
+  if (trimmed.startsWith("/")) return null;
+  if (/[\u0000-\u001f]/.test(trimmed)) return null;
+  // Reject shell metacharacters: $, backtick, |, &, ;, <, >, parens, quotes, *, ?, [, ], {, }, \, newlines.
+  // Defence-in-depth — these paths should never reach a shell, but if they do
+  // (e.g. via a future helper), this prevents command substitution / glob abuse.
+  if (/[$`|&;<>()'"*?[\]{}\\\n\r]/.test(trimmed)) return null;
+  return trimmed;
+}
+
+/** Read-only inspection commands the agent can always invoke. */
+const READ_ONLY_INSPECTORS = new Set([
+  "ls",
+  "cat",
+  "head",
+  "tail",
+  "grep",
+  "rg",
+  "find",
+  "wc",
+  "echo",
+  "pwd",
+  "true",
+  "false",
+]);
+
+/** Shell-metacharacters that allow command chaining or substitution. */
+const SHELL_METACHAR_RE = /[;&|`$<>]|\$\(/;
+
+/**
+ * Decide whether an argv is allowed to run.
+ *
+ * Layered policy:
+ *  1. Global blocklist substring scan (destructive ops, network exfil patterns).
+ *  2. Reject shell wrappers (`sh -lc`/`bash -c`) whose inner command contains
+ *     chaining or substitution metachars (`;`, `&`, `|`, backticks, `$(...)`,
+ *     redirection). This prevents `npm install; curl https://...` bypasses.
+ *  3. Per-stack allow list: an argv must EITHER (a) be a read-only inspector,
+ *     (b) match the install command for this stack, OR (c) match one of the
+ *     stack's declared check argvs exactly. This keeps execution within the
+ *     vetted command set declared in CHECK_PROFILES — generic whitelist
+ *     bypasses via wrapper flags are not allowed.
+ */
+export function isCommandAllowed(
+  argv: string[],
+  policy: {
+    allowedExactArgvs: string[][];
+    installCmd: string[] | null;
+  },
+): { ok: boolean; reason?: string } {
+  if (!Array.isArray(argv) || argv.length === 0) {
+    return { ok: false, reason: "empty argv" };
+  }
+  const joined = argv.join(" ").toLowerCase();
+  for (const bad of RUN_COMMAND_BLOCKLIST) {
+    if (joined.includes(bad.toLowerCase())) {
+      return { ok: false, reason: `blocked pattern: ${bad.trim()}` };
+    }
+  }
+
+  const first = argv[0]?.toLowerCase() ?? "";
+
+  // 2. Shell-wrapper handling — reject inner chaining/substitution.
+  if ((first === "sh" || first === "bash") && argv.length >= 3) {
+    const inner = (argv[argv.length - 1] ?? "").trim();
+    if (inner.length === 0) return { ok: false, reason: "empty shell command" };
+    if (SHELL_METACHAR_RE.test(inner)) {
+      // Allow only if the inner exactly matches one of the stack's declared argvs
+      const matchesDeclared = policy.allowedExactArgvs.some(
+        (declared) =>
+          declared[0] === argv[0] &&
+          declared[1] === argv[1] &&
+          declared[declared.length - 1] === argv[argv.length - 1],
+      );
+      const matchesInstall =
+        policy.installCmd?.[0] === argv[0] &&
+        policy.installCmd?.[1] === argv[1] &&
+        policy.installCmd?.[policy.installCmd.length - 1] === argv[argv.length - 1];
+      if (!matchesDeclared && !matchesInstall) {
+        return { ok: false, reason: "shell chaining/substitution not allowed in ad-hoc commands" };
+      }
+    }
+    const innerHead = inner.split(/\s+/)[0]?.toLowerCase() ?? "";
+    if (!RUN_COMMAND_WHITELIST.some((w) => innerHead === w || innerHead.startsWith(`${w}/`))) {
+      return { ok: false, reason: `binary not in whitelist: ${innerHead}` };
+    }
+  } else {
+    const head = first.split("/").pop() ?? "";
+    if (!RUN_COMMAND_WHITELIST.includes(head)) {
+      return { ok: false, reason: `binary not in whitelist: ${head}` };
+    }
+  }
+
+  // 3. Per-stack allow-list. Read-only inspectors are always allowed.
+  const headForCheck = first === "sh" || first === "bash" ? "" : (first.split("/").pop() ?? "");
+  if (READ_ONLY_INSPECTORS.has(headForCheck)) return { ok: true };
+
+  const sameArgv = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((tok, i) => tok === b[i]);
+  if (policy.installCmd && sameArgv(argv, policy.installCmd)) return { ok: true };
+  if (policy.allowedExactArgvs.some((d) => sameArgv(argv, d))) return { ok: true };
+
+  return {
+    ok: false,
+    reason:
+      "command not in this stack's allow-list — use one of the declared checks, the install command, or a read-only inspector",
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// In-process validators (for static-html + mobile-cross)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function runInprocessValidator(
+  kind: string,
+  files: BuilderFile[],
+): { exitCode: number; output: string } {
+  if (kind === "html-syntax") {
+    const issues: string[] = [];
+    let hasIndex = false;
+    for (const f of files) {
+      if (f.path === "index.html") hasIndex = true;
+      if (f.path.endsWith(".html")) {
+        const c = f.content;
+        const openTags = (c.match(/<html[\s>]/gi) ?? []).length;
+        const closeTags = (c.match(/<\/html>/gi) ?? []).length;
+        if (openTags !== closeTags) issues.push(`${f.path}: unbalanced <html> tags`);
+        if (!/<head[\s>]/i.test(c)) issues.push(`${f.path}: missing <head>`);
+        if (!/<body[\s>]/i.test(c)) issues.push(`${f.path}: missing <body>`);
+      }
+    }
+    if (!hasIndex && files.length > 0) issues.push("missing index.html");
+    return {
+      exitCode: issues.length === 0 ? 0 : 1,
+      output: issues.length === 0 ? "html-syntax: ok" : issues.join("\n"),
+    };
+  }
+  if (kind === "cross-file") {
+    const paths = new Set(files.map((f) => f.path));
+    const issues: string[] = [];
+    for (const f of files) {
+      if (!f.path.endsWith(".html")) continue;
+      const hrefs = Array.from(f.content.matchAll(/href=["']\.\/([^"'#?]+)["']/gi));
+      for (const m of hrefs) {
+        const target = m[1] ?? "";
+        if (target.endsWith(".html") && !paths.has(target)) {
+          issues.push(`${f.path}: broken link → ${target}`);
+        }
+      }
+    }
+    return {
+      exitCode: issues.length === 0 ? 0 : 1,
+      output: issues.length === 0 ? "cross-file: ok" : issues.join("\n"),
+    };
+  }
+  if (kind === "mobile-structure") {
+    const required = ["app.json", "app/_layout.tsx", "app/index.tsx"];
+    const have = new Set(files.map((f) => f.path));
+    const missing = required.filter((p) => !have.has(p));
+    return {
+      exitCode: missing.length === 0 ? 0 : 1,
+      output:
+        missing.length === 0
+          ? "mobile-structure: ok"
+          : `missing required files: ${missing.join(", ")}`,
+    };
+  }
+  return { exitCode: 1, output: `unknown inprocess validator: ${kind}` };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool catalog (OpenAI schema)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TOOLS: ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "list_files",
+      description:
+        "List paths of files currently in the project (relative to project root). Returns a flat array of strings.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_file",
+      description: "Read the full text content of one project file.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Relative path inside the project." },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_file",
+      description:
+        "Create or overwrite a project file with full new content. Use this for both new files and full rewrites.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          content: { type: "string" },
+          mime_type: {
+            type: "string",
+            description: "Optional, inferred from extension if absent.",
+          },
+        },
+        required: ["path", "content"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "apply_patch",
+      description:
+        "Replace an exact substring in a file. Use this for small targeted edits to large files. Fails if old_text appears zero or multiple times.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          old_text: { type: "string" },
+          new_text: { type: "string" },
+        },
+        required: ["path", "old_text", "new_text"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_file",
+      description: "Remove a file from the project.",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search",
+      description:
+        "Case-insensitive substring search across all current project files. Returns up to 50 matching lines with file:line prefix.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "run_command",
+      description:
+        "Run a shell command inside the project's container (or an in-process validator for static-html / mobile projects). Argv must be from the per-stack whitelist. Returns combined stdout+stderr (truncated).",
+      parameters: {
+        type: "object",
+        properties: {
+          argv: {
+            type: "array",
+            items: { type: "string" },
+            description: 'argv array, e.g. ["sh","-lc","npx --yes tsc --noEmit"].',
+          },
+          timeout_ms: { type: "integer" },
+        },
+        required: ["argv"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "report_progress",
+      description:
+        "Emit a short narrative step shown in the chat (one short sentence). Use sparingly between major actions.",
+      parameters: {
+        type: "object",
+        properties: { message: { type: "string" } },
+        required: ["message"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "finalize",
+      description:
+        "Signal that the build is complete. Provide a 1-3 sentence summary for the user. Call this only after all required checks pass.",
+      parameters: {
+        type: "object",
+        properties: {
+          summary: { type: "string" },
+          warnings: { type: "array", items: { type: "string" } },
+        },
+        required: ["summary"],
+        additionalProperties: false,
+      },
+    },
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// System prompt
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildSystemPrompt(
+  input: AgentLoopInput,
+  stack: StackId,
+  profile: { checks: CheckSpec[] },
+) {
+  const checkList = profile.checks.map((c) => `  • ${c.id} (${c.label})`).join("\n");
+  const isStatic = stack === "static-html";
+  const isMobile = stack === "mobile-cross";
+  const platformNote = isStatic
+    ? "This is a STATIC web app (HTML/CSS/JS + Tailwind/lucide via CDN). No npm or build tools — `run_command` is restricted to in-process validators."
+    : isMobile
+      ? "This is a MOBILE cross-platform app (Expo SDK 52 / Expo Router v3 / NativeWind v4). Generate an Expo project AND an index.html web preview. `run_command` is restricted to in-process structural validators."
+      : `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command.`;
+  return [
+    `You are MustaFlow's agentic app builder. Your job is to ${input.mode === "build" ? "create" : "refine"} a working ${stack} application that satisfies the user's request.`,
+    "",
+    platformNote,
+    "",
+    "## How you work",
+    "- Use tools iteratively. Each turn, decide the next best action.",
+    "- Read before you edit. Search before you guess.",
+    "- Make small, focused changes. Prefer apply_patch for surgical edits, write_file for new/rewritten files.",
+    "- After meaningful edits, run the checks for this stack to verify your work. Fix failures, then re-run.",
+    "- Call `finalize` only after all required checks pass. Provide a short, accurate summary.",
+    "",
+    "## Required checks for this stack",
+    checkList,
+    "",
+    "## Safety limits (will be enforced)",
+    `- Maximum ${STEP_CAP} tool-calling steps.`,
+    `- Maximum ${Math.round(WALL_CLOCK_MS / 60000)} minutes wall-clock.`,
+    `- After ${REPEATED_ERROR_CAP} consecutive failures of the same operation, the loop aborts.`,
+    "- `run_command` argv is whitelisted; destructive commands are blocked.",
+    "- All file paths are sandboxed to the project root — no `..`, no absolute paths.",
+    "",
+    "## Output discipline",
+    "- Never describe code in chat — write it with write_file / apply_patch.",
+    "- `report_progress` is for ONE short sentence between major steps, not for explanations.",
+    "- Avoid emojis in generated files and narration — use lucide icons in HTML output instead.",
+    input.knowledgeContext ? `\n## Lessons from prior builds\n${input.knowledgeContext}` : "",
+    input.planContext
+      ? `\n## Plan to execute\n${JSON.stringify(input.planContext).slice(0, 2400)}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// In-memory file workspace
+// ─────────────────────────────────────────────────────────────────────────────
+
+class FileWorkspace {
+  private files = new Map<string, BuilderFile>();
+  private readonly initialPaths: Set<string>;
+
+  constructor(initial: BuilderFile[]) {
+    for (const f of initial) this.files.set(f.path, { ...f });
+    this.initialPaths = new Set(initial.map((f) => f.path));
+  }
+
+  list(): string[] {
+    return Array.from(this.files.keys()).sort();
+  }
+
+  read(path: string): BuilderFile | undefined {
+    return this.files.get(path);
+  }
+
+  write(path: string, content: string, mimeType?: string): BuilderFile {
+    const mt = mimeType ?? guessMime(path);
+    const file: BuilderFile = { path, content, mimeType: mt };
+    this.files.set(path, file);
+    return file;
+  }
+
+  delete(path: string): boolean {
+    return this.files.delete(path);
+  }
+
+  all(): BuilderFile[] {
+    return Array.from(this.files.values());
+  }
+
+  diff(): { changed: BuilderFile[]; removed: string[]; unchanged: string[] } {
+    const current = new Set(this.files.keys());
+    const removed = Array.from(this.initialPaths).filter((p) => !current.has(p));
+    const changed: BuilderFile[] = [];
+    const unchanged: string[] = [];
+    for (const f of this.files.values()) {
+      const initial = this.initialContent(f.path);
+      if (initial === undefined || initial !== f.content) changed.push(f);
+      else unchanged.push(f.path);
+    }
+    return { changed, removed, unchanged };
+  }
+
+  private initialContentCache = new Map<string, string>();
+  private initialContent(path: string): string | undefined {
+    if (!this.initialPaths.has(path)) return undefined;
+    return this.initialContentCache.get(path);
+  }
+
+  primeInitial(files: BuilderFile[]): void {
+    for (const f of files) this.initialContentCache.set(f.path, f.content);
+  }
+
+  search(query: string): string[] {
+    const q = query.toLowerCase();
+    const hits: string[] = [];
+    for (const f of this.files.values()) {
+      const lines = f.content.split("\n");
+      for (let i = 0; i < lines.length && hits.length < 50; i++) {
+        if (lines[i]!.toLowerCase().includes(q)) {
+          hits.push(`${f.path}:${i + 1}: ${lines[i]!.slice(0, 200)}`);
+        }
+      }
+      if (hits.length >= 50) break;
+    }
+    return hits;
+  }
+}
+
+function guessMime(path: string): string {
+  const p = path.toLowerCase();
+  if (p.endsWith(".html")) return "text/html";
+  if (p.endsWith(".css")) return "text/css";
+  if (p.endsWith(".js") || p.endsWith(".mjs") || p.endsWith(".cjs"))
+    return "application/javascript";
+  if (p.endsWith(".ts") || p.endsWith(".tsx")) return "application/typescript";
+  if (p.endsWith(".json")) return "application/json";
+  if (p.endsWith(".md")) return "text/markdown";
+  if (p.endsWith(".py")) return "text/x-python";
+  if (p.endsWith(".svg")) return "image/svg+xml";
+  return "text/plain";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Loop runner
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
+  const stack = resolveStackId(input.projectKind, input.projectFormat, input.stack);
+  const profile = CHECK_PROFILES[stack];
+  const workspace = new FileWorkspace(input.existingFiles);
+  workspace.primeInitial(input.existingFiles);
+
+  const toolCalls: ToolCallRecord[] = [];
+  const commandsRun: CommandRecord[] = [];
+  const checkResults: CheckResultRecord[] = [];
+  let totalTokens = 0;
+
+  const startedAt = Date.now();
+  let lastError = "";
+  let consecutiveErrors = 0;
+  let terminationReason: AgentLoopReport["terminationReason"] = "model-stopped";
+  let finalSummary = "";
+  let finalWarnings: string[] = [];
+  let finalized = false;
+
+  const messages: ChatCompletionMessageParam[] = [
+    { role: "system", content: buildSystemPrompt(input, stack, profile) },
+  ];
+
+  // Seed context: current file manifest
+  const seedManifest = workspace.list();
+  messages.push({
+    role: "user",
+    content:
+      `User request:\n${input.userPrompt}\n\n` +
+      `Current files in project (${seedManifest.length}):\n${
+        seedManifest.length > 0 ? seedManifest.slice(0, 40).join("\n") : "(empty)"
+      }\n\n` +
+      `Conversation history follows.`,
+  });
+  for (const turn of (input.conversationHistory ?? []).slice(-6)) {
+    messages.push({ role: turn.role, content: turn.content });
+  }
+
+  const model = MODEL_FOR_MODE[input.agentMode] ?? "gpt-5-mini";
+  const containerState = { id: input.containerId ?? null, installed: false };
+  let step = 0;
+
+  for (step = 1; step <= STEP_CAP; step++) {
+    if (input.signal.aborted) {
+      terminationReason = "aborted";
+      break;
+    }
+    if (Date.now() - startedAt > WALL_CLOCK_MS) {
+      terminationReason = "wall-clock";
+      break;
+    }
+    if (consecutiveErrors >= REPEATED_ERROR_CAP) {
+      terminationReason = "repeated-error";
+      break;
+    }
+    // Total tool-call cap (not just LLM turns). STEP_CAP is the budget for the
+    // entire run measured in tool calls so a single turn that emits many calls
+    // cannot exceed the safety budget.
+    if (toolCalls.length >= STEP_CAP) {
+      terminationReason = "step-cap";
+      break;
+    }
+
+    let response;
+    try {
+      response = await openai.chat.completions.create(
+        {
+          model,
+          messages,
+          tools: TOOLS,
+          tool_choice: "auto",
+        },
+        { signal: input.signal },
+      );
+    } catch (err) {
+      if (input.signal.aborted) {
+        terminationReason = "aborted";
+        break;
+      }
+      logger.warn({ err, step }, "agent-loop: model call failed");
+      lastError = String((err as Error).message ?? err);
+      consecutiveErrors++;
+      continue;
+    }
+
+    totalTokens += response.usage?.total_tokens ?? 0;
+    const choice = response.choices[0];
+    if (!choice) {
+      terminationReason = "model-stopped";
+      break;
+    }
+    const msg = choice.message;
+    const toolReqs: ChatCompletionMessageToolCall[] = msg.tool_calls ?? [];
+
+    messages.push({
+      role: "assistant",
+      content: msg.content ?? "",
+      tool_calls: toolReqs.length > 0 ? toolReqs : undefined,
+    });
+
+    if (toolReqs.length === 0) {
+      // Model returned plain text; treat finish_reason=stop as "done without finalize".
+      if (msg.content && msg.content.length > 0) {
+        finalSummary = msg.content.slice(0, 600);
+      }
+      terminationReason = "model-stopped";
+      break;
+    }
+
+    let stepFinalized = false;
+    let mutatedThisTurn = false;
+    for (const call of toolReqs) {
+      if (call.type !== "function") continue;
+      const name = call.function.name;
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+      } catch {
+        parsed = {};
+      }
+      const tStart = Date.now();
+      const result = await executeTool({
+        name,
+        args: parsed,
+        workspace,
+        stack,
+        profile,
+        input,
+        commandsRun,
+        step,
+        containerState,
+      });
+      const durationMs = Date.now() - tStart;
+
+      const observation =
+        typeof result.observation === "string"
+          ? result.observation.slice(0, MAX_OBSERVATION_CHARS)
+          : JSON.stringify(result.observation).slice(0, MAX_OBSERVATION_CHARS);
+
+      toolCalls.push({
+        step,
+        tool: name,
+        args: redactArgs(parsed),
+        ok: result.ok,
+        durationMs,
+        preview: observation.slice(0, 400),
+      });
+
+      if (result.ok) {
+        consecutiveErrors = 0;
+      } else {
+        if (lastError === observation) consecutiveErrors++;
+        else consecutiveErrors = 1;
+        lastError = observation;
+      }
+
+      // Emit narration for high-signal tools
+      if (name === "report_progress") {
+        await safeEvent(input.onEvent, "narration", String(parsed.message ?? "").slice(0, 220));
+      } else if (name === "write_file" || name === "apply_patch" || name === "delete_file") {
+        mutatedThisTurn = true;
+        await safeEvent(
+          input.onEvent,
+          "generating_code",
+          `${name.replace("_", " ")} → ${String(parsed.path ?? "")}`.slice(0, 220),
+        );
+      } else if (name === "run_command") {
+        await safeEvent(
+          input.onEvent,
+          "narration",
+          `Running: ${(parsed.argv as string[] | undefined)?.slice(-1)[0] ?? "command"}`.slice(
+            0,
+            220,
+          ),
+        );
+      }
+
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: observation,
+      });
+
+      // Enforce tool-call cap mid-turn — stop immediately if we hit the budget
+      // partway through a multi-tool-call response.
+      if (toolCalls.length >= STEP_CAP && name !== "finalize") {
+        terminationReason = "step-cap";
+        stepFinalized = true; // borrow flag to break the outer for-loop too
+        break;
+      }
+
+      if (name === "finalize") {
+        // Run checks now; only terminate if required checks pass.
+        await safeEvent(input.onEvent, "narration", "Verifying checks before finalizing…");
+        const verifyRun = await runCheckProfile(
+          profile.checks,
+          workspace,
+          { ...input, containerId: containerState.id },
+          containerState,
+          profile.installCmd,
+        );
+        const verifyFailed = profile.checks.filter(
+          (c) => c.required && !verifyRun.find((r) => r.id === c.id)?.passed,
+        );
+        if (verifyFailed.length === 0) {
+          finalized = true;
+          stepFinalized = true;
+          finalSummary = String(parsed.summary ?? "").slice(0, 800);
+          const w = parsed.warnings;
+          if (Array.isArray(w)) finalWarnings = w.map((x) => String(x).slice(0, 200)).slice(0, 10);
+          terminationReason = "finalized";
+          // Overwrite the generic "finalized" observation in the last tool message
+          messages[messages.length - 1] = {
+            role: "tool",
+            tool_call_id: call.id,
+            content: "finalized — all required checks passed",
+          };
+          break;
+        }
+        // Required checks failed → feed back and continue looping
+        const failMsg =
+          `BLOCKED: cannot finalize — these required checks failed:\n` +
+          verifyFailed
+            .map((c) => {
+              const r = verifyRun.find((x) => x.id === c.id);
+              return `- ${c.id}: ${r?.message ?? "failed"}`;
+            })
+            .join("\n") +
+          `\nFix the failures and call finalize again.`;
+        messages[messages.length - 1] = {
+          role: "tool",
+          tool_call_id: call.id,
+          content: failMsg.slice(0, MAX_OBSERVATION_CHARS),
+        };
+        // Treat as an error event so consecutiveErrors tracks repeated failure
+        if (lastError === failMsg) consecutiveErrors++;
+        else consecutiveErrors = 1;
+        lastError = failMsg;
+      }
+    }
+
+    if (stepFinalized) break;
+
+    // Auto-verify after each turn that included a mutating tool call but did
+    // not call finalize. Runs the per-stack check profile and injects the
+    // outcome as a synthetic system message so the next turn can react.
+    // Skipped on abort to keep cancel prompt.
+    if (mutatedThisTurn && !finalized && !input.signal.aborted) {
+      const turnChecks = await runCheckProfile(
+        profile.checks,
+        workspace,
+        { ...input, containerId: containerState.id },
+        containerState,
+        profile.installCmd,
+      );
+      const turnFailed = profile.checks.filter(
+        (c) => c.required && !turnChecks.find((r) => r.id === c.id)?.passed,
+      );
+      if (turnFailed.length > 0) {
+        const summary =
+          `[auto-check] required checks failing after your edits:\n` +
+          turnFailed
+            .map((c) => {
+              const r = turnChecks.find((x) => x.id === c.id);
+              return `- ${c.id}: ${(r?.message ?? "failed").slice(0, 200)}`;
+            })
+            .join("\n") +
+          `\nFix and continue, then call finalize.`;
+        messages.push({ role: "system", content: summary.slice(0, MAX_OBSERVATION_CHARS) });
+      } else {
+        messages.push({
+          role: "system",
+          content: "[auto-check] all required checks passing. You may call finalize.",
+        });
+      }
+    }
+  }
+
+  // If the loop exited via the for-condition without break, it's a step-cap exhaustion.
+  if (step > STEP_CAP && terminationReason === "model-stopped" && !finalized) {
+    terminationReason = "step-cap";
+  }
+
+  // ── Post-loop: run required checks (whether the model finalized or not) ──
+  // Skip when aborted — cancel should not be blocked waiting on checks.
+  if (input.signal.aborted) {
+    terminationReason = "aborted";
+    const diff = workspace.diff();
+    const allFiles = workspace.all();
+    return {
+      files: allFiles,
+      changedFiles: diff.changed,
+      removedPaths: diff.removed,
+      unchangedFiles: diff.unchanged,
+      assistantSummary: finalSummary || "Aborted by user.",
+      warnings: finalWarnings,
+      checksFailed: true,
+      loopReport: {
+        stack,
+        steps: Math.min(toolCalls.length, STEP_CAP),
+        totalToolCalls: toolCalls.length,
+        totalTokens,
+        terminationReason,
+        toolCalls,
+        commandsRun,
+        checkResults,
+      },
+    };
+  }
+  await safeEvent(input.onEvent, "narration", "Running checks…");
+  const checkRun = await runCheckProfile(
+    profile.checks,
+    workspace,
+    { ...input, containerId: containerState.id },
+    containerState,
+    profile.installCmd,
+  );
+  checkResults.push(...checkRun);
+  const requiredFailed = profile.checks.some(
+    (c) => c.required && !checkRun.find((r) => r.id === c.id)?.passed,
+  );
+
+  if (requiredFailed && !finalized) {
+    terminationReason = "checks-failed";
+  } else if (requiredFailed && terminationReason === "finalized") {
+    terminationReason = "checks-failed";
+  }
+
+  if (!STEP_CAP_REACHED(toolCalls.length) && terminationReason === "model-stopped" && finalized) {
+    // keep finalized
+  }
+
+  const diff = workspace.diff();
+  const allFiles = workspace.all();
+
+  return {
+    files: allFiles,
+    changedFiles: diff.changed,
+    removedPaths: diff.removed,
+    unchangedFiles: diff.unchanged,
+    assistantSummary:
+      finalSummary ||
+      (input.mode === "build"
+        ? `Built ${allFiles.length} file${allFiles.length === 1 ? "" : "s"} via agentic loop.`
+        : `Refined ${diff.changed.length} file${diff.changed.length === 1 ? "" : "s"} via agentic loop.`),
+    warnings: finalWarnings,
+    checksFailed: requiredFailed,
+    loopReport: {
+      stack,
+      steps: Math.min(toolCalls.length, STEP_CAP),
+      totalToolCalls: toolCalls.length,
+      totalTokens,
+      terminationReason,
+      toolCalls,
+      commandsRun,
+      checkResults,
+    },
+  };
+}
+
+function STEP_CAP_REACHED(n: number): boolean {
+  return n >= STEP_CAP;
+}
+
+async function safeEvent(fn: AgentLoopEvent, type: string, msg: string): Promise<void> {
+  try {
+    await fn(type, msg);
+  } catch (err) {
+    logger.warn({ err }, "agent-loop: event emit failed");
+  }
+}
+
+function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (k === "content" || k === "new_text") {
+      const s = typeof v === "string" ? v : JSON.stringify(v);
+      out[k] = s.length > 200 ? `${s.slice(0, 200)}… (${s.length} chars)` : s;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool executors
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ToolCtx {
+  name: string;
+  args: Record<string, unknown>;
+  workspace: FileWorkspace;
+  stack: StackId;
+  profile: { checks: CheckSpec[]; installCmd: string[] | null };
+  input: AgentLoopInput;
+  commandsRun: CommandRecord[];
+  step: number;
+  /** Mutable container state: id may be filled in via on-demand provisioning. */
+  containerState: { id: string | null; installed: boolean };
+}
+
+/**
+ * Run a container exec with a hard timeout. The Fly exec API itself doesn't
+ * surface AbortSignal, but we race the promise against a wall-clock and the
+ * caller's signal so the loop can move on (the container-side command will
+ * keep running until Fly's own 5-minute server-side timeout — that's
+ * acceptable; we just stop waiting for it).
+ */
+async function execWithTimeout(
+  containerId: string,
+  argv: string[],
+  projectId: number,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<{ ok: boolean; output: string; timedOut: boolean; aborted: boolean }> {
+  const { execInContainer } = await import("./container");
+  let timer: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<{ ok: false; output: string; timedOut: true; aborted: false }>(
+    (resolve) => {
+      timer = setTimeout(
+        () =>
+          resolve({
+            ok: false,
+            output: `timeout after ${timeoutMs}ms`,
+            timedOut: true,
+            aborted: false,
+          }),
+        Math.max(1_000, timeoutMs),
+      );
+    },
+  );
+  const abortPromise = new Promise<{ ok: false; output: string; timedOut: false; aborted: true }>(
+    (resolve) => {
+      const onAbort = () =>
+        resolve({ ok: false, output: "aborted by user", timedOut: false, aborted: true });
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    },
+  );
+  try {
+    const realRun = execInContainer(containerId, argv, projectId).then((r) => ({
+      ok: r.ok,
+      output: r.output,
+      timedOut: false as const,
+      aborted: false as const,
+    }));
+    return await Promise.race([realRun, timeoutPromise, abortPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Provision a container on demand for stacks that need a shell. No-op if Fly isn't configured. */
+async function ensureContainerProvisioned(ctx: ToolCtx): Promise<{ ok: boolean; reason?: string }> {
+  if (ctx.containerState.id) return { ok: true };
+  try {
+    const { provisionContainer } = await import("./container");
+    const files = ctx.workspace.all().map((f) => ({ path: f.path, content: f.content }));
+    const info = await provisionContainer(ctx.input.projectId, files);
+    if (!info?.containerId) {
+      return { ok: false, reason: "container provider not configured (FLY_API_TOKEN unset)" };
+    }
+    ctx.containerState.id = info.containerId;
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: String((err as Error).message ?? err).slice(0, 200) };
+  }
+}
+
+/** Run the stack's install command exactly once per loop, lazily on first shell use. */
+async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number): Promise<void> {
+  if (ctx.containerState.installed) return;
+  if (!ctx.profile.installCmd) {
+    ctx.containerState.installed = true;
+    return;
+  }
+  if (!ctx.containerState.id) return;
+  const argv = ctx.profile.installCmd;
+  await safeEvent(ctx.input.onEvent, "narration", "Installing dependencies…");
+  const t = Date.now();
+  const r = await execWithTimeout(
+    ctx.containerState.id,
+    argv,
+    ctx.input.projectId,
+    5 * 60_000,
+    signal,
+  );
+  ctx.commandsRun.push({
+    step,
+    argv,
+    exitCode: r.ok ? 0 : 1,
+    durationMs: Date.now() - t,
+    stdoutPreview: r.ok ? r.output.slice(0, 400) : "",
+    stderrPreview: r.ok ? "" : r.output.slice(0, 400),
+  });
+  ctx.containerState.installed = true;
+}
+
+async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: string }> {
+  const { name, args, workspace, stack, input, commandsRun, step, containerState } = ctx;
+  if (input.signal.aborted) {
+    return { ok: false, observation: "ERROR: aborted by user" };
+  }
+  switch (name) {
+    case "list_files": {
+      const list = workspace.list();
+      return { ok: true, observation: list.length === 0 ? "(no files)" : list.join("\n") };
+    }
+    case "read_file": {
+      const path = sanitizePath(args.path);
+      if (!path) return { ok: false, observation: "ERROR: invalid path" };
+      const f = workspace.read(path);
+      if (!f) return { ok: false, observation: `ERROR: file not found: ${path}` };
+      const content =
+        f.content.length > MAX_FILE_BYTES
+          ? `${f.content.slice(0, MAX_FILE_BYTES)}\n…(truncated, ${f.content.length} bytes total)`
+          : f.content;
+      return { ok: true, observation: content };
+    }
+    case "write_file": {
+      const path = sanitizePath(args.path);
+      if (!path) return { ok: false, observation: "ERROR: invalid path" };
+      const content = typeof args.content === "string" ? args.content : "";
+      if (content.length > MAX_FILE_BYTES * 4) {
+        return { ok: false, observation: `ERROR: content too large (${content.length} bytes)` };
+      }
+      const mime = typeof args.mime_type === "string" ? args.mime_type : undefined;
+      workspace.write(path, content, mime);
+      if (containerState.id) {
+        try {
+          const { writeFileToContainer } = await import("./container");
+          await writeFileToContainer(containerState.id, path, content, input.projectId);
+        } catch (err) {
+          logger.warn({ err, path }, "agent-loop: container write failed (non-fatal)");
+        }
+      }
+      return { ok: true, observation: `wrote ${path} (${content.length} bytes)` };
+    }
+    case "apply_patch": {
+      const path = sanitizePath(args.path);
+      if (!path) return { ok: false, observation: "ERROR: invalid path" };
+      const oldText = typeof args.old_text === "string" ? args.old_text : "";
+      const newText = typeof args.new_text === "string" ? args.new_text : "";
+      const f = workspace.read(path);
+      if (!f) return { ok: false, observation: `ERROR: file not found: ${path}` };
+      if (oldText.length === 0)
+        return { ok: false, observation: "ERROR: old_text must be non-empty" };
+      const idx = f.content.indexOf(oldText);
+      if (idx === -1) return { ok: false, observation: "ERROR: old_text not found in file" };
+      if (f.content.indexOf(oldText, idx + 1) !== -1) {
+        return {
+          ok: false,
+          observation: "ERROR: old_text matches multiple locations — include more context",
+        };
+      }
+      const next = f.content.slice(0, idx) + newText + f.content.slice(idx + oldText.length);
+      workspace.write(path, next, f.mimeType);
+      if (containerState.id) {
+        try {
+          const { writeFileToContainer } = await import("./container");
+          await writeFileToContainer(containerState.id, path, next, input.projectId);
+        } catch (err) {
+          logger.warn({ err, path }, "agent-loop: container write failed (non-fatal)");
+        }
+      }
+      return { ok: true, observation: `patched ${path}` };
+    }
+    case "delete_file": {
+      const path = sanitizePath(args.path);
+      if (!path) return { ok: false, observation: "ERROR: invalid path" };
+      const removed = workspace.delete(path);
+      if (!removed) return { ok: false, observation: `ERROR: file not found: ${path}` };
+      if (containerState.id) {
+        try {
+          // Direct argv (no shell wrapper) — sanitizePath already rejected any
+          // shell metacharacters, but using argv form means even a sanitization
+          // bypass cannot trigger command substitution.
+          await execWithTimeout(
+            containerState.id,
+            ["rm", "-f", "--", `/app/${path}`],
+            input.projectId,
+            15_000,
+            input.signal,
+          );
+        } catch (err) {
+          logger.warn({ err, path }, "agent-loop: container delete failed (non-fatal)");
+        }
+      }
+      return { ok: true, observation: `deleted ${path}` };
+    }
+    case "search": {
+      const query = typeof args.query === "string" ? args.query : "";
+      if (query.length === 0) return { ok: false, observation: "ERROR: empty query" };
+      const hits = workspace.search(query);
+      return { ok: true, observation: hits.length === 0 ? "(no matches)" : hits.join("\n") };
+    }
+    case "run_command": {
+      const argv = Array.isArray(args.argv) ? (args.argv as unknown[]).map(String) : [];
+      // In-process validators bypass the shell command policy entirely — they are
+      // the documented mechanism for static-html / mobile-cross stacks. Validate
+      // that the argv exactly matches one of the stack's declared check argvs.
+      if (argv[0] === "__inprocess__") {
+        const matches = ctx.profile.checks.some(
+          (c) => c.argv.length === argv.length && c.argv.every((tok, i) => tok === argv[i]),
+        );
+        if (!matches) {
+          return {
+            ok: false,
+            observation:
+              "ERROR: __inprocess__ argv must exactly match one of this stack's declared check argvs",
+          };
+        }
+        const kind = argv[1] ?? "";
+        const t = Date.now();
+        const r = runInprocessValidator(kind, workspace.all());
+        commandsRun.push({
+          step,
+          argv,
+          exitCode: r.exitCode,
+          durationMs: Date.now() - t,
+          stdoutPreview: r.output.slice(0, 400),
+          stderrPreview: "",
+        });
+        return {
+          ok: r.exitCode === 0,
+          observation: `[${kind}] exit=${r.exitCode}\n${r.output}`,
+        };
+      }
+      const check = isCommandAllowed(argv, {
+        allowedExactArgvs: ctx.profile.checks.map((c) => c.argv),
+        installCmd: ctx.profile.installCmd,
+      });
+      if (!check.ok) {
+        const rec: CommandRecord = {
+          step,
+          argv,
+          exitCode: 126,
+          durationMs: 0,
+          stdoutPreview: "",
+          stderrPreview: `BLOCKED: ${check.reason ?? "not allowed"}`,
+        };
+        commandsRun.push(rec);
+        return { ok: false, observation: `BLOCKED: ${check.reason ?? "not allowed"}` };
+      }
+      // In-process magic prefix
+      if (argv[0] === "__inprocess__") {
+        const kind = argv[1] ?? "";
+        const t = Date.now();
+        const r = runInprocessValidator(kind, workspace.all());
+        commandsRun.push({
+          step,
+          argv,
+          exitCode: r.exitCode,
+          durationMs: Date.now() - t,
+          stdoutPreview: r.output.slice(0, 400),
+          stderrPreview: "",
+        });
+        return {
+          ok: r.exitCode === 0,
+          observation: `[${kind}] exit=${r.exitCode}\n${r.output}`,
+        };
+      }
+      // Static / mobile stacks have no container shell
+      if (stack === "static-html" || stack === "mobile-cross") {
+        return {
+          ok: false,
+          observation:
+            "ERROR: shell commands are not available for this stack. Use argv ['__inprocess__','<check-id>'] to run an in-process validator instead.",
+        };
+      }
+      // On-demand container provisioning
+      if (!containerState.id) {
+        const prov = await ensureContainerProvisioned(ctx);
+        if (!prov.ok) {
+          return {
+            ok: false,
+            observation: `ERROR: cannot provision container: ${prov.reason ?? "unknown"}`,
+          };
+        }
+      }
+      // Install deps on first shell use
+      await ensureInstalled(ctx, input.signal, step);
+
+      const timeoutMs =
+        typeof args.timeout_ms === "number" && args.timeout_ms > 0
+          ? Math.min(args.timeout_ms, 5 * 60_000)
+          : 2 * 60_000;
+      const t = Date.now();
+      const r = await execWithTimeout(
+        containerState.id!,
+        argv,
+        input.projectId,
+        timeoutMs,
+        input.signal,
+      );
+      const exitCode = r.ok ? 0 : 1;
+      commandsRun.push({
+        step,
+        argv,
+        exitCode,
+        durationMs: Date.now() - t,
+        stdoutPreview: r.ok ? r.output.slice(0, 400) : "",
+        stderrPreview: r.ok ? "" : r.output.slice(0, 400),
+      });
+      if (r.aborted) return { ok: false, observation: "ERROR: aborted by user" };
+      if (r.timedOut)
+        return { ok: false, observation: `ERROR: command exceeded ${timeoutMs}ms timeout` };
+      return {
+        ok: r.ok,
+        observation: `exit=${exitCode}\n${r.output.slice(0, MAX_OBSERVATION_CHARS)}`,
+      };
+    }
+    case "report_progress": {
+      return { ok: true, observation: "ok" };
+    }
+    case "finalize": {
+      return { ok: true, observation: "finalized" };
+    }
+    default:
+      return { ok: false, observation: `ERROR: unknown tool: ${name}` };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Post-loop check runner (always runs, populates CheckResultRecord[])
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runCheckProfile(
+  checks: CheckSpec[],
+  workspace: FileWorkspace,
+  input: AgentLoopInput,
+  containerState?: { id: string | null; installed: boolean },
+  installCmd: string[] | null = null,
+): Promise<CheckResultRecord[]> {
+  const out: CheckResultRecord[] = [];
+  // On-demand container provisioning for the check runner. If any check needs
+  // a container and one isn't attached yet, provision it now (graceful no-op
+  // if Fly isn't configured).
+  const needsContainer = checks.some((c) => c.runner !== "inprocess");
+  let effectiveContainerId = containerState?.id ?? input.containerId ?? null;
+  if (needsContainer && !effectiveContainerId && !input.signal.aborted) {
+    try {
+      const { provisionContainer } = await import("./container");
+      const files = workspace.all().map((f) => ({ path: f.path, content: f.content }));
+      const info = await provisionContainer(input.projectId, files);
+      if (info?.containerId) {
+        effectiveContainerId = info.containerId;
+        if (containerState) containerState.id = info.containerId;
+      }
+    } catch {
+      // fall through; checks below will report a skipped/error result per check
+    }
+  }
+  // Run installCmd once per loop before any container check so typecheck/build
+  // don't fail just because node_modules is missing. installCmd is null for
+  // pure in-process stacks.
+  if (
+    needsContainer &&
+    effectiveContainerId &&
+    installCmd &&
+    containerState &&
+    !containerState.installed &&
+    !input.signal.aborted
+  ) {
+    try {
+      await execWithTimeout(
+        effectiveContainerId,
+        installCmd,
+        input.projectId,
+        5 * 60_000,
+        input.signal,
+      );
+    } catch {
+      // continue; check failures will surface the real problem
+    }
+    containerState.installed = true;
+  }
+  for (const c of checks) {
+    if (input.signal.aborted) {
+      out.push({
+        id: c.id,
+        label: c.label,
+        passed: false,
+        durationMs: 0,
+        message: "aborted",
+      });
+      continue;
+    }
+    const t = Date.now();
+    if (c.runner === "inprocess") {
+      const kind = c.argv[1] ?? "";
+      const r = runInprocessValidator(kind, workspace.all());
+      out.push({
+        id: c.id,
+        label: c.label,
+        passed: r.exitCode === 0,
+        durationMs: Date.now() - t,
+        message: r.output.slice(0, 400),
+      });
+      continue;
+    }
+    if (!effectiveContainerId) {
+      out.push({
+        id: c.id,
+        label: c.label,
+        passed: false,
+        durationMs: 0,
+        message: "skipped: no container available (FLY_API_TOKEN unset?)",
+      });
+      continue;
+    }
+    try {
+      // Use execWithTimeout so cancel propagates and stuck execs don't block
+      // the loop indefinitely.
+      const exec = await execWithTimeout(
+        effectiveContainerId,
+        c.argv,
+        input.projectId,
+        2 * 60_000,
+        input.signal,
+      );
+      out.push({
+        id: c.id,
+        label: c.label,
+        passed: exec.ok,
+        durationMs: Date.now() - t,
+        message: (exec.output ?? "").slice(-400),
+      });
+    } catch (err) {
+      out.push({
+        id: c.id,
+        label: c.label,
+        passed: false,
+        durationMs: Date.now() - t,
+        message: `error: ${String((err as Error).message ?? err)}`.slice(0, 400),
+      });
+    }
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adapter: convert AgentLoopResult into the shapes runJob already consumes
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function loopResultToBuildResult(
+  result: AgentLoopResult,
+  userPrompt: string,
+  projectName: string,
+): BuilderResult {
+  const baseReport = buildTaskReport(result, userPrompt);
+  const blueprint: Blueprint = {
+    projectName,
+    projectType: result.loopReport.stack,
+    targetPlatforms: [result.loopReport.stack === "mobile-cross" ? "mobile" : "web"],
+    pages: [],
+    components: [],
+    integrationsNeeded: [],
+  };
+  return {
+    files: result.files,
+    blueprint,
+    report: baseReport,
+    assistantSummary: result.assistantSummary,
+    correctionPasses: 0,
+    // Hard gate: required-check failures must block the snapshot from being
+    // saved as a successful build. runJob inspects correctionFailed and
+    // refuses to persist files when it's true. Failure detail is still
+    // recorded in report.agentLoop.checkResults for the chat narrative.
+    correctionFailed: result.checksFailed,
+    primaryErrorCategory: result.checksFailed ? "checks-failed" : null,
+  };
+}
+
+export function loopResultToRefineResult(
+  result: AgentLoopResult,
+  userPrompt: string,
+): {
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+} {
+  const baseReport = buildTaskReport(result, userPrompt);
+  return {
+    changedFiles: result.changedFiles,
+    removedPaths: result.removedPaths,
+    unchangedFiles: result.unchangedFiles,
+    report: baseReport,
+    assistantSummary: result.assistantSummary,
+    correctionPasses: 0,
+    // Hard gate (refine path): see comment on loopResultToBuildResult.
+    correctionFailed: result.checksFailed,
+    primaryErrorCategory: result.checksFailed ? "checks-failed" : null,
+  };
+}
+
+function buildTaskReport(result: AgentLoopResult, userRequest: string): TaskReport {
+  const checkSummary =
+    result.loopReport.checkResults.length === 0
+      ? undefined
+      : result.loopReport.checkResults
+          .map((c) => `${c.passed ? "PASS" : "FAIL"} ${c.id}`)
+          .join(", ");
+  const failed = result.loopReport.checkResults.filter((c) => !c.passed).map((c) => c.id);
+  const passed = result.loopReport.checkResults.filter((c) => c.passed).length;
+  const warnings = [...result.warnings];
+  if (result.loopReport.terminationReason !== "finalized") {
+    warnings.push(`Agent loop terminated: ${result.loopReport.terminationReason}`);
+  }
+  return {
+    userRequest,
+    filesCreated: result.changedFiles.map((f) => f.path),
+    filesChanged: [],
+    filesRemoved: result.removedPaths,
+    previewUpdated: result.changedFiles.length > 0 || result.removedPaths.length > 0,
+    warnings,
+    integrationsNeeded: [],
+    summary: result.assistantSummary,
+    checkSummary,
+    checkRunsSummary: {
+      passed,
+      warnings: 0,
+      failed: failed.length,
+      skipped: 0,
+      failedChecks: failed,
+      warnChecks: [],
+    },
+    syntaxValid: !result.checksFailed,
+    // Stash the full loop report on validationReport so the existing UI surfaces it,
+    // and on a side channel via `summary` for now. Frontend can later read the raw
+    // loopReport via the typed extension below.
+    validationReport: {
+      initialIssues: failed,
+      fixupAttempted: result.loopReport.toolCalls.some(
+        (t) => t.tool === "write_file" || t.tool === "apply_patch",
+      ),
+      remainingIssues: failed,
+      passed: !result.checksFailed,
+    },
+    agentLoop: result.loopReport,
+  };
+}

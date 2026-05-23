@@ -1032,6 +1032,10 @@ export async function runJob(input: JobInput): Promise<void> {
   let wasEscalated = false;
   let analyticsErrorCategory: string | null = null;
   let analyticsCorrectionPasses = 0;
+  // Persisted validation status for the version snapshot written by this job.
+  // Default "passed"; flipped to "failed" only when agentic builder mode chooses
+  // to persist a snapshot despite required-check failures (see hard-gate blocks).
+  let versionValidationStatus: "passed" | "failed" = "passed";
 
   // Sanitise prompt before injecting into AI context — strip injection patterns
   const { cleaned: sanitisedPrompt, wasModified: promptWasModified } = sanitisePrompt(userPrompt);
@@ -1256,63 +1260,97 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           signal,
         };
 
-        let result = isMobileProject
-          ? await runMobileBuildPipeline({
-              projectName: project.name,
-              projectKind: project.kind,
-              userPrompt,
-              agentMode,
-              conversationHistory,
-              knowledgeContext: knowledgeContext || undefined,
-              activeModuleIds,
-              configuredSecretNames,
-              imageAttachments,
-              onEvent: async (type, message) => emitEvent(taskId, type, message),
-              signal,
-            })
-          : isReactViteProject
-            ? await runReactViteBuildPipeline({
+        const USE_AGENT_LOOP_BUILD = process.env.AGENTIC_BUILDER_ENABLED === "true";
+        let result:
+          | Awaited<ReturnType<typeof runBuildPipeline>>
+          | Awaited<ReturnType<typeof runMobileBuildPipeline>> = USE_AGENT_LOOP_BUILD
+          ? await (async () => {
+              const { runAgentLoop, loopResultToBuildResult } = await import("./agent-loop");
+              await emitEvent(taskId, "narration", "Agentic builder loop engaged.");
+              const loopRes = await runAgentLoop({
+                mode: "build",
+                projectId,
+                projectName: project.name,
+                projectKind: project.kind,
+                projectFormat: project.projectFormat ?? null,
+                stack: project.stack ?? null,
+                userPrompt,
+                agentMode,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                planContext: input.planContext ?? null,
+                existingFiles: [],
+                containerId: project.containerId ?? null,
+                onEvent: async (t, m) => emitEvent(taskId, t, m),
+                signal,
+              });
+              return loopResultToBuildResult(loopRes, userPrompt, project.name);
+            })()
+          : isMobileProject
+            ? await runMobileBuildPipeline({
                 projectName: project.name,
                 projectKind: project.kind,
                 userPrompt,
                 agentMode,
                 conversationHistory,
                 knowledgeContext: knowledgeContext || undefined,
-                databaseContext,
-                planContext: input.planContext ?? null,
-                conversationSummary,
+                activeModuleIds,
+                configuredSecretNames,
                 imageAttachments,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
                 signal,
               })
-            : isNextjsProject
-              ? await runNextjsBuildPipeline(stackBuildArgs)
-              : isNodeApiProject
-                ? await runNodeApiBuildPipeline(stackBuildArgs)
-                : isPythonFlaskProject
-                  ? await runFlaskBuildPipeline(stackBuildArgs)
-                  : isPythonFastapiProject
-                    ? await runFastapiBuildPipeline(stackBuildArgs)
-                    : await runBuildPipeline({
-                        projectName: project.name,
-                        projectKind: project.kind,
-                        userPrompt,
-                        agentMode,
-                        conversationHistory,
-                        knowledgeContext: knowledgeContext || undefined,
-                        databaseContext,
-                        planContext: input.planContext ?? null,
-                        conversationSummary,
-                        imageAttachments,
-                        signal,
-                      });
+            : isReactViteProject
+              ? await runReactViteBuildPipeline({
+                  projectName: project.name,
+                  projectKind: project.kind,
+                  userPrompt,
+                  agentMode,
+                  conversationHistory,
+                  knowledgeContext: knowledgeContext || undefined,
+                  databaseContext,
+                  planContext: input.planContext ?? null,
+                  conversationSummary,
+                  imageAttachments,
+                  onEvent: async (type, message) => emitEvent(taskId, type, message),
+                  signal,
+                })
+              : isNextjsProject
+                ? await runNextjsBuildPipeline(stackBuildArgs)
+                : isNodeApiProject
+                  ? await runNodeApiBuildPipeline(stackBuildArgs)
+                  : isPythonFlaskProject
+                    ? await runFlaskBuildPipeline(stackBuildArgs)
+                    : isPythonFastapiProject
+                      ? await runFastapiBuildPipeline(stackBuildArgs)
+                      : await runBuildPipeline({
+                          projectName: project.name,
+                          projectKind: project.kind,
+                          userPrompt,
+                          agentMode,
+                          conversationHistory,
+                          knowledgeContext: knowledgeContext || undefined,
+                          databaseContext,
+                          planContext: input.planContext ?? null,
+                          conversationSummary,
+                          imageAttachments,
+                          signal,
+                        });
 
         analyticsCorrectionPasses = result.correctionPasses;
         analyticsErrorCategory = result.primaryErrorCategory;
 
-        // Auto-escalation: if correction pass failed, retry at next model tier
+        // Auto-escalation: if correction pass failed, retry at next model tier.
+        // When the agentic builder loop is active it owns its own retry semantics
+        // (write → check → fix iteration + per-tier model selection), so we skip
+        // the legacy single-shot escalation path to avoid mixing pipelines.
         const buildEscalationMode = ESCALATION_MAP[agentMode];
-        if (result.correctionFailed && buildEscalationMode && !isMobileProject) {
+        if (
+          result.correctionFailed &&
+          buildEscalationMode &&
+          !isMobileProject &&
+          !USE_AGENT_LOOP_BUILD
+        ) {
           logger.info(
             { taskId, projectId, from: agentMode, to: buildEscalationMode },
             "Auto-escalating build to higher model tier",
@@ -1381,13 +1419,27 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           ];
         }
 
-        // Hard gate — if validation still failed after correction pass and escalation, refuse to
-        // write broken files. Throw so runJob marks the task failed without saving a snapshot.
-        if (result.correctionFailed) {
+        // Hard gate (legacy) — refuse to write broken files; throw so runJob marks the task failed.
+        // Agentic builder exception: persist the snapshot anyway with validation_status="failed"
+        // so the user can inspect what the loop produced and iterate.
+        if (result.correctionFailed && !USE_AGENT_LOOP_BUILD) {
           throw new Error(
             `Build validation still failed after correction pass${buildEscalationMode ? " and auto-escalation" : ""}. ` +
               `No files were saved. Try rephrasing your request or switching to a higher agent mode.`,
           );
+        }
+        if (result.correctionFailed && USE_AGENT_LOOP_BUILD) {
+          await emitEvent(
+            taskId,
+            "generating_code",
+            "Required checks failed — saving snapshot with failed status so you can inspect.",
+          );
+          result.report.warnings = [
+            "Required checks failed — snapshot saved with validation_status=failed. Review report.agentLoop.checkResults.",
+            ...(result.report.warnings ?? []),
+          ];
+          versionValidationStatus = "failed";
+          result.correctionFailed = false;
         }
 
         // Secrets scan — redact before persisting
@@ -1555,23 +1607,32 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           signal,
         };
 
-        let refineResult = isMobileProject
-          ? await runMobileRefinePipeline({
-              projectName: project.name,
-              projectKind: project.kind,
-              userPrompt,
-              agentMode,
-              existingFiles,
-              conversationHistory,
-              knowledgeContext: knowledgeContext || undefined,
-              activeModuleIds,
-              configuredSecretNames,
-              imageAttachments,
-              onEvent: async (type, message) => emitEvent(taskId, type, message),
-              signal,
-            })
-          : isReactViteProject
-            ? await runReactViteRefinePipeline({
+        const USE_AGENT_LOOP_REFINE = process.env.AGENTIC_BUILDER_ENABLED === "true";
+        let refineResult: Awaited<ReturnType<typeof runRefinePipeline>> = USE_AGENT_LOOP_REFINE
+          ? await (async () => {
+              const { runAgentLoop, loopResultToRefineResult } = await import("./agent-loop");
+              await emitEvent(taskId, "narration", "Agentic builder loop engaged.");
+              const loopRes = await runAgentLoop({
+                mode: "refine",
+                projectId,
+                projectName: project.name,
+                projectKind: project.kind,
+                projectFormat: project.projectFormat ?? null,
+                stack: project.stack ?? null,
+                userPrompt,
+                agentMode,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                planContext: input.planContext ?? null,
+                existingFiles,
+                containerId: project.containerId ?? null,
+                onEvent: async (t, m) => emitEvent(taskId, t, m),
+                signal,
+              });
+              return loopResultToRefineResult(loopRes, userPrompt);
+            })()
+          : isMobileProject
+            ? await runMobileRefinePipeline({
                 projectName: project.name,
                 projectKind: project.kind,
                 userPrompt,
@@ -1579,45 +1640,67 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 existingFiles,
                 conversationHistory,
                 knowledgeContext: knowledgeContext || undefined,
-                databaseContext,
-                unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                planContext: input.planContext ?? null,
-                conversationSummary,
+                activeModuleIds,
+                configuredSecretNames,
                 imageAttachments,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
                 signal,
               })
-            : isNextjsProject
-              ? await runNextjsRefinePipeline(stackRefineArgs)
-              : isNodeApiProject
-                ? await runNodeApiRefinePipeline(stackRefineArgs)
-                : isPythonFlaskProject
-                  ? await runFlaskRefinePipeline(stackRefineArgs)
-                  : isPythonFastapiProject
-                    ? await runFastapiRefinePipeline(stackRefineArgs)
-                    : await runRefinePipeline({
-                        projectName: project.name,
-                        projectKind: project.kind,
-                        userPrompt,
-                        agentMode,
-                        existingFiles,
-                        conversationHistory,
-                        knowledgeContext: knowledgeContext || undefined,
-                        databaseContext,
-                        unchangedFilesHint:
-                          unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                        planContext: input.planContext ?? null,
-                        conversationSummary,
-                        imageAttachments,
-                        signal,
-                      });
+            : isReactViteProject
+              ? await runReactViteRefinePipeline({
+                  projectName: project.name,
+                  projectKind: project.kind,
+                  userPrompt,
+                  agentMode,
+                  existingFiles,
+                  conversationHistory,
+                  knowledgeContext: knowledgeContext || undefined,
+                  databaseContext,
+                  unchangedFilesHint:
+                    unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                  planContext: input.planContext ?? null,
+                  conversationSummary,
+                  imageAttachments,
+                  onEvent: async (type, message) => emitEvent(taskId, type, message),
+                  signal,
+                })
+              : isNextjsProject
+                ? await runNextjsRefinePipeline(stackRefineArgs)
+                : isNodeApiProject
+                  ? await runNodeApiRefinePipeline(stackRefineArgs)
+                  : isPythonFlaskProject
+                    ? await runFlaskRefinePipeline(stackRefineArgs)
+                    : isPythonFastapiProject
+                      ? await runFastapiRefinePipeline(stackRefineArgs)
+                      : await runRefinePipeline({
+                          projectName: project.name,
+                          projectKind: project.kind,
+                          userPrompt,
+                          agentMode,
+                          existingFiles,
+                          conversationHistory,
+                          knowledgeContext: knowledgeContext || undefined,
+                          databaseContext,
+                          unchangedFilesHint:
+                            unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                          planContext: input.planContext ?? null,
+                          conversationSummary,
+                          imageAttachments,
+                          signal,
+                        });
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
         analyticsErrorCategory = refineResult.primaryErrorCategory;
 
-        // Auto-escalation: if correction pass failed, retry at next model tier
+        // Auto-escalation: if correction pass failed, retry at next model tier.
+        // See note on the build path — agent loop owns its own retry semantics.
         const refineEscalationMode = ESCALATION_MAP[agentMode];
-        if (refineResult.correctionFailed && refineEscalationMode && !isMobileProject) {
+        if (
+          refineResult.correctionFailed &&
+          refineEscalationMode &&
+          !isMobileProject &&
+          !USE_AGENT_LOOP_REFINE
+        ) {
           logger.info(
             { taskId, projectId, from: agentMode, to: refineEscalationMode },
             "Auto-escalating refine to higher model tier",
@@ -1690,13 +1773,26 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           ];
         }
 
-        // Hard gate — if validation still failed after correction pass and escalation, refuse to
-        // write broken files. Throw so runJob marks the task failed without saving a snapshot.
-        if (refineResult.correctionFailed) {
+        // Hard gate (legacy) — refuse to write broken files; throw so runJob marks the task failed.
+        // Agentic builder exception: persist with validation_status="failed" (see build path).
+        if (refineResult.correctionFailed && !USE_AGENT_LOOP_REFINE) {
           throw new Error(
             `Refine validation still failed after correction pass${refineEscalationMode ? " and auto-escalation" : ""}. ` +
               `No files were saved. Try rephrasing your request or switching to a higher agent mode.`,
           );
+        }
+        if (refineResult.correctionFailed && USE_AGENT_LOOP_REFINE) {
+          await emitEvent(
+            taskId,
+            "generating_code",
+            "Required checks failed — saving refine snapshot with failed status so you can inspect.",
+          );
+          refineResult.report.warnings = [
+            "Required checks failed — snapshot saved with validation_status=failed. Review report.agentLoop.checkResults.",
+            ...(refineResult.report.warnings ?? []),
+          ];
+          versionValidationStatus = "failed";
+          refineResult.correctionFailed = false;
         }
 
         // Empty-refine retry guard: if the model returned 0 changed/removed files for a clearly
@@ -2039,6 +2135,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           changelogEntry: changelogEntry.slice(0, 500),
           filesSnapshot: snapshot,
           planSnapshot: planSnapshot ?? undefined,
+          validationStatus: versionValidationStatus,
         })
         .returning();
       report.versionId = version?.id ?? null;

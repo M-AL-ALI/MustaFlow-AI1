@@ -42,6 +42,11 @@ export const projectVersionsTable = pgTable("project_versions", {
   filesSnapshot: jsonb("files_snapshot").$type<FileSnapshotEntry[]>(),
   planSnapshot: jsonb("plan_snapshot").$type<Record<string, unknown>>(),
   auditReport: jsonb("audit_report").$type<AuditReport>(),
+  // Persisted validation outcome for the snapshot. "passed" = all required
+  // checks succeeded; "failed" = produced by the agentic builder with one or
+  // more required checks failing (snapshot saved anyway for inspection).
+  // Null = legacy snapshots written before this column existed.
+  validationStatus: text("validation_status").$type<"passed" | "failed">(),
   // ogImageUrl: URL of the generated Open Graph image for this snapshot.
   // Set at publish time; served via the public route's <head> injection.
   ogImageUrl: text("og_image_url"),

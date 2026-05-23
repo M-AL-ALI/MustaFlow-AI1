@@ -159,6 +159,43 @@ The intended user journey is: Login → create project → build app → preview
 - **Required env (container features)**: `FLY_API_TOKEN`, `FLY_APP_NAME` (default: `mustaflow-containers`), `FLY_ORG_SLUG` (default: `personal`), `FLY_REGION` (default: `iad`). Without these, containers are disabled; everything else works normally.
 - **Key files**: `artifacts/api-server/src/lib/container.ts` (Fly.io provider), `artifacts/api-server/src/lib/terminal.ts` (WS PTY bridge), `artifacts/api-server/src/routes/containers.ts` (lifecycle routes), `artifacts/mustaflow/src/pages/projects/components/terminal-tab.tsx` (Terminal tab UI).
 
+## Agentic builder loop (Task #505)
+
+- **What it is**: An alternative to the single-shot LLM build/refine prompt. The agent picks tools (`read_file`, `write_file`, `list_files`, `search`, `run_command`, `apply_patch`, `delete_file`, `report_progress`, `finalize`), observes the results, and iterates until the per-stack checks pass.
+- **Feature flag**: `AGENTIC_BUILDER_ENABLED=true` switches every build/refine in `jobs.ts` over to the loop. Default off — legacy single-shot pipelines stay the default path.
+- **Where it lives**:
+  - `artifacts/api-server/src/lib/agent-loop.ts` — tool catalog (OpenAI function-calling schema), in-memory `FileWorkspace`, loop runner, post-loop check runner, adapters that convert the loop output into the `BuilderResult` / refine-result shapes `runJob` already consumes.
+  - `artifacts/api-server/src/lib/check-profiles.ts` — per-stack `CheckProfile` for `static-html`, `react-vite`, `node-api`, `nextjs`, `python-flask`, `python-fastapi`, `mobile-cross`. Also exports `RUN_COMMAND_WHITELIST` / `RUN_COMMAND_BLOCKLIST` used by the loop's command sanitizer.
+- **Stack routing**: `resolveStackId(project.kind, project.projectFormat, project.stack)` picks the profile.
+- **Where it runs**:
+  - Container stacks (`react-vite`, `node-api`, `nextjs`, `python-flask`, `python-fastapi`): tools route to the project's Fly.io machine via `execInContainer` / `writeFileToContainer` (no-op gracefully when `FLY_API_TOKEN` is unset).
+  - In-process stacks (`static-html`, `mobile-cross`): tool calls operate on an in-memory file map; `run_command` is restricted to the in-process validators (`html-syntax`, `cross-file`, `mobile-structure`) — there is no shell.
+- **Streaming**: every meaningful tool call is published as a `task_events` row via the existing `emitEvent` helper, so the chat narrative ("Running: tsc --noEmit", "write file → src/App.tsx", finalize summary) flows through unchanged.
+- **Cancel**: honours the per-task `AbortController` from `activeJobControllers` (Map keyed by `taskId`). The OpenAI call is invoked with `{ signal }`, and the loop checks `signal.aborted` between steps.
+- **Credits**: charged once per job by `runJob` (pre-flight check + post-success deduction). The loop never deducts credits itself — repeated tool calls inside one job are free.
+- **Structured run report**: returned in `TaskReport.agentLoop` (typed in `lib/db/src/schema/tasks.ts`):
+  - `stack`, `steps`, `totalToolCalls`, `totalTokens`, `terminationReason`
+  - `toolCalls[]` — every step with redacted args + 400-char preview
+  - `commandsRun[]` — argv, exit code, stdout/stderr previews
+  - `checkResults[]` — id, label, passed, message
+- **Safety limits** (overridable via env):
+  - `AGENTIC_BUILDER_STEP_CAP` (default 25) — hard cap on tool-calling rounds.
+  - `AGENTIC_BUILDER_WALL_CLOCK_MS` (default 480000 / 8 min) — wall-clock budget.
+  - Per-`run_command` timeout: model can pass `timeout_ms` (capped at 5 min); default 2 min. Enforced via `Promise.race` with the AbortSignal, so the loop never blocks indefinitely waiting on a stuck container exec.
+  - Repeated-error cap: 3 consecutive identical failures aborts the loop with `terminationReason="repeated-error"`.
+  - Lazy install: `installCmd` (per profile) runs exactly once, on first container shell use, before any check. `runCheckProfile` also runs it once per loop before container-runner checks (gated by `containerState.installed`), so typecheck/build never fail just because `node_modules` is missing on a fresh container.
+  - On-demand container provisioning: container-stack `run_command` calls `provisionContainer` if no container exists yet. Subsequent `write_file` / `apply_patch` / `delete_file` calls always sync to the active container via `containerState.id` (not the original `input.containerId`).
+  - **Layered command policy**: (1) global blocklist substring scan (destructive ops + network exfil — `curl`, `wget`, `nc`, `socat`, `ssh`, plus inline code-eval flags `-e`/`-c`/`--eval`/`--print` that would let whitelisted `node`/`python` smuggle scripts). (2) `sh -lc "<cmd>"` is allowed only when the inner command has no chaining/substitution metachars (`;`, `&`, `|`, backticks, `$(...)`, redirects) UNLESS it exactly matches one of the stack's declared check argvs. (3) **Per-stack allow-list**: `run_command` argv must be a read-only inspector (`ls`/`cat`/`grep`/etc.), the stack's install command, or an exact match for one of the stack's `CheckProfile.checks[i].argv`. Generic whitelist bypasses are not allowed.
+  - Path sanitization (`sanitizePath`): rejects absolute paths, `..` traversal, control characters, or paths > 512 chars.
+- **Termination reasons**: `finalized` (model called `finalize` AND post-finalize checks passed), `checks-failed`, `step-cap`, `wall-clock`, `repeated-error`, `model-stopped`, `aborted`. When the model calls `finalize`, checks run immediately; if any required check fails, the failure is fed back as a tool observation and the loop continues so the model can fix → re-finalize.
+- **Automatic per-turn verification**: after any LLM turn that mutated files (`write_file`/`apply_patch`/`delete_file`) without calling `finalize`, the per-stack check profile runs automatically and the outcome is injected as a synthetic system message so the next turn can react. Skipped on abort.
+- **On-demand container provisioning in `runCheckProfile`**: if any container-stack check needs a shell and no container is attached yet, the check runner provisions one inline (graceful no-op if Fly isn't configured) — covers the edge case where the model edits files then calls `finalize` without ever issuing a `run_command`.
+- **Cancel propagation through checks**: `runCheckProfile` short-circuits per check when `signal.aborted`, and container execs go through `execWithTimeout(signal)` so a cancel mid-checks unblocks the loop promptly. The post-loop check phase is skipped entirely when aborted.
+- **Failure persistence (agentic mode only)**: when `AGENTIC_BUILDER_ENABLED=true` and required checks still fail after the loop's own write→check→fix iteration, `runJob` persists the snapshot with `project_versions.validation_status = "failed"` and a warning instead of throwing. The user can inspect what the agent produced and iterate. Legacy single-shot pipelines retain the old hard-gate (throw + discard). Legacy single-shot escalation is disabled in agentic mode — the loop owns its own retry semantics.
+- **Persisted validation status**: `project_versions.validation_status` column is `"passed"` on success, `"failed"` on the agentic persistence path above. Apply the column with `pnpm --filter @workspace/scripts run migrate-version-validation-status` on any DB that pre-dates this change.
+- **Safety cap is per tool call, not per LLM turn**: `STEP_CAP` (default 25) caps `toolCalls.length`. The cap is checked at the top of each LLM turn AND mid-turn between individual tool-call executions, so a single response that emits many tool calls cannot exceed the budget.
+- **Adapter contract**: `loopResultToBuildResult` returns a real `BuilderResult` (with a synthesized `Blueprint`), and `loopResultToRefineResult` returns the existing refine-result shape — so the post-pipeline plumbing (secrets scan, cross-file consistency, snapshot, audits, knowledge writes, etc.) is unchanged.
+
 ## Gotchas
 
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. It also runs `typecheck:libs`, which will fail if generated types break consumers — fix consumers, don't suppress. The `codegen-drift` validation check (`pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated`) catches any drift between the spec and committed generated files — run it (or let CI run it) after every spec edit.

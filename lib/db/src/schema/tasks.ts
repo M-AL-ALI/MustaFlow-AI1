@@ -117,6 +117,41 @@ export type TaskReport = {
     /** True when no critical errors remain in the final output */
     passed: boolean;
   } | null;
+  /**
+   * Populated when the agentic builder loop (tool-calling) handled the task.
+   * Captures every tool call, command run, and check result for the run report
+   * card. Absent for legacy single-shot builds.
+   */
+  agentLoop?: {
+    stack: string;
+    steps: number;
+    totalToolCalls: number;
+    totalTokens: number;
+    terminationReason: string;
+    toolCalls: Array<{
+      step: number;
+      tool: string;
+      args: Record<string, unknown>;
+      ok: boolean;
+      durationMs: number;
+      preview: string;
+    }>;
+    commandsRun: Array<{
+      step: number;
+      argv: string[];
+      exitCode: number;
+      durationMs: number;
+      stdoutPreview: string;
+      stderrPreview: string;
+    }>;
+    checkResults: Array<{
+      id: string;
+      label: string;
+      passed: boolean;
+      durationMs: number;
+      message: string;
+    }>;
+  } | null;
 };
 
 export const agentTasksTable = pgTable(

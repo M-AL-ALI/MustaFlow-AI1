@@ -19,6 +19,7 @@
     "backfill-knowledge-scores": "tsx ./src/backfill-knowledge-scores.ts",
     "backfill-knowledge-embeddings": "tsx ./src/backfill-knowledge-embeddings.ts",
     "migrate-knowledge-embeddings": "tsx ./src/migrate-knowledge-embeddings.ts",
+    "migrate-version-validation-status": "tsx ./src/migrate-version-validation-status.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },
