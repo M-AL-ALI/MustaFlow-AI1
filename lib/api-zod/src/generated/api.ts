@@ -3502,7 +3502,15 @@ export const GetAdminStatsResponse = zod.object({
   "runs7d": zod.number().describe('Number of agent tasks in the last 7 days that included an E2E run.'),
   "scenarios7d": zod.number().describe('Total scenarios executed in those runs.'),
   "passRate7d": zod.number().describe('passed \/ (passed + failed) across the last 7 days, in [0, 1]. 0 when no scenarios ran.')
-}).describe('Platform-wide Playwright E2E metrics for the last 7 days.')
+}).describe('Platform-wide Playwright E2E metrics for the last 7 days.'),
+  "topSkills": zod.object({
+  "windowDays": zod.number().describe('Lookback window in days.'),
+  "totalBuildsWithSkills": zod.number().describe('Number of completed agent tasks in the window whose report.agentLoop.skillsLoaded was non-empty.'),
+  "skills": zod.array(zod.object({
+  "name": zod.string(),
+  "count": zod.number()
+})).describe('Skills ranked by usage count, highest first. Empty when no builds in the window loaded any skill.')
+}).describe('Most-loaded builder skills across recent agent-loop builds (Task #524).')
 })
 
 

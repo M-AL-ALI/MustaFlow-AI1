@@ -27,6 +27,8 @@ export * from './adminStats';
 export * from './adminStatsArchitectReviews';
 export * from './adminStatsE2e';
 export * from './adminStatsProjects';
+export * from './adminStatsTopSkills';
+export * from './adminStatsTopSkillsSkillsItem';
 export * from './adminStatsUsers';
 export * from './agentTask';
 export * from './agentTaskAgentIdentity';

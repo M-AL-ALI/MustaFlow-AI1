@@ -8,6 +8,7 @@
 import type { AdminStatsArchitectReviews } from './adminStatsArchitectReviews';
 import type { AdminStatsE2e } from './adminStatsE2e';
 import type { AdminStatsProjects } from './adminStatsProjects';
+import type { AdminStatsTopSkills } from './adminStatsTopSkills';
 import type { AdminStatsUsers } from './adminStatsUsers';
 
 export interface AdminStats {
@@ -19,4 +20,6 @@ export interface AdminStats {
   architectReviews: AdminStatsArchitectReviews;
   /** Platform-wide Playwright E2E metrics for the last 7 days. */
   e2e: AdminStatsE2e;
+  /** Most-loaded builder skills across recent agent-loop builds (Task #524). */
+  topSkills: AdminStatsTopSkills;
 }

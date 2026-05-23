@@ -4229,7 +4229,7 @@ components:
 
     AdminStats:
       type: object
-      required: [projects, users, transactions, deployments, architectReviews, e2e]
+      required: [projects, users, transactions, deployments, architectReviews, e2e, topSkills]
       properties:
         projects:
           type: object
@@ -4281,6 +4281,26 @@ components:
               type: number
               format: float
               description: "passed / (passed + failed) across the last 7 days, in [0, 1]. 0 when no scenarios ran."
+        topSkills:
+          type: object
+          description: "Most-loaded builder skills across recent agent-loop builds (Task #524)."
+          required: [windowDays, totalBuildsWithSkills, skills]
+          properties:
+            windowDays: { type: integer, description: "Lookback window in days." }
+            totalBuildsWithSkills:
+              {
+                type: integer,
+                description: "Number of completed agent tasks in the window whose report.agentLoop.skillsLoaded was non-empty.",
+              }
+            skills:
+              type: array
+              description: "Skills ranked by usage count, highest first. Empty when no builds in the window loaded any skill."
+              items:
+                type: object
+                required: [name, count]
+                properties:
+                  name: { type: string }
+                  count: { type: integer }
 
     AdminLaunchCheck:
       type: object

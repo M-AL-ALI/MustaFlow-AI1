@@ -136,6 +136,40 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
   const e2eTotal = e2eAgg.passed + e2eAgg.failed;
   const passRate7d = e2eTotal > 0 ? e2eAgg.passed / e2eTotal : 0;
 
+  // ── Top skills used (last 30 days) — Task #524 ───────────────────────────
+  // Aggregates report->agentLoop->skillsLoaded across completed agent tasks.
+  const SKILLS_WINDOW_DAYS = 30;
+  const topSkillsRows = await db.execute<{ name: string; count: string }>(sql`
+    SELECT skill AS name, COUNT(*)::int AS count
+    FROM agent_tasks,
+         LATERAL jsonb_array_elements_text(report->'agentLoop'->'skillsLoaded') AS skill
+    WHERE status = 'completed'
+      AND completed_at > now() - interval '30 days'
+      AND report IS NOT NULL
+      AND report ? 'agentLoop'
+      AND report->'agentLoop' ? 'skillsLoaded'
+      AND jsonb_typeof(report->'agentLoop'->'skillsLoaded') = 'array'
+    GROUP BY skill
+    ORDER BY count DESC, skill ASC
+    LIMIT 20
+  `);
+  const topSkills = topSkillsRows.rows.map((r) => ({
+    name: r.name,
+    count: Number(r.count),
+  }));
+  const buildsWithSkillsRow = await db.execute<{ total: string }>(sql`
+    SELECT COUNT(*)::int AS total
+    FROM agent_tasks
+    WHERE status = 'completed'
+      AND completed_at > now() - interval '30 days'
+      AND report IS NOT NULL
+      AND report ? 'agentLoop'
+      AND report->'agentLoop' ? 'skillsLoaded'
+      AND jsonb_typeof(report->'agentLoop'->'skillsLoaded') = 'array'
+      AND jsonb_array_length(report->'agentLoop'->'skillsLoaded') > 0
+  `);
+  const totalBuildsWithSkills = Number(buildsWithSkillsRow.rows[0]?.total ?? 0);
+
   res.json({
     projects: {
       total: projectStats?.total ?? 0,
@@ -166,6 +200,11 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
       runs7d: e2eAgg.runs,
       scenarios7d: e2eTotal,
       passRate7d,
+    },
+    topSkills: {
+      windowDays: SKILLS_WINDOW_DAYS,
+      totalBuildsWithSkills,
+      skills: topSkills,
     },
   });
 });

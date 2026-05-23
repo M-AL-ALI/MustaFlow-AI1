@@ -1460,6 +1460,23 @@ export type AdminStatsE2e = {
   passRate7d: number;
 };
 
+export type AdminStatsTopSkillsSkillsItem = {
+  name: string;
+  count: number;
+};
+
+/**
+ * Most-loaded builder skills across recent agent-loop builds (Task #524).
+ */
+export type AdminStatsTopSkills = {
+  /** Lookback window in days. */
+  windowDays: number;
+  /** Number of completed agent tasks in the window whose report.agentLoop.skillsLoaded was non-empty. */
+  totalBuildsWithSkills: number;
+  /** Skills ranked by usage count, highest first. Empty when no builds in the window loaded any skill. */
+  skills: AdminStatsTopSkillsSkillsItem[];
+};
+
 export interface AdminStats {
   projects: AdminStatsProjects;
   users: AdminStatsUsers;
@@ -1469,6 +1486,8 @@ export interface AdminStats {
   architectReviews: AdminStatsArchitectReviews;
   /** Platform-wide Playwright E2E metrics for the last 7 days. */
   e2e: AdminStatsE2e;
+  /** Most-loaded builder skills across recent agent-loop builds (Task #524). */
+  topSkills: AdminStatsTopSkills;
 }
 
 export type AdminLaunchCheckStatus = typeof AdminLaunchCheckStatus[keyof typeof AdminLaunchCheckStatus];

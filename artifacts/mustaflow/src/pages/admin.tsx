@@ -17,6 +17,7 @@ import {
   BrainCircuit,
   Activity,
   BookOpen,
+  Sparkles,
 } from "lucide-react";
 import {
   useGetAdminMe,
@@ -234,6 +235,54 @@ export default function AdminPage() {
                   tone="info"
                 />
               </div>
+            </div>
+          );
+        })()}
+
+      {stats &&
+        (() => {
+          const ts = (
+            stats as {
+              topSkills?: {
+                windowDays: number;
+                totalBuildsWithSkills: number;
+                skills: Array<{ name: string; count: number }>;
+              };
+            }
+          ).topSkills;
+          if (!ts || ts.skills.length === 0) return null;
+          const max = ts.skills[0]?.count ?? 1;
+          return (
+            <div className="border border-border rounded-xl bg-card overflow-hidden">
+              <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                  Top skills used (last {ts.windowDays} days)
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {ts.totalBuildsWithSkills} build{ts.totalBuildsWithSkills === 1 ? "" : "s"} loaded
+                  skills
+                </span>
+              </div>
+              <ul className="divide-y divide-border">
+                {ts.skills.map((s, i) => {
+                  const pct = max > 0 ? Math.max(4, Math.round((s.count / max) * 100)) : 0;
+                  return (
+                    <li key={s.name} className="px-4 py-2 flex items-center gap-3 text-sm">
+                      <span className="w-6 text-xs text-muted-foreground tabular-nums">
+                        {i + 1}.
+                      </span>
+                      <span className="flex-1 min-w-0 truncate font-mono text-xs">{s.name}</span>
+                      <div className="hidden sm:block w-32 h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div className="h-full bg-amber-400/70" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="w-12 text-right tabular-nums text-muted-foreground">
+                        {s.count}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           );
         })()}
