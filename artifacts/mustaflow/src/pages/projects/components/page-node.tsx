@@ -15,6 +15,8 @@ import {
   Info,
   Monitor,
   FilePlus,
+  Unlink,
+  AlertTriangle,
 } from "lucide-react";
 
 export type PageType =
@@ -43,6 +45,12 @@ export type PageNodeData = {
   projectId: number;
   planned?: boolean;
   isBuilding?: boolean;
+  // Connectivity (computed in page-map-tab.tsx, passed in per-render)
+  incoming?: number;
+  outgoing?: number;
+  isOrphan?: boolean;
+  isDeadEnd?: boolean;
+  dimmed?: boolean;
   onNodeClick?: (nodeId: string) => void;
   onPreviewClick?: (filePath: string) => void;
 };
@@ -151,6 +159,7 @@ export const PageNode = memo(function PageNode({
             ? "border-primary shadow-primary/20 ring-2 ring-primary ring-offset-1 ring-offset-background"
             : "border-primary/40 hover:border-primary/70 hover:shadow-lg",
           data.isBuilding && "animate-pulse",
+          data.dimmed && !selected && "opacity-40 hover:opacity-100",
         )}
         onClick={() => data.onNodeClick?.(id)}
       >
@@ -207,6 +216,15 @@ export const PageNode = memo(function PageNode({
     );
   }
 
+  const hasWiringIssue = !!data.isOrphan || !!data.isDeadEnd;
+  const issueLabel = data.isOrphan && data.isDeadEnd
+    ? "Not linked · goes nowhere"
+    : data.isOrphan
+      ? "Not linked from anywhere"
+      : data.isDeadEnd
+        ? "Goes nowhere"
+        : null;
+
   return (
     <div
       className={cn(
@@ -219,7 +237,9 @@ export const PageNode = memo(function PageNode({
           !data.hasError &&
           "ring-2 ring-green-400 ring-offset-1 ring-offset-background",
         data.hasError && "ring-2 ring-red-500 ring-offset-1 ring-offset-background",
+        hasWiringIssue && !data.hasError && !selected && "border-amber-500/40",
         data.isBuilding && "animate-pulse",
+        data.dimmed && !selected && "opacity-40 hover:opacity-100",
       )}
       onClick={() => data.onNodeClick?.(id)}
     >
@@ -242,6 +262,14 @@ export const PageNode = memo(function PageNode({
             <Icon className="h-2.5 w-2.5 shrink-0" />
             {config.label}
           </div>
+          {hasWiringIssue && (
+            <span
+              title={issueLabel ?? "Wiring issue"}
+              className="flex items-center px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30"
+            >
+              <AlertTriangle className="h-2.5 w-2.5" />
+            </span>
+          )}
           {data.aiGenerated && (
             <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary font-bold border border-primary/20">
               AI
@@ -292,6 +320,13 @@ export const PageNode = memo(function PageNode({
         <div className="px-2 py-1 bg-red-500/10 border-t border-red-500/20 flex items-center gap-1">
           <AlertCircle className="h-2.5 w-2.5 text-red-400 shrink-0" />
           <span className="text-[9px] text-red-400">Build error</span>
+        </div>
+      )}
+
+      {!data.hasError && hasWiringIssue && (
+        <div className="px-2 py-1 bg-amber-500/10 border-t border-amber-500/20 flex items-center gap-1">
+          <Unlink className="h-2.5 w-2.5 text-amber-400 shrink-0" />
+          <span className="text-[9px] text-amber-400 truncate">{issueLabel}</span>
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
@@ -36,12 +36,20 @@ import {
   Layers,
   MapPin,
   FilePlus,
+  AlertTriangle,
+  Sparkles,
+  Filter,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PageNode, type PageNodeData, type PageType } from "./page-node";
 import { PageEdge, type ConnectionType } from "./page-edge";
-import { PageDetailPanel, type PageMapNodeState } from "./page-detail-panel";
+import {
+  PageDetailPanel,
+  type PageMapNodeState,
+  type WiringEdge,
+  type WiringPage,
+} from "./page-detail-panel";
 import { EdgeDetailPanel, type PageMapEdgeState } from "./edge-detail-panel";
 
 type Platform = "web" | "ios" | "android";
@@ -149,6 +157,7 @@ export function PageMapTab({
   const [platform, setPlatform] = useState<Platform>("web");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "issues" | "built" | "planned">("all");
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -682,6 +691,213 @@ export function PageMapTab({
     [edges, setNodes, setEdges, debouncedSave],
   );
 
+  // ---------------------------------------------------------------------------
+  // Wiring / connectivity computation
+  // ---------------------------------------------------------------------------
+  // For each node, compute incoming/outgoing edge counts and heuristic flags:
+  //   isOrphan = no incoming AND not a typical entry page (landing/auth/404)
+  //   isDeadEnd = no outgoing AND not a typical terminal page (detail/404/modal/sheet)
+  // Then build displayNodes (memoized) that injects these into each node's data
+  // along with a `dimmed` flag derived from the active filter. We pass
+  // displayNodes to ReactFlow, never mutating the underlying `nodes` state, so
+  // drag/select tracking via onNodesChange remains correct.
+  const ENTRY_TYPES = new Set<PageType>(["landing", "auth", "404"]);
+  const TERMINAL_TYPES = new Set<PageType>(["detail", "404", "modal", "sheet"]);
+
+  const connectivity = useMemo(() => {
+    const incoming = new Map<string, number>();
+    const outgoing = new Map<string, number>();
+    for (const e of edges) {
+      outgoing.set(e.source, (outgoing.get(e.source) ?? 0) + 1);
+      incoming.set(e.target, (incoming.get(e.target) ?? 0) + 1);
+    }
+    const perNode = new Map<
+      string,
+      { incoming: number; outgoing: number; isOrphan: boolean; isDeadEnd: boolean }
+    >();
+    for (const n of nodes) {
+      const d = n.data as PageNodeData;
+      const inc = incoming.get(n.id) ?? 0;
+      const out = outgoing.get(n.id) ?? 0;
+      const isOrphan = inc === 0 && !ENTRY_TYPES.has(d.pageType);
+      const isDeadEnd = out === 0 && !TERMINAL_TYPES.has(d.pageType);
+      perNode.set(n.id, { incoming: inc, outgoing: out, isOrphan, isDeadEnd });
+    }
+    return perNode;
+    // ENTRY_TYPES / TERMINAL_TYPES are module-scoped constants in spirit (declared above)
+    // but stable across renders; useMemo deps are nodes + edges only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, edges]);
+
+  const issuesCount = useMemo(() => {
+    let count = 0;
+    for (const stats of connectivity.values()) {
+      if (stats.isOrphan || stats.isDeadEnd) count++;
+    }
+    return count;
+  }, [connectivity]);
+
+  const displayNodes = useMemo(() => {
+    return nodes.map((n) => {
+      const stats = connectivity.get(n.id);
+      const d = n.data as PageNodeData;
+      const isOrphan = stats?.isOrphan ?? false;
+      const isDeadEnd = stats?.isDeadEnd ?? false;
+      const hasIssue = isOrphan || isDeadEnd;
+      let dimmed = false;
+      if (filter === "issues") dimmed = !hasIssue;
+      else if (filter === "built") dimmed = !!d.planned;
+      else if (filter === "planned") dimmed = !d.planned;
+      return {
+        ...n,
+        data: {
+          ...d,
+          incoming: stats?.incoming ?? 0,
+          outgoing: stats?.outgoing ?? 0,
+          isOrphan,
+          isDeadEnd,
+          dimmed,
+        } satisfies PageNodeData,
+      };
+    });
+  }, [nodes, connectivity, filter]);
+
+  // Wiring lists for the selected node — drives the detail panel.
+  const selectedIncoming: WiringEdge[] = useMemo(() => {
+    if (!selectedNodeId) return [];
+    return edges
+      .filter((e) => e.target === selectedNodeId)
+      .map((e) => {
+        const src = nodes.find((n) => n.id === e.source);
+        const d = src?.data as PageNodeData | undefined;
+        return {
+          edgeId: e.id,
+          page: {
+            id: e.source,
+            label: d?.label ?? e.source,
+            pageType: (d?.pageType ?? "other") as PageType,
+            planned: d?.planned,
+          },
+        };
+      });
+  }, [selectedNodeId, edges, nodes]);
+
+  const selectedOutgoing: WiringEdge[] = useMemo(() => {
+    if (!selectedNodeId) return [];
+    return edges
+      .filter((e) => e.source === selectedNodeId)
+      .map((e) => {
+        const tgt = nodes.find((n) => n.id === e.target);
+        const d = tgt?.data as PageNodeData | undefined;
+        return {
+          edgeId: e.id,
+          page: {
+            id: e.target,
+            label: d?.label ?? e.target,
+            pageType: (d?.pageType ?? "other") as PageType,
+            planned: d?.planned,
+          },
+        };
+      });
+  }, [selectedNodeId, edges, nodes]);
+
+  const availableTargets: WiringPage[] = useMemo(() => {
+    return nodes.map((n) => {
+      const d = n.data as PageNodeData;
+      return { id: n.id, label: d.label, pageType: d.pageType, planned: d.planned };
+    });
+  }, [nodes]);
+
+  // Wire callbacks — create / remove edges from the side panel.
+  const handleWireTo = useCallback(
+    (targetNodeId: string) => {
+      if (!selectedNodeId || selectedNodeId === targetNodeId) return;
+      // Avoid duplicate edges between same pair
+      const exists = edges.some(
+        (e) => e.source === selectedNodeId && e.target === targetNodeId,
+      );
+      if (exists) return;
+      const newEdge: Edge = {
+        id: `edge-user-${Date.now()}`,
+        source: selectedNodeId,
+        target: targetNodeId,
+        type: "pageEdge",
+        markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+        data: { connectionType: "nav" as ConnectionType, aiGenerated: false },
+      };
+      setEdges((prev) => {
+        const updated = [...prev, newEdge];
+        debouncedSave(nodesRef.current, updated);
+        return updated;
+      });
+    },
+    [selectedNodeId, edges, setEdges, debouncedSave],
+  );
+
+  const handleUnwire = useCallback(
+    (edgeId: string) => {
+      setEdges((prev) => {
+        const updated = prev.filter((e) => e.id !== edgeId);
+        debouncedSave(nodesRef.current, updated);
+        return updated;
+      });
+    },
+    [setEdges, debouncedSave],
+  );
+
+  const handleJumpToNode = useCallback((nodeId: string) => {
+    setSelectedEdgeId(null);
+    setSelectedNodeId(nodeId);
+  }, []);
+
+  const handleAskAiToWire = useCallback(
+    (node: PageMapNodeState) => {
+      const stats = connectivity.get(node.id);
+      const isOrphan = stats?.isOrphan ?? false;
+      const isDeadEnd = stats?.isDeadEnd ?? false;
+      const candidates = nodes
+        .filter((n) => n.id !== node.id && !(n.data as PageNodeData).planned)
+        .map((n) => (n.data as PageNodeData).label)
+        .slice(0, 5);
+      const lines: string[] = [];
+      lines.push(`Wire up the "${node.label}" page so it is properly connected.`);
+      if (node.filePath) lines.push(`File: ${node.filePath}`);
+      if (isOrphan)
+        lines.push(
+          `- It currently has NO incoming links. Add navigation to it from a sensible existing page (e.g. ${candidates.join(", ") || "the landing / dashboard"}).`,
+        );
+      if (isDeadEnd)
+        lines.push(
+          `- It currently has NO outgoing links. Add appropriate buttons or links so users can navigate forward / back.`,
+        );
+      lines.push(`Keep the visual design intact — only add the missing navigation.`);
+      onSwitchToChat(lines.join("\n"));
+    },
+    [connectivity, nodes, onSwitchToChat],
+  );
+
+  const handleFixAllWiring = useCallback(() => {
+    const issues = nodes
+      .map((n) => {
+        const stats = connectivity.get(n.id);
+        const d = n.data as PageNodeData;
+        if (!stats || (!stats.isOrphan && !stats.isDeadEnd)) return null;
+        const parts: string[] = [];
+        if (stats.isOrphan) parts.push("no incoming links");
+        if (stats.isDeadEnd) parts.push("no outgoing links");
+        return `- "${d.label}"${d.filePath ? ` (${d.filePath})` : ""}: ${parts.join(" and ")}`;
+      })
+      .filter((x): x is string => x !== null);
+    if (issues.length === 0) return;
+    const msg = [
+      `Fix the navigation wiring across these pages so the app is fully connected:`,
+      ...issues,
+      ``,
+      `For each one, add the right buttons / links / redirects so users can reach it and navigate away from it. Keep existing visual design intact.`,
+    ].join("\n");
+    onSwitchToChat(msg);
+  }, [nodes, connectivity, onSwitchToChat]);
+
   const PLATFORMS: { key: Platform; label: string; Icon: React.ElementType }[] = [
     { key: "web", label: "Web", Icon: Globe },
     { key: "ios", label: "iOS", Icon: Smartphone },
@@ -754,6 +970,41 @@ export function PageMapTab({
               <Download className="h-3 w-3" />
               Export PNG
             </Button>
+
+            {hasNodes && (
+              <>
+                <div className="w-px h-5 bg-border shrink-0" />
+                <div className="flex items-center gap-1 bg-muted border border-border rounded-lg p-0.5 shrink-0">
+                  <Filter className="h-3 w-3 text-muted-foreground ml-1.5" />
+                  {(
+                    [
+                      { key: "all", label: "All" },
+                      { key: "issues", label: "Issues" },
+                      { key: "built", label: "Built" },
+                      { key: "planned", label: "Planned" },
+                    ] as const
+                  ).map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => setFilter(key)}
+                      className={cn(
+                        "px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors",
+                        filter === key
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {label}
+                      {key === "issues" && issuesCount > 0 && (
+                        <span className="ml-1 text-[10px] text-amber-400 tabular-nums">
+                          {issuesCount}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
 
@@ -770,6 +1021,35 @@ export function PageMapTab({
         )}
       </div>
 
+      {/* Health summary — only when there are wiring issues on the active platform */}
+      {platform === "web" && hasNodes && issuesCount > 0 && (
+        <div className="shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-amber-500/20 bg-amber-500/5 z-10">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+          <span className="text-[11px] text-amber-200">
+            <span className="font-semibold">{issuesCount}</span>{" "}
+            {issuesCount === 1 ? "page has" : "pages have"} wiring issues — not linked or
+            goes nowhere.
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setFilter(filter === "issues" ? "all" : "issues")}
+            className="h-6 px-2 text-[11px] text-amber-200 hover:text-amber-100 hover:bg-amber-500/10 ml-1"
+          >
+            {filter === "issues" ? "Show all pages" : "Highlight issues"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleFixAllWiring}
+            className="ml-auto h-6 px-2 text-[11px] gap-1 border-amber-500/30 text-amber-200 hover:bg-amber-500/10"
+          >
+            <Sparkles className="h-3 w-3" />
+            Ask AI to fix all
+          </Button>
+        </div>
+      )}
+
       {/* Canvas area */}
       <div className="flex-1 relative overflow-hidden" ref={canvasRef}>
         {platform !== "web" ? (
@@ -784,7 +1064,7 @@ export function PageMapTab({
           />
         ) : (
           <ReactFlow
-            nodes={nodes}
+            nodes={displayNodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
@@ -829,11 +1109,24 @@ export function PageMapTab({
         {/* Side panel — node or edge, mutually exclusive */}
         <PageDetailPanel
           node={selectedEdgeId ? null : selectedNodeState}
+          incoming={selectedIncoming}
+          outgoing={selectedOutgoing}
+          availableTargets={availableTargets}
+          isOrphan={
+            selectedNodeId ? !!connectivity.get(selectedNodeId)?.isOrphan : false
+          }
+          isDeadEnd={
+            selectedNodeId ? !!connectivity.get(selectedNodeId)?.isDeadEnd : false
+          }
           onClose={() => setSelectedNodeId(null)}
           onSave={handleDetailSave}
           onFileOpen={handleFileOpen}
           onModifyPage={handleModifyPage}
           onDelete={handleDeleteNode}
+          onJumpToNode={handleJumpToNode}
+          onWireTo={handleWireTo}
+          onUnwire={handleUnwire}
+          onAskAiToWire={handleAskAiToWire}
         />
         <EdgeDetailPanel
           edge={selectedNodeId ? null : selectedEdgeState}
