@@ -1,11 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Public publishing routes — serves published project snapshots.
 //
-// Two access patterns:
-//   GET /api/p/:slug/{*splat}  — primary (slug-based, safe for sharing)
-//   GET /api/p/:id/{*splat}    — legacy (integer project ID, backward compat)
+// Three access patterns (specific routes registered BEFORE the generic catch-all):
+//   GET /api/p/:slug/staging/{*splat}      — internal staging snapshot access
+//   GET /api/p/:previewSlug/preview/{*splat} — internal per-build preview access
+//   GET /api/p/:slug/{*splat}              — primary (slug-based or legacy ID)
 //
-// Both patterns look up the project and serve the frozen published snapshot.
 // The slug is generated on first publish and preserved on republish/unpublish.
 //
 // Custom-domain traffic (e.g. GET / on myapp.com) is handled upstream by the
@@ -21,11 +21,34 @@
 import { Router, type IRouter } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable } from "@workspace/db";
-import { serveSnapshot } from "../lib/serveSnapshot";
+import { serveSnapshot, serveSnapshotForEnv, servePreviewSnapshot } from "../lib/serveSnapshot";
 
 const router: IRouter = Router();
 
+// ── Staging route: /api/p/:slug/staging/{*splat} ──────────────────────────
+// MUST be registered before the generic catch-all so Express matches it first.
+// Internal access to staging snapshot (useful in dev where subdomains aren't available).
+router.get("/p/:slug/staging/{*splat}", async (req, res): Promise<void> => {
+  const slug = req.params.slug;
+  const splat = req.params.splat;
+  const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
+  const filePath = raw === "" ? "index.html" : raw;
+  await serveSnapshotForEnv(res, slug, filePath, "staging");
+});
+
+// ── Preview route: /api/p/:previewSlug/preview/{*splat} ──────────────────
+// MUST be registered before the generic catch-all so Express matches it first.
+// Internal access to a per-build preview snapshot.
+router.get("/p/:previewSlug/preview/{*splat}", async (req, res): Promise<void> => {
+  const previewSlug = req.params.previewSlug;
+  const splat = req.params.splat;
+  const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
+  const filePath = raw === "" ? "index.html" : raw;
+  await servePreviewSnapshot(res, previewSlug, filePath);
+});
+
 // ── Primary route: slug-based (/api/p/:slug/) ─────────────────────────────
+// Generic catch-all — registered LAST so staging/preview routes above win.
 router.get("/p/:slug/{*splat}", async (req, res): Promise<void> => {
   const slug = req.params.slug;
 

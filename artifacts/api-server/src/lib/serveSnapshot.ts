@@ -2,8 +2,8 @@
 // Used by both the /api/p/:slug/ public route and the custom-domain middleware.
 
 import type { Response } from "express";
-import { and, eq, isNull } from "drizzle-orm";
-import { db, projectsTable, projectVersionsTable } from "@workspace/db";
+import { and, eq, isNull, lt } from "drizzle-orm";
+import { db, projectsTable, projectVersionsTable, previewSnapshotsTable } from "@workspace/db";
 import { guessMime } from "./builder";
 import { injectBridge } from "./consoleBridge";
 import { isBinaryMime } from "./binary-mime";
@@ -66,6 +66,156 @@ function injectOgMeta(
     return html.replace(/(<head[^>]*>)/i, `$1${inject}`);
   }
   return html;
+}
+
+const STAGING_HTML = `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Not staged</h1><p>This project has no staging snapshot.</p></body></html>`;
+const PREVIEW_EXPIRED_HTML = `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Preview expired</h1><p>This preview link has expired. Rebuild the app to generate a fresh one.</p></body></html>`;
+
+/** Serve a snapshot directly by its snapshotId (used for staging and preview slots). */
+async function serveSnapshotById(
+  res: Response,
+  projectId: number,
+  snapshotId: number,
+  filePath: string,
+  label: string,
+): Promise<void> {
+  const [version] = await db
+    .select({ filesSnapshot: projectVersionsTable.filesSnapshot })
+    .from(projectVersionsTable)
+    .where(
+      and(eq(projectVersionsTable.id, snapshotId), eq(projectVersionsTable.projectId, projectId)),
+    );
+
+  if (!version || !Array.isArray(version.filesSnapshot)) {
+    res.status(404).type("text/html").send(SNAPSHOT_MISSING_HTML);
+    return;
+  }
+
+  const snapshot = version.filesSnapshot as SnapshotFile[];
+  let file = snapshot.find((f) => f.path === filePath);
+  if (!file) file = snapshot.find((f) => f.path === "index.html");
+
+  if (!file) {
+    res.status(404).type("text/html").send(NOT_FOUND_HTML);
+    return;
+  }
+
+  const mime = file.mimeType || guessMime(file.path);
+  res.type(mime).setHeader("Cache-Control", "no-store").setHeader("X-Mustaflow-Env", label);
+  if (isBinaryMime(mime)) {
+    res.end(Buffer.from(file.content, "base64"));
+  } else {
+    let body = file.content;
+    if (mime === "text/html") {
+      body = injectBridge(body);
+    }
+    res.send(body);
+  }
+}
+
+/**
+ * Serve a project snapshot identified by projectId + environment.
+ * Used by the custom-domain middleware where the projectId is known
+ * but the public slug may not be readily available.
+ */
+export async function serveSnapshotByProjectEnv(
+  res: Response,
+  projectId: number,
+  filePath: string,
+  env: "staging" | "production",
+): Promise<void> {
+  const [project] = await db
+    .select({
+      id: projectsTable.id,
+      status: projectsTable.status,
+      publishedSnapshotId: projectsTable.publishedSnapshotId,
+      stagingPublishedSnapshotId: projectsTable.stagingPublishedSnapshotId,
+    })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+  if (!project) {
+    res.status(404).type("text/html").send(NOT_PUBLISHED_HTML);
+    return;
+  }
+
+  if (env === "staging") {
+    if (!project.stagingPublishedSnapshotId) {
+      res.status(404).type("text/html").send(STAGING_HTML);
+      return;
+    }
+    await serveSnapshotById(
+      res,
+      projectId,
+      project.stagingPublishedSnapshotId,
+      filePath,
+      "staging",
+    );
+    return;
+  }
+
+  // Production
+  if (project.status !== "published" || !project.publishedSnapshotId) {
+    res.status(404).type("text/html").send(NOT_PUBLISHED_HTML);
+    return;
+  }
+  await serveSnapshotById(res, projectId, project.publishedSnapshotId, filePath, "production");
+}
+
+/** Serve staging snapshot for a project identified by its publicSlug. */
+export async function serveSnapshotForEnv(
+  res: Response,
+  publicSlug: string,
+  filePath: string,
+  env: "staging",
+): Promise<void> {
+  const [project] = await db
+    .select({
+      id: projectsTable.id,
+      stagingPublishedSnapshotId: projectsTable.stagingPublishedSnapshotId,
+    })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.publicSlug, publicSlug), isNull(projectsTable.deletedAt)));
+
+  if (!project) {
+    res.status(404).type("text/html").send(NOT_PUBLISHED_HTML);
+    return;
+  }
+
+  if (!project.stagingPublishedSnapshotId) {
+    res.status(404).type("text/html").send(STAGING_HTML);
+    return;
+  }
+
+  await serveSnapshotById(res, project.id, project.stagingPublishedSnapshotId, filePath, "staging");
+}
+
+/** Serve a preview snapshot identified by its previewSlug. */
+export async function servePreviewSnapshot(
+  res: Response,
+  previewSlug: string,
+  filePath: string,
+): Promise<void> {
+  const [preview] = await db
+    .select({
+      projectId: previewSnapshotsTable.projectId,
+      versionId: previewSnapshotsTable.versionId,
+      expiresAt: previewSnapshotsTable.expiresAt,
+    })
+    .from(previewSnapshotsTable)
+    .where(eq(previewSnapshotsTable.previewSlug, previewSlug));
+
+  if (!preview) {
+    res.status(404).type("text/html").send(NOT_FOUND_HTML);
+    return;
+  }
+
+  if (preview.expiresAt && new Date(preview.expiresAt) < new Date()) {
+    res.status(410).type("text/html").send(PREVIEW_EXPIRED_HTML);
+    return;
+  }
+
+  await serveSnapshotById(res, preview.projectId, preview.versionId, filePath, "preview");
 }
 
 export async function serveSnapshot(

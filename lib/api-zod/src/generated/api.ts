@@ -631,6 +631,7 @@ export const ListProjectsResponseItem = zod.object({
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -700,6 +701,7 @@ export const GetProjectResponse = zod.object({
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -770,6 +772,7 @@ export const UpdateProjectResponse = zod.object({
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -826,6 +829,7 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -882,6 +886,7 @@ export const RestoreProjectResponse = zod.object({
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -937,6 +942,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))

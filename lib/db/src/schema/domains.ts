@@ -31,6 +31,9 @@ export const projectDomainsTable = pgTable(
     // verificationStatus: pending | verified | failed
     verificationStatus: text("verification_status").notNull().default("pending"),
     sslStatus: text("ssl_status").notNull().default("pending"),
+    // environment: which deployment slot this custom domain is attached to.
+    // "production" (default) | "staging"
+    environment: text("environment").notNull().default("production"),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

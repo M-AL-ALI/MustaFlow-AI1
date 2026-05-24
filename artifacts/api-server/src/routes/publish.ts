@@ -1,11 +1,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Publish routes
 //
-//   POST /api/projects/:id/publish   — freeze snapshot, set publicSlug, go live
-//   POST /api/projects/:id/unpublish — clear snapshot, disable public URL
+//   POST /api/projects/:id/publish         — freeze snapshot → staging or production
+//   POST /api/projects/:id/unpublish       — clear snapshot, disable public URL
+//   POST /api/projects/:id/promote         — copy staging → production atomically
+//
+// Query param:  ?env=production (default) | staging
 //
 // Publish generates a publicSlug on first publish and preserves it on republish.
 // The public route /api/p/:slug/ always serves from the frozen snapshot, not live files.
+// Staging URL pattern: {slug}-staging.{PLATFORM_DOMAIN}
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
@@ -44,8 +48,15 @@ function generatePublicSlug(name: string): string {
 }
 
 // ── POST /api/projects/:id/publish ───────────────────────────────────────────
+// Supports ?env=production (default) or ?env=staging
 router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
+  const env = (req.query.env as string | undefined) ?? "production";
+
+  if (env !== "production" && env !== "staging") {
+    res.status(400).json({ error: "env must be 'production' or 'staging'" });
+    return;
+  }
 
   // requireProjectOwnership already checks deletedAt — this is defense-in-depth.
   const [project] = await db
@@ -58,7 +69,8 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   }
 
   // ── Security gate: block publish when blockPublishOnCritical is on and findings exist ──
-  if (project.blockPublishOnCritical) {
+  // Only applied to production publishes.
+  if (env === "production" && project.blockPublishOnCritical) {
     const dismissed = (project.dismissedFindingHashes as string[] | null) ?? [];
     const criticalFindings = await getUnresolvedCriticalFindings(projectId, dismissed);
     if (criticalFindings.length > 0) {
@@ -93,7 +105,8 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
 
   const publishedAt = new Date().toISOString();
   const isRepublish = project.publicSlug !== null;
-  const deploymentLabel = `${isRepublish ? "Republished" : "Published"} — ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
+  const envLabel = env === "staging" ? "Staged" : isRepublish ? "Republished" : "Published";
+  const deploymentLabel = `${envLabel} — ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
 
   // Generate OG image at publish time and store as a base64 data URL so the
   // frozen snapshot always carries its own social preview card — no separate
@@ -106,14 +119,15 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   });
   const ogImageUrl = `data:image/svg+xml;base64,${Buffer.from(ogSvg).toString("base64")}`;
 
-  // Snapshot the files into a version record (this is the frozen public copy).
+  // Snapshot the files into a version record (this is the frozen copy).
   const [deploymentVersion] = await db
     .insert(projectVersionsTable)
     .values({
       projectId,
       label: deploymentLabel,
-      note: `Deployment snapshot. ${files.length} file(s). Actor: ${req.userId ?? "unknown"}. Published: ${publishedAt}`,
+      note: `${env === "staging" ? "Staging" : "Deployment"} snapshot. ${files.length} file(s). Actor: ${req.userId ?? "unknown"}. Published: ${publishedAt}`,
       ogImageUrl,
+      environment: env,
       filesSnapshot: files.map((f) => ({
         path: f.path,
         content: f.content,
@@ -121,6 +135,63 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       })),
     })
     .returning({ id: projectVersionsTable.id, label: projectVersionsTable.label });
+
+  if (env === "staging") {
+    // ── Staging publish ───────────────────────────────────────────────────────
+    const stagingUrl = `https://${slug}-staging.${PLATFORM_DOMAIN}/`;
+
+    await db
+      .update(projectsTable)
+      .set({
+        status: project.status === "draft" ? "testing" : project.status,
+        stagingPublishedSnapshotId: deploymentVersion?.id ?? null,
+        publicSlug: slug,
+        updatedAt: new Date(),
+      })
+      .where(eq(projectsTable.id, projectId));
+
+    void writeKnowledge({
+      title: `Staged: project ${projectId}`,
+      content: `Project id:${projectId} published to staging by ${req.userId ?? "unknown"}. Slug: ${slug}. Staging URL: ${stagingUrl}`,
+      type: "publish",
+      category: "event",
+      severity: "info",
+      projectId,
+      userId: req.userId,
+    });
+
+    setImmediate(() => {
+      void db
+        .insert(deploymentLogsTable)
+        .values({
+          projectId,
+          userId: req.userId ?? "unknown",
+          env: "staging",
+          status: "published",
+          publicSlug: slug,
+          publicUrl: stagingUrl,
+          note: `Staged snapshot. ${files.length} file(s).`,
+        })
+        .catch(() => {
+          /* best-effort */
+        });
+    });
+
+    res.json({
+      ok: true,
+      projectId,
+      env: "staging",
+      publicSlug: slug,
+      stagingUrl,
+      publishedAt,
+      snapshotVersionId: deploymentVersion?.id,
+      filesPublished: files.length,
+      note: "Staging URL serves the frozen snapshot. Use Promote to push to production.",
+    });
+    return;
+  }
+
+  // ── Production publish ────────────────────────────────────────────────────
 
   const publicUrl = `https://${slug}.${PLATFORM_DOMAIN}/`;
   const internalPathUrl = `/api/p/${slug}/`;
@@ -207,6 +278,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         userId: req.userId ?? "unknown",
         env: "production",
         status: "published",
+        publicSlug: slug,
         publicUrl,
         note: containerDeployed
           ? `Container deployed to production. Machine URL: ${prodContainerUrl ?? "unknown"}.`
@@ -263,6 +335,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   res.json({
     ok: true,
     projectId,
+    env: "production",
     status: "published",
     publicSlug: slug,
     publicUrl,
@@ -278,15 +351,182 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   });
 });
 
+// ── POST /api/projects/:id/promote ───────────────────────────────────────────
+// Atomically copies stagingPublishedSnapshotId → publishedSnapshotId (production).
+// Runs publish-readiness checks first.
+router.post("/projects/:id/promote", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+
+  const [project] = await db
+    .select()
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  if (!project.stagingPublishedSnapshotId) {
+    res.status(422).json({
+      error: "No staging snapshot found. Publish to staging first before promoting.",
+    });
+    return;
+  }
+
+  // ── Production readiness gate ─────────────────────────────────────────────
+  // Minimum checks before promoting to production:
+  //   1. Project must have at least one file.
+  //   2. If blockPublishOnCritical is enabled, no unresolved critical findings.
+  const [filesRow] = await db
+    .select({ c: sql`count(*)` })
+    .from(projectFilesTable)
+    .where(eq(projectFilesTable.projectId, projectId));
+
+  if (Number(filesRow?.c ?? 0) === 0) {
+    res.status(422).json({
+      error: "Cannot promote: project has no generated files. Build the app first.",
+      code: "no_files",
+    });
+    return;
+  }
+
+  if (project.blockPublishOnCritical) {
+    const dismissed = (project.dismissedFindingHashes as string[] | null) ?? [];
+    const criticalFindings = await getUnresolvedCriticalFindings(projectId, dismissed);
+    if (criticalFindings.length > 0) {
+      res.status(422).json({
+        error: `Promote blocked by ${criticalFindings.length} critical security finding${criticalFindings.length !== 1 ? "s" : ""}. Resolve or dismiss them in the Quality tab before promoting.`,
+        code: "critical_findings",
+        findings: criticalFindings.slice(0, 10).map(({ checkName, finding }) => ({
+          checkName,
+          file: finding.file,
+          line: finding.line,
+          message: finding.message,
+        })),
+      });
+      return;
+    }
+  }
+
+  // Capture current production snapshot before promoting (needed for rollback)
+  const prevProductionSnapshotId = project.publishedSnapshotId ?? null;
+
+  // Fetch staging snapshot details for the confirmation payload
+  const [stagingVersion] = await db
+    .select({
+      id: projectVersionsTable.id,
+      label: projectVersionsTable.label,
+      createdAt: projectVersionsTable.createdAt,
+    })
+    .from(projectVersionsTable)
+    .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
+
+  const slug: string = project.publicSlug ?? generatePublicSlug(project.name);
+  const publicUrl = `https://${slug}.${PLATFORM_DOMAIN}/`;
+  const promotedAt = new Date().toISOString();
+
+  // Atomically promote staging → production
+  await db
+    .update(projectsTable)
+    .set({
+      status: "published",
+      publishedSnapshotId: project.stagingPublishedSnapshotId,
+      publicSlug: slug,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectsTable.id, projectId));
+
+  // Also mark the version row as "production" environment
+  await db
+    .update(projectVersionsTable)
+    .set({ environment: "production" })
+    .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
+
+  void writeKnowledge({
+    title: `Promoted: project ${projectId}`,
+    content: `Staging snapshot ${project.stagingPublishedSnapshotId} promoted to production for project ${projectId} by ${req.userId ?? "unknown"}. Slug: ${slug}.`,
+    type: "publish",
+    category: "event",
+    severity: "info",
+    projectId,
+    userId: req.userId,
+  });
+
+  // Audit log for rollback: status="promote", snapshotVersionId=OLD production snapshot,
+  // so rollback can restore publishedSnapshotId = snapshotVersionId.
+  setImmediate(() => {
+    void db
+      .insert(deploymentLogsTable)
+      .values({
+        projectId,
+        userId: req.userId ?? "unknown",
+        env: "production",
+        status: "promote",
+        publicSlug: slug,
+        publicUrl,
+        snapshotVersionId: prevProductionSnapshotId,
+        note: JSON.stringify({
+          action: "promote",
+          newSnapshotId: project.stagingPublishedSnapshotId,
+          prevSnapshotId: prevProductionSnapshotId,
+        }),
+      })
+      .catch(() => {
+        /* best-effort */
+      });
+  });
+
+  res.json({
+    ok: true,
+    projectId,
+    env: "production",
+    status: "published",
+    publicSlug: slug,
+    publicUrl,
+    promotedAt,
+    snapshotVersionId: project.stagingPublishedSnapshotId,
+    prevProductionSnapshotId,
+    stagingSnapshotLabel: stagingVersion?.label ?? null,
+    stagingSnapshotCreatedAt: stagingVersion?.createdAt ?? null,
+    note: "Staging snapshot is now live in production.",
+  });
+});
+
 // ── POST /api/projects/:id/unpublish ─────────────────────────────────────────
 router.post("/projects/:id/unpublish", requireProjectOwnership, async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
+  const env = (req.query.env as string | undefined) ?? "production";
 
   // Fetch current slug so we can include it in the response (slug is never cleared).
   const [current] = await db
     .select({ publicSlug: projectsTable.publicSlug })
     .from(projectsTable)
     .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+  if (env === "staging") {
+    await db
+      .update(projectsTable)
+      .set({ stagingPublishedSnapshotId: null, updatedAt: sql`now()` })
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+    setImmediate(() => {
+      void db
+        .insert(deploymentLogsTable)
+        .values({
+          projectId,
+          userId: req.userId ?? "unknown",
+          env: "staging",
+          status: "unpublished",
+          note: "Staging unpublished by user.",
+        })
+        .catch(() => {
+          /* best-effort */
+        });
+    });
+
+    res.json({ ok: true, projectId, env: "staging", publicSlug: current?.publicSlug ?? null });
+    return;
+  }
 
   // Stop the production container if one was deployed — best-effort, non-fatal.
   void (async () => {
@@ -338,6 +578,7 @@ router.post("/projects/:id/unpublish", requireProjectOwnership, async (req, res)
   res.json({
     ok: true,
     projectId,
+    env: "production",
     status: "testing",
     publicSlug: current?.publicSlug ?? null,
     publicUrlDisabled: true,

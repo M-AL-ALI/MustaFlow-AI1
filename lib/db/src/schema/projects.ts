@@ -15,10 +15,13 @@ export const projectsTable = pgTable("projects", {
   agentMode: text("agent_mode").notNull().default("eco"),
   lastTaskSummary: text("last_task_summary"),
   summary: text("summary"),
-  // publishedSnapshotId: the project_versions row that is currently live.
+  // publishedSnapshotId: the project_versions row that is currently live (production).
   // When set, the public route serves files from that snapshot instead of live files.
   // Null = not published. Updated on every publish, cleared on unpublish.
   publishedSnapshotId: integer("published_snapshot_id"),
+  // stagingPublishedSnapshotId: mirrors publishedSnapshotId for the staging slot.
+  // Null = not staged. Set on publish?env=staging; promoted to publishedSnapshotId on promote.
+  stagingPublishedSnapshotId: integer("staging_published_snapshot_id"),
   // publicSlug: human-readable slug used in the public URL (/api/p/:slug/).
   // Generated on first publish; preserved on republish; never cleared on unpublish.
   publicSlug: text("public_slug").unique(),

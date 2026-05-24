@@ -47,6 +47,7 @@ import securityRouter from "./security";
 import testRunsRouter from "./test-runs";
 import prodLogsRouter, { publicProdLogRouter } from "./prod-logs";
 import backgroundJobsRouter from "./background-jobs";
+import previewSnapshotsRouter from "./preview-snapshots";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -116,6 +117,7 @@ router.post("/projects/:id/queue", aiBuilderLimiter);
 router.post("/projects/:id/page-map/analyze", aiBuilderLimiter);
 router.post("/projects/:id/publish", publishLimiter);
 router.post("/projects/:id/unpublish", publishLimiter);
+router.post("/projects/:id/promote", publishLimiter);
 router.post("/projects/:id/deploy", publishLimiter);
 router.post("/projects/:id/duplicate", exportLimiter);
 router.get("/projects/:id/export", exportLimiter);
@@ -167,6 +169,7 @@ router.use(securityRouter);
 router.use(testRunsRouter);
 router.use(prodLogsRouter);
 router.use(backgroundJobsRouter);
+router.use(previewSnapshotsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

@@ -3557,6 +3557,9 @@ components:
         redirectWwwApex:
           type: boolean
           description: "When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains."
+        stagingPublishedSnapshotId:
+          type: ["integer", "null"]
+          description: "Version ID currently live on the staging slot. Null = not staged. Set by POST /publish?env=staging, promoted by POST /promote."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 

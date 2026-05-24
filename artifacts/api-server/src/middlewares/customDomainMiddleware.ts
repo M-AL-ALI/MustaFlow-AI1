@@ -18,7 +18,12 @@
 import type { Request, Response, NextFunction } from "express";
 import { eq, isNull, and } from "drizzle-orm";
 import { db, projectsTable, projectDomainsTable } from "@workspace/db";
-import { serveSnapshot } from "../lib/serveSnapshot";
+import {
+  serveSnapshot,
+  serveSnapshotForEnv,
+  servePreviewSnapshot,
+  serveSnapshotByProjectEnv,
+} from "../lib/serveSnapshot";
 import { logger } from "../lib/logger";
 import { subscribeDomainEvents } from "../lib/event-bus";
 import { recordHostnameSighting } from "../routes/domains";
@@ -31,6 +36,8 @@ interface CachedProject {
   id: number;
   prodContainerUrl: string | null;
   prodContainerStatus: string;
+  /** Environment slot this domain is wired to ('production' | 'staging'). */
+  environment: string;
 }
 
 let hostnameMap = new Map<string, CachedProject>();
@@ -45,6 +52,7 @@ async function loadRoutingTable(): Promise<void> {
         hostname: projectDomainsTable.hostname,
         projectId: projectDomainsTable.projectId,
         verificationStatus: projectDomainsTable.verificationStatus,
+        environment: projectDomainsTable.environment,
       })
       .from(projectDomainsTable);
 
@@ -72,7 +80,7 @@ async function loadRoutingTable(): Promise<void> {
 
     const newMap = new Map<string, CachedProject>();
 
-    // From project_domains (verified entries)
+    // From project_domains (verified entries) — honour per-domain environment slot
     for (const row of domainRows) {
       if (row.verificationStatus !== "verified") continue;
       const proj = projectMap.get(row.projectId);
@@ -81,6 +89,7 @@ async function loadRoutingTable(): Promise<void> {
         id: row.projectId,
         prodContainerUrl: proj.prodContainerUrl,
         prodContainerStatus: proj.prodContainerStatus,
+        environment: row.environment ?? "production",
       });
     }
 
@@ -92,6 +101,7 @@ async function loadRoutingTable(): Promise<void> {
         id: proj.id,
         prodContainerUrl: proj.prodContainerUrl,
         prodContainerStatus: proj.prodContainerStatus,
+        environment: "production",
       });
     }
 
@@ -127,10 +137,13 @@ async function refreshEntry(hostname: string, projectId: number): Promise<void> 
       .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
     if (proj) {
+      // Preserve the cached environment if one already exists; default to production.
+      const existing = hostnameMap.get(hostname);
       hostnameMap.set(hostname, {
         id: proj.id,
         prodContainerUrl: proj.prodContainerUrl,
         prodContainerStatus: proj.prodContainerStatus,
+        environment: existing?.environment ?? "production",
       });
     }
   } catch {
@@ -173,6 +186,26 @@ function isPlatformHost(hostname: string): boolean {
     return true;
   if (hostname === PLATFORM_DOMAIN || hostname.endsWith("." + PLATFORM_DOMAIN)) return true;
   return false;
+}
+
+// ── Platform environment subdomain patterns ──────────────────────────────────
+// Matches {slug}-staging.{PLATFORM_DOMAIN} and {slug}-preview-{taskId}.{PLATFORM_DOMAIN}
+
+const STAGING_SUFFIX = "-staging";
+
+function extractStagingSlug(hostname: string): string | null {
+  if (!hostname.endsWith("." + PLATFORM_DOMAIN)) return null;
+  const sub = hostname.slice(0, -(PLATFORM_DOMAIN.length + 1));
+  if (!sub.endsWith(STAGING_SUFFIX)) return null;
+  return sub.slice(0, -STAGING_SUFFIX.length) || null;
+}
+
+function extractPreviewSlug(hostname: string): string | null {
+  if (!hostname.endsWith("." + PLATFORM_DOMAIN)) return null;
+  const sub = hostname.slice(0, -(PLATFORM_DOMAIN.length + 1));
+  // Preview subdomains end with -preview-{number}
+  if (/-preview-\d+$/.test(sub)) return sub;
+  return null;
 }
 
 // ── Container proxy ──────────────────────────────────────────────────────────
@@ -232,6 +265,26 @@ export async function customDomainMiddleware(
   }
 
   const hostname = req.hostname;
+
+  // ── Platform environment subdomains (before platform host skip) ───────────
+  // These ARE platform hosts, but we intercept them specifically to serve
+  // staging/preview content rather than falling through to the main router.
+  if (hostname.endsWith("." + PLATFORM_DOMAIN)) {
+    const rawPath = req.path === "/" ? "index.html" : req.path.replace(/^\//, "");
+
+    const stagingSlug = extractStagingSlug(hostname);
+    if (stagingSlug) {
+      await serveSnapshotForEnv(res, stagingSlug, rawPath, "staging");
+      return;
+    }
+
+    const previewSlug = extractPreviewSlug(hostname);
+    if (previewSlug) {
+      await servePreviewSnapshot(res, previewSlug, rawPath);
+      return;
+    }
+  }
+
   if (isPlatformHost(hostname)) {
     next();
     return;
@@ -248,14 +301,22 @@ export async function customDomainMiddleware(
   // Record sighting for diagnostic panel
   recordHostnameSighting(hostname);
 
-  // Phase E: proxy to production container if running
-  if (project.prodContainerUrl && project.prodContainerStatus === "running") {
+  // Phase E: proxy to production container if running (only for production-env domains)
+  if (
+    project.environment === "production" &&
+    project.prodContainerUrl &&
+    project.prodContainerStatus === "running"
+  ) {
     const proxied = await proxyToContainer(req, res, project.prodContainerUrl);
     if (proxied) return;
     // Fall through to snapshot serving on proxy failure
   }
 
-  // Fallback: serve from DB snapshot
+  // Serve the snapshot for the correct environment slot
   const rawPath = req.path === "/" ? "index.html" : req.path.replace(/^\//, "");
-  await serveSnapshot(res, project.id, rawPath);
+  if (project.environment === "staging") {
+    await serveSnapshotByProjectEnv(res, project.id, rawPath, "staging");
+  } else {
+    await serveSnapshot(res, project.id, rawPath);
+  }
 }

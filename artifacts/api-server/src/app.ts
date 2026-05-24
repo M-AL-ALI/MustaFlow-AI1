@@ -12,6 +12,7 @@ import router from "./routes";
 import { customDomainMiddleware } from "./middlewares/customDomainMiddleware";
 import { logger } from "./lib/logger";
 import { startProdLogRetentionWorker } from "./lib/prodLogs";
+import "./lib/preview-purge";
 
 // Kick off the prod-log retention sweeper (Task #511). Hourly, best-effort.
 startProdLogRetentionWorker();

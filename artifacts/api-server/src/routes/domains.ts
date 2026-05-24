@@ -17,7 +17,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { eq, isNull, and, asc } from "drizzle-orm";
+import { eq, isNull, and, asc, desc, inArray } from "drizzle-orm";
 import { promises as dns } from "dns";
 import { randomBytes } from "crypto";
 import { db, projectsTable, projectDomainsTable, deploymentLogsTable } from "@workspace/db";
@@ -369,6 +369,28 @@ router.post("/projects/:id/domains", requireProjectOwnership, async (req, res): 
       after: { recordType, isPrimary },
     });
 
+    // Audit log for rollback — status="attach" so rollback can inverse to detach
+    setImmediate(() => {
+      void db
+        .insert(deploymentLogsTable)
+        .values({
+          projectId,
+          userId,
+          env: "production",
+          status: "attach",
+          note: JSON.stringify({
+            action: "attach",
+            hostname,
+            domainId: newDomain?.id,
+            recordType,
+            isPrimary,
+          }),
+        })
+        .catch(() => {
+          /* best-effort */
+        });
+    });
+
     // Keep legacy projects.customDomain in sync with primary domain
     if (isPrimary) {
       await db
@@ -418,6 +440,19 @@ router.delete(
       return;
     }
 
+    // Capture full domain data before deletion for rollback re-insertion
+    const detachedSnapshot = {
+      action: "detach",
+      hostname: domain.hostname,
+      domainId: domain.id,
+      recordType: domain.recordType,
+      isPrimary: domain.isPrimary,
+      verificationToken: domain.verificationToken,
+      verificationStatus: domain.verificationStatus,
+      sslStatus: domain.sslStatus,
+      environment: (domain as { environment?: string }).environment ?? "production",
+    };
+
     await db.delete(projectDomainsTable).where(eq(projectDomainsTable.id, domainId));
 
     // Emit event to hot-reload routing table
@@ -429,6 +464,22 @@ router.delete(
       action: "domain_detached",
       hostname: domain.hostname,
       before: { isPrimary: domain.isPrimary, verificationStatus: domain.verificationStatus },
+    });
+
+    // Audit log for rollback — status="detach" so rollback can inverse to re-attach
+    setImmediate(() => {
+      void db
+        .insert(deploymentLogsTable)
+        .values({
+          projectId,
+          userId,
+          env: "production",
+          status: "detach",
+          note: JSON.stringify(detachedSnapshot),
+        })
+        .catch(() => {
+          /* best-effort */
+        });
     });
 
     // If this was the primary domain, promote the next domain (if any)
@@ -503,11 +554,41 @@ router.patch(
       .set({ customDomain: domain.hostname, updatedAt: new Date() })
       .where(eq(projectsTable.id, projectId));
 
+    // Find previous primary for rollback
+    const allDomains = await db
+      .select({ id: projectDomainsTable.id, hostname: projectDomainsTable.hostname })
+      .from(projectDomainsTable)
+      .where(eq(projectDomainsTable.projectId, projectId));
+
+    const previousPrimary = allDomains.find((d) => d.id !== domainId);
+
     await writeDomainAudit({
       projectId,
       userId,
       action: "domain_set_primary",
       hostname: domain.hostname,
+    });
+
+    // Audit log for rollback — status="set-primary" with before/after hostnames
+    setImmediate(() => {
+      void db
+        .insert(deploymentLogsTable)
+        .values({
+          projectId,
+          userId,
+          env: "production",
+          status: "set-primary",
+          note: JSON.stringify({
+            action: "set-primary",
+            newPrimaryHostname: domain.hostname,
+            newPrimaryDomainId: domainId,
+            prevPrimaryHostname: previousPrimary?.hostname ?? null,
+            prevPrimaryDomainId: previousPrimary?.id ?? null,
+          }),
+        })
+        .catch(() => {
+          /* best-effort */
+        });
     });
 
     res.json({ domainId, isPrimary: true });
@@ -1246,6 +1327,185 @@ router.post(
           "DNS check failed — this can happen during heavy propagation. Please try again in a few minutes.",
       });
     }
+  },
+);
+
+// ── POST /api/projects/:id/domains/rollback ──────────────────────────────────
+// Roll back the last reversible domain action: attach / detach / set-primary / promote.
+// Reads the most recent deployment_logs row with one of those status values and
+// applies the inverse operation transactionally. Idempotent and audited.
+router.post(
+  "/projects/:id/domains/rollback",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const userId = (req as { userId?: string }).userId ?? "unknown";
+
+    // Find the last reversible domain action for this project.
+    const [lastAction] = await db
+      .select({
+        id: deploymentLogsTable.id,
+        status: deploymentLogsTable.status,
+        snapshotVersionId: deploymentLogsTable.snapshotVersionId,
+        note: deploymentLogsTable.note,
+        createdAt: deploymentLogsTable.createdAt,
+      })
+      .from(deploymentLogsTable)
+      .where(
+        and(
+          eq(deploymentLogsTable.projectId, projectId),
+          inArray(deploymentLogsTable.status, ["attach", "detach", "set-primary", "promote"]),
+        ),
+      )
+      .orderBy(desc(deploymentLogsTable.createdAt))
+      .limit(1);
+
+    if (!lastAction) {
+      res.status(422).json({
+        error:
+          "No reversible domain action found. Attach, detach, set-primary, or promote a domain first.",
+      });
+      return;
+    }
+
+    let inverseNote = "";
+
+    if (lastAction.status === "promote") {
+      // Inverse: restore the previous production snapshot
+      const prevSnapshotId = lastAction.snapshotVersionId;
+      if (!prevSnapshotId) {
+        res.status(422).json({
+          error:
+            "Promote log entry does not record a previous snapshot — cannot roll back automatically.",
+        });
+        return;
+      }
+
+      await db
+        .update(projectsTable)
+        .set({ publishedSnapshotId: prevSnapshotId, updatedAt: new Date() })
+        .where(eq(projectsTable.id, projectId));
+
+      inverseNote = `Rolled back promote: restored production snapshot ${prevSnapshotId} (log #${lastAction.id}).`;
+    } else if (lastAction.status === "attach") {
+      // Inverse: detach the hostname that was attached
+      type AttachData = { action: string; hostname?: string };
+      let data: AttachData = { action: "attach" };
+      try {
+        data = JSON.parse(lastAction.note ?? "{}") as AttachData;
+      } catch {
+        /* use defaults */
+      }
+      if (!data.hostname) {
+        res.status(422).json({ error: "Attach log does not contain hostname — cannot roll back." });
+        return;
+      }
+
+      await db
+        .delete(projectDomainsTable)
+        .where(
+          and(
+            eq(projectDomainsTable.projectId, projectId),
+            eq(projectDomainsTable.hostname, data.hostname),
+          ),
+        );
+
+      publishDomainEvent({ type: "removed", hostname: data.hostname, projectId });
+      inverseNote = `Rolled back attach: removed hostname ${data.hostname} (log #${lastAction.id}).`;
+    } else if (lastAction.status === "detach") {
+      // Inverse: re-attach the domain that was detached
+      type DetachData = {
+        action: string;
+        hostname?: string;
+        recordType?: string;
+        isPrimary?: boolean;
+      };
+      let data: DetachData = { action: "detach" };
+      try {
+        data = JSON.parse(lastAction.note ?? "{}") as DetachData;
+      } catch {
+        /* use defaults */
+      }
+      if (!data.hostname) {
+        res.status(422).json({ error: "Detach log does not contain hostname — cannot roll back." });
+        return;
+      }
+
+      const freshToken = randomBytes(24).toString("hex");
+      await db
+        .insert(projectDomainsTable)
+        .values({
+          projectId,
+          hostname: data.hostname,
+          isPrimary: data.isPrimary ?? false,
+          recordType: (data.recordType as "a" | "cname") ?? "cname",
+          verificationToken: freshToken,
+          verificationStatus: "pending",
+          sslStatus: "pending",
+        })
+        .onConflictDoNothing();
+
+      publishDomainEvent({ type: "added", hostname: data.hostname, projectId });
+      inverseNote = `Rolled back detach: re-attached hostname ${data.hostname} (log #${lastAction.id}).`;
+    } else if (lastAction.status === "set-primary") {
+      // Inverse: restore the previous primary domain
+      type SetPrimaryData = {
+        action: string;
+        prevPrimaryDomainId?: number;
+        prevPrimaryHostname?: string;
+      };
+      let data: SetPrimaryData = { action: "set-primary" };
+      try {
+        data = JSON.parse(lastAction.note ?? "{}") as SetPrimaryData;
+      } catch {
+        /* use defaults */
+      }
+
+      if (!data.prevPrimaryDomainId) {
+        res.status(422).json({
+          error:
+            "Set-primary log does not record a previous primary — cannot roll back automatically.",
+        });
+        return;
+      }
+
+      // Clear all primary flags, then restore previous primary
+      await db
+        .update(projectDomainsTable)
+        .set({ isPrimary: false, updatedAt: new Date() })
+        .where(eq(projectDomainsTable.projectId, projectId));
+
+      await db
+        .update(projectDomainsTable)
+        .set({ isPrimary: true, updatedAt: new Date() })
+        .where(eq(projectDomainsTable.id, data.prevPrimaryDomainId));
+
+      if (data.prevPrimaryHostname) {
+        await db
+          .update(projectsTable)
+          .set({ customDomain: data.prevPrimaryHostname, updatedAt: new Date() })
+          .where(eq(projectsTable.id, projectId));
+      }
+
+      inverseNote = `Rolled back set-primary: restored ${data.prevPrimaryHostname ?? `domain #${data.prevPrimaryDomainId}`} as primary (log #${lastAction.id}).`;
+    }
+
+    // Write the rollback audit log
+    await db.insert(deploymentLogsTable).values({
+      projectId,
+      userId,
+      env: "production",
+      status: "rollback",
+      note: inverseNote,
+    });
+
+    res.json({
+      ok: true,
+      projectId,
+      reversedActionId: lastAction.id,
+      reversedAction: lastAction.status,
+      note: inverseNote,
+    });
   },
 );
 

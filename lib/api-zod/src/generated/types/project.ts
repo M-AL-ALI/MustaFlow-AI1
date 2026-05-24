@@ -110,6 +110,11 @@ export interface Project {
   e2eEnabled?: boolean;
   /** When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains. */
   redirectWwwApex?: boolean;
+  /**
+     * Version ID currently live on the staging slot. Null = not staged. Set by POST /publish?env=staging, promoted by POST /promote.
+     * @nullable
+     */
+  stagingPublishedSnapshotId?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }

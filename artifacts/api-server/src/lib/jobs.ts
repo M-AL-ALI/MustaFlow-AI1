@@ -6,6 +6,7 @@ import {
   agentTasksTable,
   projectFilesTable,
   projectVersionsTable,
+  previewSnapshotsTable,
   chatMessagesTable,
   taskEventsTable,
   knowledgeEntriesTable,
@@ -2265,6 +2266,55 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           void (async () => {
             const { captureProjectDbSnapshot } = await import("./db-snapshot-capture");
             await captureProjectDbSnapshot(projectId, versionIdForSnapshot, snapshotLabel);
+          })();
+        });
+      }
+
+      // ── Preview snapshot — ephemeral per-build URL ────────────────────────
+      // Create a preview_snapshots row so the build is immediately reachable at
+      // {slug}-preview-{taskId}.{PLATFORM_DOMAIN} for 7 days.  Best-effort; a
+      // failure here must not fail the task.
+      if (version?.id) {
+        setImmediate(() => {
+          void (async () => {
+            try {
+              const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
+              const PREVIEW_EXPIRY_DAYS = Number(process.env.PREVIEW_EXPIRY_DAYS ?? "7");
+              const [proj] = await db
+                .select({ publicSlug: projectsTable.publicSlug, name: projectsTable.name })
+                .from(projectsTable)
+                .where(eq(projectsTable.id, projectId));
+              const baseSlug =
+                proj?.publicSlug ??
+                (proj?.name ?? `proj-${projectId}`)
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, "-")
+                  .replace(/^-+|-+$/g, "")
+                  .slice(0, 24) +
+                  "-" +
+                  Math.random().toString(36).slice(2, 8);
+              const previewSlug = `${baseSlug}-preview-${taskId}`;
+              const expiresAt = new Date(Date.now() + PREVIEW_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+              await db
+                .insert(previewSnapshotsTable)
+                .values({
+                  projectId,
+                  versionId: version.id,
+                  taskId,
+                  previewSlug,
+                  expiresAt,
+                })
+                .onConflictDoNothing();
+              logger.info(
+                { projectId, taskId, previewSlug, platform: PLATFORM_DOMAIN },
+                "Preview snapshot created",
+              );
+            } catch (err) {
+              logger.warn(
+                { err, projectId, taskId },
+                "Failed to create preview snapshot (non-fatal)",
+              );
+            }
           })();
         });
       }

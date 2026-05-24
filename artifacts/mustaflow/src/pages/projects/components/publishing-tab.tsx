@@ -2384,6 +2384,62 @@ export function PublishingTab({
   const [blockPublishOnCritical, setBlockPublishOnCritical] = useState(true);
   const [savingSecurityGate, setSavingSecurityGate] = useState(false);
 
+  // Environment sub-tab (inside the web platform tab)
+  const [envTab, setEnvTab] = useState<"production" | "staging" | "previews">("production");
+
+  // Staging publish state
+  const [isStaging, setIsStaging] = useState(false);
+  const [stagingResult, setStagingResult] = useState<{
+    ok: boolean;
+    stagingUrl: string;
+    publicSlug: string;
+    snapshotVersionId?: number;
+    filesPublished?: number;
+  } | null>(null);
+  const [stagingError, setStagingError] = useState<string | null>(null);
+
+  // Promote state
+  const [isPromoting, setIsPromoting] = useState(false);
+  const [promoteResult, setPromoteResult] = useState<{
+    ok: boolean;
+    publicUrl: string;
+    publicSlug: string;
+    stagingSnapshotLabel?: string | null;
+  } | null>(null);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
+  const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
+
+  // Preview snapshots state
+  type PreviewSnapshotEntry = {
+    id: number;
+    versionId: number;
+    taskId: number | null;
+    previewSlug: string;
+    previewUrl: string;
+    internalUrl: string;
+    expired: boolean;
+    expiresAt: string | null;
+    createdAt: string;
+    versionLabel: string | null;
+  };
+  const [previewSnapshots, setPreviewSnapshots] = useState<PreviewSnapshotEntry[]>([]);
+  const [previewSnapshotsLoading, setPreviewSnapshotsLoading] = useState(false);
+
+  const fetchPreviewSnapshots = useCallback(async () => {
+    setPreviewSnapshotsLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/preview-snapshots`);
+      if (res.ok) {
+        const data = (await res.json()) as { previewSnapshots: PreviewSnapshotEntry[] };
+        setPreviewSnapshots(data.previewSnapshots ?? []);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setPreviewSnapshotsLoading(false);
+    }
+  }, [projectId]);
+
   // Domain management state
   type DomainInfo = {
     subdomain: string | null;
@@ -2539,6 +2595,66 @@ export function PublishingTab({
       setDeployError(err instanceof Error ? err.message : "Deploy failed — please try again.");
     } finally {
       setIsDeploying(false);
+    }
+  }
+
+  async function handlePublishStaging() {
+    setIsStaging(true);
+    setStagingError(null);
+    setStagingResult(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/publish?env=staging`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string };
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        ok: boolean;
+        stagingUrl: string;
+        publicSlug: string;
+        snapshotVersionId?: number;
+        filesPublished?: number;
+      };
+      setStagingResult(data);
+      void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+      void fetchDeployments();
+    } catch (err) {
+      setStagingError(
+        err instanceof Error ? err.message : "Staging publish failed — please try again.",
+      );
+    } finally {
+      setIsStaging(false);
+    }
+  }
+
+  async function handlePromote() {
+    setIsPromoting(true);
+    setPromoteError(null);
+    setPromoteResult(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/promote`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string };
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        ok: boolean;
+        publicUrl: string;
+        publicSlug: string;
+        stagingSnapshotLabel?: string | null;
+      };
+      setPromoteResult(data);
+      setShowPromoteConfirm(false);
+      void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+      void fetchDeployments();
+    } catch (err) {
+      setPromoteError(err instanceof Error ? err.message : "Promote failed — please try again.");
+    } finally {
+      setIsPromoting(false);
     }
   }
 
@@ -2967,1179 +3083,1421 @@ export function PublishingTab({
         {/* ── WEB ─────────────────────────────────────────────────────────── */}
         {platform === "web" && (
           <div className="space-y-5">
-            {/* 1-2-3 publish flow */}
-            <div className="border border-border rounded-xl p-4 bg-card">
-              <h3 className="font-semibold text-sm mb-3">How to publish</h3>
-              <div className="grid grid-cols-3 gap-3">
-                {/* Step 1: Check */}
-                <div
-                  className={cn(
-                    "flex flex-col items-center gap-2 p-3 rounded-lg border-2 text-center transition-colors",
-                    readiness?.canPublish
-                      ? "border-green-500/40 bg-green-500/5"
-                      : "border-border bg-muted/30",
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
-                      readiness?.canPublish
-                        ? "bg-green-500 text-white"
-                        : "bg-muted text-muted-foreground border border-border",
-                    )}
-                  >
-                    {readiness?.canPublish ? <CheckCircle2 className="h-4 w-4" /> : "1"}
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold">Check</div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">
-                      {readiness?.canPublish ? "All good" : "Run readiness check"}
-                    </div>
-                  </div>
-                  {!readiness?.canPublish && (
-                    <button
-                      onClick={() => void fetchReadiness()}
-                      disabled={readinessLoading}
-                      className="text-[10px] font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
-                    >
-                      {readinessLoading ? "Checking…" : "Run check"}
-                    </button>
-                  )}
-                </div>
-                {/* Step 2: Publish */}
-                <div
-                  className={cn(
-                    "flex flex-col items-center gap-2 p-3 rounded-lg border-2 text-center transition-colors",
-                    publishResult || deployResult
-                      ? "border-green-500/40 bg-green-500/5"
-                      : readiness?.canPublish
-                        ? "border-primary/40 bg-primary/5"
-                        : "border-border bg-muted/30 opacity-60",
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
-                      publishResult || deployResult
-                        ? "bg-green-500 text-white"
-                        : readiness?.canPublish
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground border border-border",
-                    )}
-                  >
-                    {publishResult || deployResult ? <CheckCircle2 className="h-4 w-4" /> : "2"}
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold">Publish</div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">
-                      {publishResult || deployResult ? "Published" : "Make it live"}
-                    </div>
-                  </div>
-                  {readiness?.canPublish &&
-                    !publishResult &&
-                    !deployResult &&
-                    webEnv === "testing" && (
-                      <button
-                        onClick={() => void handlePublish()}
-                        disabled={isPublishing}
-                        className="text-[10px] font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
-                      >
-                        {isPublishing ? "Publishing…" : "Publish now"}
-                      </button>
-                    )}
-                </div>
-                {/* Step 3: Share */}
-                <div
-                  className={cn(
-                    "flex flex-col items-center gap-2 p-3 rounded-lg border-2 text-center transition-colors",
-                    publishResult || deployResult
-                      ? "border-green-500/40 bg-green-500/5"
-                      : "border-border bg-muted/30 opacity-40",
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
-                      publishResult || deployResult
-                        ? "bg-green-500 text-white"
-                        : "bg-muted text-muted-foreground border border-border",
-                    )}
-                  >
-                    {publishResult || deployResult ? <CheckCircle2 className="h-4 w-4" /> : "3"}
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold">Share</div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">
-                      Copy your public link
-                    </div>
-                  </div>
-                  {(publishResult || deployResult) && (
-                    <CopyUrlButton
-                      url={deployResult?.publicUrl ?? publishResult?.publicUrl ?? ""}
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Environment toggle card */}
-            <div className="border border-border rounded-xl p-4 bg-card space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-semibold text-sm">Deployment Environment</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Testing for internal review, Production for public traffic.
-                  </p>
-                </div>
+            {/* Environment sub-tabs: Production / Staging / Previews */}
+            <div className="flex gap-1 bg-muted/40 rounded-lg p-1 border border-border">
+              {(
+                [
+                  { id: "production" as const, label: "Production" },
+                  { id: "staging" as const, label: "Staging" },
+                  { id: "previews" as const, label: "Previews" },
+                ] as { id: "production" | "staging" | "previews"; label: string }[]
+              ).map(({ id, label }) => (
                 <button
+                  key={id}
                   onClick={() => {
-                    setWebEnv((e) => (e === "testing" ? "production" : "testing"));
-                    setShowDeployConfirm(false);
+                    setEnvTab(id);
+                    if (id === "previews") void fetchPreviewSnapshots();
                   }}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-muted hover:bg-muted/80 text-sm font-medium transition-colors"
-                >
-                  {webEnv === "testing" ? (
-                    <ToggleLeft className="h-4 w-4 text-yellow-500" />
-                  ) : (
-                    <ToggleRight className="h-4 w-4 text-green-500" />
+                  className={cn(
+                    "flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-colors",
+                    envTab === id
+                      ? "bg-background text-foreground shadow-sm border border-border"
+                      : "text-muted-foreground hover:text-foreground",
                   )}
-                  {webEnv === "testing" ? "Testing" : "Production"}
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                {(["testing", "production"] as const).map((env) => (
-                  <div
-                    key={env}
-                    className={cn(
-                      "p-3 rounded-lg border-2 transition-colors",
-                      webEnv === env
-                        ? env === "testing"
-                          ? "border-yellow-500/50 bg-yellow-500/5"
-                          : "border-green-500/50 bg-green-500/5"
-                        : "border-border bg-muted/30",
-                    )}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      {env === "testing" ? (
-                        <Server className="h-3.5 w-3.5 text-yellow-500" />
-                      ) : (
-                        <Globe className="h-3.5 w-3.5 text-green-500" />
-                      )}
-                      <span className="text-xs font-semibold capitalize">{env}</span>
-                      {webEnv === env && (
-                        <span
-                          className={cn(
-                            "text-[10px] px-1.5 py-0.5 rounded font-bold",
-                            env === "testing"
-                              ? "bg-yellow-500/20 text-yellow-600"
-                              : "bg-green-500/20 text-green-600",
-                          )}
-                        >
-                          ACTIVE
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      {env === "testing"
-                        ? "Preview URL — internal use only, test keys."
-                        : "Live domain — public traffic, production keys."}
-                    </p>
-                    <div className="mt-2 font-mono text-[10px] text-muted-foreground bg-muted rounded px-2 py-1 truncate">
-                      {env === "testing" ? "mustaflow.app/preview/…" : "yourdomain.com"}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Deployment status */}
-            <div className="border border-border rounded-xl p-4 bg-card space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-sm">Deployment Status</h3>
-                <button
-                  onClick={() => void fetchSiteSettings()}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  <RefreshCw className="h-3 w-3" />
-                  Refresh
+                  {label}
                 </button>
-              </div>
-              <div className="space-y-2">
-                {/* Production container health */}
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground text-xs flex items-center gap-1.5">
-                    <Activity className="h-3 w-3" />
-                    Production server
-                  </span>
-                  <div className="flex items-center gap-2">
-                    {prodContainerStatus === "running" ? (
-                      <>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-green-500/15 text-green-600">
-                          running
-                        </span>
-                        {prodContainerUrl && (
-                          <a
-                            href={prodContainerUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[11px] text-primary hover:underline truncate max-w-[160px]"
-                          >
-                            {prodContainerUrl}
-                          </a>
-                        )}
-                      </>
-                    ) : prodContainerStatus === "deploying" || isDeploying ? (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-blue-500/15 text-blue-600 flex items-center gap-1">
-                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                        deploying
-                      </span>
-                    ) : prodContainerStatus === "error" ? (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-destructive/15 text-destructive">
-                        error
-                      </span>
-                    ) : prodContainerStatus === "stopped" ? (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-muted text-muted-foreground">
-                        stopped
-                      </span>
-                    ) : (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-muted text-muted-foreground">
-                        not deployed
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {/* Custom domain */}
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground text-xs">Custom domain</span>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "text-[10px] px-2 py-0.5 rounded-full font-medium",
-                        domainInfo?.domainStatus === "active"
-                          ? "bg-green-500/15 text-green-600"
-                          : domainInfo?.customDomain
-                            ? "bg-yellow-500/15 text-yellow-600"
-                            : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {domainInfo?.domainStatus === "active"
-                        ? "active"
-                        : domainInfo?.customDomain
-                          ? "pending DNS"
-                          : "unconfigured"}
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {domainInfo?.customDomain ?? "Configure below"}
-                    </span>
-                  </div>
-                </div>
-                {/* SSL */}
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground text-xs">SSL / HTTPS</span>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "text-[10px] px-2 py-0.5 rounded-full font-medium",
-                        domainInfo?.sslStatus === "active"
-                          ? "bg-green-500/15 text-green-600"
-                          : "bg-yellow-500/15 text-yellow-600",
-                      )}
-                    >
-                      {domainInfo?.sslStatus === "active" ? "active" : "partial"}
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {domainInfo?.sslStatus === "active"
-                        ? "Certificate active"
-                        : "Requires manual cert setup"}
-                    </span>
-                  </div>
-                </div>
-                {/* Rollback */}
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground text-xs">Rollback point</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-green-500/15 text-green-600">
-                      ready
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      Latest snapshot available
-                    </span>
-                  </div>
-                </div>
-              </div>
+              ))}
             </div>
 
-            {/* Domain Management */}
-            <div className="border border-border rounded-xl p-5 bg-card space-y-5">
-              <h3 className="font-semibold text-sm flex items-center gap-2">
-                <Globe className="h-4 w-4 text-muted-foreground" />
-                Domains
-              </h3>
-
-              {/* Auto-subdomain */}
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Your Subdomain
-                </p>
-                <div className="flex items-center gap-2 bg-muted rounded-lg px-3 py-2.5">
-                  <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  {domainInfo?.subdomain ? (
-                    <>
-                      <span className="text-sm font-mono flex-1 truncate">
-                        {domainInfo.subdomain}
-                      </span>
+            {/* ── Staging tab ──────────────────────────────────────────────── */}
+            {envTab === "staging" && (
+              <div className="space-y-4">
+                <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                  <h3 className="font-semibold text-sm">Staging environment</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Publish to staging to test your app at a separate URL before going live. Use
+                    Promote to push the staged snapshot to production when you're ready.
+                  </p>
+                  {stagingError && <p className="text-xs text-destructive">{stagingError}</p>}
+                  {stagingResult?.ok && (
+                    <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3 space-y-1">
+                      <p className="text-xs font-medium text-green-600">
+                        Staged successfully — {stagingResult.filesPublished} file(s)
+                      </p>
                       <a
-                        href={domainInfo.subdomainUrl ?? "#"}
+                        href={stagingResult.stagingUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                        className="text-xs text-primary underline break-all"
                       >
-                        <ArrowUpRight className="h-3.5 w-3.5" />
+                        {stagingResult.stagingUrl}
                       </a>
-                      <CopyUrlButton url={domainInfo.subdomainUrl ?? domainInfo.subdomain} />
-                    </>
-                  ) : (
-                    <span className="text-sm text-muted-foreground italic">
-                      Generated on first publish
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Automatically assigned. Available as soon as you publish.
-                </p>
-              </div>
-
-              {/* Custom subdomain picker */}
-              {domainInfo?.subdomain && (
-                <CustomSubdomainPicker
-                  projectId={projectId}
-                  currentSlug={domainInfo.subdomain.split(".")[0] ?? ""}
-                  platformDomain={domainInfo.platformDomain}
-                  onSuccess={(newSlug, newSubdomain) => {
-                    setDomainInfo((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            subdomain: newSubdomain,
-                            subdomainUrl: `https://${newSubdomain}`,
-                          }
-                        : prev,
-                    );
-                  }}
-                />
-              )}
-
-              <div className="border-t border-border" />
-
-              {/* Multi-domain list */}
-              <div className="space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Custom Domains
-                </p>
-
-                {/* Add domain input */}
-                <div className="flex gap-2">
-                  <input
-                    value={newDomainInput}
-                    onChange={(e) => setNewDomainInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void addDomain();
-                    }}
-                    placeholder="app.yourdomain.com or yourdomain.com"
-                    className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void addDomain()}
-                    disabled={addingDomain || !newDomainInput.trim()}
-                    className="shrink-0"
-                  >
-                    {addingDomain ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Link2 className="h-3.5 w-3.5" />
-                    )}
-                    <span className="ml-1.5">Add</span>
-                  </Button>
-                </div>
-
-                {domainAddError && (
-                  <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>{domainAddError}</span>
-                  </div>
-                )}
-
-                {/* Domain rows */}
-                {domainsData && domainsData.domains.length > 0 && (
-                  <div className="space-y-2">
-                    {domainsData.domains.map((domain) => {
-                      const isApex = domain.recordType === "a";
-                      const isVerified = domain.verificationStatus === "verified";
-                      const isSslActive = domain.sslStatus === "active";
-                      const isVerifying = verifyingDomainId === domain.id;
-                      const isDiagnosing = diagnosingDomainId === domain.id;
-                      const isExpanded = expandedDomainId === domain.id;
-                      const diagResult = diagnoseResults[domain.id];
-
-                      return (
-                        <div
-                          key={domain.id}
-                          className="border border-border rounded-lg bg-muted/30 overflow-hidden"
-                        >
-                          {/* Domain row header */}
-                          <div className="flex items-center gap-2 px-3 py-2.5">
-                            {/* Status icon */}
-                            {isVerified && isSslActive ? (
-                              <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
-                            ) : isVerified ? (
-                              <Lock className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
-                            ) : domain.verificationStatus === "failed" ? (
-                              <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
-                            ) : (
-                              <Circle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                            )}
-
-                            {/* Hostname + badges */}
-                            <div className="flex items-center gap-1.5 flex-1 min-w-0 flex-wrap">
-                              <span className="text-sm font-mono truncate">{domain.hostname}</span>
-                              {domain.isPrimary && (
-                                <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-medium shrink-0">
-                                  primary
-                                </span>
-                              )}
-                              {isApex && (
-                                <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-medium shrink-0">
-                                  apex
-                                </span>
-                              )}
-                              <span
-                                className={cn(
-                                  "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0",
-                                  isVerified
-                                    ? "bg-green-500/15 text-green-400"
-                                    : domain.verificationStatus === "failed"
-                                      ? "bg-destructive/15 text-destructive"
-                                      : "bg-yellow-500/15 text-yellow-400",
-                                )}
-                              >
-                                {isVerified
-                                  ? "DNS verified"
-                                  : domain.verificationStatus === "failed"
-                                    ? "DNS failed"
-                                    : "DNS pending"}
-                              </span>
-                              <span
-                                className={cn(
-                                  "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0",
-                                  isSslActive
-                                    ? "bg-green-500/15 text-green-400"
-                                    : domain.sslStatus === "failed"
-                                      ? "bg-destructive/15 text-destructive"
-                                      : "bg-yellow-500/15 text-yellow-400",
-                                )}
-                              >
-                                <Lock className="h-2.5 w-2.5" />
-                                {isSslActive
-                                  ? "SSL"
-                                  : domain.sslStatus === "provisioning"
-                                    ? "SSL provisioning"
-                                    : domain.sslStatus === "failed"
-                                      ? "SSL failed"
-                                      : "SSL pending"}
-                              </span>
-                            </div>
-
-                            {/* Action buttons */}
-                            <div className="flex items-center gap-1 shrink-0">
-                              {isVerified && (
-                                <a
-                                  href={`https://${domain.hostname}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-                                  title="Open domain"
-                                >
-                                  <ArrowUpRight className="h-3.5 w-3.5" />
-                                </a>
-                              )}
-                              {!isVerified && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => void verifyDomainById(domain.id)}
-                                  disabled={isVerifying}
-                                  className="h-7 px-2 text-xs"
-                                  title="Check DNS"
-                                >
-                                  {isVerifying ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  ) : (
-                                    <RefreshCw className="h-3.5 w-3.5" />
-                                  )}
-                                </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() =>
-                                  isExpanded && diagResult
-                                    ? setExpandedDomainId(null)
-                                    : void diagnosedomainById(domain.id)
-                                }
-                                disabled={isDiagnosing}
-                                className="h-7 px-2 text-xs"
-                                title="Diagnose"
-                              >
-                                {isDiagnosing ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : isExpanded ? (
-                                  <ChevronUp className="h-3.5 w-3.5" />
-                                ) : (
-                                  <ChevronDown className="h-3.5 w-3.5" />
-                                )}
-                              </Button>
-                              {!domain.isPrimary && isVerified && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => void setPrimaryDomain(domain.id)}
-                                  className="h-7 px-2 text-[10px]"
-                                  title="Make primary"
-                                >
-                                  Set primary
-                                </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => void removeDomainById(domain.id)}
-                                className="h-7 px-2 text-destructive hover:text-destructive"
-                                title="Remove"
-                              >
-                                <XCircle className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </div>
-
-                          {/* DNS setup instructions (unverified domains) */}
-                          {!isVerified && (
-                            <div className="px-3 pb-3 space-y-2.5 border-t border-border/60 pt-2.5">
-                              {/* TXT verification record */}
-                              <div className="space-y-1.5">
-                                <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
-                                  <Info className="h-3 w-3" />
-                                  {isApex
-                                    ? "Option A — TXT ownership record"
-                                    : "Option A — TXT ownership record (preferred)"}
-                                </p>
-                                <DnsTable
-                                  rows={[
-                                    {
-                                      type: "TXT",
-                                      name: `_mustaflow-verify.${domain.hostname}`,
-                                      value: domain.verificationToken,
-                                    },
-                                  ]}
-                                />
-                              </div>
-
-                              {/* Routing record (CNAME for subdomains, A for apex) */}
-                              <div className="space-y-1.5">
-                                <p className="text-xs text-muted-foreground font-medium">
-                                  {isApex
-                                    ? "Option B — A record routing (apex)"
-                                    : "Option B — CNAME routing record"}
-                                </p>
-                                {isApex ? (
-                                  <div className="space-y-1">
-                                    <DnsTable
-                                      rows={[
-                                        { type: "A", name: "@", value: "76.76.21.21" },
-                                        { type: "A", name: "@", value: "76.76.21.22" },
-                                      ]}
-                                    />
-                                    <p className="text-[11px] text-muted-foreground">
-                                      Apex domains require A records (not CNAME). Add both IPs.
-                                    </p>
-                                  </div>
-                                ) : (
-                                  <DnsTable
-                                    rows={[
-                                      {
-                                        type: "CNAME",
-                                        name: domain.hostname,
-                                        value: domainsData.cnameTarget,
-                                      },
-                                    ]}
-                                  />
-                                )}
-                              </div>
-
-                              <p className="text-[11px] text-muted-foreground">
-                                DNS propagation can take up to 48 h. Click the refresh button once
-                                records are in place.
-                              </p>
-                            </div>
-                          )}
-
-                          {/* Diagnostic panel */}
-                          {isExpanded && diagResult && (
-                            <div className="px-3 pb-3 border-t border-border/60 pt-2.5 space-y-2">
-                              <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                                <Activity className="h-3.5 w-3.5" />
-                                Diagnostic results
-                              </p>
-                              <div className="space-y-1">
-                                {diagResult.checks.map((check) => (
-                                  <div
-                                    key={check.id}
-                                    className="flex items-start gap-2 text-xs py-1"
-                                  >
-                                    {check.passed === true ? (
-                                      <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0 mt-0.5" />
-                                    ) : check.passed === false ? (
-                                      <XCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
-                                    ) : (
-                                      <Circle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                      <p
-                                        className={cn(
-                                          "font-medium",
-                                          check.passed === true
-                                            ? "text-green-400"
-                                            : check.passed === false
-                                              ? "text-destructive"
-                                              : "text-muted-foreground",
-                                        )}
-                                      >
-                                        {check.label}
-                                      </p>
-                                      <p className="text-muted-foreground">{check.detail}</p>
-                                      {check.fixHint && check.passed === false && (
-                                        <p className="text-yellow-400 mt-0.5">{check.fixHint}</p>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="flex justify-end">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => void diagnosedomainById(domain.id)}
-                                  disabled={isDiagnosing}
-                                  className="h-7 text-xs gap-1"
-                                >
-                                  <RefreshCw className="h-3 w-3" />
-                                  Re-run
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* www-redirect toggle (apex domains only, when verified) */}
-                          {isApex && isVerified && (
-                            <div className="flex items-center justify-between px-3 py-2 border-t border-border/60 bg-muted/20">
-                              <span className="text-xs text-muted-foreground">
-                                Redirect www.{domain.hostname} → {domain.hostname}
-                              </span>
-                              <button
-                                onClick={() =>
-                                  void toggleWwwRedirect(domain.id, !domainsData.redirectWwwApex)
-                                }
-                                className="shrink-0 flex items-center"
-                                title="Toggle www redirect"
-                              >
-                                {domainsData.redirectWwwApex ? (
-                                  <ToggleRight className="h-5 w-5 text-primary" />
-                                ) : (
-                                  <ToggleLeft className="h-5 w-5 text-muted-foreground" />
-                                )}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {domainsData && domainsData.domains.length === 0 && (
-                  <p className="text-xs text-muted-foreground text-center py-3">
-                    No custom domains yet. Add one above to get started.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Site metadata */}
-            <div className="border border-border rounded-xl p-4 bg-card space-y-4">
-              <h3 className="font-semibold text-sm flex items-center gap-2">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-                Published Site Metadata
-              </h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    Site Title
-                  </label>
-                  <input
-                    value={siteTitle}
-                    onChange={(e) => setSiteTitle(e.target.value)}
-                    placeholder="My Awesome App"
-                    className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    Meta Description
-                  </label>
-                  <textarea
-                    value={metaDescription}
-                    onChange={(e) => setMetaDescription(e.target.value)}
-                    placeholder="A brief description for search engines and social sharing…"
-                    rows={2}
-                    className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    Theme Color
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={themeColor || "#000000"}
-                      onChange={(e) => setThemeColor(e.target.value)}
-                      className="h-9 w-12 rounded border border-border cursor-pointer bg-muted p-0.5"
-                    />
-                    <input
-                      value={themeColor}
-                      onChange={(e) => setThemeColor(e.target.value)}
-                      placeholder="#3b82f6"
-                      className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void saveSiteSettings()}
-                  disabled={savingSettings}
-                  className="w-full"
-                >
-                  {savingSettings ? (
-                    <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
-                  ) : (
-                    <Save className="h-3.5 w-3.5 mr-2" />
-                  )}
-                  Save Settings
-                </Button>
-              </div>
-            </div>
-
-            {/* Advanced settings — security gate toggle */}
-            <div className="border border-border rounded-xl p-4 bg-card space-y-4">
-              <h3 className="font-semibold text-sm flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                Advanced
-              </h3>
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium">Block publish on critical findings</div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    When on, publishing is blocked if any unresolved critical security findings
-                    exist from the latest quality scan. Disable to publish despite open findings.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void saveSecurityGate(!blockPublishOnCritical)}
-                  disabled={savingSecurityGate}
-                  className="shrink-0 flex items-center gap-1.5 mt-0.5 disabled:opacity-50"
-                  title={
-                    blockPublishOnCritical
-                      ? "Click to disable the security gate"
-                      : "Click to enable the security gate"
-                  }
-                >
-                  {savingSecurityGate ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                  ) : blockPublishOnCritical ? (
-                    <ToggleRight className="h-6 w-6 text-primary" />
-                  ) : (
-                    <ToggleLeft className="h-6 w-6 text-muted-foreground" />
-                  )}
-                </button>
-              </div>
-              {!blockPublishOnCritical && (
-                <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>
-                    Security gate is disabled. Critical findings will not block publishing.
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Deployment logs — includes EAS build entries (env="eas-ios"/"eas-android") */}
-            <div className="border border-border rounded-xl overflow-hidden bg-card">
-              <button
-                onClick={() => setLogsOpen((o) => !o)}
-                className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-muted/30 transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <span>Deployment History</span>
-                  {deployments.length > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-normal">
-                      {deployments.length}
-                    </span>
-                  )}
-                </div>
-                {logsOpen ? (
-                  <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                )}
-              </button>
-              {logsOpen &&
-                (deployments.length === 0 ? (
-                  <div className="bg-zinc-950 font-mono text-xs text-zinc-500 p-4 border-t border-border min-h-[80px] flex items-center justify-center">
-                    No deployments yet. History will appear here after your first deploy or EAS
-                    build.
-                  </div>
-                ) : (
-                  <div className="divide-y divide-border border-t border-border">
-                    {deployments.map((d) => {
-                      const isEas = d.env.startsWith("eas-");
-                      const isProduction = d.env === "production";
-                      const isTesting = d.env === "testing";
-                      const envLabel = isEas
-                        ? d.env.replace("eas-ios", "EAS iOS").replace("eas-android", "EAS Android")
-                        : d.env;
-                      return (
-                        <div
-                          key={d.id}
-                          className="flex items-center gap-3 px-4 py-2.5 text-xs flex-wrap"
-                        >
-                          {/* Status badge */}
-                          <span
-                            className={cn(
-                              "shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold",
-                              d.status === "passed"
-                                ? "bg-green-500/15 text-green-600"
-                                : d.status === "failed"
-                                  ? "bg-destructive/15 text-destructive"
-                                  : d.status === "unpublished"
-                                    ? "bg-muted text-muted-foreground"
-                                    : "bg-yellow-500/15 text-yellow-600",
-                            )}
-                          >
-                            {d.status === "started" ? "building" : d.status}
-                          </span>
-                          {/* Environment label */}
-                          {isEas ? (
-                            <span className="shrink-0 flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded text-[10px] bg-orange-500/15 text-orange-400 border border-orange-500/20">
-                              <Package className="h-2.5 w-2.5" />
-                              {envLabel}
-                            </span>
-                          ) : isProduction ? (
-                            <span className="shrink-0 flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded text-[10px] bg-green-500/15 text-green-600 border border-green-500/20">
-                              <Rocket className="h-2.5 w-2.5" />
-                              production
-                            </span>
-                          ) : isTesting ? (
-                            <span className="shrink-0 flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded text-[10px] bg-yellow-500/15 text-yellow-600 border border-yellow-500/20">
-                              <Server className="h-2.5 w-2.5" />
-                              testing
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground font-mono shrink-0 uppercase tracking-wide">
-                              {envLabel}
-                            </span>
-                          )}
-                          {/* URL link */}
-                          {d.publicUrl && (
-                            <a
-                              href={d.publicUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-primary truncate hover:underline min-w-0"
-                            >
-                              {d.publicUrl}
-                            </a>
-                          )}
-                          {d.filesCount != null && (
-                            <span className="text-muted-foreground shrink-0">
-                              {d.filesCount} file{d.filesCount !== 1 ? "s" : ""}
-                            </span>
-                          )}
-                          <span className="ml-auto text-muted-foreground shrink-0">
-                            {new Date(d.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-            </div>
-
-            {/* Readiness gate */}
-            {platform === "web" && (
-              <ReadinessGate
-                readiness={readiness}
-                loading={readinessLoading}
-                onRefresh={() => void fetchReadiness()}
-                projectId={projectId}
-                onFindingDismissed={() => void fetchReadiness()}
-                onNavigateToSecurity={onNavigateToChecks}
-              />
-            )}
-
-            {/* Checklist */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-4">
-                <h3 className="font-semibold text-sm whitespace-nowrap">
-                  {webEnv === "testing" ? "Testing" : "Production"} Checklist
-                </h3>
-                <ProgressBar sections={webChecklist} checked={checked} />
-              </div>
-              <ChecklistGroup sections={webChecklist} checked={checked} onToggle={toggle} />
-            </div>
-
-            {/* Deploy action (Phase E) */}
-            {webEnv === "production" && (
-              <div className="border border-border rounded-xl p-4 bg-card space-y-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <Rocket className="h-4 w-4 text-primary" />
-                  <h3 className="font-semibold text-sm">Deploy to Production</h3>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Snapshots your app, provisions a production container with blue/green swap, and
-                  makes it publicly available. Secrets are injected as environment variables.
-                </p>
-
-                {!webReadyToPublish && (
-                  <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>
-                      Complete all required checklist items before deploying to production.
-                    </span>
-                  </div>
-                )}
-
-                {!showDeployConfirm ? (
-                  <Button
-                    className="w-full"
-                    disabled={!webReadyToPublish || readiness?.canPublish === false || isDeploying}
-                    onClick={() => setShowDeployConfirm(true)}
-                  >
-                    <Rocket className="h-4 w-4 mr-2" />
-                    Deploy to Production
-                  </Button>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 text-sm space-y-1">
-                      <p className="font-semibold text-xs">Confirm production deploy</p>
-                      <p className="text-muted-foreground text-xs">
-                        This will snapshot the current build, boot a fresh production container, run
-                        a health check, then route traffic. The old container stays live until the
-                        new one is healthy. A rollback point is saved automatically.
+                      <p className="text-[10px] text-muted-foreground">
+                        Staging URL. Not publicly linked — share for review only.
                       </p>
                     </div>
-                    {deployError && (
-                      <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
-                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                        <span>{deployError}</span>
-                      </div>
+                  )}
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    disabled={isStaging}
+                    onClick={() => void handlePublishStaging()}
+                  >
+                    {isStaging ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Server className="h-4 w-4 mr-2" />
                     )}
-                    <div className="flex gap-2">
-                      <Button
-                        className="flex-1"
-                        onClick={() => void handleDeploy()}
-                        disabled={isDeploying}
-                      >
-                        {isDeploying && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                        {isDeploying ? "Deploying…" : "Confirm Deploy"}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => setShowDeployConfirm(false)}
-                        disabled={isDeploying}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+                    {isStaging ? "Publishing to staging…" : "Publish to Staging"}
+                  </Button>
+                </div>
 
-            {deployResult && (
-              <div className="border border-green-500/20 rounded-xl p-4 bg-green-500/5 space-y-3">
-                <div className="flex items-center gap-2 text-green-500 text-sm font-semibold">
-                  <CheckCircle2 className="h-4 w-4" />
-                  {deployResult.containerDeployed ? "App deployed and live" : "Snapshot published"}
-                </div>
-                <div className="flex items-center gap-2">
-                  <a
-                    href={deployResult.publicUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1.5 text-primary hover:text-primary/80 text-sm break-all min-w-0"
-                  >
-                    <span className="truncate">{deployResult.publicUrl}</span>
-                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
-                  </a>
-                  <CopyUrlButton url={deployResult.publicUrl} />
-                </div>
-                {deployResult.prodContainerUrl && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-muted-foreground">Dev Server:</span>
-                    <a
-                      href={deployResult.prodContainerUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-[11px] text-primary hover:underline truncate"
-                    >
-                      {deployResult.prodContainerUrl}
-                    </a>
-                    <CopyUrlButton url={deployResult.prodContainerUrl} />
-                  </div>
-                )}
-                <p className="text-[11px] text-muted-foreground">
-                  Slug: <span className="font-mono">{deployResult.publicSlug}</span>
-                  {deployResult.filesDeployed != null && (
-                    <span>
-                      {" · "}
-                      {deployResult.filesDeployed} file
-                      {deployResult.filesDeployed !== 1 ? "s" : ""}
-                    </span>
-                  )}
-                  {" · "}
-                  {deployResult.containerDeployed ? "Server deployed" : "Snapshot only"}
-                  {" · "}Deployed {new Date(deployResult.deployedAt).toLocaleString()}
-                </p>
-                {deployResult.note && (
-                  <p className="text-[11px] text-muted-foreground italic">{deployResult.note}</p>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    await fetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
-                    setDeployResult(null);
-                    void fetchDomain();
-                    void fetchDeployments();
-                    void fetchSiteSettings();
-                  }}
-                >
-                  Unpublish
-                </Button>
-              </div>
-            )}
-
-            {publishResult && (
-              <div className="border border-green-500/20 rounded-xl p-4 bg-green-500/5 space-y-3">
-                <div className="flex items-center gap-2 text-green-500 text-sm font-semibold">
-                  <CheckCircle2 className="h-4 w-4" />
-                  App is live (snapshot)
-                </div>
-                {publishResult.containerDeployed && (
-                  <div className="flex items-center gap-2 text-xs bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
-                    <Server className="h-3.5 w-3.5 text-primary shrink-0" />
-                    <span className="text-primary font-medium">Server deployed</span>
-                    <span className="text-muted-foreground">
-                      — public URL proxies to a live production server
-                    </span>
-                  </div>
-                )}
-                <div className="flex items-center gap-2">
-                  <a
-                    href={publishResult.publicUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1.5 text-primary hover:text-primary/80 text-sm break-all min-w-0"
-                  >
-                    <span className="truncate">{publishResult.publicUrl}</span>
-                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
-                  </a>
-                  <CopyUrlButton url={publishResult.publicUrl} />
-                </div>
-                {publishResult.containerDeployed && publishResult.containerUrl && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Server URL:{" "}
-                    <span className="font-mono break-all">{publishResult.containerUrl}</span>
+                <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                  <h3 className="font-semibold text-sm">Promote to production</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Copies the current staging snapshot directly to your live production URL — no
+                    rebuild required.
                   </p>
-                )}
-                <p className="text-[11px] text-muted-foreground">
-                  Slug: <span className="font-mono">{publishResult.publicSlug}</span>
-                  {!publishResult.containerDeployed && publishResult.filesPublished != null && (
-                    <span>
-                      {" · "}
-                      {publishResult.filesPublished} file
-                      {publishResult.filesPublished !== 1 ? "s" : ""}
-                    </span>
+                  {promoteError && <p className="text-xs text-destructive">{promoteError}</p>}
+                  {promoteResult?.ok && (
+                    <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3 space-y-1">
+                      <p className="text-xs font-medium text-green-600">Promoted to production</p>
+                      <a
+                        href={promoteResult.publicUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary underline break-all"
+                      >
+                        {promoteResult.publicUrl}
+                      </a>
+                    </div>
                   )}
-                  {" · "}Published {new Date(publishResult.publishedAt).toLocaleString()}
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  Internal path: <span className="font-mono">{publishResult.internalPathUrl}</span>
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    await fetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
-                    setPublishResult(null);
-                    void fetchDomain();
-                    void fetchDeployments();
-                  }}
-                >
-                  Unpublish
-                </Button>
-              </div>
-            )}
-
-            {/* GitHub push panel */}
-            <GithubPushPanel projectId={projectId} />
-
-            {webEnv === "testing" && (
-              <div className="space-y-2">
-                {publishError && <p className="text-xs text-destructive">{publishError}</p>}
-                {(() => {
-                  const secCheck = readiness?.checks.find(
-                    (c) => c.id === "no_critical_findings" && c.status === "fail",
-                  );
-                  const secCount = secCheck?.criticalFindingCount ?? 0;
-                  const isSecBlocked = Boolean(secCheck) && blockPublishOnCritical;
-                  return (
+                  {showPromoteConfirm ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-amber-500">
+                        This will replace your current live production app with the staged snapshot.
+                        Continue?
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="flex-1"
+                          disabled={isPromoting}
+                          onClick={() => void handlePromote()}
+                        >
+                          {isPromoting ? (
+                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          ) : null}
+                          {isPromoting ? "Promoting…" : "Promote"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => setShowPromoteConfirm(false)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
                     <Button
                       variant="outline"
                       className="w-full"
-                      disabled={!webReadyToPublish || isPublishing || isSecBlocked}
-                      onClick={() => void handlePublish()}
+                      onClick={() => setShowPromoteConfirm(true)}
                     >
-                      {isPublishing ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : isSecBlocked ? (
-                        <ShieldCheck className="h-4 w-4 mr-2 text-destructive" />
-                      ) : (
-                        <Server className="h-4 w-4 mr-2" />
-                      )}
-                      {isPublishing
-                        ? "Publishing…"
-                        : isSecBlocked
-                          ? `Blocked by ${secCount} critical finding${secCount !== 1 ? "s" : ""}`
-                          : "Publish to Testing"}
+                      <Globe className="h-4 w-4 mr-2" />
+                      Promote to Production
                     </Button>
-                  );
-                })()}
+                  )}
+                </div>
               </div>
+            )}
+
+            {/* ── Previews tab ─────────────────────────────────────────────── */}
+            {envTab === "previews" && (
+              <div className="space-y-4">
+                <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-sm">Per-build preview URLs</h3>
+                    <button
+                      onClick={() => void fetchPreviewSnapshots()}
+                      className="text-xs text-primary hover:text-primary/80 transition-colors"
+                      disabled={previewSnapshotsLoading}
+                    >
+                      {previewSnapshotsLoading ? "Loading…" : "Refresh"}
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Every successful build creates a preview link valid for 7 days. Share these
+                    links for quick reviews without affecting production.
+                  </p>
+
+                  {previewSnapshotsLoading && (
+                    <div className="flex items-center justify-center py-6">
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    </div>
+                  )}
+
+                  {!previewSnapshotsLoading && previewSnapshots.length === 0 && (
+                    <p className="text-xs text-muted-foreground italic py-4 text-center">
+                      No previews yet. Build the app to generate a preview URL.
+                    </p>
+                  )}
+
+                  {!previewSnapshotsLoading && previewSnapshots.length > 0 && (
+                    <div className="space-y-2">
+                      {previewSnapshots.map((snap) => {
+                        const expiresAt = snap.expiresAt ? new Date(snap.expiresAt) : null;
+                        const now = new Date();
+                        const msLeft = expiresAt ? expiresAt.getTime() - now.getTime() : 0;
+                        const daysLeft = Math.max(0, Math.floor(msLeft / 86400000));
+                        return (
+                          <div
+                            key={snap.id}
+                            className={cn(
+                              "rounded-lg border p-3 space-y-1",
+                              snap.expired
+                                ? "border-muted bg-muted/20 opacity-60"
+                                : "border-border bg-muted/10",
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-[10px] text-muted-foreground font-mono truncate">
+                                {snap.previewSlug}
+                              </p>
+                              {snap.expired ? (
+                                <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded shrink-0">
+                                  Expired
+                                </span>
+                              ) : (
+                                <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded shrink-0">
+                                  {daysLeft}d left
+                                </span>
+                              )}
+                            </div>
+                            {snap.versionLabel && (
+                              <p className="text-[10px] text-muted-foreground">
+                                {snap.versionLabel}
+                              </p>
+                            )}
+                            {!snap.expired && (
+                              <a
+                                href={snap.internalUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-primary underline break-all"
+                              >
+                                Open preview
+                              </a>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Production tab (existing content) ────────────────────────── */}
+            {envTab === "production" && (
+              <>
+                {/* 1-2-3 publish flow */}
+                <div className="border border-border rounded-xl p-4 bg-card">
+                  <h3 className="font-semibold text-sm mb-3">How to publish</h3>
+                  <div className="grid grid-cols-3 gap-3">
+                    {/* Step 1: Check */}
+                    <div
+                      className={cn(
+                        "flex flex-col items-center gap-2 p-3 rounded-lg border-2 text-center transition-colors",
+                        readiness?.canPublish
+                          ? "border-green-500/40 bg-green-500/5"
+                          : "border-border bg-muted/30",
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
+                          readiness?.canPublish
+                            ? "bg-green-500 text-white"
+                            : "bg-muted text-muted-foreground border border-border",
+                        )}
+                      >
+                        {readiness?.canPublish ? <CheckCircle2 className="h-4 w-4" /> : "1"}
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold">Check</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                          {readiness?.canPublish ? "All good" : "Run readiness check"}
+                        </div>
+                      </div>
+                      {!readiness?.canPublish && (
+                        <button
+                          onClick={() => void fetchReadiness()}
+                          disabled={readinessLoading}
+                          className="text-[10px] font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+                        >
+                          {readinessLoading ? "Checking…" : "Run check"}
+                        </button>
+                      )}
+                    </div>
+                    {/* Step 2: Publish */}
+                    <div
+                      className={cn(
+                        "flex flex-col items-center gap-2 p-3 rounded-lg border-2 text-center transition-colors",
+                        publishResult || deployResult
+                          ? "border-green-500/40 bg-green-500/5"
+                          : readiness?.canPublish
+                            ? "border-primary/40 bg-primary/5"
+                            : "border-border bg-muted/30 opacity-60",
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
+                          publishResult || deployResult
+                            ? "bg-green-500 text-white"
+                            : readiness?.canPublish
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-muted-foreground border border-border",
+                        )}
+                      >
+                        {publishResult || deployResult ? <CheckCircle2 className="h-4 w-4" /> : "2"}
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold">Publish</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                          {publishResult || deployResult ? "Published" : "Make it live"}
+                        </div>
+                      </div>
+                      {readiness?.canPublish &&
+                        !publishResult &&
+                        !deployResult &&
+                        webEnv === "testing" && (
+                          <button
+                            onClick={() => void handlePublish()}
+                            disabled={isPublishing}
+                            className="text-[10px] font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+                          >
+                            {isPublishing ? "Publishing…" : "Publish now"}
+                          </button>
+                        )}
+                    </div>
+                    {/* Step 3: Share */}
+                    <div
+                      className={cn(
+                        "flex flex-col items-center gap-2 p-3 rounded-lg border-2 text-center transition-colors",
+                        publishResult || deployResult
+                          ? "border-green-500/40 bg-green-500/5"
+                          : "border-border bg-muted/30 opacity-40",
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
+                          publishResult || deployResult
+                            ? "bg-green-500 text-white"
+                            : "bg-muted text-muted-foreground border border-border",
+                        )}
+                      >
+                        {publishResult || deployResult ? <CheckCircle2 className="h-4 w-4" /> : "3"}
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold">Share</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                          Copy your public link
+                        </div>
+                      </div>
+                      {(publishResult || deployResult) && (
+                        <CopyUrlButton
+                          url={deployResult?.publicUrl ?? publishResult?.publicUrl ?? ""}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Environment toggle card */}
+                <div className="border border-border rounded-xl p-4 bg-card space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-sm">Deployment Environment</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Testing for internal review, Production for public traffic.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setWebEnv((e) => (e === "testing" ? "production" : "testing"));
+                        setShowDeployConfirm(false);
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-muted hover:bg-muted/80 text-sm font-medium transition-colors"
+                    >
+                      {webEnv === "testing" ? (
+                        <ToggleLeft className="h-4 w-4 text-yellow-500" />
+                      ) : (
+                        <ToggleRight className="h-4 w-4 text-green-500" />
+                      )}
+                      {webEnv === "testing" ? "Testing" : "Production"}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {(["testing", "production"] as const).map((env) => (
+                      <div
+                        key={env}
+                        className={cn(
+                          "p-3 rounded-lg border-2 transition-colors",
+                          webEnv === env
+                            ? env === "testing"
+                              ? "border-yellow-500/50 bg-yellow-500/5"
+                              : "border-green-500/50 bg-green-500/5"
+                            : "border-border bg-muted/30",
+                        )}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          {env === "testing" ? (
+                            <Server className="h-3.5 w-3.5 text-yellow-500" />
+                          ) : (
+                            <Globe className="h-3.5 w-3.5 text-green-500" />
+                          )}
+                          <span className="text-xs font-semibold capitalize">{env}</span>
+                          {webEnv === env && (
+                            <span
+                              className={cn(
+                                "text-[10px] px-1.5 py-0.5 rounded font-bold",
+                                env === "testing"
+                                  ? "bg-yellow-500/20 text-yellow-600"
+                                  : "bg-green-500/20 text-green-600",
+                              )}
+                            >
+                              ACTIVE
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          {env === "testing"
+                            ? "Preview URL — internal use only, test keys."
+                            : "Live domain — public traffic, production keys."}
+                        </p>
+                        <div className="mt-2 font-mono text-[10px] text-muted-foreground bg-muted rounded px-2 py-1 truncate">
+                          {env === "testing" ? "mustaflow.app/preview/…" : "yourdomain.com"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Deployment status */}
+                <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-sm">Deployment Status</h3>
+                    <button
+                      onClick={() => void fetchSiteSettings()}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Refresh
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {/* Production container health */}
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground text-xs flex items-center gap-1.5">
+                        <Activity className="h-3 w-3" />
+                        Production server
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {prodContainerStatus === "running" ? (
+                          <>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-green-500/15 text-green-600">
+                              running
+                            </span>
+                            {prodContainerUrl && (
+                              <a
+                                href={prodContainerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] text-primary hover:underline truncate max-w-[160px]"
+                              >
+                                {prodContainerUrl}
+                              </a>
+                            )}
+                          </>
+                        ) : prodContainerStatus === "deploying" || isDeploying ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-blue-500/15 text-blue-600 flex items-center gap-1">
+                            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                            deploying
+                          </span>
+                        ) : prodContainerStatus === "error" ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-destructive/15 text-destructive">
+                            error
+                          </span>
+                        ) : prodContainerStatus === "stopped" ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-muted text-muted-foreground">
+                            stopped
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-muted text-muted-foreground">
+                            not deployed
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {/* Custom domain */}
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground text-xs">Custom domain</span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                            domainInfo?.domainStatus === "active"
+                              ? "bg-green-500/15 text-green-600"
+                              : domainInfo?.customDomain
+                                ? "bg-yellow-500/15 text-yellow-600"
+                                : "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {domainInfo?.domainStatus === "active"
+                            ? "active"
+                            : domainInfo?.customDomain
+                              ? "pending DNS"
+                              : "unconfigured"}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {domainInfo?.customDomain ?? "Configure below"}
+                        </span>
+                      </div>
+                    </div>
+                    {/* SSL */}
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground text-xs">SSL / HTTPS</span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                            domainInfo?.sslStatus === "active"
+                              ? "bg-green-500/15 text-green-600"
+                              : "bg-yellow-500/15 text-yellow-600",
+                          )}
+                        >
+                          {domainInfo?.sslStatus === "active" ? "active" : "partial"}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {domainInfo?.sslStatus === "active"
+                            ? "Certificate active"
+                            : "Requires manual cert setup"}
+                        </span>
+                      </div>
+                    </div>
+                    {/* Rollback */}
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground text-xs">Rollback point</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-green-500/15 text-green-600">
+                          ready
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          Latest snapshot available
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Domain Management */}
+                <div className="border border-border rounded-xl p-5 bg-card space-y-5">
+                  <h3 className="font-semibold text-sm flex items-center gap-2">
+                    <Globe className="h-4 w-4 text-muted-foreground" />
+                    Domains
+                  </h3>
+
+                  {/* Auto-subdomain */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Your Subdomain
+                    </p>
+                    <div className="flex items-center gap-2 bg-muted rounded-lg px-3 py-2.5">
+                      <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      {domainInfo?.subdomain ? (
+                        <>
+                          <span className="text-sm font-mono flex-1 truncate">
+                            {domainInfo.subdomain}
+                          </span>
+                          <a
+                            href={domainInfo.subdomainUrl ?? "#"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <ArrowUpRight className="h-3.5 w-3.5" />
+                          </a>
+                          <CopyUrlButton url={domainInfo.subdomainUrl ?? domainInfo.subdomain} />
+                        </>
+                      ) : (
+                        <span className="text-sm text-muted-foreground italic">
+                          Generated on first publish
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Automatically assigned. Available as soon as you publish.
+                    </p>
+                  </div>
+
+                  {/* Custom subdomain picker */}
+                  {domainInfo?.subdomain && (
+                    <CustomSubdomainPicker
+                      projectId={projectId}
+                      currentSlug={domainInfo.subdomain.split(".")[0] ?? ""}
+                      platformDomain={domainInfo.platformDomain}
+                      onSuccess={(newSlug, newSubdomain) => {
+                        setDomainInfo((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                subdomain: newSubdomain,
+                                subdomainUrl: `https://${newSubdomain}`,
+                              }
+                            : prev,
+                        );
+                      }}
+                    />
+                  )}
+
+                  <div className="border-t border-border" />
+
+                  {/* Multi-domain list */}
+                  <div className="space-y-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Custom Domains
+                    </p>
+
+                    {/* Add domain input */}
+                    <div className="flex gap-2">
+                      <input
+                        value={newDomainInput}
+                        onChange={(e) => setNewDomainInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void addDomain();
+                        }}
+                        placeholder="app.yourdomain.com or yourdomain.com"
+                        className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void addDomain()}
+                        disabled={addingDomain || !newDomainInput.trim()}
+                        className="shrink-0"
+                      >
+                        {addingDomain ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Link2 className="h-3.5 w-3.5" />
+                        )}
+                        <span className="ml-1.5">Add</span>
+                      </Button>
+                    </div>
+
+                    {domainAddError && (
+                      <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                        <span>{domainAddError}</span>
+                      </div>
+                    )}
+
+                    {/* Domain rows */}
+                    {domainsData && domainsData.domains.length > 0 && (
+                      <div className="space-y-2">
+                        {domainsData.domains.map((domain) => {
+                          const isApex = domain.recordType === "a";
+                          const isVerified = domain.verificationStatus === "verified";
+                          const isSslActive = domain.sslStatus === "active";
+                          const isVerifying = verifyingDomainId === domain.id;
+                          const isDiagnosing = diagnosingDomainId === domain.id;
+                          const isExpanded = expandedDomainId === domain.id;
+                          const diagResult = diagnoseResults[domain.id];
+
+                          return (
+                            <div
+                              key={domain.id}
+                              className="border border-border rounded-lg bg-muted/30 overflow-hidden"
+                            >
+                              {/* Domain row header */}
+                              <div className="flex items-center gap-2 px-3 py-2.5">
+                                {/* Status icon */}
+                                {isVerified && isSslActive ? (
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
+                                ) : isVerified ? (
+                                  <Lock className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
+                                ) : domain.verificationStatus === "failed" ? (
+                                  <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
+                                ) : (
+                                  <Circle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                )}
+
+                                {/* Hostname + badges */}
+                                <div className="flex items-center gap-1.5 flex-1 min-w-0 flex-wrap">
+                                  <span className="text-sm font-mono truncate">
+                                    {domain.hostname}
+                                  </span>
+                                  {domain.isPrimary && (
+                                    <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-medium shrink-0">
+                                      primary
+                                    </span>
+                                  )}
+                                  {isApex && (
+                                    <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-medium shrink-0">
+                                      apex
+                                    </span>
+                                  )}
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0",
+                                      isVerified
+                                        ? "bg-green-500/15 text-green-400"
+                                        : domain.verificationStatus === "failed"
+                                          ? "bg-destructive/15 text-destructive"
+                                          : "bg-yellow-500/15 text-yellow-400",
+                                    )}
+                                  >
+                                    {isVerified
+                                      ? "DNS verified"
+                                      : domain.verificationStatus === "failed"
+                                        ? "DNS failed"
+                                        : "DNS pending"}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0",
+                                      isSslActive
+                                        ? "bg-green-500/15 text-green-400"
+                                        : domain.sslStatus === "failed"
+                                          ? "bg-destructive/15 text-destructive"
+                                          : "bg-yellow-500/15 text-yellow-400",
+                                    )}
+                                  >
+                                    <Lock className="h-2.5 w-2.5" />
+                                    {isSslActive
+                                      ? "SSL"
+                                      : domain.sslStatus === "provisioning"
+                                        ? "SSL provisioning"
+                                        : domain.sslStatus === "failed"
+                                          ? "SSL failed"
+                                          : "SSL pending"}
+                                  </span>
+                                </div>
+
+                                {/* Action buttons */}
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {isVerified && (
+                                    <a
+                                      href={`https://${domain.hostname}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                                      title="Open domain"
+                                    >
+                                      <ArrowUpRight className="h-3.5 w-3.5" />
+                                    </a>
+                                  )}
+                                  {!isVerified && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => void verifyDomainById(domain.id)}
+                                      disabled={isVerifying}
+                                      className="h-7 px-2 text-xs"
+                                      title="Check DNS"
+                                    >
+                                      {isVerifying ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <RefreshCw className="h-3.5 w-3.5" />
+                                      )}
+                                    </Button>
+                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      isExpanded && diagResult
+                                        ? setExpandedDomainId(null)
+                                        : void diagnosedomainById(domain.id)
+                                    }
+                                    disabled={isDiagnosing}
+                                    className="h-7 px-2 text-xs"
+                                    title="Diagnose"
+                                  >
+                                    {isDiagnosing ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : isExpanded ? (
+                                      <ChevronUp className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <ChevronDown className="h-3.5 w-3.5" />
+                                    )}
+                                  </Button>
+                                  {!domain.isPrimary && isVerified && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => void setPrimaryDomain(domain.id)}
+                                      className="h-7 px-2 text-[10px]"
+                                      title="Make primary"
+                                    >
+                                      Set primary
+                                    </Button>
+                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => void removeDomainById(domain.id)}
+                                    className="h-7 px-2 text-destructive hover:text-destructive"
+                                    title="Remove"
+                                  >
+                                    <XCircle className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {/* DNS setup instructions (unverified domains) */}
+                              {!isVerified && (
+                                <div className="px-3 pb-3 space-y-2.5 border-t border-border/60 pt-2.5">
+                                  {/* TXT verification record */}
+                                  <div className="space-y-1.5">
+                                    <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+                                      <Info className="h-3 w-3" />
+                                      {isApex
+                                        ? "Option A — TXT ownership record"
+                                        : "Option A — TXT ownership record (preferred)"}
+                                    </p>
+                                    <DnsTable
+                                      rows={[
+                                        {
+                                          type: "TXT",
+                                          name: `_mustaflow-verify.${domain.hostname}`,
+                                          value: domain.verificationToken,
+                                        },
+                                      ]}
+                                    />
+                                  </div>
+
+                                  {/* Routing record (CNAME for subdomains, A for apex) */}
+                                  <div className="space-y-1.5">
+                                    <p className="text-xs text-muted-foreground font-medium">
+                                      {isApex
+                                        ? "Option B — A record routing (apex)"
+                                        : "Option B — CNAME routing record"}
+                                    </p>
+                                    {isApex ? (
+                                      <div className="space-y-1">
+                                        <DnsTable
+                                          rows={[
+                                            { type: "A", name: "@", value: "76.76.21.21" },
+                                            { type: "A", name: "@", value: "76.76.21.22" },
+                                          ]}
+                                        />
+                                        <p className="text-[11px] text-muted-foreground">
+                                          Apex domains require A records (not CNAME). Add both IPs.
+                                        </p>
+                                      </div>
+                                    ) : (
+                                      <DnsTable
+                                        rows={[
+                                          {
+                                            type: "CNAME",
+                                            name: domain.hostname,
+                                            value: domainsData.cnameTarget,
+                                          },
+                                        ]}
+                                      />
+                                    )}
+                                  </div>
+
+                                  <p className="text-[11px] text-muted-foreground">
+                                    DNS propagation can take up to 48 h. Click the refresh button
+                                    once records are in place.
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Diagnostic panel */}
+                              {isExpanded && diagResult && (
+                                <div className="px-3 pb-3 border-t border-border/60 pt-2.5 space-y-2">
+                                  <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                                    <Activity className="h-3.5 w-3.5" />
+                                    Diagnostic results
+                                  </p>
+                                  <div className="space-y-1">
+                                    {diagResult.checks.map((check) => (
+                                      <div
+                                        key={check.id}
+                                        className="flex items-start gap-2 text-xs py-1"
+                                      >
+                                        {check.passed === true ? (
+                                          <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0 mt-0.5" />
+                                        ) : check.passed === false ? (
+                                          <XCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                                        ) : (
+                                          <Circle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                          <p
+                                            className={cn(
+                                              "font-medium",
+                                              check.passed === true
+                                                ? "text-green-400"
+                                                : check.passed === false
+                                                  ? "text-destructive"
+                                                  : "text-muted-foreground",
+                                            )}
+                                          >
+                                            {check.label}
+                                          </p>
+                                          <p className="text-muted-foreground">{check.detail}</p>
+                                          {check.fixHint && check.passed === false && (
+                                            <p className="text-yellow-400 mt-0.5">
+                                              {check.fixHint}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="flex justify-end">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => void diagnosedomainById(domain.id)}
+                                      disabled={isDiagnosing}
+                                      className="h-7 text-xs gap-1"
+                                    >
+                                      <RefreshCw className="h-3 w-3" />
+                                      Re-run
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* www-redirect toggle (apex domains only, when verified) */}
+                              {isApex && isVerified && (
+                                <div className="flex items-center justify-between px-3 py-2 border-t border-border/60 bg-muted/20">
+                                  <span className="text-xs text-muted-foreground">
+                                    Redirect www.{domain.hostname} → {domain.hostname}
+                                  </span>
+                                  <button
+                                    onClick={() =>
+                                      void toggleWwwRedirect(
+                                        domain.id,
+                                        !domainsData.redirectWwwApex,
+                                      )
+                                    }
+                                    className="shrink-0 flex items-center"
+                                    title="Toggle www redirect"
+                                  >
+                                    {domainsData.redirectWwwApex ? (
+                                      <ToggleRight className="h-5 w-5 text-primary" />
+                                    ) : (
+                                      <ToggleLeft className="h-5 w-5 text-muted-foreground" />
+                                    )}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {domainsData && domainsData.domains.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-3">
+                        No custom domains yet. Add one above to get started.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Site metadata */}
+                <div className="border border-border rounded-xl p-4 bg-card space-y-4">
+                  <h3 className="font-semibold text-sm flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    Published Site Metadata
+                  </h3>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                        Site Title
+                      </label>
+                      <input
+                        value={siteTitle}
+                        onChange={(e) => setSiteTitle(e.target.value)}
+                        placeholder="My Awesome App"
+                        className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                        Meta Description
+                      </label>
+                      <textarea
+                        value={metaDescription}
+                        onChange={(e) => setMetaDescription(e.target.value)}
+                        placeholder="A brief description for search engines and social sharing…"
+                        rows={2}
+                        className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                        Theme Color
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={themeColor || "#000000"}
+                          onChange={(e) => setThemeColor(e.target.value)}
+                          className="h-9 w-12 rounded border border-border cursor-pointer bg-muted p-0.5"
+                        />
+                        <input
+                          value={themeColor}
+                          onChange={(e) => setThemeColor(e.target.value)}
+                          placeholder="#3b82f6"
+                          className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void saveSiteSettings()}
+                      disabled={savingSettings}
+                      className="w-full"
+                    >
+                      {savingSettings ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5 mr-2" />
+                      )}
+                      Save Settings
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Advanced settings — security gate toggle */}
+                <div className="border border-border rounded-xl p-4 bg-card space-y-4">
+                  <h3 className="font-semibold text-sm flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                    Advanced
+                  </h3>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium">Block publish on critical findings</div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        When on, publishing is blocked if any unresolved critical security findings
+                        exist from the latest quality scan. Disable to publish despite open
+                        findings.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void saveSecurityGate(!blockPublishOnCritical)}
+                      disabled={savingSecurityGate}
+                      className="shrink-0 flex items-center gap-1.5 mt-0.5 disabled:opacity-50"
+                      title={
+                        blockPublishOnCritical
+                          ? "Click to disable the security gate"
+                          : "Click to enable the security gate"
+                      }
+                    >
+                      {savingSecurityGate ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                      ) : blockPublishOnCritical ? (
+                        <ToggleRight className="h-6 w-6 text-primary" />
+                      ) : (
+                        <ToggleLeft className="h-6 w-6 text-muted-foreground" />
+                      )}
+                    </button>
+                  </div>
+                  {!blockPublishOnCritical && (
+                    <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>
+                        Security gate is disabled. Critical findings will not block publishing.
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Deployment logs — includes EAS build entries (env="eas-ios"/"eas-android") */}
+                <div className="border border-border rounded-xl overflow-hidden bg-card">
+                  <button
+                    onClick={() => setLogsOpen((o) => !o)}
+                    className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-muted/30 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>Deployment History</span>
+                      {deployments.length > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-normal">
+                          {deployments.length}
+                        </span>
+                      )}
+                    </div>
+                    {logsOpen ? (
+                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
+                  {logsOpen &&
+                    (deployments.length === 0 ? (
+                      <div className="bg-zinc-950 font-mono text-xs text-zinc-500 p-4 border-t border-border min-h-[80px] flex items-center justify-center">
+                        No deployments yet. History will appear here after your first deploy or EAS
+                        build.
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-border border-t border-border">
+                        {deployments.map((d) => {
+                          const isEas = d.env.startsWith("eas-");
+                          const isProduction = d.env === "production";
+                          const isTesting = d.env === "testing";
+                          const envLabel = isEas
+                            ? d.env
+                                .replace("eas-ios", "EAS iOS")
+                                .replace("eas-android", "EAS Android")
+                            : d.env;
+                          return (
+                            <div
+                              key={d.id}
+                              className="flex items-center gap-3 px-4 py-2.5 text-xs flex-wrap"
+                            >
+                              {/* Status badge */}
+                              <span
+                                className={cn(
+                                  "shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold",
+                                  d.status === "passed"
+                                    ? "bg-green-500/15 text-green-600"
+                                    : d.status === "failed"
+                                      ? "bg-destructive/15 text-destructive"
+                                      : d.status === "unpublished"
+                                        ? "bg-muted text-muted-foreground"
+                                        : "bg-yellow-500/15 text-yellow-600",
+                                )}
+                              >
+                                {d.status === "started" ? "building" : d.status}
+                              </span>
+                              {/* Environment label */}
+                              {isEas ? (
+                                <span className="shrink-0 flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded text-[10px] bg-orange-500/15 text-orange-400 border border-orange-500/20">
+                                  <Package className="h-2.5 w-2.5" />
+                                  {envLabel}
+                                </span>
+                              ) : isProduction ? (
+                                <span className="shrink-0 flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded text-[10px] bg-green-500/15 text-green-600 border border-green-500/20">
+                                  <Rocket className="h-2.5 w-2.5" />
+                                  production
+                                </span>
+                              ) : isTesting ? (
+                                <span className="shrink-0 flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded text-[10px] bg-yellow-500/15 text-yellow-600 border border-yellow-500/20">
+                                  <Server className="h-2.5 w-2.5" />
+                                  testing
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground font-mono shrink-0 uppercase tracking-wide">
+                                  {envLabel}
+                                </span>
+                              )}
+                              {/* URL link */}
+                              {d.publicUrl && (
+                                <a
+                                  href={d.publicUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-primary truncate hover:underline min-w-0"
+                                >
+                                  {d.publicUrl}
+                                </a>
+                              )}
+                              {d.filesCount != null && (
+                                <span className="text-muted-foreground shrink-0">
+                                  {d.filesCount} file{d.filesCount !== 1 ? "s" : ""}
+                                </span>
+                              )}
+                              <span className="ml-auto text-muted-foreground shrink-0">
+                                {new Date(d.createdAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                </div>
+
+                {/* Readiness gate */}
+                {platform === "web" && (
+                  <ReadinessGate
+                    readiness={readiness}
+                    loading={readinessLoading}
+                    onRefresh={() => void fetchReadiness()}
+                    projectId={projectId}
+                    onFindingDismissed={() => void fetchReadiness()}
+                    onNavigateToSecurity={onNavigateToChecks}
+                  />
+                )}
+
+                {/* Checklist */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <h3 className="font-semibold text-sm whitespace-nowrap">
+                      {webEnv === "testing" ? "Testing" : "Production"} Checklist
+                    </h3>
+                    <ProgressBar sections={webChecklist} checked={checked} />
+                  </div>
+                  <ChecklistGroup sections={webChecklist} checked={checked} onToggle={toggle} />
+                </div>
+
+                {/* Deploy action (Phase E) */}
+                {webEnv === "production" && (
+                  <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Rocket className="h-4 w-4 text-primary" />
+                      <h3 className="font-semibold text-sm">Deploy to Production</h3>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Snapshots your app, provisions a production container with blue/green swap,
+                      and makes it publicly available. Secrets are injected as environment
+                      variables.
+                    </p>
+
+                    {!webReadyToPublish && (
+                      <div className="flex items-start gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                        <span>
+                          Complete all required checklist items before deploying to production.
+                        </span>
+                      </div>
+                    )}
+
+                    {!showDeployConfirm ? (
+                      <Button
+                        className="w-full"
+                        disabled={
+                          !webReadyToPublish || readiness?.canPublish === false || isDeploying
+                        }
+                        onClick={() => setShowDeployConfirm(true)}
+                      >
+                        <Rocket className="h-4 w-4 mr-2" />
+                        Deploy to Production
+                      </Button>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 text-sm space-y-1">
+                          <p className="font-semibold text-xs">Confirm production deploy</p>
+                          <p className="text-muted-foreground text-xs">
+                            This will snapshot the current build, boot a fresh production container,
+                            run a health check, then route traffic. The old container stays live
+                            until the new one is healthy. A rollback point is saved automatically.
+                          </p>
+                        </div>
+                        {deployError && (
+                          <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                            <span>{deployError}</span>
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <Button
+                            className="flex-1"
+                            onClick={() => void handleDeploy()}
+                            disabled={isDeploying}
+                          >
+                            {isDeploying && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                            {isDeploying ? "Deploying…" : "Confirm Deploy"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => setShowDeployConfirm(false)}
+                            disabled={isDeploying}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {deployResult && (
+                  <div className="border border-green-500/20 rounded-xl p-4 bg-green-500/5 space-y-3">
+                    <div className="flex items-center gap-2 text-green-500 text-sm font-semibold">
+                      <CheckCircle2 className="h-4 w-4" />
+                      {deployResult.containerDeployed
+                        ? "App deployed and live"
+                        : "Snapshot published"}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={deployResult.publicUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1.5 text-primary hover:text-primary/80 text-sm break-all min-w-0"
+                      >
+                        <span className="truncate">{deployResult.publicUrl}</span>
+                        <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+                      </a>
+                      <CopyUrlButton url={deployResult.publicUrl} />
+                    </div>
+                    {deployResult.prodContainerUrl && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted-foreground">Dev Server:</span>
+                        <a
+                          href={deployResult.prodContainerUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] text-primary hover:underline truncate"
+                        >
+                          {deployResult.prodContainerUrl}
+                        </a>
+                        <CopyUrlButton url={deployResult.prodContainerUrl} />
+                      </div>
+                    )}
+                    <p className="text-[11px] text-muted-foreground">
+                      Slug: <span className="font-mono">{deployResult.publicSlug}</span>
+                      {deployResult.filesDeployed != null && (
+                        <span>
+                          {" · "}
+                          {deployResult.filesDeployed} file
+                          {deployResult.filesDeployed !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                      {" · "}
+                      {deployResult.containerDeployed ? "Server deployed" : "Snapshot only"}
+                      {" · "}Deployed {new Date(deployResult.deployedAt).toLocaleString()}
+                    </p>
+                    {deployResult.note && (
+                      <p className="text-[11px] text-muted-foreground italic">
+                        {deployResult.note}
+                      </p>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        await fetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
+                        setDeployResult(null);
+                        void fetchDomain();
+                        void fetchDeployments();
+                        void fetchSiteSettings();
+                      }}
+                    >
+                      Unpublish
+                    </Button>
+                  </div>
+                )}
+
+                {publishResult && (
+                  <div className="border border-green-500/20 rounded-xl p-4 bg-green-500/5 space-y-3">
+                    <div className="flex items-center gap-2 text-green-500 text-sm font-semibold">
+                      <CheckCircle2 className="h-4 w-4" />
+                      App is live (snapshot)
+                    </div>
+                    {publishResult.containerDeployed && (
+                      <div className="flex items-center gap-2 text-xs bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
+                        <Server className="h-3.5 w-3.5 text-primary shrink-0" />
+                        <span className="text-primary font-medium">Server deployed</span>
+                        <span className="text-muted-foreground">
+                          — public URL proxies to a live production server
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={publishResult.publicUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1.5 text-primary hover:text-primary/80 text-sm break-all min-w-0"
+                      >
+                        <span className="truncate">{publishResult.publicUrl}</span>
+                        <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+                      </a>
+                      <CopyUrlButton url={publishResult.publicUrl} />
+                    </div>
+                    {publishResult.containerDeployed && publishResult.containerUrl && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Server URL:{" "}
+                        <span className="font-mono break-all">{publishResult.containerUrl}</span>
+                      </p>
+                    )}
+                    <p className="text-[11px] text-muted-foreground">
+                      Slug: <span className="font-mono">{publishResult.publicSlug}</span>
+                      {!publishResult.containerDeployed && publishResult.filesPublished != null && (
+                        <span>
+                          {" · "}
+                          {publishResult.filesPublished} file
+                          {publishResult.filesPublished !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                      {" · "}Published {new Date(publishResult.publishedAt).toLocaleString()}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Internal path:{" "}
+                      <span className="font-mono">{publishResult.internalPathUrl}</span>
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        await fetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
+                        setPublishResult(null);
+                        void fetchDomain();
+                        void fetchDeployments();
+                      }}
+                    >
+                      Unpublish
+                    </Button>
+                  </div>
+                )}
+
+                {/* GitHub push panel */}
+                <GithubPushPanel projectId={projectId} />
+
+                {webEnv === "testing" && (
+                  <div className="space-y-2">
+                    {publishError && <p className="text-xs text-destructive">{publishError}</p>}
+                    {(() => {
+                      const secCheck = readiness?.checks.find(
+                        (c) => c.id === "no_critical_findings" && c.status === "fail",
+                      );
+                      const secCount = secCheck?.criticalFindingCount ?? 0;
+                      const isSecBlocked = Boolean(secCheck) && blockPublishOnCritical;
+                      return (
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          disabled={!webReadyToPublish || isPublishing || isSecBlocked}
+                          onClick={() => void handlePublish()}
+                        >
+                          {isPublishing ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : isSecBlocked ? (
+                            <ShieldCheck className="h-4 w-4 mr-2 text-destructive" />
+                          ) : (
+                            <Server className="h-4 w-4 mr-2" />
+                          )}
+                          {isPublishing
+                            ? "Publishing…"
+                            : isSecBlocked
+                              ? `Blocked by ${secCount} critical finding${secCount !== 1 ? "s" : ""}`
+                              : "Publish to Testing"}
+                        </Button>
+                      );
+                    })()}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
