@@ -18,6 +18,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, desc } from "drizzle-orm";
 import { X509Certificate } from "node:crypto";
 import { createSecureContext } from "node:tls";
+import { promises as dnsPromises } from "node:dns";
 import { db, projectDomainsTable, deploymentLogsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import {
@@ -601,6 +602,205 @@ router.post(
     });
   },
 );
+
+// ── GET /api/projects/:id/domains/:domainId/dns/:recordId/propagation ────────
+// Live propagation check: queries public resolvers (1.1.1.1, 8.8.8.8, system
+// default) and compares the live answer to the CF-stored value for this record.
+// Returns: status="propagated" (all match) | "partial" (some match) | "not-found".
+
+const PUBLIC_RESOLVERS: Array<{ name: string; servers: string[] }> = [
+  { name: "Cloudflare (1.1.1.1)", servers: ["1.1.1.1", "1.0.0.1"] },
+  { name: "Google (8.8.8.8)", servers: ["8.8.8.8", "8.8.4.4"] },
+  { name: "Quad9 (9.9.9.9)", servers: ["9.9.9.9", "149.112.112.112"] },
+];
+
+const PROPAGATION_QUERY_TIMEOUT_MS = 4000;
+
+function stripTrailingDot(v: string): string {
+  return v.replace(/\.$/, "").toLowerCase();
+}
+
+function normalizeIpv6(v: string): string {
+  // Lower-case + collapse — best-effort comparison without bringing in a library.
+  return v.toLowerCase().replace(/\b0+([0-9a-f])/g, "$1");
+}
+
+type ResolverResult = {
+  resolver: string;
+  matched: boolean;
+  values: string[];
+  error?: string;
+};
+
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return await Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Resolver timed out after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
+async function queryResolver(
+  servers: string[],
+  recordName: string,
+  recordType: string,
+): Promise<string[]> {
+  const r = new dnsPromises.Resolver();
+  r.setServers(servers);
+  const name = stripTrailingDot(recordName);
+  const t = recordType.toUpperCase();
+
+  if (t === "A") {
+    const v = await withTimeout(r.resolve4(name), PROPAGATION_QUERY_TIMEOUT_MS);
+    return v;
+  }
+  if (t === "AAAA") {
+    const v = await withTimeout(r.resolve6(name), PROPAGATION_QUERY_TIMEOUT_MS);
+    return v.map(normalizeIpv6);
+  }
+  if (t === "CNAME") {
+    const v = await withTimeout(r.resolveCname(name), PROPAGATION_QUERY_TIMEOUT_MS);
+    return v.map(stripTrailingDot);
+  }
+  if (t === "MX") {
+    const v = await withTimeout(r.resolveMx(name), PROPAGATION_QUERY_TIMEOUT_MS);
+    return v.map((m) => stripTrailingDot(m.exchange));
+  }
+  if (t === "TXT") {
+    const v = await withTimeout(r.resolveTxt(name), PROPAGATION_QUERY_TIMEOUT_MS);
+    return v.map((chunks) => chunks.join(""));
+  }
+  if (t === "NS") {
+    const v = await withTimeout(r.resolveNs(name), PROPAGATION_QUERY_TIMEOUT_MS);
+    return v.map(stripTrailingDot);
+  }
+  throw new Error(`Unsupported record type for propagation check: ${t}`);
+}
+
+function expectedValueFor(record: {
+  type: string;
+  content?: string;
+  data?: Record<string, unknown> | null;
+}): string | null {
+  const t = record.type.toUpperCase();
+  if (t === "A" || t === "TXT") {
+    return record.content?.trim() ?? null;
+  }
+  if (t === "AAAA") {
+    return record.content ? normalizeIpv6(record.content.trim()) : null;
+  }
+  if (t === "CNAME" || t === "MX" || t === "NS") {
+    return record.content ? stripTrailingDot(record.content.trim()) : null;
+  }
+  return null;
+}
+
+function valuesMatch(type: string, expected: string, observed: string[]): boolean {
+  const t = type.toUpperCase();
+  if (t === "TXT") {
+    // TXT is an exact-string compare (after stripping surrounding quotes).
+    const norm = expected.replace(/^"|"$/g, "");
+    return observed.some((v) => v.replace(/^"|"$/g, "") === norm);
+  }
+  return observed.some((v) => v === expected);
+}
+
+router.get(
+  "/projects/:id/domains/:domainId/dns/:recordId/propagation",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const domainId = Number(req.params.domainId);
+    const recordId = String(req.params.recordId);
+
+    const domain = await getDomainOrNull(domainId, projectId);
+    if (!domain) {
+      res.status(404).json({ error: "Domain not found" });
+      return;
+    }
+
+    if (!cfEnabled()) {
+      res.status(503).json({
+        error: "DNS record management requires Cloudflare integration.",
+      });
+      return;
+    }
+
+    // Find the record in this domain's zone (also acts as authorization).
+    const domainRecords = await listDnsRecords(domain.hostname);
+    const record = domainRecords.find((r) => r.id === recordId);
+    if (!record) {
+      res.status(404).json({ error: "Record not found in this domain." });
+      return;
+    }
+
+    const supported = ["A", "AAAA", "CNAME", "MX", "TXT", "NS"];
+    if (!supported.includes(record.type.toUpperCase())) {
+      res.json({
+        recordId,
+        type: record.type,
+        name: record.name,
+        status: "unsupported",
+        expected: null,
+        resolvers: [],
+        checkedAt: new Date().toISOString(),
+        message: `Propagation checks are not supported for ${record.type} records yet.`,
+      });
+      return;
+    }
+
+    const expected = expectedValueFor(record);
+    if (!expected) {
+      res.json({
+        recordId,
+        type: record.type,
+        name: record.name,
+        status: "unsupported",
+        expected: null,
+        resolvers: [],
+        checkedAt: new Date().toISOString(),
+        message: "Could not derive an expected value from the stored record.",
+      });
+      return;
+    }
+
+    // Query each public resolver in parallel.
+    const results: ResolverResult[] = await Promise.all(
+      PUBLIC_RESOLVERS.map(async (rs): Promise<ResolverResult> => {
+        try {
+          const values = await queryResolver(rs.servers, record.name, record.type);
+          return {
+            resolver: rs.name,
+            matched: valuesMatch(record.type, expected, values),
+            values,
+          };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return { resolver: rs.name, matched: false, values: [], error: msg };
+        }
+      }),
+    );
+
+    const matchedCount = results.filter((r) => r.matched).length;
+    const status =
+      matchedCount === results.length ? "propagated" : matchedCount > 0 ? "partial" : "not-found";
+
+    res.json({
+      recordId,
+      type: record.type,
+      name: record.name,
+      expected,
+      status,
+      resolvers: results,
+      checkedAt: new Date().toISOString(),
+    });
+  },
+);
+
+// Reference the unused promises import (kept available for future probes that
+// want to bypass per-resolver behaviour and use the system DNS).
+void dnsPromises;
 
 // ── POST /api/projects/:id/domains/:domainId/certificate ─────────────────────
 // Upload a BYO TLS certificate + private key.

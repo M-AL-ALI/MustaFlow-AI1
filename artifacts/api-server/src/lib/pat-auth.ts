@@ -31,7 +31,11 @@ declare module "express" {
 }
 
 /** Narrowed request type after PAT authentication — guarantees patScopes is set. */
-export type PATRequest = Request & { userId: string; patProjectId: number | null; patScopes: string[] };
+export type PATRequest = Request & {
+  userId: string;
+  patProjectId: number | null;
+  patScopes: string[];
+};
 
 /**
  * Middleware: authenticate via Bearer PAT.
@@ -88,7 +92,9 @@ export async function patAuthMiddleware(
         .update(personalAccessTokensTable)
         .set({ lastUsedAt: new Date() })
         .where(eq(personalAccessTokensTable.id, token.id))
-        .catch(() => {/* ignore */});
+        .catch(() => {
+          /* ignore */
+        });
     });
 
     next();

@@ -142,9 +142,7 @@ export function dispatchWebhookEvent(
         };
 
         await Promise.allSettled(
-          subscribed.map((h) =>
-            deliverWithRetry(h.id, projectId, event, h.url, h.secret, payload),
-          ),
+          subscribed.map((h) => deliverWithRetry(h.id, projectId, event, h.url, h.secret, payload)),
         );
       } catch (err) {
         logger.warn({ err, projectId, event }, "dispatchWebhookEvent outer error");

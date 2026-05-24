@@ -14,6 +14,7 @@ import {
   Eye,
   RefreshCw,
   Info,
+  Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,21 @@ interface DnsHistoryEntry {
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
   createdAt: string;
+}
+
+interface PropagationResolver {
+  resolver: string;
+  matched: boolean;
+  values: string[];
+  error?: string;
+}
+
+interface PropagationResult {
+  status: "propagated" | "partial" | "not-found" | "unsupported";
+  expected: string | null;
+  resolvers: PropagationResolver[];
+  checkedAt: string;
+  message?: string;
 }
 
 interface DryRunDiff {
@@ -248,6 +264,81 @@ function RecordBadge({ type }: { type: string }) {
     >
       {type}
     </span>
+  );
+}
+
+function PropagationBadge({ result }: { result?: PropagationResult }) {
+  if (!result) return null;
+  const styles: Record<PropagationResult["status"], { cls: string; label: string }> = {
+    propagated: { cls: "bg-green-500/15 text-green-400", label: "Propagated" },
+    partial: { cls: "bg-yellow-500/15 text-yellow-400", label: "Partial" },
+    "not-found": { cls: "bg-red-500/15 text-red-400", label: "Not found" },
+    unsupported: { cls: "bg-muted text-muted-foreground", label: "Unsupported" },
+  };
+  const s = styles[result.status];
+  return (
+    <span
+      className={cn("inline-block font-medium text-[10px] px-1.5 py-0.5 rounded shrink-0", s.cls)}
+      title={`Checked ${new Date(result.checkedAt).toLocaleTimeString()}`}
+    >
+      {s.label}
+    </span>
+  );
+}
+
+function PropagationDetails({
+  result,
+  onClose,
+}: {
+  result: PropagationResult;
+  onClose: () => void;
+}) {
+  return (
+    <div className="px-3 py-2 bg-muted/20 border-t border-border text-[11px]">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <span className="font-medium text-foreground">DNS propagation</span>
+          {result.expected && (
+            <>
+              <span>expected:</span>
+              <span className="font-mono text-foreground truncate max-w-[260px]">
+                {result.expected}
+              </span>
+            </>
+          )}
+        </div>
+        <button
+          onClick={onClose}
+          className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          title="Hide details"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+      {result.message && <p className="text-muted-foreground mb-1.5">{result.message}</p>}
+      {result.resolvers.length > 0 && (
+        <div className="space-y-1">
+          {result.resolvers.map((rs) => (
+            <div key={rs.resolver} className="flex items-start gap-2">
+              <span
+                className={cn(
+                  "inline-block w-1.5 h-1.5 mt-1.5 rounded-full shrink-0",
+                  rs.matched ? "bg-green-400" : "bg-red-400",
+                )}
+              />
+              <span className="text-muted-foreground w-44 shrink-0">{rs.resolver}</span>
+              <span className="font-mono text-foreground break-all flex-1 min-w-0">
+                {rs.error
+                  ? `error: ${rs.error}`
+                  : rs.values.length > 0
+                    ? rs.values.join(", ")
+                    : "(no answer)"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -653,6 +744,11 @@ export function DnsRecordsPanel({
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
+  // Propagation check state — per-record
+  const [propagation, setPropagation] = useState<Record<string, PropagationResult>>({});
+  const [propagationChecking, setPropagationChecking] = useState<Record<string, boolean>>({});
+  const [propagationOpen, setPropagationOpen] = useState<Record<string, boolean>>({});
+
   // Dry-run state — shared between create and update paths
   const [dryRunDiff, setDryRunDiff] = useState<DryRunDiff[] | null>(null);
   const [pendingCreate, setPendingCreate] = useState<Record<string, unknown> | null>(null);
@@ -853,6 +949,47 @@ export function DnsRecordsPanel({
     [projectId, domain.id, load],
   );
 
+  const checkPropagation = useCallback(
+    async (recordId: string) => {
+      setPropagationChecking((s) => ({ ...s, [recordId]: true }));
+      setPropagationOpen((s) => ({ ...s, [recordId]: true }));
+      try {
+        const r = await fetch(
+          `/api/projects/${projectId}/domains/${domain.id}/dns/${recordId}/propagation`,
+        );
+        const data = (await r.json()) as PropagationResult & { error?: string };
+        if (!r.ok) {
+          setPropagation((s) => ({
+            ...s,
+            [recordId]: {
+              status: "not-found",
+              expected: null,
+              resolvers: [],
+              checkedAt: new Date().toISOString(),
+              message: data.error ?? "Propagation check failed.",
+            },
+          }));
+          return;
+        }
+        setPropagation((s) => ({ ...s, [recordId]: data }));
+      } catch {
+        setPropagation((s) => ({
+          ...s,
+          [recordId]: {
+            status: "not-found",
+            expected: null,
+            resolvers: [],
+            checkedAt: new Date().toISOString(),
+            message: "Network error during propagation check.",
+          },
+        }));
+      } finally {
+        setPropagationChecking((s) => ({ ...s, [recordId]: false }));
+      }
+    },
+    [projectId, domain.id],
+  );
+
   const handleRollback = useCallback(
     async (logId: number) => {
       setRollingBack(logId);
@@ -1036,47 +1173,70 @@ export function DnsRecordsPanel({
                       />
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-muted/20 transition-colors">
-                      <RecordBadge type={rec.type} />
-                      <div className="flex-1 min-w-0">
-                        <span className="font-mono text-foreground">{rec.name}</span>
-                        {rec.content && (
-                          <span className="text-muted-foreground ml-2 truncate">{rec.content}</span>
+                    <>
+                      <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-muted/20 transition-colors">
+                        <RecordBadge type={rec.type} />
+                        <div className="flex-1 min-w-0">
+                          <span className="font-mono text-foreground">{rec.name}</span>
+                          {rec.content && (
+                            <span className="text-muted-foreground ml-2 truncate">
+                              {rec.content}
+                            </span>
+                          )}
+                          {rec.priority !== undefined && (
+                            <span className="text-muted-foreground ml-1">(pri {rec.priority})</span>
+                          )}
+                        </div>
+                        <PropagationBadge result={propagation[rec.id]} />
+                        <span className="text-muted-foreground shrink-0">
+                          {rec.ttl === 1 ? "Auto" : `${rec.ttl}s`}
+                        </span>
+                        {rec.proxied && (
+                          <span className="text-orange-400 text-[10px] shrink-0">proxied</span>
                         )}
-                        {rec.priority !== undefined && (
-                          <span className="text-muted-foreground ml-1">(pri {rec.priority})</span>
+                        {enabled && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => void checkPropagation(rec.id)}
+                              disabled={propagationChecking[rec.id]}
+                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                              title="Check DNS propagation"
+                            >
+                              {propagationChecking[rec.id] ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Globe className="h-3 w-3" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => setEditingRecord(rec)}
+                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                              title="Edit"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                            <button
+                              onClick={() => void handleDelete(rec.id)}
+                              disabled={deleting === rec.id}
+                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                              title="Delete"
+                            >
+                              {deleting === rec.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3 w-3" />
+                              )}
+                            </button>
+                          </div>
                         )}
                       </div>
-                      <span className="text-muted-foreground shrink-0">
-                        {rec.ttl === 1 ? "Auto" : `${rec.ttl}s`}
-                      </span>
-                      {rec.proxied && (
-                        <span className="text-orange-400 text-[10px] shrink-0">proxied</span>
+                      {propagationOpen[rec.id] && propagation[rec.id] && (
+                        <PropagationDetails
+                          result={propagation[rec.id]!}
+                          onClose={() => setPropagationOpen((s) => ({ ...s, [rec.id]: false }))}
+                        />
                       )}
-                      {enabled && (
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            onClick={() => setEditingRecord(rec)}
-                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                            title="Edit"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
-                          <button
-                            onClick={() => void handleDelete(rec.id)}
-                            disabled={deleting === rec.id}
-                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                            title="Delete"
-                          >
-                            {deleting === rec.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-3 w-3" />
-                            )}
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    </>
                   )}
                 </div>
               ))}

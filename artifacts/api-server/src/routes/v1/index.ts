@@ -18,12 +18,7 @@ import { Router, type IRouter } from "express";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
 import { promises as dns } from "dns";
-import {
-  db,
-  projectsTable,
-  projectDomainsTable,
-  personalAccessTokensTable,
-} from "@workspace/db";
+import { db, projectsTable, projectDomainsTable, personalAccessTokensTable } from "@workspace/db";
 import { patAuthMiddleware, type PATRequest } from "../../lib/pat-auth";
 import { publishDomainEvent } from "../../lib/event-bus";
 import { dispatchWebhookEvent } from "../../lib/webhook-dispatcher";
@@ -184,9 +179,7 @@ router.delete("/v1/projects/:id/domains/:domainId", async (req, res): Promise<vo
   const [domain] = await db
     .select()
     .from(projectDomainsTable)
-    .where(
-      and(eq(projectDomainsTable.id, domainId), eq(projectDomainsTable.projectId, projectId)),
-    );
+    .where(and(eq(projectDomainsTable.id, domainId), eq(projectDomainsTable.projectId, projectId)));
 
   if (!domain) {
     res.status(404).json({ error: "Domain not found." });
@@ -216,9 +209,7 @@ router.post("/v1/projects/:id/domains/:domainId/verify", async (req, res): Promi
   const [domain] = await db
     .select()
     .from(projectDomainsTable)
-    .where(
-      and(eq(projectDomainsTable.id, domainId), eq(projectDomainsTable.projectId, projectId)),
-    );
+    .where(and(eq(projectDomainsTable.id, domainId), eq(projectDomainsTable.projectId, projectId)));
 
   if (!domain) {
     res.status(404).json({ error: "Domain not found." });
@@ -319,9 +310,7 @@ router.post("/v1/tokens", async (req, res): Promise<void> => {
   const tokenPreview = `${raw.slice(0, 10)}•••••••••••${raw.slice(-4)}`;
 
   const expiresAt =
-    expiresInDays && expiresInDays > 0
-      ? new Date(Date.now() + expiresInDays * 86_400_000)
-      : null;
+    expiresInDays && expiresInDays > 0 ? new Date(Date.now() + expiresInDays * 86_400_000) : null;
 
   const [created] = await db
     .insert(personalAccessTokensTable)

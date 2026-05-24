@@ -329,9 +329,7 @@ function CreateWebhookForm({
   const [error, setError] = useState<string | null>(null);
 
   const toggleEvent = (e: string) => {
-    setSelectedEvents((prev) =>
-      prev.includes(e) ? prev.filter((x) => x !== e) : [...prev, e],
-    );
+    setSelectedEvents((prev) => (prev.includes(e) ? prev.filter((x) => x !== e) : [...prev, e]));
   };
 
   const handleSubmit = async () => {

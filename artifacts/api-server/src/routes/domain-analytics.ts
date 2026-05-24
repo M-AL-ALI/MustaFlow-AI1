@@ -36,10 +36,7 @@ router.get(
       .select()
       .from(projectDomainsTable)
       .where(
-        and(
-          eq(projectDomainsTable.id, domainId),
-          eq(projectDomainsTable.projectId, projectId),
-        ),
+        and(eq(projectDomainsTable.id, domainId), eq(projectDomainsTable.projectId, projectId)),
       );
 
     if (!domain) {
@@ -49,27 +46,25 @@ router.get(
 
     // ── Business metrics from our own Postgres ─────────────────────────────
     const windowMs =
-      window === "24h" ? 24 * 60 * 60 * 1000 : window === "7d" ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+      window === "24h"
+        ? 24 * 60 * 60 * 1000
+        : window === "7d"
+          ? 7 * 24 * 60 * 60 * 1000
+          : 30 * 24 * 60 * 60 * 1000;
     const since = new Date(Date.now() - windowMs);
 
     const [serveRow] = await db
       .select({ total: sql<number>`count(*)::int` })
       .from(domainServeEventsTable)
       .where(
-        and(
-          eq(domainServeEventsTable.domainId, domainId),
-          gte(domainServeEventsTable.ts, since),
-        ),
+        and(eq(domainServeEventsTable.domainId, domainId), gte(domainServeEventsTable.ts, since)),
       );
 
     const [uniqueDatesRow] = await db
       .select({ uniqueDates: sql<number>`count(distinct date_trunc('day', ts))::int` })
       .from(domainServeEventsTable)
       .where(
-        and(
-          eq(domainServeEventsTable.domainId, domainId),
-          gte(domainServeEventsTable.ts, since),
-        ),
+        and(eq(domainServeEventsTable.domainId, domainId), gte(domainServeEventsTable.ts, since)),
       );
 
     // ── Cloudflare traffic metrics ─────────────────────────────────────────
@@ -114,10 +109,7 @@ router.get(
       .select()
       .from(projectDomainsTable)
       .where(
-        and(
-          eq(projectDomainsTable.id, domainId),
-          eq(projectDomainsTable.projectId, projectId),
-        ),
+        and(eq(projectDomainsTable.id, domainId), eq(projectDomainsTable.projectId, projectId)),
       );
 
     if (!domain) {
@@ -136,10 +128,7 @@ router.get(
       })
       .from(deploymentLogsTable)
       .where(
-        and(
-          eq(deploymentLogsTable.projectId, projectId),
-          eq(deploymentLogsTable.env, "domain"),
-        ),
+        and(eq(deploymentLogsTable.projectId, projectId), eq(deploymentLogsTable.env, "domain")),
       )
       .orderBy(asc(deploymentLogsTable.createdAt))
       .limit(200);

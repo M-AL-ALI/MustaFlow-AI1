@@ -378,7 +378,13 @@ export async function customDomainMiddleware(
   const rawPath = req.path === "/" ? "index.html" : req.path.replace(/^\//, "");
   const incomingHostname = typeof req.headers["host"] === "string" ? req.headers["host"] : null;
   if (project.environment === "staging") {
-    await serveSnapshotByProjectEnv(res, project.id, rawPath, "staging", incomingHostname ?? undefined);
+    await serveSnapshotByProjectEnv(
+      res,
+      project.id,
+      rawPath,
+      "staging",
+      incomingHostname ?? undefined,
+    );
   } else {
     await serveSnapshot(res, project.id, rawPath);
   }

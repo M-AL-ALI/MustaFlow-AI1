@@ -685,9 +685,7 @@ router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void
   const days = Math.min(Math.max(1, isNaN(rawDays) ? 7 : rawDays), 90);
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  const [totalDomainsRow] = await db
-    .select({ total: count() })
-    .from(projectDomainsTable);
+  const [totalDomainsRow] = await db.select({ total: count() }).from(projectDomainsTable);
 
   const [verifiedRow] = await db
     .select({ total: count() })
@@ -935,8 +933,6 @@ router.get("/admin/security/dashboard", async (_req, res): Promise<void> => {
       domains: suspendedDomains,
     },
     cloudflare: cfSummary,
-  });
-});
   });
 });
 

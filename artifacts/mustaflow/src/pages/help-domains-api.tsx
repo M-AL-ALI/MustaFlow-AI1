@@ -126,9 +126,7 @@ export default function HelpDomainsApiPage() {
           <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
             Base URL
           </p>
-          <code className="text-sm font-mono text-foreground">
-            https://mustaflow.app/api/v1
-          </code>
+          <code className="text-sm font-mono text-foreground">https://mustaflow.app/api/v1</code>
         </div>
 
         {/* Authentication */}
@@ -237,10 +235,7 @@ export default function HelpDomainsApiPage() {
           <p className="text-sm text-muted-foreground">
             Register webhooks to receive real-time notifications on domain lifecycle events.
             Deliveries are HMAC-signed with{" "}
-            <code className="text-foreground">
-              X-Mustaflow-Signature: sha256=&lt;hex&gt;
-            </code>
-            .
+            <code className="text-foreground">X-Mustaflow-Signature: sha256=&lt;hex&gt;</code>.
           </p>
           <div className="space-y-2">
             <h3 className="text-sm font-semibold text-foreground">Available events</h3>
@@ -279,7 +274,9 @@ export default function HelpDomainsApiPage() {
             />
           </div>
           <div className="space-y-2">
-            <h3 className="text-sm font-semibold text-foreground">Verifying signatures (Node.js)</h3>
+            <h3 className="text-sm font-semibold text-foreground">
+              Verifying signatures (Node.js)
+            </h3>
             <CodeBlock
               code={`const crypto = require('crypto');
 
@@ -331,11 +328,7 @@ function verifySignature(rawBody, sigHeader, secret) {
           <div className="rounded-lg border border-border overflow-hidden">
             <EndpointRow method="GET" path="/v1/tokens" description="List your active tokens" />
             <EndpointRow method="POST" path="/v1/tokens" description="Create a new token" />
-            <EndpointRow
-              method="DELETE"
-              path="/v1/tokens/{tokenId}"
-              description="Revoke a token"
-            />
+            <EndpointRow method="DELETE" path="/v1/tokens/{tokenId}" description="Revoke a token" />
           </div>
           <CodeBlock
             code={`# List tokens
@@ -376,10 +369,7 @@ mustaflow token revoke 7`}
             <div className="rounded-lg border border-border overflow-hidden text-xs">
               {[
                 ["MUSTAFLOW_TOKEN", "Required — your personal access token (mfp_...)"],
-                [
-                  "MUSTAFLOW_API",
-                  "Optional — API base. Default: https://mustaflow.app/api",
-                ],
+                ["MUSTAFLOW_API", "Optional — API base. Default: https://mustaflow.app/api"],
               ].map(([k, v]) => (
                 <div
                   key={k}

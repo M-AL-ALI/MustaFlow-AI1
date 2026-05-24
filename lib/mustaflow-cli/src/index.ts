@@ -60,9 +60,10 @@ async function apiFetch(path: string, init?: RequestInit): Promise<unknown> {
   }
 
   if (!resp.ok) {
-    const msg = typeof body === "object" && body !== null && "error" in body
-      ? (body as { error: string }).error
-      : text;
+    const msg =
+      typeof body === "object" && body !== null && "error" in body
+        ? (body as { error: string }).error
+        : text;
     console.error(`Error ${resp.status}: ${msg}`);
     process.exit(1);
   }
@@ -79,7 +80,9 @@ function printTable(rows: Array<Record<string, unknown>>, columns: string[]): vo
     console.log("(no results)");
     return;
   }
-  const widths = columns.map((c) => Math.max(c.length, ...rows.map((r) => String(r[c] ?? "").length)));
+  const widths = columns.map((c) =>
+    Math.max(c.length, ...rows.map((r) => String(r[c] ?? "").length)),
+  );
   const header = columns.map((c, i) => c.padEnd(widths[i]!)).join("  ");
   const divider = widths.map((w) => "─".repeat(w)).join("  ");
   console.log(header);
@@ -99,7 +102,7 @@ domainCmd
   .requiredOption("--project <id>", "Project ID")
   .option("--json", "Output raw JSON")
   .action(async (opts: { project: string; json?: boolean }) => {
-    const data = await apiFetch(`/v1/projects/${opts.project}/domains`) as {
+    const data = (await apiFetch(`/v1/projects/${opts.project}/domains`)) as {
       domains: Array<{
         id: number;
         hostname: string;
@@ -110,7 +113,10 @@ domainCmd
       }>;
       cnameTarget: string;
     };
-    if (opts.json) { printJson(data); return; }
+    if (opts.json) {
+      printJson(data);
+      return;
+    }
     console.log(`CNAME target: ${data.cnameTarget}\n`);
     printTable(
       data.domains.map((d) => ({
@@ -135,13 +141,23 @@ domainCmd
       method: "POST",
       body: JSON.stringify({ hostname }),
     });
-    if (opts.json) { printJson(data); return; }
-    const r = data as { domain: { id: number; hostname: string }; cnameTarget: string; txtName: string; txtValue: string };
+    if (opts.json) {
+      printJson(data);
+      return;
+    }
+    const r = data as {
+      domain: { id: number; hostname: string };
+      cnameTarget: string;
+      txtName: string;
+      txtValue: string;
+    };
     console.log(`Domain added: ${r.domain.hostname} (id: ${r.domain.id})`);
     console.log(`\nDNS configuration required:`);
     console.log(`  CNAME  ${r.domain.hostname}  →  ${r.cnameTarget}`);
     console.log(`  TXT    ${r.txtName}  →  ${r.txtValue}`);
-    console.log(`\nRun 'mustaflow domain verify --project ${opts.project} ${r.domain.id}' once DNS propagates.`);
+    console.log(
+      `\nRun 'mustaflow domain verify --project ${opts.project} ${r.domain.id}' once DNS propagates.`,
+    );
   });
 
 domainCmd
@@ -153,7 +169,10 @@ domainCmd
     const data = await apiFetch(`/v1/projects/${opts.project}/domains/${domainId}/verify`, {
       method: "POST",
     });
-    if (opts.json) { printJson(data); return; }
+    if (opts.json) {
+      printJson(data);
+      return;
+    }
     const r = data as { verified: boolean; hostname: string; hints?: string[] };
     if (r.verified) {
       console.log(`Domain ${r.hostname} verified successfully.`);
@@ -172,7 +191,10 @@ domainCmd
     const data = await apiFetch(`/v1/projects/${opts.project}/domains/${domainId}`, {
       method: "DELETE",
     });
-    if (opts.json) { printJson(data); return; }
+    if (opts.json) {
+      printJson(data);
+      return;
+    }
     console.log(`Domain removed.`);
   });
 
@@ -184,7 +206,7 @@ dnsCmd
   .description("Get required DNS records for a domain")
   .requiredOption("--project <id>", "Project ID")
   .action(async (domainId: string, opts: { project: string }) => {
-    const data = await apiFetch(`/v1/projects/${opts.project}/domains`) as {
+    const data = (await apiFetch(`/v1/projects/${opts.project}/domains`)) as {
       domains: Array<{
         id: number;
         hostname: string;
@@ -236,7 +258,7 @@ tokenCmd
   .description("List your personal access tokens")
   .option("--json", "Output raw JSON")
   .action(async (opts: { json?: boolean }) => {
-    const data = await apiFetch("/v1/tokens") as {
+    const data = (await apiFetch("/v1/tokens")) as {
       tokens: Array<{
         id: number;
         name: string;
@@ -248,7 +270,10 @@ tokenCmd
         expiresAt: string | null;
       }>;
     };
-    if (opts.json) { printJson(data); return; }
+    if (opts.json) {
+      printJson(data);
+      return;
+    }
     printTable(
       data.tokens.map((t) => ({
         ID: t.id,
@@ -269,23 +294,28 @@ tokenCmd
   .option("--project <id>", "Scope token to a specific project ID")
   .option("--expires-days <n>", "Expire the token after N days")
   .option("--json", "Output raw JSON")
-  .action(async (opts: { name: string; project?: string; expiresDays?: string; json?: boolean }) => {
-    const body: Record<string, unknown> = { name: opts.name };
-    if (opts.project) body["projectId"] = Number(opts.project);
-    if (opts.expiresDays) body["expiresInDays"] = Number(opts.expiresDays);
+  .action(
+    async (opts: { name: string; project?: string; expiresDays?: string; json?: boolean }) => {
+      const body: Record<string, unknown> = { name: opts.name };
+      if (opts.project) body["projectId"] = Number(opts.project);
+      if (opts.expiresDays) body["expiresInDays"] = Number(opts.expiresDays);
 
-    const data = await apiFetch("/v1/tokens", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    if (opts.json) { printJson(data); return; }
-    const r = data as { token: { id: number; name: string }; rawToken: string };
-    console.log(`Token created: ${r.token.name} (id: ${r.token.id})`);
-    console.log(`\nRaw token (store this securely — shown once only):`);
-    console.log(`  ${r.rawToken}`);
-    console.log(`\nSet as environment variable:`);
-    console.log(`  export MUSTAFLOW_TOKEN=${r.rawToken}`);
-  });
+      const data = await apiFetch("/v1/tokens", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (opts.json) {
+        printJson(data);
+        return;
+      }
+      const r = data as { token: { id: number; name: string }; rawToken: string };
+      console.log(`Token created: ${r.token.name} (id: ${r.token.id})`);
+      console.log(`\nRaw token (store this securely — shown once only):`);
+      console.log(`  ${r.rawToken}`);
+      console.log(`\nSet as environment variable:`);
+      console.log(`  export MUSTAFLOW_TOKEN=${r.rawToken}`);
+    },
+  );
 
 tokenCmd
   .command("revoke <tokenId>")
@@ -293,7 +323,10 @@ tokenCmd
   .option("--json", "Output raw JSON")
   .action(async (tokenId: string, opts: { json?: boolean }) => {
     const data = await apiFetch(`/v1/tokens/${tokenId}`, { method: "DELETE" });
-    if (opts.json) { printJson(data); return; }
+    if (opts.json) {
+      printJson(data);
+      return;
+    }
     console.log(`Token ${tokenId} revoked.`);
   });
 

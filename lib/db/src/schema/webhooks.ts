@@ -1,12 +1,4 @@
-import {
-  pgTable,
-  serial,
-  integer,
-  text,
-  boolean,
-  timestamp,
-  jsonb,
-} from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export const WEBHOOK_EVENTS = [

@@ -114,10 +114,7 @@ router.patch(
       .select()
       .from(projectWebhooksTable)
       .where(
-        and(
-          eq(projectWebhooksTable.id, hookId),
-          eq(projectWebhooksTable.projectId, projectId),
-        ),
+        and(eq(projectWebhooksTable.id, hookId), eq(projectWebhooksTable.projectId, projectId)),
       );
 
     if (!existing) {
@@ -183,10 +180,7 @@ router.delete(
       .select({ id: projectWebhooksTable.id })
       .from(projectWebhooksTable)
       .where(
-        and(
-          eq(projectWebhooksTable.id, hookId),
-          eq(projectWebhooksTable.projectId, projectId),
-        ),
+        and(eq(projectWebhooksTable.id, hookId), eq(projectWebhooksTable.projectId, projectId)),
       );
 
     if (!existing) {
@@ -212,10 +206,7 @@ router.get(
       .select({ id: projectWebhooksTable.id })
       .from(projectWebhooksTable)
       .where(
-        and(
-          eq(projectWebhooksTable.id, hookId),
-          eq(projectWebhooksTable.projectId, projectId),
-        ),
+        and(eq(projectWebhooksTable.id, hookId), eq(projectWebhooksTable.projectId, projectId)),
       );
 
     if (!existing) {
@@ -246,10 +237,7 @@ router.post(
       .select()
       .from(projectWebhooksTable)
       .where(
-        and(
-          eq(projectWebhooksTable.id, hookId),
-          eq(projectWebhooksTable.projectId, projectId),
-        ),
+        and(eq(projectWebhooksTable.id, hookId), eq(projectWebhooksTable.projectId, projectId)),
       );
 
     if (!hook) {
