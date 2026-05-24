@@ -12,7 +12,14 @@ import {
   Smartphone,
   Upload,
   ShieldCheck,
+  BookmarkPlus,
 } from "lucide-react";
+import {
+  savePersonalTemplate,
+  getPersonalTemplates,
+  type PersonalTemplate,
+} from "@/components/template-picker";
+import type { TemplateCategory } from "@/lib/templates";
 import { CollaborationCard } from "./collaboration-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -125,6 +132,29 @@ export function ManageTab({
     } catch (err) {
       setRenameError(err instanceof Error ? err.message : "Rename failed");
     }
+  }
+
+  // ── Save as Template ──────────────────────────────────────────────────────
+  const [savedAsTemplate, setSavedAsTemplate] = useState(false);
+  const alreadySaved = project
+    ? getPersonalTemplates().some((t) => t.sourceProjectId === projectId)
+    : false;
+
+  function handleSaveAsTemplate() {
+    if (!project) return;
+    const personal: PersonalTemplate = {
+      id: `personal-${projectId}-${Date.now()}`,
+      title: project.name,
+      description: project.description ?? "My saved template",
+      category: "Marketing" as TemplateCategory,
+      icon: "Rocket",
+      projectKind: (project.kind as PersonalTemplate["projectKind"]) ?? "web",
+      seedPrompt: project.description ?? "",
+      savedAt: new Date().toISOString(),
+      sourceProjectId: projectId,
+    };
+    savePersonalTemplate(personal);
+    setSavedAsTemplate(true);
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────
@@ -353,6 +383,39 @@ export function ManageTab({
                 {duplicating ? "Duplicating…" : "Duplicate Project"}
               </Button>
             </div>
+          )}
+        </div>
+
+        {/* Save as Template */}
+        <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <BookmarkPlus className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">Save as Template</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Save this project as a reusable template in your personal library. It will appear in the
+            "Saved" tab of the template picker when you create new projects.
+          </p>
+          {savedAsTemplate ? (
+            <div className="flex items-center gap-2 text-xs text-green-500">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              Saved to your personal templates
+            </div>
+          ) : alreadySaved ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              Already in your template library
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSaveAsTemplate}
+              disabled={!project}
+            >
+              <BookmarkPlus className="h-3.5 w-3.5 mr-1.5" />
+              Save as Template
+            </Button>
           )}
         </div>
 

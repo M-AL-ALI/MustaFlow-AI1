@@ -20,16 +20,36 @@ import {
   CheckCircle2,
   BookOpen,
   Star,
+  Building2,
+  UtensilsCrossed,
+  Palette,
+  GraduationCap,
+  Wrench,
+  Heart,
+  ChevronLeft,
+  ChevronRight,
+  Package,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { TemplatePicker } from "@/components/template-picker";
 import { CreateProjectModal } from "@/components/create-project-modal";
+import { OnboardingWizard, hasCompletedOnboarding } from "@/components/onboarding-wizard";
 import { type TemplateDefinition } from "@/lib/templates";
+import { INDUSTRY_PERSONAS } from "@/lib/templates";
 import { cn } from "@/lib/utils";
 import { DemoAnimation } from "@/components/demo-animation";
+
+const PERSONA_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  "real-estate": Building2,
+  restaurant: UtensilsCrossed,
+  creator: Palette,
+  educator: GraduationCap,
+  contractor: Wrench,
+  nonprofit: Heart,
+};
 
 // Mobile generation is intentionally excluded — the builder produces static
 // HTML/CSS/JS. Expo/React Native output is a future milestone.
@@ -75,10 +95,30 @@ export default function HomePage() {
   const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | undefined>();
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [activePersona, setActivePersona] = useState(0);
   const queryClient = useQueryClient();
   const createProject = useCreateProject();
 
   const { toast } = useToast();
+
+  // Show onboarding wizard for first-time visitors
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!hasCompletedOnboarding()) {
+        setShowOnboarding(true);
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Auto-rotate industry personas every 4s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActivePersona((prev) => (prev + 1) % INDUSTRY_PERSONAS.length);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleBuild = (kind: string = "web") => {
     if (!prompt.trim()) return;
@@ -131,6 +171,10 @@ export default function HomePage() {
     }
   }
 
+  function handlePersonaPrompt(persona: (typeof INDUSTRY_PERSONAS)[number]) {
+    setPrompt(persona.demoPrompt);
+  }
+
   return (
     <>
       <div className="flex-1 overflow-y-auto pb-24">
@@ -151,6 +195,32 @@ export default function HomePage() {
             </p>
           </div>
 
+          {/* Rotating persona chips */}
+          <div className="flex items-center justify-center gap-2 mb-4 flex-wrap">
+            {INDUSTRY_PERSONAS.map((persona, i) => {
+              const Icon = PERSONA_ICONS[persona.id] ?? Sparkles;
+              return (
+                <button
+                  key={persona.id}
+                  type="button"
+                  onClick={() => {
+                    setActivePersona(i);
+                    handlePersonaPrompt(persona);
+                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all",
+                    i === activePersona
+                      ? "border-primary bg-primary/10 text-primary shadow-sm"
+                      : "border-border text-muted-foreground hover:text-foreground hover:border-border/80 hover:bg-muted/50",
+                  )}
+                >
+                  <Icon className="h-3 w-3" />
+                  {persona.label}
+                </button>
+              );
+            })}
+          </div>
+
           <div className="relative max-w-2xl mx-auto mb-4">
             <div className="absolute -inset-6 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.18)_0%,transparent_70%)] blur-2xl rounded-full pointer-events-none" />
             <div className="relative bg-card border border-border shadow-xl rounded-2xl p-2 flex items-center gap-2 input-glow">
@@ -160,7 +230,7 @@ export default function HomePage() {
               <Input
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="e.g. A marketplace app for local artists to sell prints..."
+                placeholder={INDUSTRY_PERSONAS[activePersona]?.demoPrompt ?? "e.g. A marketplace app for local artists to sell prints..."}
                 className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-lg h-14 bg-transparent shadow-none"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleBuild();
@@ -258,8 +328,120 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Animated demo */}
+        {/* Industry Starter Packs section */}
         <div className="border-t border-border bg-muted/20">
+          <div className="max-w-4xl mx-auto px-6 py-16">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-amber-400/80 border border-amber-500/20 bg-amber-500/5 rounded-full px-3 py-1 mb-4">
+                <Package className="h-3 w-3" />
+                Industry Starter Packs
+              </div>
+              <h2 className="text-2xl font-bold tracking-tight mb-2">
+                Ready-made for your industry
+              </h2>
+              <p className="text-muted-foreground text-sm max-w-md mx-auto">
+                Professionally designed multi-page templates built for real businesses. Pick your
+                industry and launch in minutes.
+              </p>
+            </div>
+
+            {/* Rotating persona display */}
+            <div className="bg-card border border-border rounded-2xl p-6 relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-transparent pointer-events-none" />
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex gap-1.5">
+                  {INDUSTRY_PERSONAS.map((p, i) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setActivePersona(i)}
+                      className={cn(
+                        "h-1.5 rounded-full transition-all",
+                        i === activePersona
+                          ? "w-6 bg-primary"
+                          : "w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60",
+                      )}
+                      aria-label={p.label}
+                    />
+                  ))}
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActivePersona((p) => (p - 1 + INDUSTRY_PERSONAS.length) % INDUSTRY_PERSONAS.length)
+                    }
+                    className="w-7 h-7 rounded-full border border-border bg-background flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActivePersona((p) => (p + 1) % INDUSTRY_PERSONAS.length)
+                    }
+                    className="w-7 h-7 rounded-full border border-border bg-background flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {INDUSTRY_PERSONAS.map((persona, i) => {
+                const Icon = PERSONA_ICONS[persona.id] ?? Sparkles;
+                return (
+                  <div
+                    key={persona.id}
+                    className={cn(
+                      "transition-all duration-500",
+                      i === activePersona ? "block animate-in fade-in duration-300" : "hidden",
+                    )}
+                  >
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                        <Icon className="h-6 w-6 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-foreground">{persona.label}</p>
+                        <p className="text-sm text-muted-foreground mt-1 mb-3">
+                          "{persona.demoPrompt}"
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="gap-1.5"
+                          onClick={() => {
+                            setPrompt(persona.demoPrompt);
+                            window.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                        >
+                          Build this
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-center mt-4">
+              <button
+                type="button"
+                onClick={() => setShowTemplateBrowser(true)}
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <LayoutTemplate className="h-3.5 w-3.5" />
+                Browse all templates
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Animated demo */}
+        <div className="border-t border-border bg-background">
           <div className="max-w-4xl mx-auto px-6 py-20">
             <div className="text-center mb-10">
               <h2 className="text-2xl font-bold tracking-tight mb-2">See it in action</h2>
@@ -272,7 +454,7 @@ export default function HomePage() {
         </div>
 
         {/* How it works */}
-        <div className="border-t border-border bg-background">
+        <div className="border-t border-border bg-muted/20">
           <div className="max-w-4xl mx-auto px-6 py-20">
             <div className="text-center mb-12">
               <h2 className="text-2xl font-bold tracking-tight mb-2">How it works</h2>
@@ -390,6 +572,17 @@ export default function HomePage() {
           </Button>
         </div>
       </div>
+
+      {/* Onboarding wizard — shown on first visit */}
+      {showOnboarding && (
+        <OnboardingWizard
+          onUseTemplate={(template) => {
+            setShowOnboarding(false);
+            handleTemplateSelect(template);
+          }}
+          onSkip={() => setShowOnboarding(false)}
+        />
+      )}
 
       {/* Create project modal — opened with a pre-applied template */}
       <CreateProjectModal

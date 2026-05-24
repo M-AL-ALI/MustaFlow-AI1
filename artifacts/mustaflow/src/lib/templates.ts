@@ -6,6 +6,8 @@ export interface TemplateDefinition {
   icon: string;
   projectKind: "web" | "fullstack" | "dashboard" | "automation" | "api" | "mobile-cross";
   seedPrompt: string;
+  isStarterPack?: boolean;
+  industry?: string;
 }
 
 export type TemplateCategory =
@@ -17,9 +19,11 @@ export type TemplateCategory =
   | "Business Tools"
   | "Productivity"
   | "AI"
-  | "Mobile";
+  | "Mobile"
+  | "Starter Packs";
 
 export const TEMPLATE_CATEGORIES: TemplateCategory[] = [
+  "Starter Packs",
   "Marketing",
   "Portfolio",
   "SaaS",
@@ -32,6 +36,7 @@ export const TEMPLATE_CATEGORIES: TemplateCategory[] = [
 ];
 
 export const CATEGORY_COLORS: Record<TemplateCategory, string> = {
+  "Starter Packs": "bg-amber-500/10 text-amber-400 border-amber-500/20",
   Marketing: "bg-blue-500/10 text-blue-400 border-blue-500/20",
   Portfolio: "bg-purple-500/10 text-purple-400 border-purple-500/20",
   SaaS: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
@@ -43,7 +48,115 @@ export const CATEGORY_COLORS: Record<TemplateCategory, string> = {
   Mobile: "bg-green-500/10 text-green-400 border-green-500/20",
 };
 
+export const STARTER_PACKS: TemplateDefinition[] = [
+  {
+    id: "sp-real-estate",
+    title: "Real Estate Agency",
+    description:
+      "Multi-page listing site for real estate agents — property search, listings, agent profiles, and contact",
+    category: "Starter Packs",
+    icon: "Building2",
+    projectKind: "web",
+    isStarterPack: true,
+    industry: "Real Estate",
+    seedPrompt:
+      "Build a complete multi-page real estate agency website. HOME PAGE: Hero section with a search bar (location, property type, price range), featured listings carousel (6 cards: image placeholder, address, price, beds, baths, sqft), and a 'Why Choose Us' section with 4 trust badges (Licensed Agents, 500+ Homes Sold, Local Experts, Free Valuation). LISTINGS PAGE: Filterable grid of 12 property cards, each with a photo placeholder, price, address, key stats, and a Save/Favorite button. A sidebar with filter controls (price range sliders, bedrooms, bathrooms, property type checkboxes). PROPERTY DETAIL: Full-width hero image, photo gallery strip, detailed stats table, description, features checklist, mortgage calculator, map placeholder, and a contact agent sidebar form. AGENTS PAGE: Team grid of 6 agent cards with photo placeholder, name, title, specialty tags, contact info. CONTACT PAGE: Office address and phone, Google Maps embed placeholder, inquiry form. Use a clean professional design with a navy/white/gold palette. Include a sticky header with logo, nav links, and a CTA button.",
+  },
+  {
+    id: "sp-restaurant",
+    title: "Restaurant & Dining",
+    description:
+      "Full restaurant site with digital menu, online reservations, hours, and location",
+    category: "Starter Packs",
+    icon: "UtensilsCrossed",
+    projectKind: "web",
+    isStarterPack: true,
+    industry: "Restaurant",
+    seedPrompt:
+      "Build a complete multi-page restaurant website. HOME PAGE: Full-width hero with restaurant name, tagline, and two CTAs (Reserve a Table, View Menu). An atmosphere photo gallery strip (3 images), a brief story section with chef photo placeholder, and a featured dishes section (3 cards with image, name, description, price). Add opening hours block and a Google Maps placeholder. MENU PAGE: Sticky category nav (Starters, Mains, Pasta, Seafood, Grill, Desserts, Drinks). Menu items in a 2-column grid, each with image placeholder, name, description, dietary badges (Vegetarian, Vegan, Gluten-Free, Spicy), and price. RESERVATIONS PAGE: Reservation form with date picker, time slot selector, party size, name, email, phone, special requests. Show a confirmation success state. ABOUT PAGE: Restaurant story, team photos, awards, press logos. Include a full sticky header with navigation, and a footer with hours, address, phone, social links. Design: warm, upscale feel with dark background, cream/gold accents, elegant serif typography for headings.",
+  },
+  {
+    id: "sp-portfolio-creator",
+    title: "Creator Portfolio",
+    description:
+      "Multi-page portfolio for freelancers, designers, and photographers with project gallery and client inquiry",
+    category: "Starter Packs",
+    icon: "Palette",
+    projectKind: "web",
+    isStarterPack: true,
+    industry: "Portfolio",
+    seedPrompt:
+      "Build a complete multi-page portfolio website for a creative professional. HOME PAGE: Bold hero with name, title (e.g. 'Visual Designer & Illustrator'), a tagline, and CTA buttons (View Work, Contact Me). An animated scrolling marquee of skills. A featured projects section showing 3 highlighted case study cards with project type, title, cover image placeholder, and 'View Project' link. Add a client logos strip (6 placeholder logos) and a short testimonial from a happy client. WORK/PROJECTS PAGE: Filterable masonry-style project grid (categories: All, Branding, Web, Print, Motion) showing 9 project cards. Clicking opens a case study modal with full description, tools used, challenge/solution/outcome sections, and image gallery placeholders. ABOUT PAGE: Professional photo placeholder, bio, skills grid with proficiency bars, work timeline, awards/publications. SERVICES PAGE: 3 service cards (e.g. Brand Identity, Web Design, Illustration) with description, what's included list, starting price, and 'Get a Quote' CTA. CONTACT PAGE: Friendly contact form with project type dropdown, budget range, timeline, and message. Include social links and a downloadable resume button. Design: minimal, dark, typographic — let the work speak. White space, subtle animations on scroll.",
+  },
+  {
+    id: "sp-online-course",
+    title: "Online Course",
+    description:
+      "Course landing page with curriculum, instructor bio, student testimonials, and enrollment",
+    category: "Starter Packs",
+    icon: "GraduationCap",
+    projectKind: "web",
+    isStarterPack: true,
+    industry: "Education",
+    seedPrompt:
+      "Build a complete multi-page online course website. LANDING PAGE: Hero with course name, transformation headline ('Go from beginner to hired in 12 weeks'), a short video embed placeholder, and 'Enroll Now' CTA with enrollment counter and urgency copy. Add a 'What You'll Learn' section (8 outcome bullets with checkmarks), a curriculum accordion (6 modules, each expanding to show 4–6 lesson titles), an instructor bio section with photo placeholder, credentials, and social proof numbers (10k+ students, 4.9 stars). Include a 3-plan pricing section (Self-Paced $197, Guided $397, VIP Coaching $797). Add 6 student testimonials with photo, name, result achieved, and star rating. CURRICULUM PAGE: Full detailed module breakdown with lesson list, duration, preview tags. INSTRUCTOR PAGE: Full bio, credentials, other courses, media appearances, podcast links. FAQ PAGE: 10 common questions and answers accordion. ENROLLMENT PAGE: Checkout form with plan selector, payment details, money-back guarantee badge, secure checkout trust signals. Design: motivating, modern — use bold typography, gradient accents, plenty of social proof. Dark hero transitioning to light content sections.",
+  },
+  {
+    id: "sp-local-services",
+    title: "Local Services Business",
+    description:
+      "Lead-gen site for plumbers, electricians, contractors — service areas, pricing, and instant quote form",
+    category: "Starter Packs",
+    icon: "Wrench",
+    projectKind: "web",
+    isStarterPack: true,
+    industry: "Home Services",
+    seedPrompt:
+      "Build a complete multi-page local services business website (suitable for plumber, electrician, HVAC, roofer, etc.). HOME PAGE: Hero with bold headline ('Your Local [Service] Experts'), phone number prominently displayed, and emergency call button. 3 trust badges (Licensed & Insured, Same-Day Service, Free Estimates). Services overview cards (6 services with icon, name, short description). A 'How It Works' section (3 steps: Call/Book → We Arrive → Problem Solved). 5-star review showcase. Service area map section. SERVICES PAGE: Detailed service cards, each with description, typical problems solved, pricing ranges, and a 'Get a Quote' button. PRICING PAGE: Transparent pricing table with common jobs and typical cost ranges, note about free estimates. REVIEWS PAGE: Grid of 12 customer reviews with name, location, rating, review text, and date. Overall rating summary. CONTACT/QUOTE PAGE: Multi-step quote request form (Step 1: Service Type → Step 2: Problem Description & Photos upload placeholder → Step 3: Contact Info & Preferred Time). Emergency contact section with large phone button. ABOUT PAGE: Company history, team photos, licenses/certifications, community involvement. Design: trustworthy, professional — use blue or green palette, bold typography, lots of social proof and trust signals.",
+  },
+  {
+    id: "sp-wedding",
+    title: "Wedding Site",
+    description:
+      "Romantic multi-page wedding site with RSVP, schedule, registry links, and accommodation info",
+    category: "Starter Packs",
+    icon: "Heart",
+    projectKind: "web",
+    isStarterPack: true,
+    industry: "Wedding",
+    seedPrompt:
+      "Build a beautiful multi-page wedding website for a couple. HOME PAGE: Romantic hero with couple names and wedding date in elegant typography, a countdown timer to the wedding day, and a hero photo placeholder with a floral or watercolor overlay design. A 'Save the Date' section with location and date. Navigation to all pages. OUR STORY PAGE: Timeline of the couple's relationship milestones with photo placeholders, from 'How We Met' to 'The Proposal'. WEDDING DETAILS PAGE: Full ceremony schedule with time, location, address, map embed placeholder. Reception details, dress code, parking info, what to expect. RSVP PAGE: RSVP form with guest name, attendance confirmation, meal preference (Chicken/Fish/Vegetarian), dietary restrictions, plus-one info. Submission shows a heartfelt confirmation message. TRAVEL & STAY PAGE: Hotel accommodation blocks with discount code info, distance from venue, booking links. Local transportation tips, airport info. REGISTRY PAGE: Registry cards linking to 3 stores (Amazon, Crate & Barrel, Honeymoon Fund) with icon, store name, description. PHOTO GALLERY: Engagement photo grid placeholder, 12 image placeholders in a masonry layout. Design: romantic and elegant — soft colors (blush pink, sage green, ivory, or dusty blue), script font headings, floral decorative elements via CSS, generous white space.",
+  },
+  {
+    id: "sp-event",
+    title: "Event Registration",
+    description:
+      "Event site with agenda, speakers, ticket tiers, registration form, and sponsor showcase",
+    category: "Starter Packs",
+    icon: "CalendarCheck",
+    projectKind: "web",
+    isStarterPack: true,
+    industry: "Events",
+    seedPrompt:
+      "Build a complete multi-page event registration website for a professional conference or meetup. HOME PAGE: Full-width hero with event name, tagline, date/location/format badges, and a 'Register Now' CTA with a live ticket count (e.g. '87 tickets remaining'). A countdown timer to the event. Speaker highlight section (3 featured speaker cards). Sponsor logo strip. SPEAKERS PAGE: Grid of 12 speaker cards with photo placeholder, name, company, talk title, and short bio. Clicking expands to a full bio modal with social links. AGENDA/SCHEDULE PAGE: Day-by-day schedule (2 days), each session showing time, title, speaker, room, and a track badge (Keynote, Workshop, Panel). Filter by track. TICKETS PAGE: 3 ticket tier cards (General $99, Professional $199, VIP $499) with feature comparison, early bird discount badge for lowest tier. Includes a simple registration form (name, email, company, dietary preferences, T-shirt size). VENUE PAGE: Venue name, address, photo placeholder, map embed, hotel recommendations, transit info, parking. SPONSORS PAGE: Sponsor grid organized by tier (Gold, Silver, Bronze, Media Partners) with logo placeholders and company descriptions. Design: bold and energizing — use a dark hero with vibrant accent color, professional conference aesthetic, strong typography hierarchy.",
+  },
+  {
+    id: "sp-nonprofit",
+    title: "Nonprofit & Charity",
+    description:
+      "Mission-driven nonprofit site with donation flow, impact stats, programs, and volunteer signup",
+    category: "Starter Packs",
+    icon: "Heart",
+    projectKind: "web",
+    isStarterPack: true,
+    industry: "Nonprofit",
+    seedPrompt:
+      "Build a complete multi-page nonprofit organization website. HOME PAGE: Emotionally compelling hero with mission statement headline, a powerful photo placeholder, and two CTAs (Donate Now, Learn More). Impact stats bar (e.g. 12,000 Meals Served, 3,000 Families Helped, 15 Years of Service, 200 Volunteers). Program highlights section (3 program cards). Donation CTA banner with progress bar toward annual goal. Testimonial from a beneficiary. Partner logos strip. ABOUT PAGE: Organization story, founding history, team grid with photo placeholders, board of directors, annual report download button. VALUES/MISSION/VISION section. PROGRAMS PAGE: 3–4 program detail sections with description, who it serves, impact numbers, and a 'Support This Program' CTA. DONATE PAGE: Donation amount selector (preset amounts: $25, $50, $100, $250 + custom), monthly giving option with savings callout, tax-deductibility notice, impact equivalences ('Your $50 feeds a family for a week'), donor info form, and trust badges (Charity Navigator rating, SSL secure). VOLUNTEER PAGE: Volunteer opportunities grid with role, time commitment, skills needed, and 'Sign Up' button. Volunteer signup form. CONTACT PAGE: Office address, phone, email, contact form, social media links, newsletter signup. Design: warm, trustworthy, human — photography-forward with warm color palette (orange, teal, or deep green), emotional storytelling tone, accessible and inclusive.",
+  },
+];
+
 export const TEMPLATES: TemplateDefinition[] = [
+  ...STARTER_PACKS,
   {
     id: "landing-page",
     title: "Landing Page",
@@ -300,4 +413,57 @@ export const TEMPLATES: TemplateDefinition[] = [
     seedPrompt:
       "Build a complete Expo React Native in-app purchases app using the RevenueCat Purchases React Native SDK (@revenuecat/purchases-react-native). Include: (1) An initialization setup in app/_layout.tsx that calls Purchases.configure({ apiKey: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY ?? '' }) on mount — fall back gracefully when the key is not set by showing a setup prompt instead of crashing. (2) A Paywall screen (app/paywall.tsx) that calls Purchases.getOfferings() and renders the 'default' offering's packages. Show 3 plan cards: Monthly, Annual (with 'Best Value' badge), and Lifetime — each with price from the StoreProduct, a feature checklist (5 items), and a 'Subscribe' button that calls Purchases.purchasePackage(). Handle PurchasesError codes: USER_CANCELLED silently, PRODUCT_ALREADY_PURCHASED shows 'Already subscribed', other errors show a toast. Include a 'Restore Purchases' button that calls Purchases.restorePurchases(). (3) A Home screen that calls Purchases.getCustomerInfo() and shows entitlement status: 'Pro' badge if 'pro_access' entitlement is active, or a 'Upgrade to Pro' button that opens the Paywall screen. (4) A subscription status card showing: plan name, renewal date (from CustomerInfo.activeSubscriptions), and a 'Manage Subscription' button that opens the platform store. (5) An Account screen with CustomerInfo details: userId, activeEntitlements list, and sign-out. Add EXPO_PUBLIC_REVENUECAT_API_KEY to a .env.example file with instructions. Use NativeWind, Expo Router, TypeScript, and include all required package.json dependencies. Note: RevenueCat requires a real device for production — the app should show a 'Simulated mode' banner in the web preview.",
   },
+];
+
+export const INDUSTRY_PERSONAS = [
+  {
+    id: "real-estate",
+    label: "Real Estate Agent",
+    templateId: "sp-real-estate",
+    demoPrompt: "A property listing site for a local real estate agency",
+  },
+  {
+    id: "restaurant",
+    label: "Restaurant Owner",
+    templateId: "sp-restaurant",
+    demoPrompt: "An online menu and reservation system for a restaurant",
+  },
+  {
+    id: "creator",
+    label: "Portfolio Creator",
+    templateId: "sp-portfolio-creator",
+    demoPrompt: "A portfolio to showcase my design and photography work",
+  },
+  {
+    id: "educator",
+    label: "Online Educator",
+    templateId: "sp-online-course",
+    demoPrompt: "A landing page to sell my online course",
+  },
+  {
+    id: "contractor",
+    label: "Local Contractor",
+    templateId: "sp-local-services",
+    demoPrompt: "A website for my plumbing business with a quote form",
+  },
+  {
+    id: "nonprofit",
+    label: "Nonprofit Leader",
+    templateId: "sp-nonprofit",
+    demoPrompt: "A donation site for my charity organization",
+  },
+];
+
+export const ONBOARDING_INDUSTRIES = [
+  { id: "business", label: "Small Business", icon: "Briefcase", templateId: "sp-local-services" },
+  { id: "restaurant", label: "Restaurant / Food", icon: "UtensilsCrossed", templateId: "sp-restaurant" },
+  { id: "real-estate", label: "Real Estate", icon: "Building2", templateId: "sp-real-estate" },
+  { id: "creator", label: "Creative / Portfolio", icon: "Palette", templateId: "sp-portfolio-creator" },
+  { id: "education", label: "Education / Course", icon: "GraduationCap", templateId: "sp-online-course" },
+  { id: "nonprofit", label: "Nonprofit / Charity", icon: "Heart", templateId: "sp-nonprofit" },
+  { id: "event", label: "Event / Conference", icon: "CalendarCheck", templateId: "sp-event" },
+  { id: "wedding", label: "Wedding / Personal", icon: "Heart", templateId: "sp-wedding" },
+  { id: "saas", label: "SaaS / Tech", icon: "Zap", templateId: "saas-dashboard" },
+  { id: "ecommerce", label: "Online Store", icon: "ShoppingCart", templateId: "ecommerce-store" },
+  { id: "other", label: "Something Else", icon: "Sparkles", templateId: "landing-page" },
 ];

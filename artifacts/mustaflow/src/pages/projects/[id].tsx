@@ -135,6 +135,7 @@ import {
   useAcknowledgeCveScan,
 } from "@workspace/api-client-react";
 import { GithubTab } from "./components/github-tab";
+import { RecipesTab } from "./components/recipes-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
@@ -652,6 +653,7 @@ function LowCreditsBanner({
 const PRIMARY_TABS = [
   { label: "Preview", value: "preview", icon: Monitor },
   { label: "Code", value: "code", icon: FileCode2 },
+  { label: "Recipes", value: "recipes", icon: Puzzle },
   { label: "Publishing", value: "publishing", icon: Rocket },
   { label: "Manage", value: "manage", icon: Settings },
 ];
@@ -3246,6 +3248,17 @@ export default function ProjectWorkspacePage() {
                 projectId={projectId}
                 scrollToMobileSettings={scrollManageToMobileSettings}
                 onScrollComplete={() => setScrollManageToMobileSettings(false)}
+              />
+            )}
+            {activeTab === "recipes" && (
+              <RecipesTab
+                projectId={projectId}
+                onApplyRecipe={(prompt) => {
+                  switchLeftPanel("chat");
+                  if (isMobileLayout) setChatDrawerOpen(true);
+                  send(prompt, { agentIntent: "build" });
+                  setActiveTab("preview");
+                }}
               />
             )}
           </div>
