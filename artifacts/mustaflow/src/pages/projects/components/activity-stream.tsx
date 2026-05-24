@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { useListTaskEvents, getListTaskEventsQueryKey } from "@workspace/api-client-react";
 import {
   Clock,
   BrainCircuit,
@@ -28,6 +27,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type EventType =
   | "queued"
   | "analyzing_request"
@@ -48,6 +49,17 @@ type EventType =
   | "narration"
   | "completed"
   | "failed";
+
+interface StreamEvent {
+  id: number;
+  taskId: number;
+  eventType: string;
+  message: string;
+  filePath: string | null;
+  createdAt: string | Date;
+}
+
+// ─── Event metadata ───────────────────────────────────────────────────────────
 
 const EVENT_META: Record<
   EventType,
@@ -154,15 +166,55 @@ const PILL_STYLE_CLASSES: Record<string, string> = {
   narrate: "bg-muted/40 border-border text-muted-foreground",
 };
 
-const TERMINAL_STATUSES = new Set(["completed", "failed"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
-interface Props {
-  projectId: number;
-  taskId: number;
-  taskStatus?: string;
-  agentIdentity?: string;
-  onDismiss: () => void;
+// ─── SSE hook ─────────────────────────────────────────────────────────────────
+
+/**
+ * Connects to the SSE stream for a task and accumulates events in real time.
+ * Replaces polling: the server pushes each event the instant it is created.
+ * Auto-closes when a terminal event (completed / failed / cancelled) arrives.
+ * Reconnects automatically on transient network errors (browser EventSource
+ * built-in behavior) until the task ends.
+ */
+function useTaskEventStream(projectId: number, taskId: number): StreamEvent[] {
+  const [events, setEvents] = useState<StreamEvent[]>([]);
+  const seenIdsRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    // Reset on task change
+    seenIdsRef.current = new Set();
+    setEvents([]);
+
+    const es = new EventSource(`/api/projects/${projectId}/tasks/${taskId}/events/stream`);
+
+    es.onmessage = (raw: MessageEvent<string>) => {
+      try {
+        const event = JSON.parse(raw.data) as StreamEvent;
+        // Deduplicate: the server replays DB history on connect, so we may see
+        // the same event id twice if the client reconnects mid-stream.
+        if (seenIdsRef.current.has(event.id)) return;
+        seenIdsRef.current.add(event.id);
+        setEvents((prev) => [...prev, event]);
+        if (TERMINAL_STATUSES.has(event.eventType)) {
+          es.close();
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    };
+
+    // onerror fires on transient drops — EventSource will retry automatically.
+    // We don't need to do anything; state is preserved across reconnects because
+    // the server replays history and the dedup set filters already-seen ids.
+
+    return () => es.close();
+  }, [projectId, taskId]);
+
+  return events;
 }
+
+// ─── Agent badge ──────────────────────────────────────────────────────────────
 
 const AGENT_BADGE: Record<string, { label: string; icon: React.ElementType; className: string }> = {
   planning: {
@@ -182,27 +234,28 @@ const AGENT_BADGE: Record<string, { label: string; icon: React.ElementType; clas
   },
 };
 
+// ─── Props ────────────────────────────────────────────────────────────────────
+
+interface Props {
+  projectId: number;
+  taskId: number;
+  taskStatus?: string;
+  agentIdentity?: string;
+  onDismiss: () => void;
+}
+
+// ─── ActivityStream ───────────────────────────────────────────────────────────
+
 export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, onDismiss }: Props) {
   const pillRowRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [autoDismissed, setAutoDismissed] = useState(false);
 
-  const { data: events = [] } = useListTaskEvents(projectId, taskId, {
-    query: {
-      queryKey: getListTaskEventsQueryKey(projectId, taskId),
-      refetchInterval: (query) => {
-        const data = query.state.data;
-        if (!data || !Array.isArray(data)) return 1200;
-        const last = (data as Array<{ eventType: string }>)[data.length - 1];
-        if (last && TERMINAL_STATUSES.has(last.eventType)) return false;
-        return 1200;
-      },
-    },
-  });
+  const events = useTaskEventStream(projectId, taskId);
 
   const lastEvent = events[events.length - 1];
-  const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
+  const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
   const isNeedsReview = taskStatus === "needs_review";
@@ -233,18 +286,16 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
 
   if (autoDismissed) return null;
 
-  // Build the pill list — show all icons, but cap display at MAX_PILLS visible;
-  // if over cap, show first FEW + ellipsis + last FEW.
+  // Pill list: show at most MAX_PILLS; if over cap keep first 4 + last (MAX-4)
   const MAX_PILLS = 18;
   const pills = events.map((e, idx) => {
     const meta = EVENT_META[e.eventType as EventType] ?? EVENT_META.queued;
     const Icon = meta.icon;
     const isLast = idx === events.length - 1;
     const isActive = isLast && !isTerminal;
-    return { id: e.id, Icon, meta, isActive, isLast, eventType: e.eventType };
+    return { id: e.id, Icon, meta, isActive, isLast };
   });
 
-  // Decide what subset of pills to render
   let visiblePills: typeof pills;
   if (pills.length <= MAX_PILLS) {
     visiblePills = pills;
@@ -277,20 +328,16 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
         {/* Pill icon row */}
         <div
           ref={pillRowRef}
-          className="flex items-center gap-0.5 overflow-x-auto hide-scrollbar shrink-0 max-w-[52%]"
+          className="flex items-center gap-0.5 overflow-x-auto shrink-0 max-w-[52%]"
           style={{ scrollbarWidth: "none" }}
           onClick={(e) => e.stopPropagation()}
         >
           {visiblePills.map((p, i) => {
             const Icon = p.Icon;
-            if (p.id === -1) {
-              return (
-                <span key="ellipsis" className="text-[10px] text-muted-foreground px-0.5 shrink-0">
-                  ···
-                </span>
-              );
-            }
             const styleClass = PILL_STYLE_CLASSES[p.meta.pillStyle] ?? PILL_STYLE_CLASSES.terminal;
+            const age = visiblePills.length - 1 - i;
+            const ageOpacity =
+              age === 0 ? "" : age === 1 ? "opacity-60" : age === 2 ? "opacity-40" : "opacity-20";
             return (
               <span
                 key={p.id}
@@ -299,7 +346,7 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
                   "inline-flex items-center justify-center h-5 w-5 rounded-[5px] border shrink-0 transition-all duration-150",
                   styleClass,
                   p.isActive && "ring-1 ring-primary/40 scale-110",
-                  !p.isActive && !p.isLast && i < visiblePills.length - 3 && "opacity-40",
+                  ageOpacity,
                 )}
               >
                 {p.isActive && !isTerminal ? (
@@ -385,7 +432,8 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
       {expanded && (
         <div
           ref={detailRef}
-          className="overflow-y-auto max-h-52 px-2 pb-2 space-y-0.5 border-t border-border pt-2 hide-scrollbar"
+          className="overflow-y-auto max-h-52 px-2 pb-2 space-y-0.5 border-t border-border pt-2"
+          style={{ scrollbarWidth: "none" }}
         >
           {events.map((event, idx) => {
             const meta = EVENT_META[event.eventType as EventType] ?? EVENT_META.queued;
@@ -455,29 +503,20 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
   );
 }
 
+// ─── InlineLiveActivity ───────────────────────────────────────────────────────
+
 /**
  * Inline live activity feed — renders a compact icon-timeline row directly
- * inside the chat scroll area. Shows a horizontal trail of action pills with
- * the current step description. Auto-dismisses after completion.
+ * inside the chat scroll area. Connects via SSE so every event appears
+ * the instant the agent emits it — no polling delay.
  */
 export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
   const pillRowRef = useRef<HTMLDivElement>(null);
 
-  const { data: events = [] } = useListTaskEvents(projectId, taskId, {
-    query: {
-      queryKey: getListTaskEventsQueryKey(projectId, taskId),
-      refetchInterval: (query) => {
-        const data = query.state.data;
-        if (!data || !Array.isArray(data)) return 700;
-        const last = (data as Array<{ eventType: string }>)[data.length - 1];
-        if (last && TERMINAL_STATUSES.has(last.eventType)) return false;
-        return 700;
-      },
-    },
-  });
+  const events = useTaskEventStream(projectId, taskId);
 
   const lastEvent = events[events.length - 1];
-  const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
+  const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
 
@@ -488,6 +527,7 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
     }
   }, [events]);
 
+  // Auto-dismiss 2 s after terminal
   useEffect(() => {
     if (!isTerminal) return;
     const t = setTimeout(onDismiss, 2000);
@@ -506,8 +546,9 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
   }
 
   const currentMeta = EVENT_META[lastEvent?.eventType as EventType] ?? EVENT_META.queued;
+  const CurrentIcon = currentMeta.icon;
 
-  // Show last 20 pills maximum; use a compact row
+  // Show last 20 pills maximum
   const pillsToShow = events.slice(-20);
 
   return (
@@ -516,7 +557,7 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
         {/* Icon trail */}
         <div
           ref={pillRowRef}
-          className="flex items-center gap-0.5 overflow-x-auto hide-scrollbar shrink-0"
+          className="flex items-center gap-0.5 overflow-x-auto shrink-0"
           style={{ maxWidth: "55%", scrollbarWidth: "none" }}
         >
           {pillsToShow.map((event, idx) => {
@@ -575,11 +616,11 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
               : (lastEvent?.message ?? "Working…")}
         </span>
 
-        {/* Action count */}
+        {/* Action count + current icon */}
         <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
           {events.length}
         </span>
-        <currentMeta.icon className={cn("h-3 w-3 shrink-0 opacity-50", currentMeta.color)} />
+        <CurrentIcon className={cn("h-3 w-3 shrink-0 opacity-50", currentMeta.color)} />
       </div>
     </div>
   );
