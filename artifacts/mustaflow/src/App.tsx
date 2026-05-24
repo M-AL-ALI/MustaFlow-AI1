@@ -292,9 +292,7 @@ function HomeRoute() {
         <Redirect to="/projects" />
       </Show>
       <Show when="signed-out">
-        <AppLayout>
-          <HomePage />
-        </AppLayout>
+        <HomePage />
       </Show>
     </>
   );

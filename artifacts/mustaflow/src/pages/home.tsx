@@ -43,9 +43,6 @@ import { cn } from "@/lib/utils";
 import { DemoAnimation } from "@/components/demo-animation";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Show } from "@clerk/react";
-import heroShot from "@assets/image_1779643547464.png";
-import logosStrip from "@assets/image_1779643571872.png";
-import featureStrip from "@assets/image_1779643590270.png";
 
 const PERSONA_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "real-estate": Building2,
@@ -408,25 +405,6 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Trusted-by logos strip */}
-        <div className="border-t border-border bg-card/40">
-          <div className="max-w-5xl mx-auto px-6 py-10">
-            <p className="text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70 mb-5">
-              Trusted by makers building on the modern stack
-            </p>
-            <div className="relative rounded-2xl overflow-hidden border border-border bg-background/40">
-              <img
-                src={logosStrip}
-                alt="Logos of companies and tools makers use"
-                className="w-full h-auto object-cover opacity-90 dark:opacity-80"
-                loading="lazy"
-              />
-              <div className="absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-background to-transparent pointer-events-none" />
-              <div className="absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-background to-transparent pointer-events-none" />
-            </div>
-          </div>
-        </div>
-
         {/* Big feature showcase — Meet Your AI Builder */}
         <div className="border-t border-border bg-background">
           <div className="max-w-6xl mx-auto px-6 py-20">
@@ -436,8 +414,8 @@ export default function HomePage() {
                 Meet your AI builder
               </div>
               <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-3">
-                Creativity runs on{" "}
-                <span className="gradient-text">MustaFlow</span>
+                Built for makers,{" "}
+                <span className="gradient-text">powered by AI</span>
               </h2>
               <p className="text-muted-foreground max-w-2xl mx-auto">
                 A side-by-side preview, a chat that builds, and a one-click publish — all in your
@@ -446,7 +424,7 @@ export default function HomePage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-              {/* Big hero card with reference image */}
+              {/* Big hero card with mock browser preview */}
               <div className="lg:col-span-3 relative rounded-3xl border border-border bg-card overflow-hidden shadow-xl group">
                 <div className="absolute inset-0 bg-gradient-to-br from-primary/15 via-transparent to-transparent pointer-events-none" />
                 <div className="p-8 sm:p-10">
@@ -470,13 +448,32 @@ export default function HomePage() {
                   </Button>
                 </div>
                 <div className="px-6 pb-6">
+                  {/* Original mock browser window — no third-party brands */}
                   <div className="rounded-2xl overflow-hidden border border-border bg-background/60 shadow-inner">
-                    <img
-                      src={heroShot}
-                      alt="MustaFlow builder preview"
-                      className="w-full h-auto block group-hover:scale-[1.01] transition-transform duration-700"
-                      loading="lazy"
-                    />
+                    <div className="flex items-center gap-1.5 px-4 py-2.5 bg-muted/40 border-b border-border">
+                      <span className="h-2.5 w-2.5 rounded-full bg-red-400/70" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-yellow-400/70" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-green-400/70" />
+                      <div className="ml-3 flex-1 h-5 rounded-md bg-background/60 border border-border/60 px-2 text-[10px] text-muted-foreground flex items-center">
+                        mustaflow.app/preview
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 p-6 bg-gradient-to-br from-primary/8 via-background to-background">
+                      <div className="space-y-3">
+                        <div className="h-3 w-20 rounded bg-primary/40" />
+                        <div className="h-6 w-32 rounded bg-foreground/80" />
+                        <div className="h-3 w-40 rounded bg-muted-foreground/30" />
+                        <div className="h-3 w-36 rounded bg-muted-foreground/30" />
+                        <div className="h-9 w-28 rounded-lg bg-primary mt-2" />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="aspect-square rounded-xl bg-gradient-to-br from-primary/40 to-primary/10 border border-primary/20" />
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="aspect-square rounded-lg bg-muted/60 border border-border" />
+                          <div className="aspect-square rounded-lg bg-muted/60 border border-border" />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -572,15 +569,6 @@ export default function HomePage() {
               ))}
             </div>
 
-            {/* Reference montage */}
-            <div className="mt-10 rounded-2xl overflow-hidden border border-border bg-card shadow-lg">
-              <img
-                src={featureStrip}
-                alt="Feature highlights — Agent Chat, Full Stack, Integrations, Enterprise"
-                className="w-full h-auto block"
-                loading="lazy"
-              />
-            </div>
           </div>
         </div>
 
