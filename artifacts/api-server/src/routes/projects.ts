@@ -223,7 +223,10 @@ router.post("/projects", async (req, res): Promise<void> => {
   // Task #544: every new project gets a primary artifact mirroring its
   // kind/platform/format/stack. This preserves the "project owns ≥1 artifact"
   // invariant so resolveArtifactId() always finds a target and the artifact
-  // tab strip auto-selects on load.
+  // tab strip auto-selects on load. The id is captured into primaryArtifactIdRef
+  // and stamped onto every scaffold file insert below so artifact-scoped
+  // replaceAll/writes work correctly from the very first build.
+  const primaryArtifactIdRef: { id: number | null } = { id: null };
   {
     const { projectArtifactsTable } = await import("@workspace/db");
     const primaryKind = projectInput.kind;
@@ -239,17 +242,21 @@ router.post("/projects", async (req, res): Promise<void> => {
         : primaryKind.startsWith("mobile")
           ? "Mobile app"
           : slug[0]!.toUpperCase() + slug.slice(1);
-    await db.insert(projectArtifactsTable).values({
-      projectId: project.id,
-      kind: primaryKind,
-      platform,
-      projectFormat,
-      stack: resolvedStack,
-      name: artifactName,
-      slug,
-      isPrimary: true,
-      status: "draft",
-    });
+    const [primaryArtifact] = await db
+      .insert(projectArtifactsTable)
+      .values({
+        projectId: project.id,
+        kind: primaryKind,
+        platform,
+        projectFormat,
+        stack: resolvedStack,
+        name: artifactName,
+        slug,
+        isPrimary: true,
+        status: "draft",
+      })
+      .returning();
+    if (primaryArtifact) primaryArtifactIdRef.id = primaryArtifact.id;
   }
 
   // Seed a minimal scaffold so the code editor shows a real file tree
@@ -349,6 +356,7 @@ app.listen(PORT, () => {
     await db.insert(projectFilesTable).values(
       scaffoldFiles.map((f) => ({
         projectId: project.id,
+        artifactId: primaryArtifactIdRef.id,
         path: f.path,
         content: f.content,
         mimeType: f.mimeType,
@@ -434,6 +442,7 @@ if __name__ == "__main__":
     await db.insert(projectFilesTable).values(
       scaffoldFiles.map((f) => ({
         projectId: project.id,
+        artifactId: primaryArtifactIdRef.id,
         path: f.path,
         content: f.content,
         mimeType: f.mimeType,
@@ -601,6 +610,7 @@ createRoot(document.getElementById('root')!).render(
     await db.insert(projectFilesTable).values(
       scaffoldFiles.map((f) => ({
         projectId: project.id,
+        artifactId: primaryArtifactIdRef.id,
         path: f.path,
         content: f.content,
         mimeType: f.mimeType,
@@ -738,6 +748,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     await db.insert(projectFilesTable).values(
       nextjsScaffold.map((f) => ({
         projectId: project.id,
+        artifactId: primaryArtifactIdRef.id,
         path: f.path,
         content: f.content,
         mimeType: f.mimeType,
@@ -843,6 +854,7 @@ router.get('/', (_req, res) => {
     await db.insert(projectFilesTable).values(
       nodeApiScaffold.map((f) => ({
         projectId: project.id,
+        artifactId: primaryArtifactIdRef.id,
         path: f.path,
         content: f.content,
         mimeType: f.mimeType,
@@ -898,6 +910,7 @@ if __name__ == "__main__":
     await db.insert(projectFilesTable).values(
       flaskScaffold.map((f) => ({
         projectId: project.id,
+        artifactId: primaryArtifactIdRef.id,
         path: f.path,
         content: f.content,
         mimeType: f.mimeType,
@@ -959,6 +972,7 @@ if __name__ == "__main__":
     await db.insert(projectFilesTable).values(
       fastapiScaffold.map((f) => ({
         projectId: project.id,
+        artifactId: primaryArtifactIdRef.id,
         path: f.path,
         content: f.content,
         mimeType: f.mimeType,
@@ -1124,6 +1138,7 @@ export default function HomeScreen() {
     await db.insert(projectFilesTable).values(
       mobileScaffold.map((f) => ({
         projectId: project.id,
+        artifactId: primaryArtifactIdRef.id,
         path: f.path,
         content: f.content,
         mimeType: f.mimeType,
