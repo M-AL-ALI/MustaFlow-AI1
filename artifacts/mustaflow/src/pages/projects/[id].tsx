@@ -2465,343 +2465,343 @@ export default function ProjectWorkspacePage() {
                     </div>
                   )}
                   <div className="flex-1 min-h-0 relative">
-                  <div
-                    ref={scrollRef}
-                    onScroll={() => {
-                      const el = scrollRef.current;
-                      if (!el) return;
-                      const atBottom =
-                        el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                      chatAtBottomRef.current = atBottom;
-                      setChatScrolledUp(!atBottom);
-                    }}
-                    className="h-full overflow-y-auto px-4 py-3 space-y-2.5 hide-scrollbar"
-                  >
-                    {creditsSuccess && (
-                      <div className="sticky top-0 z-10 pb-1">
-                        <CreditsSuccessBanner onDismiss={() => setCreditsSuccess(false)} />
-                      </div>
-                    )}
-                    {(() => {
-                      const RECENT_DEFAULT = 6;
-                      const allRecent = messages?.slice(-20) ?? [];
-                      const hiddenCount = showAllRecent
-                        ? 0
-                        : Math.max(0, allRecent.length - RECENT_DEFAULT);
-                      return (
-                        <>
-                          {hiddenCount > 0 && (
-                            <div className="flex items-center justify-center gap-2 pb-1">
-                              <button
-                                type="button"
-                                onClick={() => setShowAllRecent(true)}
-                                className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-                              >
-                                <ChevronDown className="h-3 w-3 rotate-180" />
-                                Show {hiddenCount} older message
-                                {hiddenCount === 1 ? "" : "s"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setShowChatHistory(true)}
-                                className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-                              >
-                                <History className="h-3 w-3" />
-                                Full history
-                              </button>
-                            </div>
-                          )}
-                          {showAllRecent && allRecent.length > RECENT_DEFAULT && (
-                            <div className="flex items-center justify-center pb-1">
-                              <button
-                                type="button"
-                                onClick={() => setShowAllRecent(false)}
-                                className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-                              >
-                                <ChevronDown className="h-3 w-3" />
-                                Collapse older
-                              </button>
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
-                    {(() => {
-                      const RECENT_DEFAULT = 6;
-                      const allRecent = messages?.slice(-20) ?? [];
-                      const visibleMsgs = showAllRecent
-                        ? allRecent
-                        : allRecent.slice(-RECENT_DEFAULT);
-                      const lastReportIdx = visibleMsgs.reduce<number>((acc, msg, idx) => {
-                        const p = msg.plan as ChatPlanPayload | null | undefined;
-                        const k =
-                          p && typeof p === "object" ? (p as { kind?: string }).kind : undefined;
-                        return k === "report" ? idx : acc;
-                      }, -1);
-                      return visibleMsgs.map((msg, msgIdx) => {
-                        const planPayload = msg.plan as ChatPlanPayload | null | undefined;
-                        const payloadKind =
-                          planPayload && typeof planPayload === "object"
-                            ? (planPayload as { kind?: string }).kind
-                            : undefined;
-                        const isReport = payloadKind === "report";
-                        const isError = payloadKind === "error";
-                        const isTaskQueued = payloadKind === "task-queued";
-                        const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
-                        const structuredPlan =
-                          isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
-                        return (
-                          <div
-                            key={msg.id}
-                            className={cn(
-                              "flex",
-                              msg.role === "user" ? "justify-end" : "justify-start",
-                            )}
-                          >
-                            {isTaskQueued ? (
-                              <button
-                                onClick={() => setBackgroundPanelOpen(true)}
-                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/40 bg-muted/30 text-[10px] text-muted-foreground hover:border-primary/30 hover:text-foreground transition-colors"
-                              >
-                                <Layers2 className="h-3 w-3 text-primary/60 shrink-0" />
-                                <span>Task queued in background</span>
-                                <ChevronRight className="h-3 w-3 shrink-0 opacity-50" />
-                              </button>
-                            ) : (
-                              <div
-                                className={cn(
-                                  "max-w-[90%] px-3 py-2 rounded-xl text-xs",
-                                  msg.role === "user"
-                                    ? "bg-primary text-primary-foreground rounded-br-sm"
-                                    : isError
-                                      ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
-                                      : "bg-muted text-foreground rounded-bl-sm border border-border",
-                                )}
-                              >
-                                {msg.role === "assistant" && !isReport && !isError ? (
-                                  <StreamingText
-                                    content={msg.content}
-                                    messageId={msg.id}
-                                    animate={
-                                      msgIdx === visibleMsgs.length - 1 &&
-                                      !!(planPayload as { streaming?: boolean } | null | undefined)
-                                        ?.streaming
-                                    }
-                                    onApply={(code) =>
-                                      send(`Apply this to my app:\n\`\`\`\n${code}\n\`\`\``, {
-                                        agentIntent: "build",
-                                        planMode: false,
-                                      })
-                                    }
-                                  />
-                                ) : (
-                                  <div className="whitespace-pre-wrap leading-relaxed">
-                                    {msg.content}
-                                  </div>
-                                )}
-
-                                {/* Clarifying quick-reply chips — clickable in live chat */}
-                                {payloadKind === "clarifying" &&
-                                  !isBusy &&
-                                  (() => {
-                                    const opts = (planPayload as { options?: string[] }).options;
-                                    if (!opts?.length) return null;
-                                    return (
-                                      <div className="mt-2.5 flex flex-wrap gap-1.5">
-                                        {opts.map((opt) => (
-                                          <button
-                                            key={opt}
-                                            onClick={() => send(opt)}
-                                            className="px-2.5 py-1 rounded-full text-[10px] border border-primary/30 bg-primary/8 text-primary hover:bg-primary/15 hover:border-primary/50 transition-colors font-medium"
-                                          >
-                                            {opt}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    );
-                                  })()}
-
-                                {isReport &&
-                                  (() => {
-                                    const rp = planPayload as {
-                                      kind: "report";
-                                      report: TaskReport;
-                                      taskId?: number;
-                                      queueBatchId?: string;
-                                      queueIndex?: number | null;
-                                      queueTotalCount?: number | null;
-                                    };
-                                    const hasBatch =
-                                      rp.queueBatchId &&
-                                      rp.queueTotalCount &&
-                                      rp.queueTotalCount > 1;
-                                    const isLastReport = msgIdx === lastReportIdx;
-                                    return (
-                                      <>
-                                        {hasBatch && (
-                                          <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
-                                            <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
-                                            <span className="text-[10px] text-muted-foreground/70 font-medium">
-                                              Task {(rp.queueIndex ?? 0) + 1} of{" "}
-                                              {rp.queueTotalCount}
-                                            </span>
-                                          </div>
-                                        )}
-                                        <ReportCard
-                                          report={rp.report}
-                                          onViewFile={(path, line) => {
-                                            const f = files.find((x) => x.path === path);
-                                            if (f) {
-                                              setSelectedCodeFileId(f.id);
-                                              setSelectedCodeFileLine(line ?? null);
-                                              setActiveTab("code");
-                                            }
-                                          }}
-                                          onViewHistory={() => switchLeftPanel("history")}
-                                          onSendMessage={(text) => send(text)}
-                                        />
-                                        {isLastReport && rp.taskId && !isBusy && (
-                                          <SuggestionChips
-                                            projectId={projectId}
-                                            taskId={rp.taskId}
-                                            onAccepted={(tid) => setActiveTaskId(tid)}
-                                          />
-                                        )}
-                                      </>
-                                    );
-                                  })()}
-                                {isError && (
-                                  <ErrorCard
-                                    message={(planPayload as { message: string }).message}
-                                    suggestions={
-                                      (planPayload as { suggestions?: string[] }).suggestions
-                                    }
-                                    onTryFix={(text) => {
-                                      setPrompt(text);
-                                    }}
-                                    onBuyCredits={() => setBuyCreditsOpen(true)}
-                                  />
-                                )}
-                                {isPlanCard && (
-                                  <PlanCard
-                                    plan={structuredPlan}
-                                    projectId={projectId}
-                                    initialAgentMode={agentMode}
-                                    onBuild={runPlanned}
-                                    onAddKey={handleAddKey}
-                                    disabled={isBusy}
-                                    messageId={msg.id}
-                                  />
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      });
-                    })()}
-
-                    {/* Task #532: human-in-the-loop prompts from the agent loop */}
-                    <AgentPromptCardsList
-                      projectId={projectId}
-                      taskId={activeTaskId}
-                      prompts={agentPrompts}
-                      onDismiss={dismissAgentPrompt}
-                    />
-
-                    {/* Live streaming bubble — shown while SSE converse stream is active */}
-                    {isStreaming && !sendMessage.isPending && (
-                      <div className="relative">
-                        {/* Typing indicator: fades out and steps aside when first token arrives */}
-                        <div
-                          className={cn(
-                            "transition-opacity duration-150",
-                            streamingText.length > 0
-                              ? "opacity-0 pointer-events-none absolute top-0 left-0"
-                              : "opacity-100",
-                          )}
-                        >
-                          <TypingIndicator />
+                    <div
+                      ref={scrollRef}
+                      onScroll={() => {
+                        const el = scrollRef.current;
+                        if (!el) return;
+                        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                        chatAtBottomRef.current = atBottom;
+                        setChatScrolledUp(!atBottom);
+                      }}
+                      className="h-full overflow-y-auto px-4 py-3 space-y-2.5 hide-scrollbar"
+                    >
+                      {creditsSuccess && (
+                        <div className="sticky top-0 z-10 pb-1">
+                          <CreditsSuccessBanner onDismiss={() => setCreditsSuccess(false)} />
                         </div>
-                        {/* Streaming bubble: fades in as text arrives */}
-                        {streamingText.length > 0 && (
-                          <div className="flex justify-start animate-in fade-in duration-150">
-                            <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
-                              <MarkdownMessage content={streamingText} />
-                              <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
-                              <div className="mt-1.5 flex justify-end">
+                      )}
+                      {(() => {
+                        const RECENT_DEFAULT = 6;
+                        const allRecent = messages?.slice(-20) ?? [];
+                        const hiddenCount = showAllRecent
+                          ? 0
+                          : Math.max(0, allRecent.length - RECENT_DEFAULT);
+                        return (
+                          <>
+                            {hiddenCount > 0 && (
+                              <div className="flex items-center justify-center gap-2 pb-1">
                                 <button
-                                  onClick={handleStopStream}
-                                  className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                                  title="Stop generating"
+                                  type="button"
+                                  onClick={() => setShowAllRecent(true)}
+                                  className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
                                 >
-                                  <Square className="w-2.5 h-2.5 fill-current" />
-                                  Stop
+                                  <ChevronDown className="h-3 w-3 rotate-180" />
+                                  Show {hiddenCount} older message
+                                  {hiddenCount === 1 ? "" : "s"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowChatHistory(true)}
+                                  className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                                >
+                                  <History className="h-3 w-3" />
+                                  Full history
                                 </button>
                               </div>
+                            )}
+                            {showAllRecent && allRecent.length > RECENT_DEFAULT && (
+                              <div className="flex items-center justify-center pb-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAllRecent(false)}
+                                  className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                                >
+                                  <ChevronDown className="h-3 w-3" />
+                                  Collapse older
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                      {(() => {
+                        const RECENT_DEFAULT = 6;
+                        const allRecent = messages?.slice(-20) ?? [];
+                        const visibleMsgs = showAllRecent
+                          ? allRecent
+                          : allRecent.slice(-RECENT_DEFAULT);
+                        const lastReportIdx = visibleMsgs.reduce<number>((acc, msg, idx) => {
+                          const p = msg.plan as ChatPlanPayload | null | undefined;
+                          const k =
+                            p && typeof p === "object" ? (p as { kind?: string }).kind : undefined;
+                          return k === "report" ? idx : acc;
+                        }, -1);
+                        return visibleMsgs.map((msg, msgIdx) => {
+                          const planPayload = msg.plan as ChatPlanPayload | null | undefined;
+                          const payloadKind =
+                            planPayload && typeof planPayload === "object"
+                              ? (planPayload as { kind?: string }).kind
+                              : undefined;
+                          const isReport = payloadKind === "report";
+                          const isError = payloadKind === "error";
+                          const isTaskQueued = payloadKind === "task-queued";
+                          const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
+                          const structuredPlan =
+                            isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
+                          return (
+                            <div
+                              key={msg.id}
+                              className={cn(
+                                "flex",
+                                msg.role === "user" ? "justify-end" : "justify-start",
+                              )}
+                            >
+                              {isTaskQueued ? (
+                                <button
+                                  onClick={() => setBackgroundPanelOpen(true)}
+                                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/40 bg-muted/30 text-[10px] text-muted-foreground hover:border-primary/30 hover:text-foreground transition-colors"
+                                >
+                                  <Layers2 className="h-3 w-3 text-primary/60 shrink-0" />
+                                  <span>Task queued in background</span>
+                                  <ChevronRight className="h-3 w-3 shrink-0 opacity-50" />
+                                </button>
+                              ) : (
+                                <div
+                                  className={cn(
+                                    "max-w-[90%] px-3 py-2 rounded-xl text-xs",
+                                    msg.role === "user"
+                                      ? "bg-primary text-primary-foreground rounded-br-sm"
+                                      : isError
+                                        ? "bg-destructive/10 border border-destructive/30 text-foreground rounded-bl-sm"
+                                        : "bg-muted text-foreground rounded-bl-sm border border-border",
+                                  )}
+                                >
+                                  {msg.role === "assistant" && !isReport && !isError ? (
+                                    <StreamingText
+                                      content={msg.content}
+                                      messageId={msg.id}
+                                      animate={
+                                        msgIdx === visibleMsgs.length - 1 &&
+                                        !!(
+                                          planPayload as { streaming?: boolean } | null | undefined
+                                        )?.streaming
+                                      }
+                                      onApply={(code) =>
+                                        send(`Apply this to my app:\n\`\`\`\n${code}\n\`\`\``, {
+                                          agentIntent: "build",
+                                          planMode: false,
+                                        })
+                                      }
+                                    />
+                                  ) : (
+                                    <div className="whitespace-pre-wrap leading-relaxed">
+                                      {msg.content}
+                                    </div>
+                                  )}
+
+                                  {/* Clarifying quick-reply chips — clickable in live chat */}
+                                  {payloadKind === "clarifying" &&
+                                    !isBusy &&
+                                    (() => {
+                                      const opts = (planPayload as { options?: string[] }).options;
+                                      if (!opts?.length) return null;
+                                      return (
+                                        <div className="mt-2.5 flex flex-wrap gap-1.5">
+                                          {opts.map((opt) => (
+                                            <button
+                                              key={opt}
+                                              onClick={() => send(opt)}
+                                              className="px-2.5 py-1 rounded-full text-[10px] border border-primary/30 bg-primary/8 text-primary hover:bg-primary/15 hover:border-primary/50 transition-colors font-medium"
+                                            >
+                                              {opt}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      );
+                                    })()}
+
+                                  {isReport &&
+                                    (() => {
+                                      const rp = planPayload as {
+                                        kind: "report";
+                                        report: TaskReport;
+                                        taskId?: number;
+                                        queueBatchId?: string;
+                                        queueIndex?: number | null;
+                                        queueTotalCount?: number | null;
+                                      };
+                                      const hasBatch =
+                                        rp.queueBatchId &&
+                                        rp.queueTotalCount &&
+                                        rp.queueTotalCount > 1;
+                                      const isLastReport = msgIdx === lastReportIdx;
+                                      return (
+                                        <>
+                                          {hasBatch && (
+                                            <div className="mt-1.5 mb-0.5 flex items-center gap-1.5">
+                                              <ListOrdered className="h-3 w-3 text-muted-foreground/50" />
+                                              <span className="text-[10px] text-muted-foreground/70 font-medium">
+                                                Task {(rp.queueIndex ?? 0) + 1} of{" "}
+                                                {rp.queueTotalCount}
+                                              </span>
+                                            </div>
+                                          )}
+                                          <ReportCard
+                                            report={rp.report}
+                                            onViewFile={(path, line) => {
+                                              const f = files.find((x) => x.path === path);
+                                              if (f) {
+                                                setSelectedCodeFileId(f.id);
+                                                setSelectedCodeFileLine(line ?? null);
+                                                setActiveTab("code");
+                                              }
+                                            }}
+                                            onViewHistory={() => switchLeftPanel("history")}
+                                            onSendMessage={(text) => send(text)}
+                                          />
+                                          {isLastReport && rp.taskId && !isBusy && (
+                                            <SuggestionChips
+                                              projectId={projectId}
+                                              taskId={rp.taskId}
+                                              onAccepted={(tid) => setActiveTaskId(tid)}
+                                            />
+                                          )}
+                                        </>
+                                      );
+                                    })()}
+                                  {isError && (
+                                    <ErrorCard
+                                      message={(planPayload as { message: string }).message}
+                                      suggestions={
+                                        (planPayload as { suggestions?: string[] }).suggestions
+                                      }
+                                      onTryFix={(text) => {
+                                        setPrompt(text);
+                                      }}
+                                      onBuyCredits={() => setBuyCreditsOpen(true)}
+                                    />
+                                  )}
+                                  {isPlanCard && (
+                                    <PlanCard
+                                      plan={structuredPlan}
+                                      projectId={projectId}
+                                      initialAgentMode={agentMode}
+                                      onBuild={runPlanned}
+                                      onAddKey={handleAddKey}
+                                      disabled={isBusy}
+                                      messageId={msg.id}
+                                    />
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
+
+                      {/* Task #532: human-in-the-loop prompts from the agent loop */}
+                      <AgentPromptCardsList
+                        projectId={projectId}
+                        taskId={activeTaskId}
+                        prompts={agentPrompts}
+                        onDismiss={dismissAgentPrompt}
+                      />
+
+                      {/* Live streaming bubble — shown while SSE converse stream is active */}
+                      {isStreaming && !sendMessage.isPending && (
+                        <div className="relative">
+                          {/* Typing indicator: fades out and steps aside when first token arrives */}
+                          <div
+                            className={cn(
+                              "transition-opacity duration-150",
+                              streamingText.length > 0
+                                ? "opacity-0 pointer-events-none absolute top-0 left-0"
+                                : "opacity-100",
+                            )}
+                          >
+                            <TypingIndicator />
+                          </div>
+                          {/* Streaming bubble: fades in as text arrives */}
+                          {streamingText.length > 0 && (
+                            <div className="flex justify-start animate-in fade-in duration-150">
+                              <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
+                                <MarkdownMessage content={streamingText} />
+                                <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
+                                <div className="mt-1.5 flex justify-end">
+                                  <button
+                                    onClick={handleStopStream}
+                                    className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                                    title="Stop generating"
+                                  >
+                                    <Square className="w-2.5 h-2.5 fill-current" />
+                                    Stop
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {sendMessage.isPending ? (
+                        pendingIsConverse ? (
+                          <TypingIndicator />
+                        ) : pendingFeedTaskId !== null ? (
+                          <AgentThinkingBubble
+                            projectId={projectId}
+                            taskId={pendingFeedTaskId}
+                            startedAt={pendingBuildStartedAt}
+                            onDismiss={() => {}}
+                            onViewHistory={(versionId) => {
+                              setHistoryFocusVersionId(versionId);
+                              switchLeftPanel("history");
+                            }}
+                          />
+                        ) : (
+                          <div className="flex justify-start">
+                            <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
+                              <div
+                                className={cn(
+                                  "animate-pulse w-1.5 h-1.5 rounded-full",
+                                  pendingIsPlan ? "bg-secondary" : "bg-primary",
+                                )}
+                              />
+                              <span className="text-muted-foreground">
+                                {pendingIsPlan
+                                  ? "Thinking through the plan…"
+                                  : "MustaFlow is working…"}
+                              </span>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    )}
-
-                    {sendMessage.isPending ? (
-                      pendingIsConverse ? (
-                        <TypingIndicator />
-                      ) : pendingFeedTaskId !== null ? (
+                        )
+                      ) : activeTaskId !== null ? (
                         <AgentThinkingBubble
                           projectId={projectId}
-                          taskId={pendingFeedTaskId}
+                          taskId={activeTaskId}
                           startedAt={pendingBuildStartedAt}
-                          onDismiss={() => {}}
+                          onDismiss={() => setActiveTaskId(null)}
                           onViewHistory={(versionId) => {
                             setHistoryFocusVersionId(versionId);
                             switchLeftPanel("history");
                           }}
                         />
-                      ) : (
-                        <div className="flex justify-start">
-                          <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2">
-                            <div
-                              className={cn(
-                                "animate-pulse w-1.5 h-1.5 rounded-full",
-                                pendingIsPlan ? "bg-secondary" : "bg-primary",
-                              )}
-                            />
-                            <span className="text-muted-foreground">
-                              {pendingIsPlan
-                                ? "Thinking through the plan…"
-                                : "MustaFlow is working…"}
-                            </span>
-                          </div>
-                        </div>
-                      )
-                    ) : activeTaskId !== null ? (
-                      <AgentThinkingBubble
-                        projectId={projectId}
-                        taskId={activeTaskId}
-                        startedAt={pendingBuildStartedAt}
-                        onDismiss={() => setActiveTaskId(null)}
-                        onViewHistory={(versionId) => {
-                          setHistoryFocusVersionId(versionId);
-                          switchLeftPanel("history");
+                      ) : null}
+                    </div>
+                    {chatScrolledUp && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const el = scrollRef.current;
+                          if (el) el.scrollTop = el.scrollHeight;
                         }}
-                      />
-                    ) : null}
-                  </div>
-                  {chatScrolledUp && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const el = scrollRef.current;
-                        if (el) el.scrollTop = el.scrollHeight;
-                      }}
-                      className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-medium shadow-lg hover:opacity-90 transition-opacity"
-                      title="Jump to latest message"
-                    >
-                      <ChevronDown className="h-3 w-3" />
-                      Jump to latest
-                    </button>
-                  )}
+                        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-medium shadow-lg hover:opacity-90 transition-opacity"
+                        title="Jump to latest message"
+                      >
+                        <ChevronDown className="h-3 w-3" />
+                        Jump to latest
+                      </button>
+                    )}
                   </div>
 
                   {/* Status bar */}
