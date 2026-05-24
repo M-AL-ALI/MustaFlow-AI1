@@ -2914,6 +2914,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 diffForOrchestrator,
                 summaryForOrchestrator,
                 kindForOrchestrator,
+                undefined,
+                {
+                  hounddog: project.scannerHoundDogEnabled === true,
+                  trivy: project.scannerTrivyEnabled === true,
+                },
               );
 
               // Persist to check_runs table

@@ -177,6 +177,16 @@ async function runCheckByName(
       const r = await runSemgrepCheck(files);
       return { status: r.status, findings: r.findings };
     }
+    case "hounddog-sast": {
+      const { runHoundDogCheck } = await import("./hounddog");
+      const r = await runHoundDogCheck(files);
+      return { status: r.status, findings: r.findings };
+    }
+    case "trivy-sast": {
+      const { runTrivyCheck } = await import("./trivy");
+      const r = await runTrivyCheck(files);
+      return { status: r.status, findings: r.findings };
+    }
     case "accessibility": {
       const r = runAccessibilityCheck(files);
       return { status: r.status, findings: r.findings };
@@ -214,12 +224,18 @@ async function runCheckByName(
  * Main orchestration entry point.
  * Selects checks via AI, runs them in parallel, and returns all results.
  */
+export type ScannerToggles = {
+  hounddog?: boolean;
+  trivy?: boolean;
+};
+
 export async function runOrchestration(
   files: BuilderFile[],
   diff: BuildDiffSummary,
   buildSummary: string,
   projectKind: string,
   onDemandChecks?: string[],
+  scannerToggles?: ScannerToggles,
 ): Promise<OrchestratorResult> {
   const alwaysOnChecks = getAlwaysOnChecks();
 
@@ -261,6 +277,12 @@ export async function runOrchestration(
     } else if (def.trigger === "on-demand") {
       shouldRun = false;
       reason = "On-demand only — not triggered.";
+    } else if (name === "hounddog-sast" && !scannerToggles?.hounddog) {
+      shouldRun = false;
+      reason = "Disabled — enable projects.scannerHoundDogEnabled to run HoundDog.";
+    } else if (name === "trivy-sast" && !scannerToggles?.trivy) {
+      shouldRun = false;
+      reason = "Disabled — enable projects.scannerTrivyEnabled to run Trivy.";
     } else {
       shouldRun = selection?.run ?? true;
       reason = selection?.reason ?? "Included by default.";

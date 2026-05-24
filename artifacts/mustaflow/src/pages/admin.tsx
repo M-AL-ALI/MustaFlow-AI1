@@ -178,6 +178,8 @@ export default function AdminPage() {
         </div>
       )}
 
+      <EvalResultsTile />
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
           icon={FolderKanban}
@@ -1172,6 +1174,122 @@ function AdminSection({ title, children }: { title: string; children: React.Reac
         </h3>
       </div>
       <div className="divide-y divide-border">{children}</div>
+    </div>
+  );
+}
+
+type EvalSummary = {
+  ran?: boolean;
+  startedAt?: string;
+  finishedAt?: string;
+  model?: string;
+  totalFixtures?: number;
+  passed?: number;
+  failed?: number;
+  errored?: number;
+  perStage?: Record<string, { passed: number; failed: number; avgScore: number }>;
+  comparison?: {
+    winners: string[];
+    losers: string[];
+    ties: string[];
+    totalDeltaScore: number;
+    regressionRatio: number;
+  };
+};
+
+function EvalResultsTile() {
+  const [data, setData] = useState<EvalSummary | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch("/api/admin/eval-results");
+        if (r.ok) setData((await r.json()) as EvalSummary);
+      } catch {
+        /* ignore */
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, []);
+  if (!loaded) return null;
+  const ran = data?.ran === true;
+  return (
+    <div className="border border-border rounded-xl bg-card overflow-hidden">
+      <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <Activity className="h-3.5 w-3.5 text-cyan-400" />
+          Prompt Eval (Task #545)
+        </h3>
+        {ran && data?.finishedAt && (
+          <span className="text-xs text-muted-foreground">
+            {new Date(data.finishedAt).toLocaleString()} · {data.model ?? "—"}
+          </span>
+        )}
+      </div>
+      {!ran ? (
+        <div className="p-4 text-sm text-muted-foreground">
+          No eval results yet. Run{" "}
+          <code className="text-xs bg-muted/60 px-1.5 py-0.5 rounded">
+            pnpm --filter @workspace/scripts run eval-prompts
+          </code>{" "}
+          to generate them.
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border/40">
+            <ArchitectMetric
+              label="Pass"
+              value={`${data?.passed ?? 0}/${data?.totalFixtures ?? 0}`}
+              tone="ok"
+            />
+            <ArchitectMetric label="Fail" value={String(data?.failed ?? 0)} tone="warn" />
+            <ArchitectMetric label="Errored" value={String(data?.errored ?? 0)} tone="error" />
+            <ArchitectMetric
+              label="Δ Score"
+              value={
+                data?.comparison
+                  ? (data.comparison.totalDeltaScore >= 0 ? "+" : "") +
+                    String(data.comparison.totalDeltaScore)
+                  : "—"
+              }
+              tone={
+                data?.comparison && data.comparison.totalDeltaScore < 0 ? "warn" : "neutral"
+              }
+            />
+          </div>
+          {data?.perStage && (
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-px bg-border/40">
+              {(
+                Object.keys(data.perStage) as Array<keyof typeof data.perStage>
+              ).map((stage) => {
+                const ps = data.perStage![stage as string]!;
+                return (
+                  <div key={stage as string} className="bg-card px-3 py-2 text-xs">
+                    <div className="text-muted-foreground uppercase tracking-wider">
+                      {stage as string}
+                    </div>
+                    <div className="font-medium mt-0.5">
+                      {ps.passed}/{ps.passed + ps.failed} · avg {ps.avgScore.toFixed(1)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {data?.comparison && (
+            <div className="px-4 py-2 text-xs text-muted-foreground border-t border-border">
+              {data.comparison.winners.length} win · {data.comparison.ties.length} tie ·{" "}
+              {data.comparison.losers.length} lose vs baseline
+              {data.comparison.regressionRatio > 0.1 && (
+                <span className="ml-2 text-destructive font-semibold">
+                  REGRESSION ({(data.comparison.regressionRatio * 100).toFixed(0)}%)
+                </span>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

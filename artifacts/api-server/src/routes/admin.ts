@@ -222,6 +222,22 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
   });
 });
 
+// ── GET /api/admin/eval-results ──────────────────────────────────────────────
+// Returns the latest prompt-eval harness run (Task #545). Reads
+// scripts/eval-results/latest.json if present; returns { ran: false } otherwise.
+router.get("/admin/eval-results", async (_req, res): Promise<void> => {
+  try {
+    const { readFile } = await import("fs/promises");
+    const { join } = await import("path");
+    const path = join(process.cwd(), "scripts", "eval-results", "latest.json");
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    res.json({ ran: true, ...parsed });
+  } catch {
+    res.json({ ran: false });
+  }
+});
+
 // ── GET /api/admin/launch-readiness ──────────────────────────────────────────
 // Returns a structured checklist with pass/fail/partial for each launch item.
 router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {

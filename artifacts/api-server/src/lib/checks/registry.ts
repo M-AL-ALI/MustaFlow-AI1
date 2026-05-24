@@ -66,6 +66,24 @@ export const CHECK_REGISTRY: CheckDefinition[] = [
       "Fix all security vulnerabilities found by Semgrep static analysis. Address each finding at the indicated file and line: sanitize user inputs before using them in DOM operations, avoid eval() and Function() with dynamic strings, prevent prototype pollution by validating object keys, and follow OWASP secure coding guidelines for JavaScript. Do not remove functionality — only fix the insecure patterns.",
   },
   {
+    name: "hounddog-sast",
+    category: "security",
+    trigger: "agent-selected",
+    description:
+      "HoundDog secret/PII leak scanner — detects hardcoded credentials, API keys, and personally-identifiable data flowing into logs/storage. Complements the always-on regex-based secret-leak check with deeper PII rules. Disabled by default per project (enable via projects.scannerHoundDogEnabled). Gracefully skips when the hounddog CLI is not installed.",
+    fixPrompt:
+      "Address each HoundDog finding by removing hardcoded secrets/PII from the generated code. Replace credentials with environment-variable lookups, strip user PII from log statements, and avoid persisting sensitive fields (email, phone, SSN, payment data) in plaintext storage. Preserve functionality — only remove or relocate the sensitive values.",
+  },
+  {
+    name: "trivy-sast",
+    category: "security",
+    trigger: "agent-selected",
+    description:
+      "Trivy filesystem scanner — finds known CVEs in declared dependencies (package-lock.json, requirements.txt, Pipfile.lock, go.sum, Cargo.lock, etc.) plus container-image misconfigurations in Dockerfiles. Disabled by default per project (enable via projects.scannerTrivyEnabled). Gracefully skips when the trivy CLI is not installed.",
+    fixPrompt:
+      "Bump every vulnerable dependency Trivy flagged to the suggested fixed version (or the latest stable if no fix is listed). Update the lockfile accordingly. For Dockerfile misconfigurations, apply the recommended mitigation (e.g. switch to a non-root user, pin base images, remove ADD with URLs). Do not change application logic — only patch the manifest/Dockerfile.",
+  },
+  {
     name: "accessibility",
     category: "accessibility",
     trigger: "agent-selected",

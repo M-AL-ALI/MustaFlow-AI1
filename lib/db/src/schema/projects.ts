@@ -115,6 +115,15 @@ export const projectsTable = pgTable("projects", {
   // "standard"   — broad allow with deny-list (default).
   // "permissive" — admin-only; skips registry allowlist for pkg_install.
   policyStrictness: text("policy_strictness").notNull().default("standard"),
+  // Task #545 — Security & Quality Pack: per-project scanner toggles.
+  // scannerHoundDogEnabled: when true, the HoundDog secret/PII leak scanner runs
+  //   alongside semgrep on every build. Default false — opt-in (HoundDog requires
+  //   its CLI to be installed and is more permissive than the always-on secret-leak
+  //   check; admins may flip this on per project for stricter PII coverage).
+  // scannerTrivyEnabled: when true, the Trivy filesystem/vulnerability scanner runs
+  //   on every build (lockfiles, container manifests, IaC). Default false — opt-in.
+  scannerHoundDogEnabled: boolean("scanner_hounddog_enabled").notNull().default(false),
+  scannerTrivyEnabled: boolean("scanner_trivy_enabled").notNull().default(false),
   // e2eEnabled: when true, the agentic builder loop automatically runs a Playwright
   // smoke E2E scenario set after every successful web build, and the `run_e2e` tool
   // is available to the model. Default true. Disable for speed-over-coverage builds.
