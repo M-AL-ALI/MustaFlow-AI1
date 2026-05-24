@@ -3,17 +3,21 @@
  *
  *   scanner_hounddog_enabled BOOLEAN NOT NULL DEFAULT false
  *   scanner_trivy_enabled    BOOLEAN NOT NULL DEFAULT false
+ *   scanner_semgrep_enabled  BOOLEAN NOT NULL DEFAULT true
  *
  * Idempotent — safe to re-run. Uses ADD COLUMN IF NOT EXISTS.
  */
 import { pool } from "@workspace/db";
 
 async function main() {
-  console.log("Adding scanner_hounddog_enabled / scanner_trivy_enabled to projects…");
+  console.log(
+    "Adding scanner_hounddog_enabled / scanner_trivy_enabled / scanner_semgrep_enabled to projects…",
+  );
   await pool.query(`
     ALTER TABLE projects
       ADD COLUMN IF NOT EXISTS scanner_hounddog_enabled BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS scanner_trivy_enabled    BOOLEAN NOT NULL DEFAULT false;
+      ADD COLUMN IF NOT EXISTS scanner_trivy_enabled    BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS scanner_semgrep_enabled  BOOLEAN NOT NULL DEFAULT true;
   `);
   console.log("Done.");
   await pool.end();

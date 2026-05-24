@@ -227,6 +227,8 @@ async function runCheckByName(
 export type ScannerToggles = {
   hounddog?: boolean;
   trivy?: boolean;
+  /** Defaults to true (Semgrep is the baseline SAST). Pass false to disable. */
+  semgrep?: boolean;
 };
 
 export async function runOrchestration(
@@ -283,6 +285,9 @@ export async function runOrchestration(
     } else if (name === "trivy-sast" && !scannerToggles?.trivy) {
       shouldRun = false;
       reason = "Disabled — enable projects.scannerTrivyEnabled to run Trivy.";
+    } else if (name === "semgrep-sast" && scannerToggles?.semgrep === false) {
+      shouldRun = false;
+      reason = "Disabled — projects.scannerSemgrepEnabled is false.";
     } else {
       shouldRun = selection?.run ?? true;
       reason = selection?.reason ?? "Included by default.";

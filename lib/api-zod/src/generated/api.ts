@@ -699,6 +699,9 @@ export const ListProjectsResponseItem = zod.object({
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
+  "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
+  "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -770,6 +773,9 @@ export const GetProjectResponse = zod.object({
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
+  "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
+  "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -796,7 +802,10 @@ export const UpdateProjectBody = zod.object({
   "architectReviewEnabled": zod.boolean().optional().describe('Toggle the architect review subagent for this project.'),
   "e2eEnabled": zod.boolean().optional(),
   "multiplayerEnabled": zod.boolean().optional(),
-  "redirectWwwApex": zod.boolean().optional()
+  "redirectWwwApex": zod.boolean().optional(),
+  "scannerSemgrepEnabled": zod.boolean().optional().describe('Run Semgrep SAST on every build (Task #545). Default true.'),
+  "scannerHoundDogEnabled": zod.boolean().optional().describe('Run HoundDog secret\/PII scanner on every build (Task #545). Default false.'),
+  "scannerTrivyEnabled": zod.boolean().optional().describe('Run Trivy CVE\/IaC scanner on every build (Task #545). Default false.')
 })
 
 export const updateProjectResponseHealthScoreMin = 0;
@@ -843,6 +852,9 @@ export const UpdateProjectResponse = zod.object({
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
+  "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
+  "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -901,6 +913,9 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
+  "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
+  "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -959,6 +974,9 @@ export const RestoreProjectResponse = zod.object({
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
+  "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
+  "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -1016,6 +1034,9 @@ export const GetProjectsSummaryResponse = zod.object({
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
   "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
+  "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
+  "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
+  "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()

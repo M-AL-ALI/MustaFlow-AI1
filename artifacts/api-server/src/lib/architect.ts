@@ -48,7 +48,7 @@ const ArchitectResponseSchema = z.object({
 export type ArchitectFinding = z.infer<typeof ArchitectFindingSchema>;
 export type ArchitectResponse = z.infer<typeof ArchitectResponseSchema>;
 
-const ARCHITECT_SYSTEM_PROMPT = `You are the Architect Reviewer for MustaFlow AI — a senior staff engineer giving a second-opinion deep review of a build that another AI just completed.
+export const ARCHITECT_SYSTEM_PROMPT = `You are the Architect Reviewer for MustaFlow AI — a senior staff engineer giving a second-opinion deep review of a build that another AI just completed.
 
 Your job: read the user request, the plan (if any), the diff, the commands the builder ran, and any file excerpts provided. Decide whether the build actually satisfies the request and is production-safe.
 

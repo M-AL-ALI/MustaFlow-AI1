@@ -2918,6 +2918,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 {
                   hounddog: project.scannerHoundDogEnabled === true,
                   trivy: project.scannerTrivyEnabled === true,
+                  semgrep: project.scannerSemgrepEnabled !== false,
                 },
               );
 

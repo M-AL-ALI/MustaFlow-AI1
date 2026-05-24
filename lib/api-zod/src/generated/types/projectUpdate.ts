@@ -30,4 +30,10 @@ export interface ProjectUpdate {
   e2eEnabled?: boolean;
   multiplayerEnabled?: boolean;
   redirectWwwApex?: boolean;
+  /** Run Semgrep SAST on every build (Task #545). Default true. */
+  scannerSemgrepEnabled?: boolean;
+  /** Run HoundDog secret/PII scanner on every build (Task #545). Default false. */
+  scannerHoundDogEnabled?: boolean;
+  /** Run Trivy CVE/IaC scanner on every build (Task #545). Default false. */
+  scannerTrivyEnabled?: boolean;
 }

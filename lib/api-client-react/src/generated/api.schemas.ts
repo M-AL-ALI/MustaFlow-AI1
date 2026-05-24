@@ -315,6 +315,12 @@ export interface Project {
   multiplayerEnabled?: boolean;
   /** When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains. */
   redirectWwwApex?: boolean;
+  /** When true, Semgrep SAST runs on every build (Task #545). Default true. */
+  scannerSemgrepEnabled?: boolean;
+  /** When true, the HoundDog secret/PII scanner runs on every build (Task #545). Default false. */
+  scannerHoundDogEnabled?: boolean;
+  /** When true, the Trivy CVE/IaC scanner runs on every build (Task #545). Default false. */
+  scannerTrivyEnabled?: boolean;
   /**
      * Version ID currently live on the staging slot. Null = not staged. Set by POST /publish?env=staging, promoted by POST /promote.
      * @nullable
@@ -439,6 +445,12 @@ export interface ProjectUpdate {
   e2eEnabled?: boolean;
   multiplayerEnabled?: boolean;
   redirectWwwApex?: boolean;
+  /** Run Semgrep SAST on every build (Task #545). Default true. */
+  scannerSemgrepEnabled?: boolean;
+  /** Run HoundDog secret/PII scanner on every build (Task #545). Default false. */
+  scannerHoundDogEnabled?: boolean;
+  /** Run Trivy CVE/IaC scanner on every build (Task #545). Default false. */
+  scannerTrivyEnabled?: boolean;
 }
 
 export interface MobileAppSettingsInput {

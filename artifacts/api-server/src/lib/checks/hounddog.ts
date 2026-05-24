@@ -89,11 +89,10 @@ export async function runHoundDogCheck(files: BuilderFile[]): Promise<HoundDogRe
 
     let stdout = "";
     try {
-      const r = await execFileAsync(
-        "hounddog",
-        ["scan", "--format", "json", "--no-color", dir],
-        { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 },
-      );
+      const r = await execFileAsync("hounddog", ["scan", "--format", "json", "--no-color", dir], {
+        timeout: 60_000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
       stdout = r.stdout;
     } catch (err: unknown) {
       const e = err as { stdout?: string };

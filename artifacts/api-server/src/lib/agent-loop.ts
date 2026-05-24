@@ -24,6 +24,7 @@
  */
 
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { z } from "zod";
 import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
@@ -3978,25 +3979,57 @@ ${inventory || "(empty workspace)"}`;
           { signal: input.signal },
         );
         const raw = completion.choices?.[0]?.message?.content ?? "{}";
-        let parsed: {
-          scope?: string;
-          assets?: Array<{ name?: string; description?: string }>;
-          trust_boundaries?: string[];
-          threats?: Array<{
-            category?: string;
-            title?: string;
-            description?: string;
-            likelihood?: string;
-            impact?: string;
-            mitigations?: string[];
-          }>;
-          summary?: string;
-        };
+        // Zod-validate the model output before persistence. Anything that
+        // doesn't match the documented STRIDE shape is rejected with a
+        // structured error so the caller (or operator) can see why.
+        const ThreatModelSchema = z.object({
+          scope: z.string().optional(),
+          assets: z
+            .array(
+              z.object({
+                name: z.string().optional(),
+                description: z.string().optional(),
+              }),
+            )
+            .optional(),
+          trust_boundaries: z.array(z.string()).optional(),
+          threats: z
+            .array(
+              z.object({
+                category: z
+                  .enum([
+                    "Spoofing",
+                    "Tampering",
+                    "Repudiation",
+                    "InformationDisclosure",
+                    "DenialOfService",
+                    "ElevationOfPrivilege",
+                  ])
+                  .optional(),
+                title: z.string().optional(),
+                description: z.string().optional(),
+                likelihood: z.enum(["low", "medium", "high"]).optional(),
+                impact: z.enum(["low", "medium", "high"]).optional(),
+                mitigations: z.array(z.string()).optional(),
+              }),
+            )
+            .optional(),
+          summary: z.string().optional(),
+        });
+        let rawParsed: unknown;
         try {
-          parsed = JSON.parse(raw);
+          rawParsed = JSON.parse(raw);
         } catch {
           return { ok: false, observation: "ERROR: model returned invalid JSON" };
         }
+        const validation = ThreatModelSchema.safeParse(rawParsed);
+        if (!validation.success) {
+          return {
+            ok: false,
+            observation: `ERROR: threat_model output failed schema validation — ${validation.error.message.slice(0, 400)}`,
+          };
+        }
+        const parsed = validation.data;
 
         const md: string[] = [];
         md.push(`# Threat Model — ${parsed.scope ?? scope}`);
@@ -4022,9 +4055,7 @@ ${inventory || "(empty workspace)"}`;
           md.push(`## STRIDE threats`);
           for (const t of parsed.threats) {
             md.push(`### ${t.category ?? "?"} — ${t.title ?? "(untitled)"}`);
-            md.push(
-              `**Likelihood:** ${t.likelihood ?? "?"} · **Impact:** ${t.impact ?? "?"}`,
-            );
+            md.push(`**Likelihood:** ${t.likelihood ?? "?"} · **Impact:** ${t.impact ?? "?"}`);
             if (t.description) md.push("");
             if (t.description) md.push(t.description);
             if (t.mitigations?.length) {

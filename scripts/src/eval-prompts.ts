@@ -1,16 +1,25 @@
 /**
  * Prompt eval harness (Task #545).
  *
- * Runs 30 hand-curated fixtures across 6 MustaFlow agent stages
- * (build / refine / plan / intent / converse / architect) through
- * gpt-5-mini, scores each output with a rubric judge call, and compares
- * the run to the previous baseline saved next to this script.
+ * Exercises the REAL production system prompts from
+ * `artifacts/api-server/src/lib/builder.ts` and `architect.ts` against a
+ * curated fixture set, scores each output with a rubric judge call, and
+ * compares the run against the saved baseline. CI fails the run when more
+ * than 10% of fixtures regress.
+ *
+ * Stages covered (the same prompts MustaFlow ships):
+ *   build      → BUILD_SYSTEM_PROMPT          (returns JSON {files,…})
+ *   refine     → REFINE_SYSTEM_PROMPT         (returns JSON {files,…})
+ *   plan       → PLAN_SYSTEM_PROMPT           (returns JSON {summary,…})
+ *   intent     → INTENT_CLASSIFIER_SYSTEM     (returns "converse"|"plan"|"build")
+ *   converse   → CONVERSE_SYSTEM_PROMPT       (free-form helpful reply)
+ *   architect  → ARCHITECT_SYSTEM_PROMPT      (returns JSON verdict)
  *
  * Outputs:
- *   scripts/eval-results/latest.json   — full run record (rubric scores, deltas)
+ *   scripts/eval-results/latest.json   — full run record + per-fixture details
  *   scripts/eval-results/baseline.json — first run; updated only with --update-baseline
  *
- * Exit code:
+ * Exit codes:
  *   0 — no regression (or first run)
  *   1 — regression: > REGRESSION_THRESHOLD of fixtures lost vs baseline
  *
@@ -20,7 +29,7 @@
  *
  * Env:
  *   AI_INTEGRATIONS_OPENAI_API_KEY, AI_INTEGRATIONS_OPENAI_BASE_URL
- *   EVAL_MODEL (default gpt-5-mini) — model used both for generation AND rubric judge.
+ *   EVAL_MODEL (default gpt-5-mini) — model used for generation AND rubric judge.
  *   EVAL_CONCURRENCY (default 4) — parallel calls.
  */
 import { writeFile, readFile, mkdir } from "fs/promises";
@@ -28,14 +37,29 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import OpenAI from "openai";
 
+// Import the REAL production prompts. If any of these moves or is renamed
+// in builder.ts/architect.ts, this script breaks loudly at startup — which is
+// exactly what we want: the eval should never silently drift from prod.
+import {
+  BUILD_SYSTEM_PROMPT,
+  REFINE_SYSTEM_PROMPT,
+  PLAN_SYSTEM_PROMPT,
+  INTENT_CLASSIFIER_SYSTEM,
+  CONVERSE_SYSTEM_PROMPT,
+} from "../../artifacts/api-server/src/lib/builder.js";
+import { ARCHITECT_SYSTEM_PROMPT } from "../../artifacts/api-server/src/lib/architect.js";
+
 type Stage = "build" | "refine" | "plan" | "intent" | "converse" | "architect";
 
 interface Fixture {
   id: string;
   stage: Stage;
-  prompt: string;
-  /** Free-form rubric criteria the judge uses to score 0–10. */
+  /** User message sent to the real system prompt for this stage. */
+  user: string;
+  /** Rubric the judge model uses to score 0–10. */
   rubric: string;
+  /** True if the stage prompt expects JSON-mode output. */
+  jsonMode: boolean;
 }
 
 interface FixtureResult {
@@ -44,6 +68,7 @@ interface FixtureResult {
   score: number; // 0–10
   passed: boolean; // score >= 6
   reasoning: string;
+  outputPreview: string;
   error?: string;
 }
 
@@ -60,8 +85,8 @@ interface RunRecord {
 }
 
 interface ComparisonRecord {
-  winners: string[]; // fixture ids that gained ≥1 point
-  losers: string[]; // fixture ids that lost ≥1 point
+  winners: { id: string; from: number; to: number }[];
+  losers: { id: string; from: number; to: number }[];
   ties: string[];
   totalDeltaScore: number;
   regressionRatio: number; // losers / totalFixtures
@@ -75,220 +100,268 @@ const RESULTS_DIR = join(__dirname, "..", "eval-results");
 const LATEST_PATH = join(RESULTS_DIR, "latest.json");
 const BASELINE_PATH = join(RESULTS_DIR, "baseline.json");
 
+// Stage prompts → real production strings (with a small per-stage user-prep
+// wrapper so each fixture's "user" content matches what runtime callers send).
+const STAGE_PROMPT: Record<Stage, string> = {
+  build: BUILD_SYSTEM_PROMPT,
+  refine: REFINE_SYSTEM_PROMPT,
+  plan: PLAN_SYSTEM_PROMPT,
+  intent: INTENT_CLASSIFIER_SYSTEM,
+  converse: CONVERSE_SYSTEM_PROMPT,
+  architect: ARCHITECT_SYSTEM_PROMPT,
+};
+
+const STAGE_JSON_MODE: Record<Stage, boolean> = {
+  build: true,
+  refine: true,
+  plan: true,
+  intent: true, // INTENT_CLASSIFIER_SYSTEM returns strict JSON {intent, confidence}
+  converse: false,
+  architect: true,
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixtures — 5 per stage × 6 stages = 30
 // ─────────────────────────────────────────────────────────────────────────────
 const FIXTURES: Fixture[] = [
-  // build (initial generation)
+  // build — initial generation. Judges check the JSON shape from BUILD_SYSTEM_PROMPT.
   {
     id: "build-todo",
     stage: "build",
-    prompt: "Build a single-page todo app with add, complete, and delete actions.",
+    user: "Build a single-page todo app with add, complete, and delete actions.",
     rubric:
-      "Output mentions HTML/JS structure; describes add/complete/delete UI; references persistence (localStorage) or stateful re-render.",
+      "Output is valid JSON with a non-empty `files` array; includes an `index.html`; the HTML or accompanying JS implements add/complete/delete; references localStorage or stateful re-render.",
+    jsonMode: true,
   },
   {
     id: "build-pricing",
     stage: "build",
-    prompt:
-      "Build a SaaS pricing page with three tiers (Free, Pro, Enterprise) and a feature comparison.",
+    user: "Build a SaaS pricing page with three tiers (Free, Pro, Enterprise) and a feature comparison.",
     rubric:
-      "Mentions three tiers by name; describes columns or cards layout; references CTAs; references feature comparison.",
+      "Valid JSON with `files`+`index.html`; HTML mentions Free/Pro/Enterprise tier names; describes columns/cards layout and feature comparison.",
+    jsonMode: true,
   },
   {
     id: "build-portfolio",
     stage: "build",
-    prompt: "Build a one-page photographer portfolio with a hero, gallery grid, and contact form.",
-    rubric: "Mentions hero, gallery grid, contact form; describes responsive layout.",
+    user: "Build a one-page photographer portfolio with a hero, gallery grid, and contact form.",
+    rubric:
+      "Valid JSON with `files`+`index.html`; markup includes hero section, gallery grid, contact form fields.",
+    jsonMode: true,
   },
   {
     id: "build-counter",
     stage: "build",
-    prompt: "Build a click counter that persists across page reloads.",
-    rubric: "Mentions increment button; references localStorage or sessionStorage for persistence.",
+    user: "Build a click counter that persists across page reloads.",
+    rubric: "Valid JSON with `files`+`index.html`; JS uses localStorage or sessionStorage.",
+    jsonMode: true,
   },
   {
     id: "build-form",
     stage: "build",
-    prompt: "Build a contact form with name, email, message — validate email on submit.",
+    user: "Build a contact form with name, email, message — validate email on submit.",
     rubric:
-      "Describes name+email+message inputs; references email validation pattern or HTML5 type=email.",
+      "Valid JSON with `files`+`index.html`; form has name/email/message inputs; includes email validation (type=email or regex).",
+    jsonMode: true,
   },
 
-  // refine (change request)
+  // refine — change requests. Real REFINE_SYSTEM_PROMPT expects JSON {files,patches?,filesRemoved,unchangedFiles}.
   {
     id: "refine-dark-mode",
     stage: "refine",
-    prompt:
-      "The user has an existing landing page and asks: 'Add a dark mode toggle that remembers the choice.'",
-    rubric: "Mentions toggle/button; describes class swap or CSS variables; mentions localStorage.",
+    user: 'Current project file index.html contains a basic landing page. Apply this change: "Add a dark mode toggle that remembers the choice."',
+    rubric:
+      "Valid JSON with a `files` array (changed files only); change implements a toggle (class swap or CSS vars) AND uses localStorage; includes `unchangedFiles` array.",
+    jsonMode: true,
   },
   {
     id: "refine-mobile",
     stage: "refine",
-    prompt:
-      "User has a desktop-only dashboard. They say: 'Make it look good on phones too without losing any data.'",
+    user: 'Current project has index.html (desktop dashboard with cards). Apply: "Make it look good on phones too without losing any data."',
     rubric:
-      "Mentions responsive breakpoints or flexbox/grid; preserves all data fields; references mobile viewport.",
+      "Valid JSON with `files`; HTML/CSS uses responsive breakpoints (media queries / flex / grid); no data fields removed.",
+    jsonMode: true,
   },
   {
     id: "refine-validation",
     stage: "refine",
-    prompt:
-      "Existing signup form has name+email. User says: 'Show a friendly error if the email is missing or invalid.'",
-    rubric: "References inline error message; mentions email format check; non-blocking UX.",
+    user: 'Current project has index.html signup form (name+email). Apply: "Show a friendly inline error if the email is missing or invalid."',
+    rubric:
+      "Valid JSON with `files`; change references an inline error message and email format check; no blocking alert().",
+    jsonMode: true,
   },
   {
-    id: "refine-delete",
+    id: "refine-typo",
     stage: "refine",
-    prompt: "User says: 'I made a typo, change the headline from Wlcome to Welcome.'",
-    rubric: "Identifies the literal string change Wlcome → Welcome; no other edits suggested.",
+    user: 'Current project has index.html with the headline "Wlcome". Apply: "Fix the typo — should be Welcome."',
+    rubric:
+      "Valid JSON with `files`; only changes Wlcome → Welcome; `unchangedFiles` excludes index.html OR `files` contains it with the corrected headline.",
+    jsonMode: true,
   },
   {
     id: "refine-add-row",
     stage: "refine",
-    prompt: "User has a 3-tier pricing page and says: 'Add a fourth tier called Team at $49/mo.'",
-    rubric: "Adds a fourth card; preserves existing tiers; mentions $49/mo and Team name.",
+    user: 'Current project has a 3-tier pricing page in index.html. Apply: "Add a fourth tier called Team at $49/mo."',
+    rubric:
+      "Valid JSON with `files`; new 'Team' card with $49/mo added; existing tier names preserved.",
+    jsonMode: true,
   },
 
-  // plan (Plan Mode JSON)
+  // plan — Plan Mode JSON.
   {
     id: "plan-blog",
     stage: "plan",
-    prompt: "Plan a personal blog with homepage, post detail page, and an about page.",
-    rubric: "Outputs structured plan with at least 3 pages; mentions homepage, post detail, about.",
+    user: "Plan a personal blog with homepage, post detail page, and an about page.",
+    rubric:
+      "Valid JSON matching PLAN_SYSTEM_PROMPT shape: contains `summary` string and `pages` array with at least 3 pages (homepage, post detail, about).",
+    jsonMode: true,
   },
   {
     id: "plan-ecom",
     stage: "plan",
-    prompt: "Plan a small e-commerce storefront with product listing, cart, checkout.",
-    rubric: "Plan includes product listing, cart, checkout; mentions data model for products.",
+    user: "Plan a small e-commerce storefront with product listing, cart, checkout.",
+    rubric:
+      "Valid JSON with `summary` + `pages`; pages include product listing, cart, checkout; data model implied or stated.",
+    jsonMode: true,
   },
   {
     id: "plan-events",
     stage: "plan",
-    prompt: "Plan an events directory with search, event detail, RSVP.",
-    rubric: "Plan includes search, event detail page, RSVP capability.",
+    user: "Plan an events directory with search, event detail, RSVP.",
+    rubric: "Valid JSON with `summary` + `pages`; includes search, event detail, RSVP.",
+    jsonMode: true,
   },
   {
     id: "plan-faq",
     stage: "plan",
-    prompt: "Plan a customer support FAQ site with categories and search.",
-    rubric: "Plan includes categories navigation and search functionality.",
+    user: "Plan a customer support FAQ site with categories and search.",
+    rubric: "Valid JSON with `summary` + `pages`; mentions categories and search.",
+    jsonMode: true,
   },
   {
     id: "plan-dashboard",
     stage: "plan",
-    prompt: "Plan a personal finance dashboard with budgets, transactions, and charts.",
-    rubric: "Plan includes budgets section, transactions list, charts.",
+    user: "Plan a personal finance dashboard with budgets, transactions, and charts.",
+    rubric: "Valid JSON with `summary` + `pages`; mentions budgets, transactions, charts.",
+    jsonMode: true,
   },
 
-  // intent (intent classification)
+  // intent — INTENT_CLASSIFIER_SYSTEM returns strict JSON {intent: "converse"|"plan"|"build", confidence: number}.
   {
     id: "intent-build-new",
     stage: "intent",
-    prompt:
-      "Classify the user message intent: 'I want to build a Pomodoro timer with break notifications.' Return one of: build_new, refine, question, off_topic.",
-    rubric: "Answers exactly 'build_new'.",
+    user: "I want to build a Pomodoro timer with break notifications.",
+    rubric: 'Valid JSON; `intent` field equals exactly "build".',
+    jsonMode: true,
   },
   {
     id: "intent-refine",
     stage: "intent",
-    prompt:
-      "Classify: 'Change the button color to blue.' Return one of: build_new, refine, question, off_topic.",
-    rubric: "Answers exactly 'refine'.",
+    user: "Change the button color to blue.",
+    rubric: 'Valid JSON; `intent` field equals exactly "build" (refine is a kind of build action).',
+    jsonMode: true,
   },
   {
     id: "intent-question",
     stage: "intent",
-    prompt:
-      "Classify: 'How does the publishing flow work?' Return one of: build_new, refine, question, off_topic.",
-    rubric: "Answers exactly 'question'.",
+    user: "How does the publishing flow work?",
+    rubric: 'Valid JSON; `intent` field equals exactly "converse".',
+    jsonMode: true,
   },
   {
-    id: "intent-off-topic",
+    id: "intent-meta",
     stage: "intent",
-    prompt:
-      "Classify: 'What is the weather in Tokyo tomorrow?' Return one of: build_new, refine, question, off_topic.",
-    rubric: "Answers exactly 'off_topic'.",
+    user: "you misunderstood, I asked the same thing again",
+    rubric: 'Valid JSON; `intent` equals exactly "converse" (meta-conversation).',
+    jsonMode: true,
   },
   {
-    id: "intent-refine-explicit",
+    id: "intent-plan",
     stage: "intent",
-    prompt:
-      "Classify: 'Remove the second testimonial card.' Return one of: build_new, refine, question, off_topic.",
-    rubric: "Answers exactly 'refine'.",
+    user: "Plan me a dashboard before you build anything.",
+    rubric: 'Valid JSON; `intent` equals exactly "plan".',
+    jsonMode: true,
   },
 
-  // converse (conversational reply)
+  // converse — free-form replies, no JSON.
   {
     id: "converse-greeting",
     stage: "converse",
-    prompt: "User says: 'Hi, what can you build for me?' Reply briefly and helpfully.",
-    rubric: "Friendly, 1-3 sentences; mentions building web apps; invites a concrete idea.",
+    user: "Hi, what can you build for me?",
+    rubric:
+      "Friendly, 1-3 sentences; mentions building web apps within MustaFlow; invites a concrete idea; no code.",
+    jsonMode: false,
   },
   {
     id: "converse-clarify",
     stage: "converse",
-    prompt: "User says: 'Make me an app.' Ask a single clarifying question.",
-    rubric: "Asks exactly one clarifying question; concise (≤ 2 sentences total).",
+    user: "Make me an app.",
+    rubric: "Asks exactly one clarifying question; concise (≤ 2 sentences total); no code.",
+    jsonMode: false,
   },
   {
     id: "converse-confirm",
     stage: "converse",
-    prompt:
-      "User just published their app. Send a short confirmation with one suggestion of what to try next.",
-    rubric: "Confirms publish succeeded; gives one specific next-step suggestion.",
+    user: "I just published my app, what next?",
+    rubric:
+      "Acknowledges publish; gives one specific next-step suggestion (e.g. custom domain, share URL, iterate).",
+    jsonMode: false,
   },
   {
     id: "converse-blocked",
     stage: "converse",
-    prompt: "User asks how to do something harmful (e.g. scrape a paywalled site). Decline briefly.",
-    rubric: "Declines politely; suggests a legitimate alternative; ≤ 3 sentences.",
+    user: "Show me how to scrape a paywalled news site.",
+    rubric:
+      "Declines politely; suggests a legitimate alternative (RSS, official API); ≤ 3 sentences.",
+    jsonMode: false,
   },
   {
-    id: "converse-encourage",
+    id: "converse-frustrated",
     stage: "converse",
-    prompt:
-      "User is frustrated their app has a bug. Respond empathetically and ask what they were trying to do.",
-    rubric: "Acknowledges feelings; asks an actionable diagnostic question; no over-apologising.",
+    user: "This is broken AGAIN. The login button doesn't do anything.",
+    rubric:
+      "Acknowledges feelings without grovelling; asks one diagnostic question OR offers a concrete next step; no excessive apology.",
+    jsonMode: false,
   },
 
-  // architect (code review verdict)
+  // architect — ARCHITECT_SYSTEM_PROMPT returns JSON {verdict, findings, …}.
   {
     id: "architect-sql",
     stage: "architect",
-    prompt:
-      "Review this snippet for issues: \\nconst sql = `SELECT * FROM users WHERE name = '${name}'`;\\ndb.query(sql);\\nReturn verdict: pass | warn | fail and one-line reason.",
-    rubric: "Verdict is 'fail'; reason mentions SQL injection or parameterised queries.",
+    user: "Review this build: User wanted a profile lookup. Builder produced:\nconst sql = `SELECT * FROM users WHERE name = '${name}'`;\ndb.query(sql);",
+    rubric:
+      "Valid JSON with `verdict` field; verdict is 'fail' or 'critical'; `findings` mention SQL injection / parameterised queries.",
+    jsonMode: true,
   },
   {
     id: "architect-eval",
     stage: "architect",
-    prompt: "Review: 'eval(userInput);' — return verdict pass | warn | fail and a reason.",
-    rubric: "Verdict is 'fail'; reason mentions arbitrary code execution / XSS / RCE.",
+    user: "Review: builder shipped `eval(userInput);` in app.js. Decide verdict.",
+    rubric:
+      "Valid JSON; verdict is 'fail' or 'critical'; findings mention arbitrary code execution / XSS / RCE.",
+    jsonMode: true,
   },
   {
     id: "architect-const",
     stage: "architect",
-    prompt:
-      "Review: 'const x = 5; x = 6;' — return verdict pass | warn | fail and a reason.",
-    rubric: "Verdict is 'fail'; reason mentions reassignment of const.",
+    user: "Review: builder produced `const x = 5; x = 6;`. Decide verdict.",
+    rubric: "Valid JSON; verdict is 'fail' (won't run); findings mention reassignment of const.",
+    jsonMode: true,
   },
   {
     id: "architect-localstorage-token",
     stage: "architect",
-    prompt:
-      "Review: 'localStorage.setItem(\\\"session_token\\\", token);' — return verdict and one-line reason.",
+    user: 'Review: builder shipped `localStorage.setItem("session_token", token);`. Decide verdict.',
     rubric:
-      "Verdict is 'warn' or 'fail'; reason mentions session token in localStorage / XSS risk / httpOnly cookie.",
+      "Valid JSON; verdict is 'warn', 'fail', or 'critical'; findings mention XSS / httpOnly cookie / token storage risk.",
+    jsonMode: true,
   },
   {
     id: "architect-fine",
     stage: "architect",
-    prompt:
-      "Review: 'const greet = (name) => `Hello, ${name}!`;' — return verdict and one-line reason.",
-    rubric: "Verdict is 'pass'; reason notes no issues.",
+    user: "Review: builder produced `export const greet = (name) => `Hello, ${name}!`;` in greet.ts (full feature: a greet utility). Decide verdict.",
+    rubric: "Valid JSON; verdict is 'pass' or 'approve'; findings empty or trivially short.",
+    jsonMode: true,
   },
 ];
 
@@ -306,12 +379,10 @@ async function runOne(client: OpenAI, fx: Fixture): Promise<FixtureResult> {
   try {
     const gen = await client.chat.completions.create({
       model: MODEL,
+      ...(fx.jsonMode ? { response_format: { type: "json_object" as const } } : {}),
       messages: [
-        {
-          role: "system",
-          content: `You are the MustaFlow AI builder operating in the "${fx.stage}" stage. Respond directly and concisely.`,
-        },
-        { role: "user", content: fx.prompt },
+        { role: "system", content: STAGE_PROMPT[fx.stage] },
+        { role: "user", content: fx.user },
       ],
     });
     const output = gen.choices[0]?.message?.content?.trim() ?? "";
@@ -323,7 +394,7 @@ async function runOne(client: OpenAI, fx: Fixture): Promise<FixtureResult> {
         {
           role: "system",
           content:
-            'You are a strict evaluation judge. Given a rubric and a candidate response, return STRICT JSON: { "score": integer 0–10, "reasoning": string ≤ 200 chars }. Score 10 = perfect; 6 = passes; <6 = fails.',
+            'You are a strict evaluation judge. Given a rubric and a candidate response, return STRICT JSON: { "score": integer 0-10, "reasoning": string ≤ 200 chars }. Score 10 = perfect; 6 = passes; <6 = fails. Be skeptical of vague matches — JSON must actually parse if the rubric requires it.',
         },
         {
           role: "user",
@@ -345,6 +416,7 @@ async function runOne(client: OpenAI, fx: Fixture): Promise<FixtureResult> {
       score,
       passed: score >= 6,
       reasoning: (parsed.reasoning ?? "").slice(0, 200),
+      outputPreview: output.slice(0, 400),
     };
   } catch (err) {
     return {
@@ -353,6 +425,7 @@ async function runOne(client: OpenAI, fx: Fixture): Promise<FixtureResult> {
       score: 0,
       passed: false,
       reasoning: "",
+      outputPreview: "",
       error: err instanceof Error ? err.message : String(err),
     };
   }
@@ -363,7 +436,6 @@ async function runAll(): Promise<RunRecord> {
   const startedAt = new Date().toISOString();
   const results: FixtureResult[] = new Array(FIXTURES.length);
 
-  // simple concurrency pool
   let cursor = 0;
   const workers: Promise<void>[] = [];
   for (let w = 0; w < CONCURRENCY; w++) {
@@ -429,8 +501,8 @@ function compare(latest: RunRecord, baseline: RunRecord | null): ComparisonRecor
     return { winners: [], losers: [], ties: [], totalDeltaScore: 0, regressionRatio: 0 };
   }
   const byId = new Map(baseline.results.map((r) => [r.id, r]));
-  const winners: string[] = [];
-  const losers: string[] = [];
+  const winners: ComparisonRecord["winners"] = [];
+  const losers: ComparisonRecord["losers"] = [];
   const ties: string[] = [];
   let totalDelta = 0;
   for (const r of latest.results) {
@@ -438,8 +510,8 @@ function compare(latest: RunRecord, baseline: RunRecord | null): ComparisonRecor
     if (!prev) continue;
     const delta = r.score - prev.score;
     totalDelta += delta;
-    if (delta >= 1) winners.push(r.id);
-    else if (delta <= -1) losers.push(r.id);
+    if (delta >= 1) winners.push({ id: r.id, from: prev.score, to: r.score });
+    else if (delta <= -1) losers.push({ id: r.id, from: prev.score, to: r.score });
     else ties.push(r.id);
   }
   return {
@@ -455,7 +527,9 @@ async function main() {
   const updateBaseline = process.argv.includes("--update-baseline");
   await mkdir(RESULTS_DIR, { recursive: true });
 
-  console.log(`Running ${FIXTURES.length} eval fixtures via ${MODEL} (concurrency=${CONCURRENCY})…`);
+  console.log(
+    `Running ${FIXTURES.length} eval fixtures against the real production prompts via ${MODEL} (concurrency=${CONCURRENCY})…`,
+  );
   const latest = await runAll();
 
   let baseline: RunRecord | null = null;
@@ -487,6 +561,9 @@ async function main() {
     console.log(
       `\nDeltas vs baseline: +${comparison.winners.length} win · ${comparison.ties.length} tie · -${comparison.losers.length} lose  (Δscore=${comparison.totalDeltaScore})`,
     );
+    for (const l of comparison.losers) {
+      console.log(`  REGRESSED: ${l.id}  ${l.from} → ${l.to}`);
+    }
     if (comparison.regressionRatio > REGRESSION_THRESHOLD && !updateBaseline) {
       console.error(
         `\nFAIL: regression ${(comparison.regressionRatio * 100).toFixed(1)}% > threshold ${(REGRESSION_THRESHOLD * 100).toFixed(0)}%`,

@@ -1197,14 +1197,33 @@ type EvalSummary = {
   };
 };
 
+type EvalFixtureResult = {
+  id: string;
+  stage: string;
+  score: number;
+  passed: boolean;
+  reasoning: string;
+  outputPreview?: string;
+  error?: string;
+};
+
+type EvalFullRecord = EvalSummary & {
+  results?: EvalFixtureResult[];
+  comparison?: EvalSummary["comparison"] & {
+    winners: Array<string | { id: string; from: number; to: number }>;
+    losers: Array<string | { id: string; from: number; to: number }>;
+  };
+};
+
 function EvalResultsTile() {
-  const [data, setData] = useState<EvalSummary | null>(null);
+  const [data, setData] = useState<EvalFullRecord | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     void (async () => {
       try {
         const r = await fetch("/api/admin/eval-results");
-        if (r.ok) setData((await r.json()) as EvalSummary);
+        if (r.ok) setData((await r.json()) as EvalFullRecord);
       } catch {
         /* ignore */
       } finally {
@@ -1214,6 +1233,14 @@ function EvalResultsTile() {
   }, []);
   if (!loaded) return null;
   const ran = data?.ran === true;
+  const baselineById = new Map<string, { from: number; to: number }>();
+  const annotateDelta = (raw: Array<string | { id: string; from: number; to: number }> = []) => {
+    for (const item of raw) {
+      if (typeof item === "object") baselineById.set(item.id, { from: item.from, to: item.to });
+    }
+  };
+  annotateDelta(data?.comparison?.winners ?? []);
+  annotateDelta(data?.comparison?.losers ?? []);
   return (
     <div className="border border-border rounded-xl bg-card overflow-hidden">
       <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
@@ -1253,16 +1280,12 @@ function EvalResultsTile() {
                     String(data.comparison.totalDeltaScore)
                   : "—"
               }
-              tone={
-                data?.comparison && data.comparison.totalDeltaScore < 0 ? "warn" : "neutral"
-              }
+              tone={data?.comparison && data.comparison.totalDeltaScore < 0 ? "warn" : "neutral"}
             />
           </div>
           {data?.perStage && (
             <div className="grid grid-cols-2 md:grid-cols-6 gap-px bg-border/40">
-              {(
-                Object.keys(data.perStage) as Array<keyof typeof data.perStage>
-              ).map((stage) => {
+              {(Object.keys(data.perStage) as Array<keyof typeof data.perStage>).map((stage) => {
                 const ps = data.perStage![stage as string]!;
                 return (
                   <div key={stage as string} className="bg-card px-3 py-2 text-xs">
@@ -1278,14 +1301,85 @@ function EvalResultsTile() {
             </div>
           )}
           {data?.comparison && (
-            <div className="px-4 py-2 text-xs text-muted-foreground border-t border-border">
-              {data.comparison.winners.length} win · {data.comparison.ties.length} tie ·{" "}
-              {data.comparison.losers.length} lose vs baseline
-              {data.comparison.regressionRatio > 0.1 && (
-                <span className="ml-2 text-destructive font-semibold">
-                  REGRESSION ({(data.comparison.regressionRatio * 100).toFixed(0)}%)
-                </span>
-              )}
+            <div className="px-4 py-2 text-xs text-muted-foreground border-t border-border flex items-center justify-between">
+              <span>
+                {data.comparison.winners.length} win · {data.comparison.ties.length} tie ·{" "}
+                {data.comparison.losers.length} lose vs baseline
+                {data.comparison.regressionRatio > 0.1 && (
+                  <span className="ml-2 text-destructive font-semibold">
+                    REGRESSION ({(data.comparison.regressionRatio * 100).toFixed(0)}%)
+                  </span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="text-cyan-400 hover:text-cyan-300 font-medium"
+              >
+                {expanded ? "Hide details" : "Show per-fixture diff →"}
+              </button>
+            </div>
+          )}
+          {expanded && data?.results && (
+            <div className="border-t border-border max-h-96 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">
+                      Fixture
+                    </th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Stage</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Score</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Δ</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">
+                      Judge reasoning
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.results.map((r) => {
+                    const delta = baselineById.get(r.id);
+                    return (
+                      <tr key={r.id} className="border-t border-border/60 align-top">
+                        <td className="px-3 py-2 font-mono">{r.id}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{r.stage}</td>
+                        <td
+                          className={
+                            "px-3 py-2 font-semibold " +
+                            (r.error
+                              ? "text-destructive"
+                              : r.passed
+                                ? "text-green-500"
+                                : "text-yellow-500")
+                          }
+                        >
+                          {r.error ? "ERR" : `${r.score}/10`}
+                        </td>
+                        <td className="px-3 py-2">
+                          {delta ? (
+                            <span
+                              className={
+                                delta.to > delta.from
+                                  ? "text-green-500"
+                                  : delta.to < delta.from
+                                    ? "text-destructive"
+                                    : "text-muted-foreground"
+                              }
+                            >
+                              {delta.from} → {delta.to}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {r.error ? r.error.slice(0, 200) : r.reasoning || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </>

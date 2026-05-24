@@ -124,6 +124,11 @@ export const projectsTable = pgTable("projects", {
   //   on every build (lockfiles, container manifests, IaC). Default false — opt-in.
   scannerHoundDogEnabled: boolean("scanner_hounddog_enabled").notNull().default(false),
   scannerTrivyEnabled: boolean("scanner_trivy_enabled").notNull().default(false),
+  // scannerSemgrepEnabled: when true, the always-on Semgrep SAST check runs on
+  //   every build. Default true — Semgrep ships as the baseline SAST and is on
+  //   by default; admins can flip it off per project for speed-over-coverage
+  //   builds or to silence noisy false-positives on legacy projects.
+  scannerSemgrepEnabled: boolean("scanner_semgrep_enabled").notNull().default(true),
   // e2eEnabled: when true, the agentic builder loop automatically runs a Playwright
   // smoke E2E scenario set after every successful web build, and the `run_e2e` tool
   // is available to the model. Default true. Disable for speed-over-coverage builds.

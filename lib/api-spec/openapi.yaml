@@ -3685,6 +3685,15 @@ components:
         redirectWwwApex:
           type: boolean
           description: "When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains."
+        scannerSemgrepEnabled:
+          type: boolean
+          description: "When true, Semgrep SAST runs on every build (Task #545). Default true."
+        scannerHoundDogEnabled:
+          type: boolean
+          description: "When true, the HoundDog secret/PII scanner runs on every build (Task #545). Default false."
+        scannerTrivyEnabled:
+          type: boolean
+          description: "When true, the Trivy CVE/IaC scanner runs on every build (Task #545). Default false."
         stagingPublishedSnapshotId:
           type: ["integer", "null"]
           description: "Version ID currently live on the staging slot. Null = not staged. Set by POST /publish?env=staging, promoted by POST /promote."
@@ -3765,6 +3774,15 @@ components:
         e2eEnabled: { type: boolean }
         multiplayerEnabled: { type: boolean }
         redirectWwwApex: { type: boolean }
+        scannerSemgrepEnabled:
+          type: boolean
+          description: "Run Semgrep SAST on every build (Task #545). Default true."
+        scannerHoundDogEnabled:
+          type: boolean
+          description: "Run HoundDog secret/PII scanner on every build (Task #545). Default false."
+        scannerTrivyEnabled:
+          type: boolean
+          description: "Run Trivy CVE/IaC scanner on every build (Task #545). Default false."
 
     MobileAppSettingsInput:
       type: object
