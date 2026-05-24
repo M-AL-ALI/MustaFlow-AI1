@@ -343,9 +343,10 @@ export default function SecurityPage() {
   const critHighCount = badgeData?.count ?? 0;
 
   return (
+    <div className="flex-1 overflow-y-auto">
     <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-foreground">Security Center</h1>
@@ -359,10 +360,7 @@ export default function SecurityPage() {
             Persistent security findings across all your projects, sorted by exposure.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={findingsLoading}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${findingsLoading ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <ScanActions onRefresh={handleRefresh} loading={findingsLoading} />
       </div>
 
       {/* Summary bar */}
@@ -509,6 +507,62 @@ export default function SecurityPage() {
             visible in the Admin dashboard. Contact your platform administrator for access.
           </p>
         </div>
+      )}
+    </div>
+    </div>
+  );
+}
+
+function ScanActions({ onRefresh, loading }: { onRefresh: () => void; loading: boolean }) {
+  const [scanning, setScanning] = useState(false);
+  const [lastResult, setLastResult] = useState<string | null>(null);
+
+  const runScan = async () => {
+    setScanning(true);
+    setLastResult(null);
+    try {
+      const res = await fetch("/api/security/cve/scan", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        setLastResult("Scan failed. Try again.");
+      } else {
+        const data = await res.json();
+        const total = typeof data?.total === "number" ? data.total : 0;
+        setLastResult(total === 0 ? "Scan complete — no issues found." : `Scan complete — ${total} finding${total === 1 ? "" : "s"}.`);
+        onRefresh();
+      }
+    } catch {
+      setLastResult("Scan failed. Try again.");
+    } finally {
+      setScanning(false);
+      setTimeout(() => setLastResult(null), 6000);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-end gap-2">
+      <div className="flex items-center gap-2">
+        <span
+          className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md border border-border bg-muted/50 text-muted-foreground"
+          title="Scans run automatically after every build, refine, and publish. A daily background scan also runs across all your projects."
+        >
+          <Clock className="h-3 w-3" />
+          Auto-scan: on build &amp; daily
+        </span>
+        <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading || scanning}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
+        <Button size="sm" onClick={runScan} disabled={scanning || loading}>
+          <ShieldCheck className={`h-4 w-4 mr-2 ${scanning ? "animate-pulse" : ""}`} />
+          {scanning ? "Scanning…" : "Run scan now"}
+        </Button>
+      </div>
+      {lastResult && (
+        <span className="text-[11px] text-muted-foreground">{lastResult}</span>
       )}
     </div>
   );
