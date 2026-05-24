@@ -25,3 +25,4 @@ export * from "./app-test-runs";
 export * from "./prod-logs";
 export * from "./tool-audit";
 export * from "./builder-skills";
+export * from "./project-embeddings";

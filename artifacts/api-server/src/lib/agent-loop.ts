@@ -343,11 +343,20 @@ const TOOLS: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "read_file",
-      description: "Read the full text content of one project file.",
+      description:
+        "Read text content of one project file. Supports pagination for large files via `offset` (1-indexed start line, default 1) and `limit` (max lines to return, default whole file). When the file is truncated, the response is prefixed with `[showing lines X–Y of N]` so you know to request more.",
       parameters: {
         type: "object",
         properties: {
           path: { type: "string", description: "Relative path inside the project." },
+          offset: {
+            type: "integer",
+            description: "1-indexed start line. Default 1.",
+          },
+          limit: {
+            type: "integer",
+            description: "Max number of lines to return from `offset`. Default: whole file.",
+          },
         },
         required: ["path"],
         additionalProperties: false,
@@ -411,11 +420,47 @@ const TOOLS: ChatCompletionTool[] = [
     function: {
       name: "search",
       description:
-        "Case-insensitive substring search across all current project files. Returns up to 50 matching lines with file:line prefix.",
+        'Case-insensitive substring search across all current project files. Returns up to 50 matching lines with file:line prefix. For natural-language intent queries (e.g. "where is the cart logic?") prefer `semantic_search`.',
       parameters: {
         type: "object",
         properties: { query: { type: "string" } },
         required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "semantic_search",
+      description:
+        'Find the top-k most semantically relevant project files for a natural-language query (e.g. "checkout flow", "auth middleware"). Returns ranked paths with similarity scores and a short snippet. Uses per-project embeddings (text-embedding-3-small), built lazily on first call and refreshed on file changes. Falls back to substring ranking if embeddings are unavailable.',
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Natural-language intent (1-400 chars)." },
+          top_k: {
+            type: "integer",
+            description: "Number of results to return (1-20, default 8).",
+          },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "find_files",
+      description:
+        "List project file paths that match a glob pattern. Supports `*` (single segment), `?` (one char), and `**` (any depth). Examples: `src/**/*.ts`, `*.json`, `app/**/page.tsx`. Returns matching paths sorted alphabetically.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: { type: "string", description: "Glob pattern, relative to project root." },
+        },
+        required: ["pattern"],
         additionalProperties: false,
       },
     },
@@ -2367,11 +2412,30 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       if (!path) return { ok: false, observation: "ERROR: invalid path" };
       const f = workspace.read(path);
       if (!f) return { ok: false, observation: `ERROR: file not found: ${path}` };
-      const content =
-        f.content.length > MAX_FILE_BYTES
-          ? `${f.content.slice(0, MAX_FILE_BYTES)}\n…(truncated, ${f.content.length} bytes total)`
-          : f.content;
-      return { ok: true, observation: content };
+      const lines = f.content.split("\n");
+      const totalLines = lines.length;
+      const rawOffset = typeof args.offset === "number" ? Math.floor(args.offset) : 1;
+      const rawLimit =
+        typeof args.limit === "number" ? Math.floor(args.limit) : Number.MAX_SAFE_INTEGER;
+      const offset = Math.max(1, Math.min(rawOffset, totalLines));
+      const limit = Math.max(1, rawLimit);
+      const endLine = Math.min(totalLines, offset + limit - 1);
+      const slice = lines.slice(offset - 1, endLine).join("\n");
+      const paged = offset > 1 || endLine < totalLines;
+      let body = slice;
+      // Byte-cap even paginated slices so a single huge line can't blow past
+      // MAX_FILE_BYTES — model is told the byte truncation happened too.
+      let byteTruncated = false;
+      if (body.length > MAX_FILE_BYTES) {
+        body = body.slice(0, MAX_FILE_BYTES);
+        byteTruncated = true;
+      }
+      const header = paged
+        ? `[showing lines ${offset}–${endLine} of ${totalLines}${byteTruncated ? `, byte-truncated to ${MAX_FILE_BYTES}` : ""}]\n`
+        : byteTruncated
+          ? `[byte-truncated to ${MAX_FILE_BYTES} of ${f.content.length} total bytes]\n`
+          : "";
+      return { ok: true, observation: header + body };
     }
     case "write_file": {
       const path = sanitizePath(args.path);
@@ -2449,6 +2513,48 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       if (query.length === 0) return { ok: false, observation: "ERROR: empty query" };
       const hits = workspace.search(query);
       return { ok: true, observation: hits.length === 0 ? "(no matches)" : hits.join("\n") };
+    }
+    case "semantic_search": {
+      const query = typeof args.query === "string" ? args.query.trim() : "";
+      if (query.length === 0) return { ok: false, observation: "ERROR: empty query" };
+      if (query.length > 400) {
+        return { ok: false, observation: "ERROR: query too long (max 400 chars)" };
+      }
+      const topK = typeof args.top_k === "number" ? Math.floor(args.top_k) : 8;
+      try {
+        const { semanticSearch } = await import("./project-search");
+        const files = workspace.all().map((f) => ({ path: f.path, content: f.content }));
+        const hits = await semanticSearch(input.projectId, query, files, topK);
+        if (hits.length === 0) return { ok: true, observation: "(no matches)" };
+        const formatted = hits
+          .map((h, i) => `${i + 1}. ${h.path}  (score: ${h.score.toFixed(3)})\n   ${h.snippet}`)
+          .join("\n");
+        return { ok: true, observation: formatted };
+      } catch (err) {
+        logger.warn({ err }, "semantic_search failed");
+        return {
+          ok: false,
+          observation: `ERROR: semantic_search failed: ${(err as Error).message}`,
+        };
+      }
+    }
+    case "find_files": {
+      const pattern = typeof args.pattern === "string" ? args.pattern.trim() : "";
+      if (pattern.length === 0) return { ok: false, observation: "ERROR: empty pattern" };
+      if (pattern.length > 200) {
+        return { ok: false, observation: "ERROR: pattern too long (max 200 chars)" };
+      }
+      try {
+        const { matchGlob } = await import("./project-search");
+        const paths = workspace.list();
+        const hits = matchGlob(pattern, paths).sort();
+        return {
+          ok: true,
+          observation: hits.length === 0 ? "(no matches)" : hits.join("\n"),
+        };
+      } catch (err) {
+        return { ok: false, observation: `ERROR: find_files failed: ${(err as Error).message}` };
+      }
     }
     case "run_command": {
       const argv = Array.isArray(args.argv) ? (args.argv as unknown[]).map(String) : [];

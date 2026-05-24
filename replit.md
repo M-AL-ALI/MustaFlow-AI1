@@ -196,6 +196,16 @@ The intended user journey is: Login → create project → build app → preview
 - **Safety cap is per tool call, not per LLM turn**: `STEP_CAP` (default 25) caps `toolCalls.length`. The cap is checked at the top of each LLM turn AND mid-turn between individual tool-call executions, so a single response that emits many tool calls cannot exceed the budget.
 - **Adapter contract**: `loopResultToBuildResult` returns a real `BuilderResult` (with a synthesized `Blueprint`), and `loopResultToRefineResult` returns the existing refine-result shape — so the post-pipeline plumbing (secrets scan, cross-file consistency, snapshot, audits, knowledge writes, etc.) is unchanged.
 
+## Smarter project search (Task #534)
+
+- **New tools in `agent-loop.ts`**: `semantic_search` (top-k natural-language file matches via per-project embeddings) and `find_files` (glob: `*`, `?`, `**`). `read_file` now accepts `offset` + `limit` (1-indexed lines) and prefixes truncated responses with `[showing lines X–Y of N]` so the model knows to paginate.
+- **Embeddings index**: `project_embeddings` table (project_id, file_path, content_hash, model, embedding vector(1536), snippet) with a unique index on (project_id, file_path). Stored via pgvector — same column type as `knowledge_entries.embedding`.
+- **Index lifecycle**: built lazily on the first `semantic_search` call per project. Per-file `content_hash` (sha-256) is compared on every call — files whose content changed since the last embedding are automatically re-embedded; orphan rows (files no longer in project) are pruned. Rollback restores older file content, the hash flips, and lazy re-embed handles it on next search. No eager invalidation hook is required.
+- **Ranking**: in-app cosine similarity over `text-embedding-3-small` vectors (same model as Knowledge Vault). Falls back to substring frequency rank when embeddings generation fails or pgvector is unavailable.
+- **Safety / cost caps**: at most 60 files re-embedded per `semantic_search` call (rest fall back to snippet+substring rank that pass), query capped at 400 chars, glob pattern at 200 chars, results capped at 20.
+- **Migration**: `pnpm --filter @workspace/scripts run migrate-project-embeddings` (idempotent — `CREATE EXTENSION vector` + table + unique index).
+- **Key files**: `artifacts/api-server/src/lib/project-search.ts`, `lib/db/src/schema/project-embeddings.ts`, `scripts/src/migrate-project-embeddings.ts`.
+
 ## Architect review subagent (Task #507)
 
 - Second-opinion deep reviewer that runs after a successful build/refine. Defined in `artifacts/api-server/src/lib/architect.ts` (`runArchitectReview` — gpt-5-mini JSON mode, Zod-validated, non-throwing).
