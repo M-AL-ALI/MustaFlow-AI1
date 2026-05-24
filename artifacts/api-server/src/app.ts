@@ -13,9 +13,15 @@ import { customDomainMiddleware } from "./middlewares/customDomainMiddleware";
 import { logger } from "./lib/logger";
 import { startProdLogRetentionWorker } from "./lib/prodLogs";
 import "./lib/preview-purge";
+import { startCfScheduler } from "./lib/cf-scheduler";
 
 // Kick off the prod-log retention sweeper (Task #511). Hourly, best-effort.
 startProdLogRetentionWorker();
+
+// Kick off the Cloudflare for SaaS scheduler (Task #553).
+// Handles cert-status polling (5-min) + dangling-CNAME sweep + expiry alerts (daily).
+// No-ops gracefully when CF_ZONE_ID / CF_API_TOKEN are not set.
+startCfScheduler();
 
 const app: Express = express();
 

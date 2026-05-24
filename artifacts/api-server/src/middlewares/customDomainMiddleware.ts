@@ -301,6 +301,21 @@ export async function customDomainMiddleware(
   // Record sighting for diagnostic panel
   recordHostnameSighting(hostname);
 
+  // HTTP → HTTPS redirect (enforced at the platform level for all custom domains).
+  // Detect via X-Forwarded-Proto set by the upstream proxy / Cloudflare.
+  const proto =
+    (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim() ?? req.protocol;
+  if (proto === "http") {
+    const httpsUrl = `https://${hostname}${req.url}`;
+    res.redirect(301, httpsUrl);
+    return;
+  }
+
+  // Strict-Transport-Security (HSTS) — 1 year, including subdomains.
+  // Applied to every response served for a verified custom domain so browsers
+  // remember to always use HTTPS without a redirect round-trip.
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+
   // Phase E: proxy to production container if running (only for production-env domains)
   if (
     project.environment === "production" &&

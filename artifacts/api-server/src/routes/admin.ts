@@ -25,6 +25,7 @@ import {
 import { and, gte } from "drizzle-orm";
 import { requireAdmin } from "../lib/adminAuth";
 import { errorsPerDay } from "../lib/prodLogs";
+import { getCfHostnameSummary } from "../lib/cf-scheduler";
 import {
   listAllSkillsForAdmin,
   setSkillEnabled,
@@ -178,6 +179,9 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
   `);
   const totalBuildsWithSkills = Number(buildsWithSkillsRow.rows[0]?.total ?? 0);
 
+  // ── Cloudflare for SaaS hostname summary (Task #553) ─────────────────────
+  const cfHostnames = await getCfHostnameSummary();
+
   res.json({
     projects: {
       total: projectStats?.total ?? 0,
@@ -189,6 +193,7 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
     },
     transactions: txStats?.total ?? 0,
     deployments: deployStats?.total ?? 0,
+    cfHostnames,
     architectReviews: {
       windowDays: 30,
       reviewed: Number(archRow?.reviewed ?? 0),

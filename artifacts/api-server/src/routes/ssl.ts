@@ -6,7 +6,8 @@
 //     If CF env vars are missing, returns { cfRequired: true } for setup-required UI.
 //
 //   POST /api/domain/ssl-webhook  (PUBLIC — no auth, called by Cloudflare)
-//     Receives Cloudflare webhook events and updates ssl_status.
+//     Receives Cloudflare webhook events and updates ssl_status on both
+//     project_domains and the legacy projects row.
 //
 // Required env vars (both must be set for real CF integration):
 //   CF_ZONE_ID      — Cloudflare zone ID for mustaflow.app
@@ -15,66 +16,59 @@
 
 import { Router, type IRouter } from "express";
 import { eq, isNull, and } from "drizzle-orm";
-import { db, projectsTable } from "@workspace/db";
+import { db, projectsTable, projectDomainsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+import {
+  cfEnabled,
+  createCustomHostname,
+  getCustomHostname,
+  mapCfSslStatus,
+} from "../lib/cloudflare";
 
-const CF_ZONE_ID = process.env.CF_ZONE_ID;
-const CF_API_TOKEN = process.env.CF_API_TOKEN;
-const CF_API_BASE = "https://api.cloudflare.com/client/v4";
+// ── Shared activation logic ────────────────────────────────────────────────────
 
-/** True when both CF env vars are present. */
-function cfConfigured(): boolean {
-  return Boolean(CF_ZONE_ID && CF_API_TOKEN);
-}
-
-// Cloudflare SSL status → our internal sslStatus
-function mapCfSslStatus(
-  cfSslStatus: string | undefined,
-): "pending" | "provisioning" | "active" | "failed" {
-  switch (cfSslStatus) {
-    case "active":
-      return "active";
-    case "pending_validation":
-    case "pending_issuance":
-    case "pending_deployment":
-      return "provisioning";
-    case "initializing":
-      return "provisioning";
-    case "expired_certificate":
-    case "blocked":
-    case "deactivated":
-    case "pending_blocked_validation":
-    case "validation_timed_out":
-      return "failed";
-    default:
-      return "provisioning";
-  }
-}
-
-// ── Shared activation logic (called by ssl-activate endpoint AND domain verify) ──
-// Returns the new sslStatus and optional cfHostnameId.
-export async function activateSslForProject(
-  projectId: number,
-  domain: string,
+/**
+ * Activate SSL for a specific project_domains row.
+ *
+ * - If CF is configured: creates or polls the CF custom hostname and writes
+ *   cfHostnameId + sslStatus back to project_domains.
+ * - If CF is not configured: marks sslStatus = "provisioning" so the UI
+ *   prompts the operator to configure CF manually.
+ * - Syncs projects.sslStatus + projects.cfHostnameId when isPrimary = true.
+ *
+ * Best-effort — never throws; callers can fire-and-forget.
+ */
+export async function activateSslForDomain(
+  domainId: number,
+  hostname: string,
   existingCfHostnameId: string | null | undefined,
+  projectId: number,
+  isPrimary: boolean,
 ): Promise<{
-  sslStatus: "pending" | "provisioning" | "active" | "failed";
+  sslStatus: string;
   cfHostnameId: string | null;
   cfRequired: boolean;
   message: string;
 }> {
-  if (!cfConfigured()) {
+  if (!cfEnabled()) {
     await db
-      .update(projectsTable)
-      .set({ sslStatus: "provisioning" })
-      .where(eq(projectsTable.id, projectId));
+      .update(projectDomainsTable)
+      .set({ sslStatus: "provisioning", updatedAt: new Date() })
+      .where(eq(projectDomainsTable.id, domainId));
+
+    if (isPrimary) {
+      await db
+        .update(projectsTable)
+        .set({ sslStatus: "provisioning", updatedAt: new Date() })
+        .where(eq(projectsTable.id, projectId));
+    }
 
     return {
       sslStatus: "provisioning",
       cfHostnameId: null,
       cfRequired: true,
       message:
-        "Cloudflare for SaaS is not configured. Set CF_ZONE_ID and CF_API_TOKEN env vars to enable automated SSL. SSL is marked as provisioning — configure manually via your infrastructure team.",
+        "Cloudflare for SaaS is not configured. Set CF_ZONE_ID and CF_API_TOKEN to enable automated SSL.",
     };
   }
 
@@ -82,92 +76,89 @@ export async function activateSslForProject(
     let cfHostnameId = existingCfHostnameId ?? null;
 
     if (!cfHostnameId) {
-      // Create the custom hostname in Cloudflare
-      const createResp = await fetch(`${CF_API_BASE}/zones/${CF_ZONE_ID}/custom_hostnames`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${CF_API_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          hostname: domain,
-          ssl: {
-            method: "http",
-            type: "dv",
-            settings: {
-              min_tls_version: "1.2",
-              http2: "on",
-            },
-          },
-        }),
-      });
+      const created = await createCustomHostname(hostname);
 
-      const createJson = (await createResp.json()) as {
-        success: boolean;
-        result?: { id: string; ssl?: { status: string } };
-        errors?: Array<{ message: string }>;
-      };
-
-      if (!createResp.ok || !createJson.success) {
-        const errMsg =
-          createJson.errors?.map((e) => e.message).join("; ") ?? "Unknown Cloudflare error";
-
+      if (!created) {
+        const errMsg = "Cloudflare API returned no result — check CF_ZONE_ID / CF_API_TOKEN.";
         await db
-          .update(projectsTable)
-          .set({ sslStatus: "failed", sslError: errMsg })
-          .where(eq(projectsTable.id, projectId));
+          .update(projectDomainsTable)
+          .set({ sslStatus: "failed", updatedAt: new Date() })
+          .where(eq(projectDomainsTable.id, domainId));
 
-        return {
-          sslStatus: "failed",
-          cfHostnameId: null,
-          cfRequired: false,
-          message: `Cloudflare API error: ${errMsg}`,
-        };
+        if (isPrimary) {
+          await db
+            .update(projectsTable)
+            .set({ sslStatus: "failed", sslError: errMsg, updatedAt: new Date() })
+            .where(eq(projectsTable.id, projectId));
+        }
+
+        return { sslStatus: "failed", cfHostnameId: null, cfRequired: false, message: errMsg };
       }
 
-      cfHostnameId = createJson.result?.id ?? null;
-      const initialSslStatus = mapCfSslStatus(createJson.result?.ssl?.status);
+      cfHostnameId = created.id;
+      const initialStatus = mapCfSslStatus(created.ssl?.status);
 
       await db
-        .update(projectsTable)
+        .update(projectDomainsTable)
         .set({
           cfHostnameId,
-          sslStatus: initialSslStatus,
-          sslError: null,
+          sslStatus: initialStatus,
+          sslLastCheckedAt: new Date(),
+          updatedAt: new Date(),
         })
-        .where(eq(projectsTable.id, projectId));
+        .where(eq(projectDomainsTable.id, domainId));
+
+      if (isPrimary) {
+        await db
+          .update(projectsTable)
+          .set({ cfHostnameId, sslStatus: initialStatus, sslError: null, updatedAt: new Date() })
+          .where(eq(projectsTable.id, projectId));
+      }
 
       return {
-        sslStatus: initialSslStatus,
+        sslStatus: initialStatus,
         cfHostnameId,
         cfRequired: false,
         message:
-          "Cloudflare custom hostname created. SSL is provisioning — this typically takes 2–10 minutes.",
+          "Cloudflare custom hostname created. SSL is provisioning — typically takes 2–10 minutes.",
       };
     }
 
     // Existing CF hostname — poll current status
-    const pollResp = await fetch(
-      `${CF_API_BASE}/zones/${CF_ZONE_ID}/custom_hostnames/${cfHostnameId}`,
-      {
-        headers: { Authorization: `Bearer ${CF_API_TOKEN}` },
-      },
-    );
-    const pollJson = (await pollResp.json()) as {
-      success: boolean;
-      result?: { ssl?: { status: string } };
-    };
+    const polled = await getCustomHostname(cfHostnameId);
+    if (!polled) {
+      return {
+        sslStatus: "provisioning",
+        cfHostnameId,
+        cfRequired: false,
+        message: "Could not reach Cloudflare to poll cert status. Will retry shortly.",
+      };
+    }
 
-    const polledStatus = mapCfSslStatus(pollJson.result?.ssl?.status);
+    const polledStatus = mapCfSslStatus(polled.ssl?.status);
+    const expiresOn = polled.ssl?.expires_on ? new Date(polled.ssl.expires_on) : null;
 
     await db
-      .update(projectsTable)
+      .update(projectDomainsTable)
       .set({
         sslStatus: polledStatus,
-        sslVerifiedAt: polledStatus === "active" ? new Date() : undefined,
-        sslError: null,
+        sslLastCheckedAt: new Date(),
+        sslExpiresAt: expiresOn ?? undefined,
+        updatedAt: new Date(),
       })
-      .where(eq(projectsTable.id, projectId));
+      .where(eq(projectDomainsTable.id, domainId));
+
+    if (isPrimary) {
+      await db
+        .update(projectsTable)
+        .set({
+          sslStatus: polledStatus,
+          sslVerifiedAt: polledStatus === "active" ? new Date() : undefined,
+          sslError: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(projectsTable.id, projectId));
+    }
 
     return {
       sslStatus: polledStatus,
@@ -179,20 +170,148 @@ export async function activateSslForProject(
     const message = err instanceof Error ? err.message : "Unexpected error contacting Cloudflare";
 
     await db
-      .update(projectsTable)
-      .set({ sslStatus: "failed", sslError: message })
-      .where(eq(projectsTable.id, projectId));
+      .update(projectDomainsTable)
+      .set({ sslStatus: "failed", updatedAt: new Date() })
+      .where(eq(projectDomainsTable.id, domainId));
 
-    return {
-      sslStatus: "failed",
-      cfHostnameId: null,
-      cfRequired: false,
-      message: `SSL activation failed: ${message}`,
-    };
+    if (isPrimary) {
+      await db
+        .update(projectsTable)
+        .set({ sslStatus: "failed", sslError: message, updatedAt: new Date() })
+        .where(eq(projectsTable.id, projectId));
+    }
+
+    return { sslStatus: "failed", cfHostnameId: null, cfRequired: false, message };
   }
 }
 
-// ── Authenticated routes (project-scoped) ────────────────────────────────────
+/**
+ * Legacy activation path — operates on projects.customDomain + projects.cfHostnameId.
+ * Kept for backward compatibility with the legacy single-domain PATCH flow.
+ *
+ * For new multi-domain flow, call activateSslForDomain() instead.
+ */
+export async function activateSslForProject(
+  projectId: number,
+  domain: string,
+  existingCfHostnameId: string | null | undefined,
+): Promise<{
+  sslStatus: "pending" | "provisioning" | "active" | "failed";
+  cfHostnameId: string | null;
+  cfRequired: boolean;
+  message: string;
+}> {
+  // Find the matching project_domains row (if any) for richer per-domain tracking
+  const [domainRow] = await db
+    .select({
+      id: projectDomainsTable.id,
+      isPrimary: projectDomainsTable.isPrimary,
+      cfHostnameId: projectDomainsTable.cfHostnameId,
+    })
+    .from(projectDomainsTable)
+    .where(eq(projectDomainsTable.hostname, domain));
+
+  if (domainRow) {
+    const result = await activateSslForDomain(
+      domainRow.id,
+      domain,
+      domainRow.cfHostnameId ?? existingCfHostnameId,
+      projectId,
+      domainRow.isPrimary,
+    );
+    return {
+      sslStatus: result.sslStatus as "pending" | "provisioning" | "active" | "failed",
+      cfHostnameId: result.cfHostnameId,
+      cfRequired: result.cfRequired,
+      message: result.message,
+    };
+  }
+
+  // No project_domains row — operate directly on projects table (true legacy path)
+  if (!cfEnabled()) {
+    await db
+      .update(projectsTable)
+      .set({ sslStatus: "provisioning", updatedAt: new Date() })
+      .where(eq(projectsTable.id, projectId));
+    return {
+      sslStatus: "provisioning",
+      cfHostnameId: null,
+      cfRequired: true,
+      message: "Cloudflare for SaaS is not configured. Set CF_ZONE_ID and CF_API_TOKEN.",
+    };
+  }
+
+  try {
+    let cfHostnameId = existingCfHostnameId ?? null;
+
+    if (!cfHostnameId) {
+      const created = await createCustomHostname(domain);
+      if (!created) {
+        await db
+          .update(projectsTable)
+          .set({
+            sslStatus: "failed",
+            sslError: "CF API returned no result",
+            updatedAt: new Date(),
+          })
+          .where(eq(projectsTable.id, projectId));
+        return {
+          sslStatus: "failed",
+          cfHostnameId: null,
+          cfRequired: false,
+          message: "CF API error",
+        };
+      }
+      cfHostnameId = created.id;
+      const status = mapCfSslStatus(created.ssl?.status) as
+        | "pending"
+        | "provisioning"
+        | "active"
+        | "failed";
+      await db
+        .update(projectsTable)
+        .set({ cfHostnameId, sslStatus: status, sslError: null, updatedAt: new Date() })
+        .where(eq(projectsTable.id, projectId));
+      return {
+        sslStatus: status,
+        cfHostnameId,
+        cfRequired: false,
+        message: "CF hostname created.",
+      };
+    }
+
+    const polled = await getCustomHostname(cfHostnameId);
+    const polledStatus = mapCfSslStatus(polled?.ssl?.status) as
+      | "pending"
+      | "provisioning"
+      | "active"
+      | "failed";
+    await db
+      .update(projectsTable)
+      .set({
+        sslStatus: polledStatus,
+        sslVerifiedAt: polledStatus === "active" ? new Date() : undefined,
+        sslError: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(projectsTable.id, projectId));
+    return {
+      sslStatus: polledStatus,
+      cfHostnameId,
+      cfRequired: false,
+      message: "Polled CF status.",
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unexpected error";
+    await db
+      .update(projectsTable)
+      .set({ sslStatus: "failed", sslError: message, updatedAt: new Date() })
+      .where(eq(projectsTable.id, projectId));
+    return { sslStatus: "failed", cfHostnameId: null, cfRequired: false, message };
+  }
+}
+
+// ── Authenticated routes (project-scoped) ─────────────────────────────────────
 const router: IRouter = Router();
 
 // POST /api/projects/:id/domain/ssl-activate
@@ -252,17 +371,13 @@ export default router;
 export const sslWebhookRouter: IRouter = Router();
 
 // POST /api/domain/ssl-webhook
-// Cloudflare posts hostname events here. We match the hostname to a project
-// and update sslStatus accordingly.
-// Webhook payload shape: { data: { hostname: string, ssl: { status: string } } }
+// Cloudflare posts hostname events here. We match the hostname and update sslStatus
+// on both project_domains and the legacy projects row.
 sslWebhookRouter.post("/domain/ssl-webhook", async (req, res): Promise<void> => {
-  // In production, verify the Cloudflare webhook signature here.
-  // For now we trust the payload and match by hostname.
-
   const body = req.body as {
     data?: {
       hostname?: string;
-      ssl?: { status?: string };
+      ssl?: { status?: string; expires_on?: string };
       id?: string;
     };
   };
@@ -270,25 +385,69 @@ sslWebhookRouter.post("/domain/ssl-webhook", async (req, res): Promise<void> => 
   const hostname = body?.data?.hostname;
   const cfSslStatus = body?.data?.ssl?.status;
   const cfHostnameId = body?.data?.id;
+  const expiresOn = body?.data?.ssl?.expires_on ? new Date(body.data.ssl.expires_on) : null;
 
   if (!hostname) {
     res.status(400).json({ error: "Missing hostname in webhook payload" });
     return;
   }
 
-  // Find the project with this custom domain
+  const newSslStatus = mapCfSslStatus(cfSslStatus);
+
+  // Update project_domains row
+  const [domainRow] = await db
+    .select({
+      id: projectDomainsTable.id,
+      projectId: projectDomainsTable.projectId,
+      isPrimary: projectDomainsTable.isPrimary,
+    })
+    .from(projectDomainsTable)
+    .where(eq(projectDomainsTable.hostname, hostname));
+
+  if (domainRow) {
+    await db
+      .update(projectDomainsTable)
+      .set({
+        sslStatus: newSslStatus,
+        sslLastCheckedAt: new Date(),
+        sslExpiresAt: expiresOn ?? undefined,
+        cfHostnameId: cfHostnameId ?? undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(projectDomainsTable.id, domainRow.id));
+
+    // Sync legacy projects row
+    if (domainRow.isPrimary) {
+      await db
+        .update(projectsTable)
+        .set({
+          sslStatus: newSslStatus,
+          cfHostnameId: cfHostnameId ?? undefined,
+          sslVerifiedAt:
+            newSslStatus === "active" || newSslStatus === "expiring_soon" ? new Date() : undefined,
+          sslError:
+            newSslStatus === "failed"
+              ? `Cloudflare reported SSL status: ${cfSslStatus ?? "unknown"}`
+              : null,
+          updatedAt: new Date(),
+        })
+        .where(eq(projectsTable.id, domainRow.projectId));
+    }
+
+    res.json({ ok: true, acknowledged: true, matched: true, newSslStatus });
+    return;
+  }
+
+  // Fallback: try legacy projects.customDomain match
   const [project] = await db
     .select({ id: projectsTable.id, sslStatus: projectsTable.sslStatus })
     .from(projectsTable)
     .where(and(eq(projectsTable.customDomain, hostname), isNull(projectsTable.deletedAt)));
 
   if (!project) {
-    // Not found — acknowledge so CF doesn't retry
     res.json({ ok: true, acknowledged: true, matched: false });
     return;
   }
-
-  const newSslStatus = mapCfSslStatus(cfSslStatus);
 
   await db
     .update(projectsTable)
@@ -300,6 +459,7 @@ sslWebhookRouter.post("/domain/ssl-webhook", async (req, res): Promise<void> => 
         newSslStatus === "failed"
           ? `Cloudflare reported SSL status: ${cfSslStatus ?? "unknown"}`
           : null,
+      updatedAt: new Date(),
     })
     .where(eq(projectsTable.id, project.id));
 

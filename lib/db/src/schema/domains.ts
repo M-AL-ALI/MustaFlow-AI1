@@ -30,10 +30,19 @@ export const projectDomainsTable = pgTable(
     verificationToken: text("verification_token").notNull(),
     // verificationStatus: pending | verified | failed
     verificationStatus: text("verification_status").notNull().default("pending"),
+    // sslStatus: pending | provisioning | active | expiring_soon | expired | failed
     sslStatus: text("ssl_status").notNull().default("pending"),
     // environment: which deployment slot this custom domain is attached to.
     // "production" (default) | "staging"
     environment: text("environment").notNull().default("production"),
+    // Cloudflare for SaaS custom hostname integration (Task #553).
+    // cfHostnameId: Cloudflare custom hostname UUID stored after createCustomHostname succeeds.
+    //   Null means CF has not been provisioned for this domain yet.
+    // sslLastCheckedAt: when we last polled Cloudflare for this cert's status.
+    // sslExpiresAt: cert expiry date returned by Cloudflare (populated once cert is active).
+    cfHostnameId: text("cf_hostname_id"),
+    sslLastCheckedAt: timestamp("ssl_last_checked_at", { withTimezone: true }),
+    sslExpiresAt: timestamp("ssl_expires_at", { withTimezone: true }),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

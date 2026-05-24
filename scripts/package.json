@@ -31,6 +31,7 @@
     "migrate-project-domains": "tsx ./src/migrate-project-domains.ts",
     "migrate-checkpoint-id": "tsx ./src/migrate-checkpoint-id.ts",
     "migrate-staging-domains": "tsx ./src/migrate-staging-domains.ts",
+    "migrate-cf-hostname-columns": "tsx ./src/migrate-cf-hostname-columns.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

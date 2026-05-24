@@ -22,7 +22,8 @@ import { promises as dns } from "dns";
 import { randomBytes } from "crypto";
 import { db, projectsTable, projectDomainsTable, deploymentLogsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
-import { activateSslForProject } from "./ssl";
+import { activateSslForDomain, activateSslForProject } from "./ssl";
+import { deleteCustomHostname } from "../lib/cloudflare";
 import { createLimiterForDomainVerify } from "../lib/rateLimit";
 import { publishDomainEvent } from "../lib/event-bus";
 
@@ -455,6 +456,13 @@ router.delete(
 
     await db.delete(projectDomainsTable).where(eq(projectDomainsTable.id, domainId));
 
+    // Delete the Cloudflare custom hostname so the cert is released (best-effort).
+    if (domain.cfHostnameId) {
+      void deleteCustomHostname(domain.cfHostnameId).catch(() => {
+        /* non-fatal — the daily dangling sweep will clean it up if this fails */
+      });
+    }
+
     // Emit event to hot-reload routing table
     publishDomainEvent({ type: "removed", hostname: domain.hostname, projectId });
 
@@ -748,12 +756,14 @@ router.post(
             })
             .where(eq(projectsTable.id, projectId));
 
-          // Auto-trigger SSL (best-effort, non-fatal)
-          const [proj] = await db
-            .select({ cfHostnameId: projectsTable.cfHostnameId })
-            .from(projectsTable)
-            .where(eq(projectsTable.id, projectId));
-          void activateSslForProject(projectId, hostname, proj?.cfHostnameId).catch(() => {
+          // Auto-trigger SSL via the per-domain path (best-effort, non-fatal).
+          void activateSslForDomain(
+            domainId,
+            hostname,
+            domain.cfHostnameId ?? null,
+            projectId,
+            domain.isPrimary,
+          ).catch(() => {
             /* best-effort */
           });
         }
@@ -970,8 +980,52 @@ router.get(
         : "No requests seen for this hostname yet. Visit your domain to activate routing.",
     });
 
-    // Overall result
-    const allRequired = checks.filter((c) => c.id !== "middleware_sighted");
+    // Check 5: CAA record advisory (non-blocking — Cloudflare handles certs)
+    // Resolve CAA records for the apex of the hostname to detect policies that
+    // would block Cloudflare-supported CAs (letsencrypt.org, pki.goog, digicert.com).
+    const CLOUDFLARE_CAS = ["letsencrypt.org", "pki.goog", "digicert.com"];
+    const apexForCaa = hostname.split(".").slice(-2).join(".");
+    let caaRecordsForIssue: string[] = [];
+    let caaAllowsCf = true;
+    let caaChecked = false;
+    try {
+      const caaRaw = await dns.resolveCaa(apexForCaa);
+      caaChecked = true;
+      caaRecordsForIssue = caaRaw
+        .filter((r) => r.issue !== undefined || r.issuewild !== undefined)
+        .map((r) => r.issue ?? r.issuewild ?? "")
+        .filter(Boolean);
+
+      if (caaRecordsForIssue.length > 0) {
+        caaAllowsCf = CLOUDFLARE_CAS.some((ca) =>
+          caaRecordsForIssue.some((r) => r.toLowerCase().includes(ca)),
+        );
+      }
+    } catch {
+      // ENODATA / ENOTFOUND = no CAA records — any CA can issue. Non-fatal.
+      caaChecked = true;
+      caaAllowsCf = true;
+    }
+    checks.push({
+      id: "caa_advisory",
+      label: "CAA record advisory",
+      passed: caaAllowsCf,
+      detail:
+        caaRecordsForIssue.length === 0
+          ? "No CAA records — any certificate authority can issue certificates for this domain."
+          : caaAllowsCf
+            ? `CAA allows at least one Cloudflare-supported CA. Records: ${caaRecordsForIssue.join(", ")}`
+            : `CAA records restrict issuance. None of the Cloudflare-supported CAs (${CLOUDFLARE_CAS.join(", ")}) are allowed. Found: ${caaRecordsForIssue.join(", ")}`,
+      fixHint:
+        !caaAllowsCf && caaRecordsForIssue.length > 0
+          ? `Add a CAA record: type=0, tag=issue, value="letsencrypt.org" — or add one for "digicert.com" or "pki.goog" to allow Cloudflare to issue your TLS certificate.`
+          : undefined,
+    });
+
+    // Overall result (CAA advisory doesn't block — it's informational only)
+    const allRequired = checks.filter(
+      (c) => c.id !== "middleware_sighted" && c.id !== "caa_advisory",
+    );
     const allPassed = allRequired.every((c) => c.passed === true);
 
     res.json({
