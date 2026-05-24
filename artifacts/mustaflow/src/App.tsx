@@ -37,6 +37,7 @@ import MyDomainsPage from "./pages/account/domains";
 import WorkspaceDomainsPage from "./pages/workspace-domains";
 import OrgSettingsPage from "./pages/org-settings";
 import OrgNewPage from "./pages/org-new";
+import OrgInviteAcceptPage from "./pages/org-invite-accept";
 
 // Components
 import { AppLayout } from "./components/layout/app-layout";
@@ -454,6 +455,11 @@ function ClerkProviderWithRoutes() {
                     <MyDomainsPage />
                   </AppLayout>
                 </Protected>
+              </Route>
+              <Route path="/orgs/invites/:token">
+                <AppLayout>
+                  <OrgInviteAcceptPage />
+                </AppLayout>
               </Route>
               <Route path="/orgs/new">
                 <Protected>

@@ -87,6 +87,45 @@ export async function sendDomainRenewalWarning(opts: {
   await sendEmail({ to, subject, html, text: `${subject}\n\nRenew at: ${renewUrl}` });
 }
 
+export async function sendOrgInvite(opts: {
+  to: string;
+  orgName: string;
+  inviterName: string | null;
+  role: string;
+  acceptUrl: string;
+  expiresAt: Date;
+}): Promise<void> {
+  const { to, orgName, inviterName, role, acceptUrl, expiresAt } = opts;
+  const subject = `You're invited to join ${orgName} on MustaFlow`;
+  const inviter = inviterName ? inviterName : "A teammate";
+  const expiresStr = expiresAt.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111">
+  <h2 style="margin-top:0">You've been invited to ${orgName}</h2>
+  <p>${inviter} invited you to join <strong>${orgName}</strong> on MustaFlow as a <strong>${role}</strong>.</p>
+  <p style="margin:24px 0">
+    <a href="${acceptUrl}"
+       style="background:#4a90e2;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">
+      Accept invitation
+    </a>
+  </p>
+  <p style="font-size:13px;color:#444">Or paste this link into your browser:<br><span style="color:#666">${acceptUrl}</span></p>
+  <p style="font-size:12px;color:#666">This invitation expires on ${expiresStr}. If you didn't expect this email, you can safely ignore it.</p>
+</body>
+</html>`;
+
+  const text = `${inviter} invited you to join ${orgName} on MustaFlow as a ${role}.\n\nAccept: ${acceptUrl}\n\nExpires: ${expiresStr}`;
+
+  await sendEmail({ to, subject, html, text });
+}
+
 export async function sendDomainRenewalFailure(opts: {
   to: string;
   hostname: string;

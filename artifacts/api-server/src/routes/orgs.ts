@@ -10,6 +10,15 @@ import {
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { logger } from "../lib/logger";
+import { sendOrgInvite } from "../lib/emailClient";
+
+function getBaseUrl(req: { protocol: string; get: (h: string) => string | undefined }): string {
+  const envDomain = (process.env.REPLIT_DOMAINS ?? "").split(",")[0]?.trim();
+  if (envDomain) return `https://${envDomain}`;
+  const host = req.get("host") ?? "localhost";
+  const proto = req.get("x-forwarded-proto") ?? req.protocol ?? "https";
+  return `${proto}://${host}`;
+}
 
 const router: IRouter = Router();
 
@@ -28,10 +37,7 @@ function makeUniqueSlug(base: string): string {
 }
 
 // Resolve the requesting user's role in an org. Returns null if not a member.
-async function getUserOrgRole(
-  userId: string,
-  orgId: number,
-): Promise<string | null> {
+async function getUserOrgRole(userId: string, orgId: number): Promise<string | null> {
   const [member] = await db
     .select({ role: orgMembersTable.role })
     .from(orgMembersTable)
@@ -56,9 +62,7 @@ router.get("/orgs", async (req, res): Promise<void> => {
     })
     .from(orgMembersTable)
     .innerJoin(organizationsTable, eq(organizationsTable.id, orgMembersTable.organizationId))
-    .where(
-      and(eq(orgMembersTable.userId, userId), isNull(organizationsTable.deletedAt)),
-    )
+    .where(and(eq(orgMembersTable.userId, userId), isNull(organizationsTable.deletedAt)))
     .orderBy(desc(orgMembersTable.joinedAt));
 
   res.json(
@@ -74,16 +78,25 @@ router.get("/orgs", async (req, res): Promise<void> => {
 router.get("/orgs/:orgId", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const orgId = parseInt(req.params.orgId, 10);
-  if (!Number.isFinite(orgId)) { res.status(400).json({ error: "Invalid org id" }); return; }
+  if (!Number.isFinite(orgId)) {
+    res.status(400).json({ error: "Invalid org id" });
+    return;
+  }
 
   const role = await getUserOrgRole(userId, orgId);
-  if (!role) { res.status(403).json({ error: "Not a member" }); return; }
+  if (!role) {
+    res.status(403).json({ error: "Not a member" });
+    return;
+  }
 
   const [org] = await db
     .select()
     .from(organizationsTable)
     .where(and(eq(organizationsTable.id, orgId), isNull(organizationsTable.deletedAt)));
-  if (!org) { res.status(404).json({ error: "Not found" }); return; }
+  if (!org) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
 
   res.json({ ...org, myRole: role });
 });
@@ -98,7 +111,10 @@ const CreateOrgBody = z.object({
 router.post("/orgs", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const parsed = CreateOrgBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
 
   const { name, description, billingEmail } = parsed.data;
   const baseSlug = generateSlug(name);
@@ -116,7 +132,10 @@ router.post("/orgs", async (req, res): Promise<void> => {
     .values({ name, slug, description, billingEmail, createdByUserId: userId, type: "team" })
     .returning();
 
-  if (!org) { res.status(500).json({ error: "Failed to create org" }); return; }
+  if (!org) {
+    res.status(500).json({ error: "Failed to create org" });
+    return;
+  }
 
   // Auto-add creator as owner
   await db.insert(orgMembersTable).values({
@@ -139,13 +158,22 @@ const UpdateOrgBody = z.object({
 router.patch("/orgs/:orgId", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const orgId = parseInt(req.params.orgId, 10);
-  if (!Number.isFinite(orgId)) { res.status(400).json({ error: "Invalid org id" }); return; }
+  if (!Number.isFinite(orgId)) {
+    res.status(400).json({ error: "Invalid org id" });
+    return;
+  }
 
   const role = await getUserOrgRole(userId, orgId);
-  if (!role || !hasMinRole(role, "admin")) { res.status(403).json({ error: "Insufficient role" }); return; }
+  if (!role || !hasMinRole(role, "admin")) {
+    res.status(403).json({ error: "Insufficient role" });
+    return;
+  }
 
   const parsed = UpdateOrgBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
 
   const [org] = await db
     .update(organizationsTable)
@@ -160,16 +188,25 @@ router.patch("/orgs/:orgId", async (req, res): Promise<void> => {
 router.delete("/orgs/:orgId", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const orgId = parseInt(req.params.orgId, 10);
-  if (!Number.isFinite(orgId)) { res.status(400).json({ error: "Invalid org id" }); return; }
+  if (!Number.isFinite(orgId)) {
+    res.status(400).json({ error: "Invalid org id" });
+    return;
+  }
 
   const role = await getUserOrgRole(userId, orgId);
-  if (role !== "owner") { res.status(403).json({ error: "Only the owner can delete an org" }); return; }
+  if (role !== "owner") {
+    res.status(403).json({ error: "Only the owner can delete an org" });
+    return;
+  }
 
   const [org] = await db
     .select({ type: organizationsTable.type })
     .from(organizationsTable)
     .where(eq(organizationsTable.id, orgId));
-  if (org?.type === "personal") { res.status(400).json({ error: "Cannot delete personal org" }); return; }
+  if (org?.type === "personal") {
+    res.status(400).json({ error: "Cannot delete personal org" });
+    return;
+  }
 
   await db
     .update(organizationsTable)
@@ -183,10 +220,16 @@ router.delete("/orgs/:orgId", async (req, res): Promise<void> => {
 router.get("/orgs/:orgId/members", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const orgId = parseInt(req.params.orgId, 10);
-  if (!Number.isFinite(orgId)) { res.status(400).json({ error: "Invalid org id" }); return; }
+  if (!Number.isFinite(orgId)) {
+    res.status(400).json({ error: "Invalid org id" });
+    return;
+  }
 
   const role = await getUserOrgRole(userId, orgId);
-  if (!role) { res.status(403).json({ error: "Not a member" }); return; }
+  if (!role) {
+    res.status(403).json({ error: "Not a member" });
+    return;
+  }
 
   const members = await db
     .select()
@@ -207,18 +250,26 @@ router.patch("/orgs/:orgId/members/:memberId", async (req, res): Promise<void> =
   const orgId = parseInt(req.params.orgId, 10);
   const memberId = parseInt(req.params.memberId, 10);
   if (!Number.isFinite(orgId) || !Number.isFinite(memberId)) {
-    res.status(400).json({ error: "Invalid id" }); return;
+    res.status(400).json({ error: "Invalid id" });
+    return;
   }
 
   const role = await getUserOrgRole(userId, orgId);
-  if (!role || !hasMinRole(role, "admin")) { res.status(403).json({ error: "Insufficient role" }); return; }
+  if (!role || !hasMinRole(role, "admin")) {
+    res.status(403).json({ error: "Insufficient role" });
+    return;
+  }
 
   const parsed = UpdateMemberBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
 
   // Cannot promote someone to a role higher than your own
   if ((ROLE_RANK[parsed.data.role] ?? 0) > (ROLE_RANK[role] ?? 0)) {
-    res.status(403).json({ error: "Cannot promote above your own role" }); return;
+    res.status(403).json({ error: "Cannot promote above your own role" });
+    return;
   }
 
   const [updated] = await db
@@ -227,7 +278,10 @@ router.patch("/orgs/:orgId/members/:memberId", async (req, res): Promise<void> =
     .where(and(eq(orgMembersTable.id, memberId), eq(orgMembersTable.organizationId, orgId)))
     .returning();
 
-  if (!updated) { res.status(404).json({ error: "Member not found" }); return; }
+  if (!updated) {
+    res.status(404).json({ error: "Member not found" });
+    return;
+  }
   res.json(updated);
 });
 
@@ -237,31 +291,37 @@ router.delete("/orgs/:orgId/members/:memberId", async (req, res): Promise<void> 
   const orgId = parseInt(req.params.orgId, 10);
   const memberId = parseInt(req.params.memberId, 10);
   if (!Number.isFinite(orgId) || !Number.isFinite(memberId)) {
-    res.status(400).json({ error: "Invalid id" }); return;
+    res.status(400).json({ error: "Invalid id" });
+    return;
   }
 
   const [target] = await db
     .select()
     .from(orgMembersTable)
     .where(and(eq(orgMembersTable.id, memberId), eq(orgMembersTable.organizationId, orgId)));
-  if (!target) { res.status(404).json({ error: "Member not found" }); return; }
+  if (!target) {
+    res.status(404).json({ error: "Member not found" });
+    return;
+  }
 
   // Allow self-removal (leaving) OR admin/owner removing others
   if (target.userId !== userId) {
     const role = await getUserOrgRole(userId, orgId);
     if (!role || !hasMinRole(role, "admin")) {
-      res.status(403).json({ error: "Insufficient role" }); return;
+      res.status(403).json({ error: "Insufficient role" });
+      return;
     }
     // Cannot remove the owner unless you are the owner
     if (target.role === "owner") {
       const myRole = await getUserOrgRole(userId, orgId);
-      if (myRole !== "owner") { res.status(403).json({ error: "Cannot remove the owner" }); return; }
+      if (myRole !== "owner") {
+        res.status(403).json({ error: "Cannot remove the owner" });
+        return;
+      }
     }
   }
 
-  await db
-    .delete(orgMembersTable)
-    .where(eq(orgMembersTable.id, memberId));
+  await db.delete(orgMembersTable).where(eq(orgMembersTable.id, memberId));
 
   res.json({ removed: true });
 });
@@ -275,13 +335,22 @@ const CreateInviteBody = z.object({
 router.post("/orgs/:orgId/invites", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const orgId = parseInt(req.params.orgId, 10);
-  if (!Number.isFinite(orgId)) { res.status(400).json({ error: "Invalid org id" }); return; }
+  if (!Number.isFinite(orgId)) {
+    res.status(400).json({ error: "Invalid org id" });
+    return;
+  }
 
   const role = await getUserOrgRole(userId, orgId);
-  if (!role || !hasMinRole(role, "admin")) { res.status(403).json({ error: "Insufficient role" }); return; }
+  if (!role || !hasMinRole(role, "admin")) {
+    res.status(403).json({ error: "Insufficient role" });
+    return;
+  }
 
   const parsed = CreateInviteBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
 
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
@@ -298,18 +367,42 @@ router.post("/orgs/:orgId/invites", async (req, res): Promise<void> => {
     })
     .returning();
 
+  const acceptUrl = `${getBaseUrl(req)}/orgs/invites/${token}`;
+
+  // Fetch org name + inviter display name for the email body
+  const [orgRow] = await db
+    .select({ name: organizationsTable.name })
+    .from(organizationsTable)
+    .where(eq(organizationsTable.id, orgId));
+
+  // Best-effort: send transactional email (no-op when SMTP unconfigured)
+  void sendOrgInvite({
+    to: parsed.data.email,
+    orgName: orgRow?.name ?? "your team",
+    inviterName: null,
+    role: parsed.data.role,
+    acceptUrl,
+    expiresAt,
+  });
+
   logger.info({ orgId, email: parsed.data.email }, "Org invite created");
-  res.status(201).json(invite);
+  res.status(201).json({ ...invite, acceptUrl });
 });
 
 // ── List invites ──────────────────────────────────────────────────────────────
 router.get("/orgs/:orgId/invites", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const orgId = parseInt(req.params.orgId, 10);
-  if (!Number.isFinite(orgId)) { res.status(400).json({ error: "Invalid org id" }); return; }
+  if (!Number.isFinite(orgId)) {
+    res.status(400).json({ error: "Invalid org id" });
+    return;
+  }
 
   const role = await getUserOrgRole(userId, orgId);
-  if (!role || !hasMinRole(role, "admin")) { res.status(403).json({ error: "Insufficient role" }); return; }
+  if (!role || !hasMinRole(role, "admin")) {
+    res.status(403).json({ error: "Insufficient role" });
+    return;
+  }
 
   const invites = await db
     .select()
@@ -326,11 +419,15 @@ router.delete("/orgs/:orgId/invites/:inviteId", async (req, res): Promise<void> 
   const orgId = parseInt(req.params.orgId, 10);
   const inviteId = parseInt(req.params.inviteId, 10);
   if (!Number.isFinite(orgId) || !Number.isFinite(inviteId)) {
-    res.status(400).json({ error: "Invalid id" }); return;
+    res.status(400).json({ error: "Invalid id" });
+    return;
   }
 
   const role = await getUserOrgRole(userId, orgId);
-  if (!role || !hasMinRole(role, "admin")) { res.status(403).json({ error: "Insufficient role" }); return; }
+  if (!role || !hasMinRole(role, "admin")) {
+    res.status(403).json({ error: "Insufficient role" });
+    return;
+  }
 
   await db
     .update(orgInvitesTable)
@@ -345,14 +442,20 @@ router.post("/orgs/invites/:token/accept", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const { token } = req.params;
 
-  const [invite] = await db
-    .select()
-    .from(orgInvitesTable)
-    .where(eq(orgInvitesTable.token, token));
+  const [invite] = await db.select().from(orgInvitesTable).where(eq(orgInvitesTable.token, token));
 
-  if (!invite) { res.status(404).json({ error: "Invite not found" }); return; }
-  if (invite.status !== "pending") { res.status(400).json({ error: `Invite is ${invite.status}` }); return; }
-  if (invite.expiresAt < new Date()) { res.status(400).json({ error: "Invite expired" }); return; }
+  if (!invite) {
+    res.status(404).json({ error: "Invite not found" });
+    return;
+  }
+  if (invite.status !== "pending") {
+    res.status(400).json({ error: `Invite is ${invite.status}` });
+    return;
+  }
+  if (invite.expiresAt < new Date()) {
+    res.status(400).json({ error: "Invite expired" });
+    return;
+  }
 
   // Add member if not already in org
   await db
@@ -372,10 +475,16 @@ router.post("/orgs/invites/:token/accept", async (req, res): Promise<void> => {
 router.get("/orgs/:orgId/projects", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const orgId = parseInt(req.params.orgId, 10);
-  if (!Number.isFinite(orgId)) { res.status(400).json({ error: "Invalid org id" }); return; }
+  if (!Number.isFinite(orgId)) {
+    res.status(400).json({ error: "Invalid org id" });
+    return;
+  }
 
   const role = await getUserOrgRole(userId, orgId);
-  if (!role) { res.status(403).json({ error: "Not a member" }); return; }
+  if (!role) {
+    res.status(403).json({ error: "Not a member" });
+    return;
+  }
 
   const projects = await db
     .select()

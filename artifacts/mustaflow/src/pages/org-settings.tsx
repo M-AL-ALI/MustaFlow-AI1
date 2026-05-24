@@ -48,6 +48,7 @@ interface OrgInvite {
   email: string;
   role: string;
   status: string;
+  token: string;
   expiresAt: string;
   createdAt: string;
 }
@@ -106,14 +107,14 @@ export default function OrgSettingsPage() {
         fetch(`/api/orgs/${orgId}/invites`),
       ]);
       if (orgR.ok) {
-        const o = await orgR.json() as Org;
+        const o = (await orgR.json()) as Org;
         setOrg(o);
         setEditName(o.name);
         setEditDesc(o.description ?? "");
         setEditBillingEmail(o.billingEmail ?? "");
       }
-      if (membersR.ok) setMembers(await membersR.json() as OrgMember[]);
-      if (invitesR.ok) setInvites(await invitesR.json() as OrgInvite[]);
+      if (membersR.ok) setMembers((await membersR.json()) as OrgMember[]);
+      if (invitesR.ok) setInvites((await invitesR.json()) as OrgInvite[]);
     } finally {
       setLoading(false);
     }
@@ -159,7 +160,7 @@ export default function OrgSettingsPage() {
         setInviteEmail("");
         void loadAll();
       } else {
-        const d = await r.json() as { error?: string };
+        const d = (await r.json()) as { error?: string };
         setInviteError(d.error ?? "Failed to send invite");
       }
     } finally {
@@ -187,7 +188,8 @@ export default function OrgSettingsPage() {
   };
 
   const copyInviteLink = async (token: string, inviteId: number) => {
-    await navigator.clipboard.writeText(`${window.location.origin}/invite/${token}`);
+    const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+    await navigator.clipboard.writeText(`${window.location.origin}${base}/orgs/invites/${token}`);
     setCopiedInviteId(inviteId);
     setTimeout(() => setCopiedInviteId(null), 2000);
   };
@@ -218,7 +220,12 @@ export default function OrgSettingsPage() {
     <div className="min-h-screen bg-background">
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         {/* Back */}
-        <Button variant="ghost" size="sm" className="gap-2" onClick={() => setLocation("/projects")}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-2"
+          onClick={() => setLocation("/projects")}
+        >
           <ArrowLeft className="h-3.5 w-3.5" />
           Projects
         </Button>
@@ -339,7 +346,9 @@ export default function OrgSettingsPage() {
                     placeholder="colleague@example.com"
                     type="email"
                     className="h-9 text-sm flex-1"
-                    onKeyDown={(e) => { if (e.key === "Enter") void sendInvite(); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void sendInvite();
+                    }}
                   />
                   <select
                     value={inviteRole}
@@ -359,9 +368,7 @@ export default function OrgSettingsPage() {
                     {inviting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Invite"}
                   </Button>
                 </div>
-                {inviteError && (
-                  <p className="text-xs text-destructive">{inviteError}</p>
-                )}
+                {inviteError && <p className="text-xs text-destructive">{inviteError}</p>}
               </div>
             )}
 
@@ -387,7 +394,7 @@ export default function OrgSettingsPage() {
                         size="icon"
                         variant="ghost"
                         className="h-7 w-7"
-                        onClick={() => void copyInviteLink(invite.id.toString(), invite.id)}
+                        onClick={() => void copyInviteLink(invite.token, invite.id)}
                         title="Copy invite link"
                       >
                         {copiedInviteId === invite.id ? (
