@@ -18,8 +18,10 @@
     "*.{js,jsx,ts,tsx,json,css,md,yaml,yml}": "prettier --write"
   },
   "devDependencies": {
+    "@clerk/testing": "^2.0.33",
     "@cloudflare/workers-types": "^4.20260523.1",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.60.0",
     "eslint": "^10.4.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "husky": "^9.1.7",

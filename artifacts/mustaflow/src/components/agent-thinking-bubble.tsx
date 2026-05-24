@@ -1381,6 +1381,7 @@ export function AgentThinkingBubble({
               onClick={handleCancel}
               disabled={cancelling}
               title="Cancel build"
+              data-testid="cancel-build-btn"
               className={cn(
                 "flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors shrink-0",
                 cancelling

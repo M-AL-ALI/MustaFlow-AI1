@@ -2365,6 +2365,63 @@ export async function runBuildPipeline(args: {
     signal,
   } = args;
 
+  // ── Dev-only build stub ────────────────────────────────────────────────────
+  // When DEV_SLOW_BUILD_DELAY_MS is set (and not in production) the pipeline
+  // sleeps instead of calling the AI provider.  This lets e2e tests exercise
+  // the full cancel flow — real DB rows, real SSE events — without burning
+  // OpenAI credits.  The task is kept in "building" state for the duration so
+  // the AbortController is registered before the test calls POST /cancel.
+  if (process.env.NODE_ENV !== "production" && process.env.DEV_SLOW_BUILD_DELAY_MS) {
+    const ms = Math.max(0, parseInt(process.env.DEV_SLOW_BUILD_DELAY_MS, 10) || 0);
+    if (ms > 0) {
+      await new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(new Error("Build cancelled"));
+          return;
+        }
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(new Error("Build cancelled"));
+          },
+          { once: true },
+        );
+      });
+      return {
+        blueprint: {
+          projectName,
+          projectType: "web",
+          targetPlatforms: ["browser"],
+          pages: [{ name: "Home", route: "/" }],
+          components: [],
+          integrationsNeeded: [],
+        },
+        files: [
+          {
+            path: "index.html",
+            content: `<!DOCTYPE html><html><head><title>${projectName}</title></head><body><h1>${projectName}</h1></body></html>`,
+            mimeType: "text/html",
+          },
+        ],
+        report: {
+          userRequest: userPrompt,
+          filesCreated: ["index.html"],
+          filesChanged: [],
+          filesRemoved: [],
+          previewUpdated: true,
+          warnings: [],
+          integrationsNeeded: [],
+        },
+        assistantSummary: "[dev-stub] Build completed (DEV_SLOW_BUILD_DELAY_MS was set).",
+        correctionPasses: 0,
+        correctionFailed: false,
+        primaryErrorCategory: null,
+      };
+    }
+  }
+
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: BUILD_SYSTEM_PROMPT },
     {

@@ -152,3 +152,7 @@ FLY_ORG_SLUG = "personal"
 STRIPE_PRICE_STARTER = "price_1Tae1ULqqLu7se88cTw00WRi"
 STRIPE_PRICE_BUILDER = "price_1Tae1ULqqLu7se887EoqIKpj"
 STRIPE_PRICE_POWER = "price_1Tae1VLqqLu7se88jksCkMIg"
+E2E_TEST_ENABLED = "true"
+
+[userenv.development]
+DEV_SLOW_BUILD_DELAY_MS = "30000"

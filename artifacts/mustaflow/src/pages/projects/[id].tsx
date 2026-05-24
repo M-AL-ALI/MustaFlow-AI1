@@ -845,6 +845,23 @@ export default function ProjectWorkspacePage() {
     versionB: { id: number; userRequest: string; changelogEntry?: string | null };
   } | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+
+  // On initial load, if there is already an in-flight task (e.g. after a browser
+  // refresh while a build is running), surface it in the AgentThinkingBubble.
+  // A ref gate ensures this fires at most once per mount so subsequent polling
+  // updates from tasksForFeed never override a task the user deliberately dismissed.
+  const didAutoInitActiveTask = useRef(false);
+  useEffect(() => {
+    if (didAutoInitActiveTask.current || activeTaskId !== null || tasksForFeed.length === 0) return;
+    const inFlight = tasksForFeed.find(
+      (t) => !["completed", "failed", "canceled"].includes(t.status),
+    );
+    if (inFlight) {
+      setActiveTaskId(inFlight.id);
+      didAutoInitActiveTask.current = true;
+    }
+  }, [tasksForFeed, activeTaskId]);
+
   const [agentPrompts, setAgentPrompts] = useState<AgentPromptCard[]>([]);
   const [buildRefreshCount, setBuildRefreshCount] = useState(0);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);

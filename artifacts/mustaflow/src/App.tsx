@@ -168,6 +168,16 @@ function SignInRedirect() {
 
 // Auth guard — shows children to signed-in users, redirects others to /sign-in.
 function Protected({ children }: { children: React.ReactNode }) {
+  // Dev-only E2E bypass: Playwright injects window.__E2E_TEST_USER__ via
+  // page.addInitScript() before any script runs. Only active in dev builds —
+  // import.meta.env.DEV is statically replaced with `false` in production
+  // bundles, so this branch is dead-code-eliminated at build time.
+  if (import.meta.env.DEV) {
+    const win = window as unknown as { __E2E_TEST_USER__?: string };
+    if (typeof win.__E2E_TEST_USER__ === "string" && win.__E2E_TEST_USER__.length > 0) {
+      return <>{children}</>;
+    }
+  }
   return (
     <>
       <Show when="signed-in">{children}</Show>

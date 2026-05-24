@@ -84,6 +84,17 @@ declare global {
 }
 
 export function attachUser(req: Request, res: Response, next: NextFunction): void {
+  // E2E test bypass: only active when both E2E_TEST_ENABLED=true and NODE_ENV !== "production"
+  // are set. Requiring an explicit opt-in env flag prevents the bypass from
+  // being silently active in shared staging / non-prod deployments.
+  if (process.env.NODE_ENV !== "production" && process.env.E2E_TEST_ENABLED === "true") {
+    const testUser = req.headers["x-e2e-test-user"];
+    if (typeof testUser === "string" && testUser.length > 0) {
+      req.userId = testUser;
+      next();
+      return;
+    }
+  }
   void activeAdapter.attachUser(req, res, next);
 }
 
