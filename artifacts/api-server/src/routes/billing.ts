@@ -37,6 +37,7 @@ export const CREDIT_PACKAGES = [
     credits: 500,
     priceUsd: 5,
     description: "500 build credits — good for everyday building",
+    priceIdEnv: "STRIPE_PRICE_STARTER",
   },
   {
     id: "builder",
@@ -44,6 +45,7 @@ export const CREDIT_PACKAGES = [
     credits: 2500,
     priceUsd: 20,
     description: "2,500 build credits — best value for active builders",
+    priceIdEnv: "STRIPE_PRICE_BUILDER",
   },
   {
     id: "power",
@@ -51,8 +53,16 @@ export const CREDIT_PACKAGES = [
     credits: 10000,
     priceUsd: 65,
     description: "10,000 build credits — for power users and teams",
+    priceIdEnv: "STRIPE_PRICE_POWER",
   },
 ] as const;
+
+// Resolve a pack's Stripe Price ID from env. When unset, the checkout falls
+// back to inline price_data so dev/test still works without seeded prices.
+function priceIdForPack(pkg: (typeof CREDIT_PACKAGES)[number]): string | undefined {
+  const id = process.env[pkg.priceIdEnv];
+  return id && id.trim() ? id.trim() : undefined;
+}
 
 // ── Stripe webhook handler (shared between router and billingWebhookRouter) ───
 //
@@ -311,12 +321,13 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
   }
 
   try {
-    // Use inline price_data instead of pre-created Stripe Price IDs so
-    // operators don't need to create products in the Stripe Dashboard first.
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [
-        {
+    // Prefer pre-created Stripe Price IDs (set via `pnpm --filter @workspace/scripts
+    // run seed:stripe`, then stored as STRIPE_PRICE_STARTER/BUILDER/POWER secrets).
+    // Falls back to inline price_data so dev/test still works without seeding.
+    const priceId = priceIdForPack(pkg);
+    const lineItem = priceId
+      ? { quantity: 1, price: priceId }
+      : {
           quantity: 1,
           price_data: {
             currency: "usd",
@@ -326,8 +337,11 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
               description: pkg.description,
             },
           },
-        },
-      ],
+        };
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: [lineItem],
       success_url: successUrl,
       cancel_url: cancelUrl,
       metadata: {

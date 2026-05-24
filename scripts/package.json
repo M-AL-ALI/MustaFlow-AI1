@@ -6,6 +6,7 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "seed": "tsx ./src/seed.ts",
+    "seed:stripe": "tsx ./src/seed-stripe-products.ts",
     "check-cdn-versions": "tsx ./src/check-cdn-versions.ts",
     "migrate-containers": "tsx ./src/migrate-containers.ts",
     "migrate-production-container": "tsx ./src/migrate-production-container.ts",
@@ -50,7 +51,8 @@
   },
   "dependencies": {
     "@workspace/db": "workspace:*",
-    "openai": "^6.38.0"
+    "openai": "^6.38.0",
+    "stripe": "20.0.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",

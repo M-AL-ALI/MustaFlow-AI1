@@ -894,6 +894,9 @@ importers:
       openai:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@3.25.76)
+      stripe:
+        specifier: 20.0.0
+        version: 20.0.0(@types/node@25.6.2)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

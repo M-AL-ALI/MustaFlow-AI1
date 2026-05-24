@@ -189,7 +189,11 @@ function buildBindZone(hostname: string, records: Array<Record<string, unknown>>
   for (const r of records) {
     const name = (r.name as string) ?? "";
     const display =
-      name === hostname ? "@" : name.endsWith(`.${hostname}`) ? name.slice(0, -hostname.length - 1) : name;
+      name === hostname
+        ? "@"
+        : name.endsWith(`.${hostname}`)
+          ? name.slice(0, -hostname.length - 1)
+          : name;
     const ttl = (r.ttl as number) === 1 ? 300 : (r.ttl as number);
     const type = String(r.type ?? "");
     const content = (r.content as string | undefined) ?? "";
