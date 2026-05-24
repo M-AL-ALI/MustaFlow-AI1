@@ -231,6 +231,7 @@ describe("formatSkillIndex", () => {
         triggers: ["a", "b", "c", "d", "e", "f", "g"],
         body: "",
         filePath: "/x",
+        draft: false,
       } satisfies SkillManifest,
     ]);
     expect(out).toContain("- react-vite — A description");
@@ -250,6 +251,7 @@ describe("getSkillManifest + __setManifestsForTesting", () => {
           triggers: [],
           body: "INJECTED",
           filePath: "(virtual)",
+          draft: false,
         },
       ],
     ]);

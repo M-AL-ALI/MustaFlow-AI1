@@ -63,3 +63,46 @@ export function Button({ label, onClick, variant = "primary" }: ButtonProps) {
   );
 }
 ```
+
+## Examples
+
+### Minimal App.tsx
+
+```tsx
+import { useState } from "react";
+
+export default function App() {
+  const [count, setCount] = useState(0);
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
+      <button
+        onClick={() => setCount((c) => c + 1)}
+        className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500"
+      >
+        Clicked {count} times
+      </button>
+    </div>
+  );
+}
+```
+
+### TanStack Query + fetch
+
+```tsx
+import { useQuery } from "@tanstack/react-query";
+
+export function Users() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["users"],
+    queryFn: async () => (await fetch("/api/users")).json(),
+  });
+  if (isLoading) return <p>Loading…</p>;
+  return (
+    <ul>
+      {data.map((u: any) => (
+        <li key={u.id}>{u.name}</li>
+      ))}
+    </ul>
+  );
+}
+```

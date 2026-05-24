@@ -609,7 +609,7 @@ const ACTION_COLORS: Record<string, string> = {
   verification_failed: "text-yellow-500 bg-yellow-500/10",
 };
 
-// ─── Skills panel (per-task skills system, Task #506) ──────────────────────
+// ─── Skills panel (per-task skills system, Task #506; drafts Task #536) ────
 type SkillSummary = {
   name: string;
   description: string;
@@ -618,22 +618,39 @@ type SkillSummary = {
   loadCount: number;
   lastLoadedAt: string | null;
   bytes: number;
+  draft?: boolean;
+  authoredBy?: string | null;
+  authoredAt?: string | null;
+  authoringContext?: string | null;
 };
 
 function SkillsPanel() {
+  const [tab, setTab] = useState<"active" | "drafts">("active");
   const [skills, setSkills] = useState<SkillSummary[] | null>(null);
+  const [drafts, setDrafts] = useState<SkillSummary[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingName, setPendingName] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState<string | null>(null);
+  const [draftRaw, setDraftRaw] = useState<string>("");
+  const [draftLoading, setDraftLoading] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/skills");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as { skills: SkillSummary[] };
-      setSkills(json.skills);
+      const [active, pending] = await Promise.all([
+        fetch("/api/admin/skills").then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json() as Promise<{ skills: SkillSummary[] }>;
+        }),
+        fetch("/api/admin/skills/drafts").then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json() as Promise<{ drafts: SkillSummary[] }>;
+        }),
+      ]);
+      setSkills(active.skills);
+      setDrafts(pending.drafts);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -644,6 +661,78 @@ function SkillsPanel() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  async function openDraft(name: string) {
+    setEditingDraft(name);
+    setDraftRaw("");
+    setDraftLoading(true);
+    try {
+      const res = await fetch(`/api/admin/skills/drafts/${encodeURIComponent(name)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { raw: string };
+      setDraftRaw(json.raw);
+    } catch (err) {
+      setError((err as Error).message);
+      setEditingDraft(null);
+    } finally {
+      setDraftLoading(false);
+    }
+  }
+
+  async function saveDraft(name: string) {
+    setPendingName(name);
+    try {
+      const res = await fetch(`/api/admin/skills/drafts/${encodeURIComponent(name)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ raw: draftRaw }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setPendingName(null);
+    }
+  }
+
+  async function approveDraft(name: string) {
+    setPendingName(name);
+    try {
+      const res = await fetch(`/api/admin/skills/drafts/${encodeURIComponent(name)}/approve`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+      setEditingDraft(null);
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setPendingName(null);
+    }
+  }
+
+  async function rejectDraft(name: string) {
+    if (!confirm(`Delete draft "${name}" permanently?`)) return;
+    setPendingName(name);
+    try {
+      const res = await fetch(`/api/admin/skills/drafts/${encodeURIComponent(name)}/reject`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setEditingDraft(null);
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setPendingName(null);
+    }
+  }
 
   async function toggle(name: string, enabled: boolean) {
     setPendingName(name);
@@ -670,7 +759,8 @@ function SkillsPanel() {
           Builder Skills
           {skills && (
             <span className="text-muted-foreground font-normal normal-case tracking-normal">
-              — {skills.length} registered
+              — {skills.length} active
+              {drafts && drafts.length > 0 ? `, ${drafts.length} pending` : ""}
             </span>
           )}
         </h3>
@@ -683,10 +773,48 @@ function SkillsPanel() {
         </button>
       </div>
 
+      <div className="px-4 pt-3 border-b border-border flex gap-1">
+        <button
+          onClick={() => setTab("active")}
+          className={`text-xs font-medium px-3 py-1.5 rounded-t-md border-b-2 ${
+            tab === "active"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Active ({skills?.length ?? "…"})
+        </button>
+        <button
+          onClick={() => setTab("drafts")}
+          className={`text-xs font-medium px-3 py-1.5 rounded-t-md border-b-2 ${
+            tab === "drafts"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Pending review{" "}
+          {drafts && drafts.length > 0 && (
+            <span className="ml-1 bg-yellow-500/20 text-yellow-500 text-[10px] font-bold px-1.5 py-0.5 rounded">
+              {drafts.length}
+            </span>
+          )}
+        </button>
+      </div>
+
       <div className="px-4 py-3 border-b border-border text-xs text-muted-foreground">
-        Skills are markdown instruction sets the agent loop can pull on demand via{" "}
-        <code className="font-mono">load_skill</code>. Disabling a skill hides it from the system
-        prompt index and rejects load requests.
+        {tab === "active" ? (
+          <>
+            Skills are markdown instruction sets the agent loop can pull on demand via{" "}
+            <code className="font-mono">load_skill</code>. Disabling a skill hides it from the
+            system prompt index and rejects load requests.
+          </>
+        ) : (
+          <>
+            Drafts authored by the agent via <code className="font-mono">author_skill</code>.
+            Review, edit, then approve to move into{" "}
+            <code className="font-mono">skills/&lt;slug&gt;/</code> and enable for all builds.
+          </>
+        )}
       </div>
 
       {error && (
@@ -704,7 +832,106 @@ function SkillsPanel() {
         </div>
       )}
 
-      {skills && skills.length > 0 && (
+      {tab === "drafts" && drafts && drafts.length === 0 && (
+        <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+          No drafts pending review. The agent will queue new skills here when it discovers a
+          reusable pattern via <code className="font-mono">author_skill</code>.
+        </div>
+      )}
+
+      {tab === "drafts" && drafts && drafts.length > 0 && (
+        <div className="divide-y divide-border">
+          {drafts.map((d) => {
+            const isOpen = editingDraft === d.name;
+            return (
+              <div key={d.name} className="px-4 py-3 text-sm">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <code className="font-mono text-xs font-semibold text-foreground">
+                        {d.name}
+                      </code>
+                      <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-500">
+                        draft
+                      </span>
+                      {d.authoredBy && (
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          by {d.authoredBy}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{d.description}</p>
+                    {d.authoringContext && (
+                      <p className="text-xs text-muted-foreground/80 mt-1 italic">
+                        rationale: {d.authoringContext}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-[10px] text-muted-foreground/80">
+                      <span>{d.bytes.toLocaleString()} bytes</span>
+                      {d.authoredAt && <span>{new Date(d.authoredAt).toLocaleString()}</span>}
+                      {d.triggers.length > 0 && (
+                        <span className="truncate">
+                          triggers: {d.triggers.slice(0, 6).join(", ")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex flex-col gap-1">
+                    <button
+                      onClick={() => (isOpen ? setEditingDraft(null) : void openDraft(d.name))}
+                      className="text-xs font-medium px-3 py-1.5 rounded-md border border-border hover:bg-muted"
+                    >
+                      {isOpen ? "Close" : "Review"}
+                    </button>
+                    <button
+                      onClick={() => void approveDraft(d.name)}
+                      disabled={pendingName === d.name}
+                      className="text-xs font-medium px-3 py-1.5 rounded-md border border-green-500/40 text-green-500 hover:bg-green-500/10 disabled:opacity-50"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => void rejectDraft(d.name)}
+                      disabled={pendingName === d.name}
+                      className="text-xs font-medium px-3 py-1.5 rounded-md border border-destructive/40 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+                {isOpen && (
+                  <div className="mt-3 space-y-2">
+                    {draftLoading ? (
+                      <div className="text-xs text-muted-foreground">Loading…</div>
+                    ) : (
+                      <>
+                        <textarea
+                          value={draftRaw}
+                          onChange={(e) => setDraftRaw(e.target.value)}
+                          spellCheck={false}
+                          rows={20}
+                          className="w-full font-mono text-xs bg-muted/30 border border-border rounded p-2 resize-y"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => void saveDraft(d.name)}
+                            disabled={pendingName === d.name}
+                            className="text-xs font-medium px-3 py-1.5 rounded-md border border-primary/40 text-primary hover:bg-primary/10 disabled:opacity-50"
+                          >
+                            Save changes
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === "active" && skills && skills.length > 0 && (
         <div className="divide-y divide-border">
           {skills.map((s) => (
             <div key={s.name} className="px-4 py-3 text-sm flex items-start gap-3">

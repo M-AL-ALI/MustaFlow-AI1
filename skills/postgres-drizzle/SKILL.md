@@ -98,3 +98,40 @@ await db.insert(postsTable).values(rows);
 - Don't return password hashes, tokens, or PII from API responses. Select only the columns you need.
 - Don't `SELECT *` in hot paths — list columns explicitly.
 - Don't keep a long-lived connection per request; reuse the `pool`.
+
+## Examples
+
+### Schema + query
+
+```ts
+import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { eq, desc } from "drizzle-orm";
+
+export const todos = pgTable("todos", {
+  id: serial("id").primaryKey(),
+  text: text("text").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const db = drizzle(pool);
+
+export async function listTodos(limit = 20) {
+  return db
+    .select({ id: todos.id, text: todos.text })
+    .from(todos)
+    .orderBy(desc(todos.createdAt))
+    .limit(limit);
+}
+
+export async function createTodo(text: string) {
+  const [row] = await db.insert(todos).values({ text }).returning();
+  return row;
+}
+
+export async function deleteTodo(id: number) {
+  await db.delete(todos).where(eq(todos.id, id));
+}
+```

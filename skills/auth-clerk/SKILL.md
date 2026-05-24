@@ -65,3 +65,41 @@ app.get("/api/me", requireAuth(), (req, res) => {
 - Do not call `getToken()` from the browser unless calling a non-Clerk service that needs a JWT.
 - Do not expose `CLERK_SECRET_KEY` to the frontend.
 - Do not hand-roll session cookies, JWT verification, or password hashing.
+
+## Examples
+
+### Protect a page (React)
+
+```tsx
+import { SignedIn, SignedOut, RedirectToSignIn, UserButton } from "@clerk/clerk-react";
+
+export default function Dashboard() {
+  return (
+    <>
+      <SignedIn>
+        <header className="flex justify-end p-4">
+          <UserButton />
+        </header>
+        <main>Welcome back!</main>
+      </SignedIn>
+      <SignedOut>
+        <RedirectToSignIn />
+      </SignedOut>
+    </>
+  );
+}
+```
+
+### Server-side guard (Express)
+
+```ts
+import { clerkMiddleware, getAuth } from "@clerk/express";
+
+app.use(clerkMiddleware());
+
+app.get("/api/me", (req, res) => {
+  const { userId } = getAuth(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ userId });
+});
+```

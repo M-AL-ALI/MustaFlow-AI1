@@ -25,7 +25,15 @@ import {
 import { and, gte } from "drizzle-orm";
 import { requireAdmin } from "../lib/adminAuth";
 import { errorsPerDay } from "../lib/prodLogs";
-import { listAllSkillsForAdmin, setSkillEnabled } from "../lib/builder-skills";
+import {
+  listAllSkillsForAdmin,
+  setSkillEnabled,
+  listDraftSkillsForAdmin,
+  readDraftRaw,
+  updateDraftSkillBody,
+  approveDraftSkill,
+  rejectDraftSkill,
+} from "../lib/builder-skills";
 
 const router: IRouter = Router();
 
@@ -542,6 +550,70 @@ router.patch("/admin/skills/:name", async (req, res): Promise<void> => {
   }
   await setSkillEnabled(name, body.enabled);
   res.json({ name, enabled: body.enabled });
+});
+
+// ── GET /api/admin/skills/drafts ──────────────────────────────────────────────
+// Lists every agent-authored draft awaiting admin review.
+router.get("/admin/skills/drafts", async (_req, res): Promise<void> => {
+  const drafts = await listDraftSkillsForAdmin();
+  res.json({ drafts });
+});
+
+// ── GET /api/admin/skills/drafts/:name ────────────────────────────────────────
+// Returns the full raw SKILL.md content (including frontmatter) for editing.
+router.get("/admin/skills/drafts/:name", async (req, res): Promise<void> => {
+  const name = String(req.params.name ?? "").trim();
+  const raw = await readDraftRaw(name);
+  if (raw == null) {
+    res.status(404).json({ error: "Draft not found" });
+    return;
+  }
+  res.json({ name, raw });
+});
+
+// ── PATCH /api/admin/skills/drafts/:name ──────────────────────────────────────
+// Body: { raw: string }. Overwrites the draft's SKILL.md file in place.
+router.patch("/admin/skills/drafts/:name", async (req, res): Promise<void> => {
+  const name = String(req.params.name ?? "").trim();
+  const body = (req.body ?? {}) as { raw?: unknown };
+  if (typeof body.raw !== "string" || body.raw.length === 0) {
+    res.status(400).json({ error: "Body must include { raw: string }" });
+    return;
+  }
+  if (body.raw.length > 60_000) {
+    res.status(400).json({ error: "raw too long (max 60000 chars)" });
+    return;
+  }
+  try {
+    await updateDraftSkillBody(name, body.raw);
+    res.json({ name, updated: true });
+  } catch (err) {
+    res.status(400).json({ error: String((err as Error).message ?? err) });
+  }
+});
+
+// ── POST /api/admin/skills/drafts/:name/approve ───────────────────────────────
+// Moves the draft from skills/_drafts/<slug>/ to skills/<slug>/ and enables it.
+router.post("/admin/skills/drafts/:name/approve", async (req, res): Promise<void> => {
+  const name = String(req.params.name ?? "").trim();
+  try {
+    await approveDraftSkill(name);
+    res.json({ name, approved: true });
+  } catch (err) {
+    res.status(400).json({ error: String((err as Error).message ?? err) });
+  }
+});
+
+// ── POST /api/admin/skills/drafts/:name/reject ────────────────────────────────
+// Deletes the draft file and DB row.
+router.post("/admin/skills/drafts/:name/reject", async (req, res): Promise<void> => {
+  const name = String(req.params.name ?? "").trim();
+  try {
+    await rejectDraftSkill(name);
+    res.json({ name, rejected: true });
+  } catch (err) {
+    res.status(400).json({ error: String((err as Error).message ?? err) });
+  }
 });
 
 export default router;

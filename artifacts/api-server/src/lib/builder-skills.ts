@@ -1,5 +1,5 @@
 /**
- * Per-task skills system (Task #506).
+ * Per-task skills system (Task #506, expanded in #536).
  *
  * Skills are markdown files on disk under `skills/<name>/SKILL.md` at the
  * workspace root. Each file starts with YAML-ish frontmatter:
@@ -19,11 +19,19 @@
  * Admin enable/disable + load counts persist in the `builder_skills` table.
  * Disabled skills are hidden from the index and `load_skill` returns an error
  * for them.
+ *
+ * Task #536:
+ *   - Drafts: agent-authored skills live under `skills/_drafts/<slug>/SKILL.md`
+ *     with `draft=true` in the DB. They are excluded from the loop index and
+ *     `load_skill`. Admin approval moves the file to `skills/<slug>/` and
+ *     flips the flag.
+ *   - Trigger-aware ranking: callers can pass a user prompt to
+ *     `formatSkillIndex` to bubble matched skills to the top of the index.
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { sql, inArray } from "drizzle-orm";
+import { sql, inArray, eq, and } from "drizzle-orm";
 import { db, builderSkillsTable, type BuilderSkillRow } from "@workspace/db";
 import { logger } from "./logger";
 
@@ -34,6 +42,8 @@ export interface SkillManifest {
   body: string;
   /** Absolute path to the SKILL.md file. */
   filePath: string;
+  /** True when this manifest came from skills/_drafts/. */
+  draft: boolean;
 }
 
 export interface SkillSummary {
@@ -44,7 +54,13 @@ export interface SkillSummary {
   loadCount: number;
   lastLoadedAt: string | null;
   bytes: number;
+  draft: boolean;
+  authoredBy: string | null;
+  authoredAt: string | null;
+  authoringContext: string | null;
 }
+
+const DRAFTS_DIRNAME = "_drafts";
 
 let cachedManifests: Map<string, SkillManifest> | null = null;
 let cachedAt = 0;
@@ -83,7 +99,10 @@ async function resolveSkillsDir(): Promise<string | null> {
  * library — the format is fixed: a leading `---` line, key/value pairs (with
  * scalar or bracketed-list values), and a closing `---` line.
  */
-function parseFrontmatter(raw: string): { meta: Record<string, unknown>; body: string } {
+export function parseFrontmatter(raw: string): {
+  meta: Record<string, unknown>;
+  body: string;
+} {
   if (!raw.startsWith("---")) return { meta: {}, body: raw };
   const end = raw.indexOf("\n---", 3);
   if (end === -1) return { meta: {}, body: raw };
@@ -106,6 +125,34 @@ function parseFrontmatter(raw: string): { meta: Record<string, unknown>; body: s
     }
   }
   return { meta, body };
+}
+
+async function readSkillFile(
+  dir: string,
+  entry: string,
+  isDraft: boolean,
+): Promise<SkillManifest | null> {
+  const skillPath = path.join(dir, entry, "SKILL.md");
+  let raw: string;
+  try {
+    const st = await fs.stat(path.join(dir, entry));
+    if (!st.isDirectory()) return null;
+    raw = await fs.readFile(skillPath, "utf8");
+  } catch {
+    return null;
+  }
+  const { meta, body } = parseFrontmatter(raw);
+  const name = typeof meta.name === "string" && meta.name.length > 0 ? meta.name : entry;
+  const description = typeof meta.description === "string" ? meta.description : "(no description)";
+  const triggers = Array.isArray(meta.triggers) ? (meta.triggers as string[]) : [];
+  return {
+    name,
+    description: description.slice(0, 240),
+    triggers,
+    body: body.trim(),
+    filePath: skillPath,
+    draft: isDraft,
+  };
 }
 
 async function readManifests(): Promise<Map<string, SkillManifest>> {
@@ -132,28 +179,26 @@ async function readManifests(): Promise<Map<string, SkillManifest>> {
   }
 
   for (const entry of entries) {
-    const skillPath = path.join(root, entry, "SKILL.md");
-    let raw: string;
-    try {
-      const st = await fs.stat(path.join(root, entry));
-      if (!st.isDirectory()) continue;
-      raw = await fs.readFile(skillPath, "utf8");
-    } catch {
-      continue;
-    }
-    const { meta, body } = parseFrontmatter(raw);
-    const name = typeof meta.name === "string" && meta.name.length > 0 ? meta.name : entry;
-    const description =
-      typeof meta.description === "string" ? meta.description : "(no description)";
-    const triggers = Array.isArray(meta.triggers) ? (meta.triggers as string[]) : [];
-    out.set(name, {
-      name,
-      description: description.slice(0, 240),
-      triggers,
-      body: body.trim(),
-      filePath: skillPath,
-    });
+    if (entry === DRAFTS_DIRNAME) continue; // handled separately below
+    const m = await readSkillFile(root, entry, false);
+    if (m) out.set(m.name, m);
   }
+
+  // Drafts: skills/_drafts/<slug>/SKILL.md
+  const draftsRoot = path.join(root, DRAFTS_DIRNAME);
+  try {
+    const draftEntries = await fs.readdir(draftsRoot);
+    for (const entry of draftEntries) {
+      const m = await readSkillFile(draftsRoot, entry, true);
+      if (!m) continue;
+      // Don't let a draft shadow an approved skill of the same name.
+      if (out.has(m.name)) continue;
+      out.set(m.name, m);
+    }
+  } catch {
+    /* drafts dir doesn't exist yet — fine */
+  }
+
   cachedManifests = out;
   cachedAt = now;
   return out;
@@ -179,39 +224,65 @@ async function loadSettingsMap(names: string[]): Promise<Map<string, BuilderSkil
   }
 }
 
-/** Returns enabled-only manifests, applying DB enable/disable settings. */
+/** Returns enabled-only manifests, applying DB enable/disable settings and
+ *  excluding drafts. */
 export async function listEnabledSkills(): Promise<SkillManifest[]> {
   const manifests = await readManifests();
   const settings = await loadSettingsMap(Array.from(manifests.keys()));
   const out: SkillManifest[] = [];
   for (const m of manifests.values()) {
+    if (m.draft) continue;
     const s = settings.get(m.name);
-    if (s && s.enabled === false) continue;
+    if (s && (s.enabled === false || s.draft === true)) continue;
     out.push(m);
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
 }
 
-/** Admin view: all skills (enabled + disabled) with settings + telemetry. */
+/** Admin view: all approved skills (enabled + disabled) with settings + telemetry. */
 export async function listAllSkillsForAdmin(): Promise<SkillSummary[]> {
   const manifests = await readManifests();
   const settings = await loadSettingsMap(Array.from(manifests.keys()));
   const out: SkillSummary[] = [];
   for (const m of manifests.values()) {
+    if (m.draft) continue;
     const s = settings.get(m.name);
-    out.push({
-      name: m.name,
-      description: m.description,
-      triggers: m.triggers,
-      enabled: s?.enabled ?? true,
-      loadCount: s?.loadCount ?? 0,
-      lastLoadedAt: s?.lastLoadedAt ? new Date(s.lastLoadedAt).toISOString() : null,
-      bytes: m.body.length,
-    });
+    if (s?.draft) continue;
+    out.push(summaryFromManifest(m, s));
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
+}
+
+/** Admin view: just the pending-review drafts. */
+export async function listDraftSkillsForAdmin(): Promise<SkillSummary[]> {
+  const manifests = await readManifests();
+  const settings = await loadSettingsMap(Array.from(manifests.keys()));
+  const out: SkillSummary[] = [];
+  for (const m of manifests.values()) {
+    const s = settings.get(m.name);
+    if (!m.draft && !s?.draft) continue;
+    out.push(summaryFromManifest(m, s));
+  }
+  out.sort((a, b) => (b.authoredAt ?? "").localeCompare(a.authoredAt ?? ""));
+  return out;
+}
+
+function summaryFromManifest(m: SkillManifest, s: BuilderSkillRow | undefined): SkillSummary {
+  return {
+    name: m.name,
+    description: m.description,
+    triggers: m.triggers,
+    enabled: s?.enabled ?? true,
+    loadCount: s?.loadCount ?? 0,
+    lastLoadedAt: s?.lastLoadedAt ? new Date(s.lastLoadedAt).toISOString() : null,
+    bytes: m.body.length,
+    draft: s?.draft ?? m.draft,
+    authoredBy: s?.authoredBy ?? null,
+    authoredAt: s?.authoredAt ? new Date(s.authoredAt).toISOString() : null,
+    authoringContext: s?.authoringContext ?? null,
+  };
 }
 
 export async function setSkillEnabled(name: string, enabled: boolean): Promise<void> {
@@ -225,16 +296,18 @@ export async function setSkillEnabled(name: string, enabled: boolean): Promise<v
 }
 
 /**
- * Load a single skill's full body. Returns null when the skill is unknown or
- * disabled. Increments the persistent load counter on success.
+ * Load a single skill's full body. Returns null when the skill is unknown,
+ * disabled, or still in draft state. Increments the persistent load counter
+ * on success.
  */
 export async function loadSkillContent(name: string): Promise<SkillManifest | null> {
   const manifests = await readManifests();
   const m = manifests.get(name);
   if (!m) return null;
+  if (m.draft) return null;
   const settings = await loadSettingsMap([name]);
   const s = settings.get(name);
-  if (s && s.enabled === false) return null;
+  if (s && (s.enabled === false || s.draft === true)) return null;
   // Best-effort load count update — never fail the load on a DB hiccup.
   try {
     await db
@@ -254,20 +327,64 @@ export async function loadSkillContent(name: string): Promise<SkillManifest | nu
   return m;
 }
 
-/** Format a compact index for injection into the agent system prompt. */
-export function formatSkillIndex(skills: SkillManifest[]): string {
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,80}$/;
+
+export function isValidSkillSlug(slug: string): boolean {
+  return SLUG_RE.test(slug);
+}
+
+/** Suggest skills whose triggers match the current user prompt. Used by both
+ *  the index formatter (to bubble matches to the top) and as a public helper
+ *  for callers that want the raw match list. Case-insensitive substring match. */
+export function rankSkillsByPrompt(
+  skills: SkillManifest[],
+  prompt: string | null | undefined,
+): { suggested: SkillManifest[]; rest: SkillManifest[] } {
+  if (!prompt || !prompt.trim()) return { suggested: [], rest: skills };
+  const lower = prompt.toLowerCase();
+  const suggested: SkillManifest[] = [];
+  const rest: SkillManifest[] = [];
+  for (const s of skills) {
+    const matched = s.triggers.some((t) => {
+      const trig = t.trim().toLowerCase();
+      if (trig.length < 2) return false;
+      // Word-ish boundary: cheap regex escape for the trigger.
+      const escaped = trig.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i");
+      return re.test(lower);
+    });
+    (matched ? suggested : rest).push(s);
+  }
+  return { suggested, rest };
+}
+
+/**
+ * Format a compact index for injection into the agent system prompt. When a
+ * user prompt is provided, skills whose triggers match are pulled to the top
+ * under a "Suggested for this request" header so the model preferentially
+ * loads them before guessing.
+ */
+export function formatSkillIndex(skills: SkillManifest[], userPrompt?: string | null): string {
   if (skills.length === 0) return "";
-  const lines = skills.map((s) => {
+  const { suggested, rest } = rankSkillsByPrompt(skills, userPrompt ?? null);
+  const fmt = (s: SkillManifest, marker = ""): string => {
     const trig = s.triggers.length > 0 ? `  (triggers: ${s.triggers.slice(0, 6).join(", ")})` : "";
-    return `- ${s.name} — ${s.description}${trig}`;
-  });
-  return [
+    return `- ${s.name}${marker} — ${s.description}${trig}`;
+  };
+  const sections: string[] = [
     "## Available skills (load on demand)",
     "Each skill is a focused instruction set for a specific stack or feature.",
     "Call `load_skill(name)` to read the full guidance for a skill BEFORE generating code that uses it.",
     "",
-    ...lines,
-  ].join("\n");
+  ];
+  if (suggested.length > 0) {
+    sections.push("### Suggested for this request");
+    sections.push(...suggested.map((s) => fmt(s, " ⭐")));
+    sections.push("");
+    sections.push("### Other available skills");
+  }
+  sections.push(...rest.map((s) => fmt(s)));
+  return sections.join("\n");
 }
 
 /** Pure lookup (no telemetry, no enable check). Used by callers that already
@@ -281,4 +398,186 @@ export async function getSkillManifest(name: string): Promise<SkillManifest | un
 export function __setManifestsForTesting(map: Map<string, SkillManifest>): void {
   cachedManifests = map;
   cachedAt = Date.now();
+}
+
+// ─── Drafts: author / approve / reject ──────────────────────────────────────
+
+export interface AuthorSkillInput {
+  slug: string;
+  name?: string;
+  description: string;
+  triggers?: string[];
+  body: string;
+  authoredBy?: string | null;
+  authoringContext?: string | null;
+}
+
+export interface AuthorSkillResult {
+  slug: string;
+  name: string;
+  filePath: string;
+  bytes: number;
+}
+
+/**
+ * Persist an agent-authored skill draft. Writes
+ * `skills/_drafts/<slug>/SKILL.md` and inserts (or updates) a
+ * `builder_skills` row with `enabled=false, draft=true`.
+ */
+export async function authorSkillDraft(input: AuthorSkillInput): Promise<AuthorSkillResult> {
+  const slug = (input.slug ?? "").trim().toLowerCase();
+  if (!isValidSkillSlug(slug)) {
+    throw new Error(
+      "Invalid slug: must match [a-z0-9][a-z0-9-]{1,80} (lowercase letters, digits, dashes).",
+    );
+  }
+  const name = (input.name ?? slug).trim();
+  const description = (input.description ?? "").trim();
+  if (!description) throw new Error("description is required");
+  if (description.length > 240) {
+    throw new Error("description must be ≤ 240 characters");
+  }
+  const body = (input.body ?? "").trim();
+  if (!body) throw new Error("body is required");
+  if (!/\n##\s+Examples\b/i.test("\n" + body)) {
+    throw new Error("body must include an '## Examples' section");
+  }
+  const MAX_BYTES = 40_000;
+  if (body.length > MAX_BYTES) {
+    throw new Error(`body must be ≤ ${MAX_BYTES} characters (got ${body.length})`);
+  }
+  const triggers = Array.isArray(input.triggers)
+    ? input.triggers
+        .map((t) => String(t).trim())
+        .filter((t) => t.length > 0)
+        .slice(0, 24)
+    : [];
+
+  const root = await resolveSkillsDir();
+  if (!root) throw new Error("skills/ directory not found");
+
+  // Collision guard: refuse to overwrite an approved skill on disk or in DB.
+  // Without this, authoring a draft whose `slug` matches an existing approved
+  // directory, or whose `name` matches an existing approved DB row, would either
+  // shadow the live skill or flip its `draft`/`enabled` flags, hiding it from
+  // the active index with no recovery path through admin approval.
+  const approvedDir = path.join(root, slug);
+  try {
+    await fs.stat(approvedDir);
+    throw new Error(
+      `Cannot author draft: an approved skill already exists at skills/${slug}. Choose a different slug.`,
+    );
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") throw err;
+  }
+  const existingManifests = await readManifests();
+  const existing = existingManifests.get(name);
+  if (existing && !existing.draft) {
+    throw new Error(
+      `Cannot author draft: an approved skill named "${name}" already exists. Choose a different name.`,
+    );
+  }
+
+  const draftDir = path.join(root, DRAFTS_DIRNAME, slug);
+  await fs.mkdir(draftDir, { recursive: true });
+  const filePath = path.join(draftDir, "SKILL.md");
+
+  const frontmatter =
+    `---\n` +
+    `name: ${name}\n` +
+    `description: ${description}\n` +
+    `triggers: [${triggers.join(", ")}]\n` +
+    `---\n\n`;
+  const fileContent = frontmatter + body + "\n";
+  await fs.writeFile(filePath, fileContent, "utf8");
+
+  await db
+    .insert(builderSkillsTable)
+    .values({
+      name,
+      enabled: false,
+      draft: true,
+      authoredBy: input.authoredBy ?? null,
+      authoredAt: new Date(),
+      authoringContext: input.authoringContext ?? null,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: builderSkillsTable.name,
+      set: {
+        enabled: false,
+        draft: true,
+        authoredBy: input.authoredBy ?? null,
+        authoredAt: new Date(),
+        authoringContext: input.authoringContext ?? null,
+        updatedAt: new Date(),
+      },
+    });
+
+  invalidateSkillCache();
+  return { slug, name, filePath, bytes: fileContent.length };
+}
+
+/** Update a draft's file contents in place (admin edit before approval). */
+export async function updateDraftSkillBody(name: string, newRawFile: string): Promise<void> {
+  const manifests = await readManifests();
+  const m = manifests.get(name);
+  if (!m || !m.draft) throw new Error(`No draft skill named "${name}"`);
+  await fs.writeFile(m.filePath, newRawFile, "utf8");
+  invalidateSkillCache();
+}
+
+/** Approve a draft: move the directory from skills/_drafts/<slug>/ to
+ *  skills/<slug>/ and clear the draft flag in the DB. */
+export async function approveDraftSkill(name: string): Promise<void> {
+  const manifests = await readManifests();
+  const m = manifests.get(name);
+  if (!m || !m.draft) throw new Error(`No draft skill named "${name}"`);
+  const draftDir = path.dirname(m.filePath);
+  const root = await resolveSkillsDir();
+  if (!root) throw new Error("skills/ directory not found");
+  const slug = path.basename(draftDir);
+  const targetDir = path.join(root, slug);
+  try {
+    await fs.stat(targetDir);
+    throw new Error(`Cannot approve: skills/${slug} already exists on disk`);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") throw err;
+  }
+  await fs.rename(draftDir, targetDir);
+  await db
+    .insert(builderSkillsTable)
+    .values({ name, enabled: true, draft: false, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: builderSkillsTable.name,
+      set: { enabled: true, draft: false, updatedAt: new Date() },
+    });
+  invalidateSkillCache();
+}
+
+/** Reject a draft: delete the directory and remove the draft row. */
+export async function rejectDraftSkill(name: string): Promise<void> {
+  const manifests = await readManifests();
+  const m = manifests.get(name);
+  if (!m || !m.draft) throw new Error(`No draft skill named "${name}"`);
+  const draftDir = path.dirname(m.filePath);
+  await fs.rm(draftDir, { recursive: true, force: true });
+  await db
+    .delete(builderSkillsTable)
+    .where(and(eq(builderSkillsTable.name, name), eq(builderSkillsTable.draft, true)));
+  invalidateSkillCache();
+}
+
+/** Read raw file content for a draft (admin edit view). */
+export async function readDraftRaw(name: string): Promise<string | null> {
+  const manifests = await readManifests();
+  const m = manifests.get(name);
+  if (!m || !m.draft) return null;
+  try {
+    return await fs.readFile(m.filePath, "utf8");
+  } catch {
+    return null;
+  }
 }

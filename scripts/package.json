@@ -26,6 +26,7 @@
     "migrate-policy-audit": "tsx ./src/migrate-policy-audit.ts",
     "migrate-background-jobs": "tsx ./src/migrate-background-jobs.ts",
     "migrate-builder-skills": "tsx ./src/migrate-builder-skills.ts",
+    "migrate-builder-skills-drafts": "tsx ./src/migrate-builder-skills-drafts.ts",
     "migrate-project-embeddings": "tsx ./src/migrate-project-embeddings.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"

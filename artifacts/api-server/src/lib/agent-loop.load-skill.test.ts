@@ -87,6 +87,7 @@ describe("executeTool — load_skill", () => {
       triggers: [],
       body: "FULL BODY CONTENT",
       filePath: "(virtual)",
+      draft: false,
     };
     __setManifestsForTesting(new Map([[manifest.name, manifest]]));
     const loaded = new Map<string, SkillManifest>();
@@ -109,6 +110,7 @@ describe("executeTool — load_skill", () => {
       triggers: [],
       body: "FULL BODY CONTENT",
       filePath: "(virtual)",
+      draft: false,
     };
     __setManifestsForTesting(new Map([[manifest.name, manifest]]));
     const loaded = new Map<string, SkillManifest>([["react-vite", manifest]]);

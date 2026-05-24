@@ -57,6 +57,7 @@ import {
   listEnabledSkills,
   loadSkillContent,
   formatSkillIndex,
+  authorSkillDraft,
   type SkillManifest,
 } from "./builder-skills";
 
@@ -798,6 +799,50 @@ export const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "author_skill",
+      description:
+        "Draft a new reusable skill (SKILL.md instruction set) when you discover a pattern that would help future builds. The draft is queued for admin review and is NOT immediately available to load. Use sparingly — only for genuinely reusable, non-trivial patterns (a new framework, a tricky integration). Body must include an '## Examples' section with real code.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: {
+            type: "string",
+            description:
+              "URL-safe slug: lowercase letters/digits/dashes, e.g. 'tanstack-query'. Used as the folder name.",
+          },
+          name: {
+            type: "string",
+            description: "Human-friendly name shown in the index (defaults to slug).",
+          },
+          description: {
+            type: "string",
+            description: "One-line summary (≤240 chars) shown in the skill index.",
+          },
+          triggers: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Keywords/phrases that should auto-suggest this skill when present in a user prompt.",
+          },
+          body: {
+            type: "string",
+            description:
+              "Full SKILL.md body (markdown, no frontmatter — that's added automatically). MUST include an '## Examples' section.",
+          },
+          rationale: {
+            type: "string",
+            description:
+              "Brief note to the reviewing admin explaining why this skill is worth adding.",
+          },
+        },
+        required: ["slug", "description", "body"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "load_skill",
       description:
         "Load the full instructions for a named skill from the registry. Call this BEFORE generating code for a stack/feature listed in the 'Available skills' section. Returns the SKILL.md body. Loading the same skill twice in one run is free — it returns the cached content.",
@@ -1281,7 +1326,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // already-loaded skills in this Map so a repeated load_skill is a free
   // cache hit (no double-count, no second LLM trip into the body).
   const enabledSkills = await listEnabledSkills();
-  const skillsIndex = formatSkillIndex(enabledSkills);
+  const skillsIndex = formatSkillIndex(enabledSkills, input.userPrompt);
   const loadedSkills = new Map<string, SkillManifest>();
 
   const messages: ChatCompletionMessageParam[] = [
@@ -3006,6 +3051,41 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         return {
           ok: false,
           observation: `ERROR: fetch_prod_logs failed: ${String((err as Error).message ?? err)}`,
+        };
+      }
+    }
+    case "author_skill": {
+      const slug = typeof args.slug === "string" ? args.slug.trim().toLowerCase() : "";
+      const description = typeof args.description === "string" ? args.description.trim() : "";
+      const body = typeof args.body === "string" ? args.body : "";
+      const name = typeof args.name === "string" && args.name.trim() ? args.name.trim() : slug;
+      const triggers = Array.isArray(args.triggers)
+        ? (args.triggers as unknown[]).map((t) => String(t))
+        : [];
+      const rationale = typeof args.rationale === "string" ? args.rationale : null;
+      try {
+        const result = await authorSkillDraft({
+          slug,
+          name,
+          description,
+          triggers,
+          body,
+          authoredBy: `agent:project-${input.projectId}`,
+          authoringContext: rationale,
+        });
+        await safeEvent(
+          input.onEvent,
+          "narration",
+          `Authored skill draft: ${result.name} (${result.bytes} bytes) — queued for admin review.`,
+        );
+        return {
+          ok: true,
+          observation: `Draft skill "${result.name}" written to skills/_drafts/${result.slug}/SKILL.md (${result.bytes} bytes). It is queued for admin review and will NOT appear in your skill index until approved. Do NOT call load_skill on it in this run.`,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          observation: `ERROR: author_skill failed: ${String((err as Error).message ?? err)}`,
         };
       }
     }

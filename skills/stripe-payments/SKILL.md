@@ -81,3 +81,47 @@ app.post("/api/billing/webhook", express.raw({ type: "application/json" }), (req
 - Do not call Stripe APIs from the browser using the secret key. Use the publishable key on the client; the secret key stays server-side.
 - Do not assume webhook order — handle out-of-order events idempotently.
 - Do not put Price IDs in source. Use `STRIPE_PRICE_*` env vars so test/prod can differ.
+
+## Examples
+
+### Create Checkout Session (server)
+
+```ts
+import Stripe from "stripe";
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+
+app.post("/api/checkout", async (req, res) => {
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    line_items: [{ price: process.env.STRIPE_PRICE_PRO!, quantity: 1 }],
+    success_url: `${process.env.APP_URL}/welcome?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${process.env.APP_URL}/pricing`,
+    client_reference_id: req.user.id,
+  });
+  res.json({ url: session.url });
+});
+```
+
+### Webhook with idempotent handling
+
+```ts
+import express from "express";
+
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), (req, res) => {
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      req.header("stripe-signature")!,
+      process.env.STRIPE_WEBHOOK_SECRET!,
+    );
+  } catch {
+    return res.status(400).send("bad signature");
+  }
+  if (event.type === "checkout.session.completed") {
+    const s = event.data.object;
+    // upsert subscription record by s.id (idempotent)
+  }
+  res.json({ received: true });
+});
+```

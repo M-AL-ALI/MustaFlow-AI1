@@ -43,3 +43,41 @@ existing preview pipeline can render it inside the Replit iframe.
 - Render a phone-frame mockup of each screen.
 - Use realistic placeholder data, not lorem ipsum.
 - No interactivity beyond simple in-page navigation between mocked screens.
+
+## Examples
+
+### app/\_layout.tsx (Expo Router root)
+
+```tsx
+import { Stack } from "expo-router";
+import "../global.css";
+
+export default function RootLayout() {
+  return (
+    <Stack screenOptions={{ headerStyle: { backgroundColor: "#0f172a" }, headerTintColor: "#fff" }}>
+      <Stack.Screen name="index" options={{ title: "Home" }} />
+    </Stack>
+  );
+}
+```
+
+### app/index.tsx with NativeWind
+
+```tsx
+import { View, Text, Pressable } from "react-native";
+import { useState } from "react";
+
+export default function Home() {
+  const [count, setCount] = useState(0);
+  return (
+    <View className="flex-1 items-center justify-center bg-slate-950">
+      <Pressable
+        onPress={() => setCount((c) => c + 1)}
+        className="px-6 py-3 bg-blue-600 rounded-xl"
+      >
+        <Text className="text-white font-semibold">Tapped {count} times</Text>
+      </Pressable>
+    </View>
+  );
+}
+```
