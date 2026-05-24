@@ -17,6 +17,7 @@ import {
   Check,
   Ban,
   RotateCcw,
+  History,
   Cpu,
   Zap,
   Navigation,
@@ -53,6 +54,7 @@ import {
   getListTestRunsQueryKey,
   useListProjectFiles,
   useGetProjectFile,
+  useRestoreCheckpoint,
 } from "@workspace/api-client-react";
 import { unifiedDiff } from "@/lib/line-diff";
 import { Download, FileBox, GitCompare } from "lucide-react";
@@ -225,6 +227,7 @@ type Message = {
   attachments?: ChatAttachment[] | null;
   createdAt: string;
   agentIdentity?: string | null;
+  checkpointId?: number | null;
 };
 
 function AttachmentGallery({ attachments }: { attachments: ChatAttachment[] }) {
@@ -1652,6 +1655,9 @@ function MessageRow({
           </span>
         )}
         <span>{ts}</span>
+        {!isUser && typeof msg.checkpointId === "number" && msg.checkpointId > 0 && (
+          <RewindToCheckpointButton projectId={projectId} checkpointId={msg.checkpointId} />
+        )}
       </div>
 
       {/* Bubble */}
@@ -1829,6 +1835,66 @@ function MessageRow({
           })()}
       </div>
     </div>
+  );
+}
+
+function RewindToCheckpointButton({
+  projectId,
+  checkpointId,
+}: {
+  projectId: number;
+  checkpointId: number;
+}) {
+  const queryClient = useQueryClient();
+  const restore = useRestoreCheckpoint();
+  const [confirming, setConfirming] = useState(false);
+
+  const onClick = () => {
+    if (!confirming) {
+      setConfirming(true);
+      window.setTimeout(() => setConfirming(false), 4000);
+      return;
+    }
+    restore.mutate(
+      { id: projectId, checkpointId },
+      {
+        onSuccess: () => {
+          setConfirming(false);
+          void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+          void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
+          void queryClient.invalidateQueries({
+            queryKey: getListProjectFilesQueryKey(projectId),
+          });
+          void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+        },
+      },
+    );
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={restore.isPending}
+      title={
+        confirming
+          ? "Click again to confirm — restores code, database, and chat history to this point."
+          : "Rewind to this checkpoint (restores code + database + chat history)"
+      }
+      className={cn(
+        "flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded border font-medium shrink-0 transition-colors disabled:opacity-50",
+        confirming
+          ? "bg-orange-500/15 text-orange-400 border-orange-500/40 hover:bg-orange-500/25"
+          : "bg-muted text-muted-foreground border-border hover:text-foreground hover:border-primary/30",
+      )}
+    >
+      {restore.isPending ? (
+        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+      ) : (
+        <History className="h-2.5 w-2.5" />
+      )}
+      {restore.isPending ? "Restoring…" : confirming ? "Confirm rewind" : "Rewind"}
+    </button>
   );
 }
 

@@ -637,6 +637,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProjectsSummary"
 
+  /projects/{id}/checkpoints:
+    get:
+      operationId: listCheckpoints
+      tags: [checkpoints]
+      summary: Unified Checkpoints — file snapshot + linked DB snapshot per version
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Checkpoints for the project (most recent first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Checkpoint" }
+
+  /projects/{id}/checkpoints/{checkpointId}/restore:
+    post:
+      operationId: restoreCheckpoint
+      tags: [checkpoints]
+      summary: Atomically restore files, database, and chat history to a checkpoint. A forward-safety snapshot is created first.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: checkpointId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Restore complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckpointRestoreResponse"
+
   /projects/{id}/messages:
     get:
       operationId: listMessages
@@ -3646,7 +3678,35 @@ components:
         attachments:
           type: ["array", "null"]
           items: { $ref: "#/components/schemas/ChatAttachment" }
+        checkpointId:
+          type: ["integer", "null"]
+          description: "If set, this message is anchored to a project_versions row. The chat UI can offer a 'Rewind to here' action that restores files + database and truncates chat after this point."
         createdAt: { type: string, format: date-time }
+
+    Checkpoint:
+      type: object
+      required: [id, projectId, label, createdAt, filesCount, hasDbSnapshot]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        label: { type: string }
+        note: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+        filesCount: { type: integer }
+        hasDbSnapshot: { type: boolean }
+        dbProvider: { type: ["string", "null"] }
+
+    CheckpointRestoreResponse:
+      type: object
+      required: [checkpointId, label, restoredFiles, truncatedMessages, dbSnapshotRestored]
+      properties:
+        checkpointId: { type: integer }
+        label: { type: string }
+        restoredFiles: { type: integer }
+        truncatedMessages: { type: integer }
+        forwardCheckpointId: { type: ["integer", "null"] }
+        dbSnapshotRestored: { type: boolean }
+        dbSnapshotError: { type: ["string", "null"] }
 
     ChatMessageInput:
       type: object

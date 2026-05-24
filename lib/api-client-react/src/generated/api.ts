@@ -46,6 +46,8 @@ import type {
   ChatMessageInput,
   CheckRun,
   CheckRunTrendsResponse,
+  Checkpoint,
+  CheckpointRestoreResponse,
   ConnectGithub200,
   ContainerExecInput,
   ContainerExecResult,
@@ -2613,6 +2615,155 @@ export function useGetProjectsSummary<TData = Awaited<ReturnType<typeof getProje
 
 
 
+
+export const getListCheckpointsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/checkpoints`
+}
+
+/**
+ * @summary Unified Checkpoints — file snapshot + linked DB snapshot per version
+ */
+export const listCheckpoints = async (id: number, options?: RequestInit): Promise<Checkpoint[]> => {
+
+  return customFetch<Checkpoint[]>(getListCheckpointsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCheckpointsQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/checkpoints`
+    ] as const;
+    }
+
+
+export const getListCheckpointsQueryOptions = <TData = Awaited<ReturnType<typeof listCheckpoints>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCheckpoints>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCheckpointsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCheckpoints>>> = ({ signal }) => listCheckpoints(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCheckpoints>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCheckpointsQueryResult = NonNullable<Awaited<ReturnType<typeof listCheckpoints>>>
+export type ListCheckpointsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Unified Checkpoints — file snapshot + linked DB snapshot per version
+ */
+
+export function useListCheckpoints<TData = Awaited<ReturnType<typeof listCheckpoints>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCheckpoints>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCheckpointsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getRestoreCheckpointUrl = (id: number,
+    checkpointId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/checkpoints/${checkpointId}/restore`
+}
+
+/**
+ * @summary Atomically restore files, database, and chat history to a checkpoint. A forward-safety snapshot is created first.
+ */
+export const restoreCheckpoint = async (id: number,
+    checkpointId: number, options?: RequestInit): Promise<CheckpointRestoreResponse> => {
+
+  return customFetch<CheckpointRestoreResponse>(getRestoreCheckpointUrl(id,checkpointId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRestoreCheckpointMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreCheckpoint>>, TError,{id: number;checkpointId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof restoreCheckpoint>>, TError,{id: number;checkpointId: number}, TContext> => {
+
+const mutationKey = ['restoreCheckpoint'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof restoreCheckpoint>>, {id: number;checkpointId: number}> = (props) => {
+          const {id,checkpointId} = props ?? {};
+
+          return  restoreCheckpoint(id,checkpointId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RestoreCheckpointMutationResult = NonNullable<Awaited<ReturnType<typeof restoreCheckpoint>>>
+
+    export type RestoreCheckpointMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Atomically restore files, database, and chat history to a checkpoint. A forward-safety snapshot is created first.
+ */
+export const useRestoreCheckpoint = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreCheckpoint>>, TError,{id: number;checkpointId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof restoreCheckpoint>>,
+        TError,
+        {id: number;checkpointId: number},
+        TContext
+      > => {
+      return useMutation(getRestoreCheckpointMutationOptions(options));
+    }
 
 export const getListMessagesUrl = (id: number,) => {
 

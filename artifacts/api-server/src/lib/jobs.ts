@@ -2255,6 +2255,20 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         .returning();
       report.versionId = version?.id ?? null;
 
+      // Task #538 — Unified Checkpoints: capture a database snapshot tied to
+      // this version (best-effort, non-fatal). Lets users restore code + DB
+      // together from one checkpoint.
+      if (version) {
+        const versionIdForSnapshot = version.id;
+        const snapshotLabel = `Checkpoint: ${nextVersionLabel}`;
+        setImmediate(() => {
+          void (async () => {
+            const { captureProjectDbSnapshot } = await import("./db-snapshot-capture");
+            await captureProjectDbSnapshot(projectId, versionIdForSnapshot, snapshotLabel);
+          })();
+        });
+      }
+
       await emitEvent(taskId, "updating_preview", "Refreshing preview…");
 
       // ── Synchronous Drizzle migration (before task completion) ─────────────
@@ -3200,6 +3214,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           string,
           unknown
         >,
+        // Task #538 — anchor this message to the new checkpoint so the chat UI
+        // can offer "Rewind to here" (restores files + db + truncates chat).
+        checkpointId: version?.id ?? null,
       });
 
       // If Moment.js was detected in an initial build, automatically enqueue a follow-up refine
@@ -3513,6 +3530,21 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       planSnapshot: planSnapshot ?? undefined,
     })
     .returning();
+
+  // Task #538 — Unified Checkpoints: capture DB snapshot tied to apply version.
+  if (version) {
+    const versionIdForSnapshot = version.id;
+    setImmediate(() => {
+      void (async () => {
+        const { captureProjectDbSnapshot } = await import("./db-snapshot-capture");
+        await captureProjectDbSnapshot(
+          projectId,
+          versionIdForSnapshot,
+          `Checkpoint: Apply Task #${taskId}`,
+        );
+      })();
+    });
+  }
 
   const finalReport: TaskReport = {
     ...(report ?? {

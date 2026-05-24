@@ -943,6 +943,45 @@ export const GetProjectsSummaryResponse = zod.object({
 })
 
 
+/**
+ * @summary Unified Checkpoints — file snapshot + linked DB snapshot per version
+ */
+export const ListCheckpointsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListCheckpointsResponseItem = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "label": zod.string(),
+  "note": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "filesCount": zod.number(),
+  "hasDbSnapshot": zod.boolean(),
+  "dbProvider": zod.string().nullish()
+})
+export const ListCheckpointsResponse = zod.array(ListCheckpointsResponseItem)
+
+
+/**
+ * @summary Atomically restore files, database, and chat history to a checkpoint. A forward-safety snapshot is created first.
+ */
+export const RestoreCheckpointParams = zod.object({
+  "id": zod.coerce.number(),
+  "checkpointId": zod.coerce.number()
+})
+
+export const RestoreCheckpointResponse = zod.object({
+  "checkpointId": zod.number(),
+  "label": zod.string(),
+  "restoredFiles": zod.number(),
+  "truncatedMessages": zod.number(),
+  "forwardCheckpointId": zod.number().nullish(),
+  "dbSnapshotRestored": zod.boolean(),
+  "dbSnapshotError": zod.string().nullish()
+})
+
+
 export const ListMessagesParams = zod.object({
   "id": zod.coerce.number()
 })
@@ -964,6 +1003,7 @@ export const ListMessagesResponseItem = zod.object({
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
 })).nullish(),
+  "checkpointId": zod.number().nullish().describe('If set, this message is anchored to a project_versions row. The chat UI can offer a \'Rewind to here\' action that restores files + database and truncates chat after this point.'),
   "createdAt": zod.coerce.date()
 })
 export const ListMessagesResponse = zod.array(ListMessagesResponseItem)
@@ -1015,6 +1055,7 @@ export const SendMessageResponse = zod.object({
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
 })).nullish(),
+  "checkpointId": zod.number().nullish().describe('If set, this message is anchored to a project_versions row. The chat UI can offer a \'Rewind to here\' action that restores files + database and truncates chat after this point.'),
   "createdAt": zod.coerce.date()
 }),
   "assistantMessage": zod.object({
@@ -1034,6 +1075,7 @@ export const SendMessageResponse = zod.object({
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
 })).nullish(),
+  "checkpointId": zod.number().nullish().describe('If set, this message is anchored to a project_versions row. The chat UI can offer a \'Rewind to here\' action that restores files + database and truncates chat after this point.'),
   "createdAt": zod.coerce.date()
 }),
   "detectedIntent": zod.enum(['converse', 'plan', 'build']).optional().describe('The intent auto-detected or explicitly provided for this exchange.')

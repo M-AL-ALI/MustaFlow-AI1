@@ -21,5 +21,10 @@ export interface ChatMessage {
   plan?: ChatMessagePlan;
   /** @nullable */
   attachments?: ChatAttachment[] | null;
+  /**
+     * If set, this message is anchored to a project_versions row. The chat UI can offer a 'Rewind to here' action that restores files + database and truncates chat after this point.
+     * @nullable
+     */
+  checkpointId?: number | null;
   createdAt: Date;
 }

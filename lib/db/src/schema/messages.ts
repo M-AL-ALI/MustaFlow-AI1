@@ -23,6 +23,11 @@ export const chatMessagesTable = pgTable(
     planMode: boolean("plan_mode").notNull().default(false),
     plan: jsonb("plan"),
     attachments: jsonb("attachments"),
+    // checkpointId: project_versions row this message is anchored to.
+    // Set on assistant/system messages that announce a successful build/refine,
+    // so the chat UI can offer "Rewind to here" → restore files + db + truncate
+    // chat back to this point.
+    checkpointId: integer("checkpoint_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

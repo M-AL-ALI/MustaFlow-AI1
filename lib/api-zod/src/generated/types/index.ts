@@ -76,6 +76,8 @@ export * from './chatMessageInputAgentIntent';
 export * from './chatMessageInputAgentMode';
 export * from './chatMessagePlan';
 export * from './chatMessageRole';
+export * from './checkpoint';
+export * from './checkpointRestoreResponse';
 export * from './checkRun';
 export * from './checkRunFinding';
 export * from './checkRunFindingSeverity';

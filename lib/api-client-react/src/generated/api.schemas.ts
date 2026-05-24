@@ -519,7 +519,37 @@ export interface ChatMessage {
   plan?: ChatMessagePlan;
   /** @nullable */
   attachments?: ChatAttachment[] | null;
+  /**
+     * If set, this message is anchored to a project_versions row. The chat UI can offer a 'Rewind to here' action that restores files + database and truncates chat after this point.
+     * @nullable
+     */
+  checkpointId?: number | null;
   createdAt: string;
+}
+
+export interface Checkpoint {
+  id: number;
+  projectId: number;
+  label: string;
+  /** @nullable */
+  note?: string | null;
+  createdAt: string;
+  filesCount: number;
+  hasDbSnapshot: boolean;
+  /** @nullable */
+  dbProvider?: string | null;
+}
+
+export interface CheckpointRestoreResponse {
+  checkpointId: number;
+  label: string;
+  restoredFiles: number;
+  truncatedMessages: number;
+  /** @nullable */
+  forwardCheckpointId?: number | null;
+  dbSnapshotRestored: boolean;
+  /** @nullable */
+  dbSnapshotError?: string | null;
 }
 
 export type ChatMessageInputAgentMode = typeof ChatMessageInputAgentMode[keyof typeof ChatMessageInputAgentMode];
