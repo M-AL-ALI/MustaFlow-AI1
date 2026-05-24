@@ -846,6 +846,7 @@ export default function ProjectWorkspacePage() {
   } | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [agentPrompts, setAgentPrompts] = useState<AgentPromptCard[]>([]);
+  const [buildRefreshCount, setBuildRefreshCount] = useState(0);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
     const valid = WORKSPACE_TABS.map((t) => t.value);
@@ -1425,6 +1426,10 @@ export default function ProjectWorkspacePage() {
         ) {
           // Drop any unanswered prompts when the task ends.
           setAgentPrompts([]);
+          // Reload the preview iframe so the freshly-built files are visible.
+          if (event.eventType === "completed") {
+            setBuildRefreshCount((n) => n + 1);
+          }
         }
       } catch {
         // ignore malformed frames
@@ -3300,6 +3305,7 @@ export default function ProjectWorkspacePage() {
                 wc={wc}
                 focusMode={focusMode}
                 onToggleFocusMode={() => setFocusMode((f) => !f)}
+                refreshTrigger={buildRefreshCount}
                 validationWarnings={(() => {
                   const recentReport = [...(messages ?? [])].reverse().find((m) => {
                     const p = m.plan as ChatPlanPayload | null | undefined;

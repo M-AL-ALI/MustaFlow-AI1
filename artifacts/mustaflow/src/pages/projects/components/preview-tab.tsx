@@ -130,6 +130,12 @@ type PreviewTabProps = {
   latestReport?: ReadinessReport | null;
   /** Switch to the Secrets / Tools panel so the user can fill in missing keys. */
   onJumpToSecrets?: () => void;
+  /**
+   * Incrementing counter: whenever this value changes the preview iframe
+   * is force-reloaded so freshly-built files are visible immediately.
+   * Pass a value that increments each time a build task completes.
+   */
+  refreshTrigger?: number;
 };
 
 // ─── Security note ────────────────────────────────────────────────────────────
@@ -160,6 +166,7 @@ export function PreviewTab({
   onStartContainer,
   latestReport,
   onJumpToSecrets,
+  refreshTrigger,
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
   const [readinessDismissed, setReadinessDismissed] = useState(false);
@@ -203,6 +210,18 @@ export function PreviewTab({
   const [platform, setPlatform] = useState<Platform>("web");
   const [device, setDevice] = useState<DeviceFrame>(isMobile ? "mobile" : "desktop");
   const [iframeKey, setIframeKey] = useState(0);
+  const prevRefreshTriggerRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (refreshTrigger === undefined) return;
+    if (prevRefreshTriggerRef.current === undefined) {
+      prevRefreshTriggerRef.current = refreshTrigger;
+      return;
+    }
+    if (refreshTrigger !== prevRefreshTriggerRef.current) {
+      prevRefreshTriggerRef.current = refreshTrigger;
+      setIframeKey((k) => k + 1);
+    }
+  }, [refreshTrigger]);
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
