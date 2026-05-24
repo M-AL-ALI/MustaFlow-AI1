@@ -669,6 +669,41 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckpointRestoreResponse"
 
+  /projects/{id}/workflows:
+    get:
+      operationId: listWorkflows
+      tags: [workflows]
+      summary: List named workflows declared in workflows.yaml (or per-stack defaults)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Workflow definitions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowList"
+
+  /projects/{id}/workflows/{name}/run:
+    post:
+      operationId: runWorkflow
+      tags: [workflows]
+      summary: Execute a named workflow in the project container
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Workflow ran (check `ok` for success)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowRunResponse"
+        "404":
+          description: Workflow not found
+        "409":
+          description: Project container is not running
+
   /projects/{id}/messages:
     get:
       operationId: listMessages
@@ -3695,6 +3730,37 @@ components:
         filesCount: { type: integer }
         hasDbSnapshot: { type: boolean }
         dbProvider: { type: ["string", "null"] }
+        dbSnapshotSizeBytes: { type: ["integer", "null"] }
+        triggerMessageId: { type: ["integer", "null"] }
+        triggerMessagePreview: { type: ["string", "null"] }
+
+    Workflow:
+      type: object
+      required: [name, command]
+      properties:
+        name: { type: string }
+        command: { type: string }
+        description: { type: ["string", "null"] }
+        cwd: { type: ["string", "null"] }
+
+    WorkflowList:
+      type: object
+      required: [source, workflows]
+      properties:
+        source: { type: string, enum: [yaml, defaults] }
+        workflows:
+          type: array
+          items: { $ref: "#/components/schemas/Workflow" }
+
+    WorkflowRunResponse:
+      type: object
+      required: [name, ok, output, command]
+      properties:
+        name: { type: string }
+        ok: { type: boolean }
+        output: { type: string }
+        command: { type: string }
+        cwd: { type: ["string", "null"] }
 
     CheckpointRestoreResponse:
       type: object

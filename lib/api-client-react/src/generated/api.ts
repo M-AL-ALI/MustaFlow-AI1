@@ -194,6 +194,8 @@ import type {
   UploadUrlResponse,
   UserCredit,
   UserPreferences,
+  WorkflowList,
+  WorkflowRunResponse,
   Workspace,
   WorkspaceInput,
   WorkspaceUpdate
@@ -2763,6 +2765,155 @@ export const useRestoreCheckpoint = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRestoreCheckpointMutationOptions(options));
+    }
+
+export const getListWorkflowsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/workflows`
+}
+
+/**
+ * @summary List named workflows declared in workflows.yaml (or per-stack defaults)
+ */
+export const listWorkflows = async (id: number, options?: RequestInit): Promise<WorkflowList> => {
+
+  return customFetch<WorkflowList>(getListWorkflowsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListWorkflowsQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/workflows`
+    ] as const;
+    }
+
+
+export const getListWorkflowsQueryOptions = <TData = Awaited<ReturnType<typeof listWorkflows>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listWorkflows>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListWorkflowsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listWorkflows>>> = ({ signal }) => listWorkflows(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listWorkflows>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListWorkflowsQueryResult = NonNullable<Awaited<ReturnType<typeof listWorkflows>>>
+export type ListWorkflowsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List named workflows declared in workflows.yaml (or per-stack defaults)
+ */
+
+export function useListWorkflows<TData = Awaited<ReturnType<typeof listWorkflows>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listWorkflows>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListWorkflowsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getRunWorkflowUrl = (id: number,
+    name: string,) => {
+
+
+
+
+  return `/api/projects/${id}/workflows/${name}/run`
+}
+
+/**
+ * @summary Execute a named workflow in the project container
+ */
+export const runWorkflow = async (id: number,
+    name: string, options?: RequestInit): Promise<WorkflowRunResponse> => {
+
+  return customFetch<WorkflowRunResponse>(getRunWorkflowUrl(id,name),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRunWorkflowMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runWorkflow>>, TError,{id: number;name: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof runWorkflow>>, TError,{id: number;name: string}, TContext> => {
+
+const mutationKey = ['runWorkflow'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof runWorkflow>>, {id: number;name: string}> = (props) => {
+          const {id,name} = props ?? {};
+
+          return  runWorkflow(id,name,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RunWorkflowMutationResult = NonNullable<Awaited<ReturnType<typeof runWorkflow>>>
+
+    export type RunWorkflowMutationError = ErrorType<void>
+
+    /**
+ * @summary Execute a named workflow in the project container
+ */
+export const useRunWorkflow = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runWorkflow>>, TError,{id: number;name: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof runWorkflow>>,
+        TError,
+        {id: number;name: string},
+        TContext
+      > => {
+      return useMutation(getRunWorkflowMutationOptions(options));
     }
 
 export const getListMessagesUrl = (id: number,) => {

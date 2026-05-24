@@ -17,4 +17,10 @@ export interface Checkpoint {
   hasDbSnapshot: boolean;
   /** @nullable */
   dbProvider?: string | null;
+  /** @nullable */
+  dbSnapshotSizeBytes?: number | null;
+  /** @nullable */
+  triggerMessageId?: number | null;
+  /** @nullable */
+  triggerMessagePreview?: string | null;
 }

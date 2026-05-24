@@ -51,6 +51,10 @@ router.get(
     }
     // Use a lateral subquery to pick the LATEST db snapshot per version so a
     // version with multiple snapshots doesn't appear as duplicate rows.
+    // Pulls each version plus:
+    //   • latest linked db snapshot (provider + total byte size)
+    //   • the most recent USER chat message anchored to this checkpoint
+    //     (so the timeline can show "what prompt produced this checkpoint")
     const rows = await db.execute<{
       id: number;
       project_id: number;
@@ -60,6 +64,9 @@ router.get(
       files_count: number;
       db_snapshot_id: number | null;
       db_provider: string | null;
+      db_snapshot_size_bytes: number | null;
+      trigger_message_id: number | null;
+      trigger_message_preview: string | null;
     }>(sql`
       SELECT v.id,
              v.project_id,
@@ -68,15 +75,27 @@ router.get(
              v.created_at,
              COALESCE(jsonb_array_length(v.files_snapshot), 0) AS files_count,
              s.id AS db_snapshot_id,
-             s.provider AS db_provider
+             s.provider AS db_provider,
+             s.size_bytes AS db_snapshot_size_bytes,
+             m.id AS trigger_message_id,
+             m.preview AS trigger_message_preview
       FROM ${projectVersionsTable} v
       LEFT JOIN LATERAL (
-        SELECT id, provider
+        SELECT id, provider, size_bytes
         FROM ${dbSnapshotsTable}
         WHERE project_id = v.project_id AND version_id = v.id
         ORDER BY created_at DESC
         LIMIT 1
       ) s ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT id, LEFT(content, 200) AS preview
+        FROM ${chatMessagesTable}
+        WHERE project_id = v.project_id
+          AND checkpoint_id = v.id
+          AND role = 'user'
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) m ON TRUE
       WHERE v.project_id = ${projectId}
       ORDER BY v.created_at DESC
     `);
@@ -93,6 +112,10 @@ router.get(
         filesCount: Number(r.files_count ?? 0),
         hasDbSnapshot: r.db_snapshot_id != null,
         dbProvider: (r.db_provider as string | null) ?? null,
+        dbSnapshotSizeBytes:
+          r.db_snapshot_size_bytes != null ? Number(r.db_snapshot_size_bytes) : null,
+        triggerMessageId: r.trigger_message_id != null ? Number(r.trigger_message_id) : null,
+        triggerMessagePreview: (r.trigger_message_preview as string | null) ?? null,
       })),
     );
   },

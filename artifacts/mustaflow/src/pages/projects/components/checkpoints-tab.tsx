@@ -19,6 +19,12 @@ import { Button } from "@/components/ui/button";
 import { Clock, Database, FileText, RotateCcw, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function formatTime(iso: string): string {
   const d = new Date(iso);
   const now = Date.now();
@@ -112,9 +118,15 @@ export function CheckpointsTab({ projectId }: { projectId: number }) {
                     <span className="flex items-center gap-1 text-emerald-500">
                       <Database className="h-3 w-3" />
                       Database{cp.dbProvider ? ` (${cp.dbProvider})` : ""}
+                      {cp.dbSnapshotSizeBytes ? ` · ${formatBytes(cp.dbSnapshotSizeBytes)}` : ""}
                     </span>
                   )}
                 </div>
+                {cp.triggerMessagePreview && (
+                  <div className="mt-2 text-[11px] text-muted-foreground italic line-clamp-2 border-l-2 border-border/60 pl-2">
+                    “{cp.triggerMessagePreview}”
+                  </div>
+                )}
               </div>
               <div className="shrink-0">
                 {isConfirming ? (

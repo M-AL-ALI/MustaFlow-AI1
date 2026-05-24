@@ -3214,10 +3214,38 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           string,
           unknown
         >,
-        // Task #538 — anchor this message to the new checkpoint so the chat UI
-        // can offer "Rewind to here" (restores files + db + truncates chat).
+        // Task #538 — anchor this system summary to the new checkpoint so the
+        // chat UI can offer "Rewind to here" (restores files + db + truncates chat).
         checkpointId: version?.id ?? null,
       });
+
+      // Also link the *triggering* user message (the prompt that produced this
+      // checkpoint) so the unified Checkpoints timeline can render "what prompt
+      // produced this state" alongside each checkpoint. We pick the most recent
+      // user-role message in this project that doesn't already have a checkpoint
+      // anchor — that is, the prompt the user just sent.
+      if (version?.id) {
+        try {
+          await db
+            .update(chatMessagesTable)
+            .set({ checkpointId: version.id })
+            .where(
+              sql`id = (
+                SELECT id FROM chat_messages
+                WHERE project_id = ${projectId}
+                  AND role = 'user'
+                  AND checkpoint_id IS NULL
+                ORDER BY created_at DESC
+                LIMIT 1
+              )`,
+            );
+        } catch (err) {
+          logger.warn(
+            { err, projectId, versionId: version.id },
+            "Failed to link triggering message to checkpoint",
+          );
+        }
+      }
 
       // If Moment.js was detected in an initial build, automatically enqueue a follow-up refine
       // that swaps it for Luxon. Only fires on builds (not on refines) to avoid infinite loops.

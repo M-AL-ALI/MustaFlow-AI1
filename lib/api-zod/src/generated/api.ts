@@ -958,7 +958,10 @@ export const ListCheckpointsResponseItem = zod.object({
   "createdAt": zod.coerce.date(),
   "filesCount": zod.number(),
   "hasDbSnapshot": zod.boolean(),
-  "dbProvider": zod.string().nullish()
+  "dbProvider": zod.string().nullish(),
+  "dbSnapshotSizeBytes": zod.number().nullish(),
+  "triggerMessageId": zod.number().nullish(),
+  "triggerMessagePreview": zod.string().nullish()
 })
 export const ListCheckpointsResponse = zod.array(ListCheckpointsResponseItem)
 
@@ -979,6 +982,41 @@ export const RestoreCheckpointResponse = zod.object({
   "forwardCheckpointId": zod.number().nullish(),
   "dbSnapshotRestored": zod.boolean(),
   "dbSnapshotError": zod.string().nullish()
+})
+
+
+/**
+ * @summary List named workflows declared in workflows.yaml (or per-stack defaults)
+ */
+export const ListWorkflowsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListWorkflowsResponse = zod.object({
+  "source": zod.enum(['yaml', 'defaults']),
+  "workflows": zod.array(zod.object({
+  "name": zod.string(),
+  "command": zod.string(),
+  "description": zod.string().nullish(),
+  "cwd": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Execute a named workflow in the project container
+ */
+export const RunWorkflowParams = zod.object({
+  "id": zod.coerce.number(),
+  "name": zod.coerce.string()
+})
+
+export const RunWorkflowResponse = zod.object({
+  "name": zod.string(),
+  "ok": zod.boolean(),
+  "output": zod.string(),
+  "command": zod.string(),
+  "cwd": zod.string().nullish()
 })
 
 

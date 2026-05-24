@@ -538,6 +538,43 @@ export interface Checkpoint {
   hasDbSnapshot: boolean;
   /** @nullable */
   dbProvider?: string | null;
+  /** @nullable */
+  dbSnapshotSizeBytes?: number | null;
+  /** @nullable */
+  triggerMessageId?: number | null;
+  /** @nullable */
+  triggerMessagePreview?: string | null;
+}
+
+export interface Workflow {
+  name: string;
+  command: string;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  cwd?: string | null;
+}
+
+export type WorkflowListSource = typeof WorkflowListSource[keyof typeof WorkflowListSource];
+
+
+export const WorkflowListSource = {
+  yaml: 'yaml',
+  defaults: 'defaults',
+} as const;
+
+export interface WorkflowList {
+  source: WorkflowListSource;
+  workflows: Workflow[];
+}
+
+export interface WorkflowRunResponse {
+  name: string;
+  ok: boolean;
+  output: string;
+  command: string;
+  /** @nullable */
+  cwd?: string | null;
 }
 
 export interface CheckpointRestoreResponse {
