@@ -716,12 +716,35 @@ export function AgentThinkingBubble({
   const { data: tasks } = useListTasks(projectId, {
     query: {
       queryKey: getListTasksQueryKey(projectId),
-      enabled: isTerminal && isDone,
+      // Always poll while waiting so we can detect a server-side failure
+      // (e.g. runJob crashed) even when no events were ever emitted.
+      enabled: true,
+      refetchInterval: isTerminal ? false : 3000,
       staleTime: 0,
     },
   });
 
   const completedTask = tasks?.find((t) => t.id === taskId);
+  // If we have no events yet but the task in DB is already failed/cancelled/done,
+  // treat the bubble as terminal so it doesn't sit at "Starting up…" forever.
+  const taskStatus = completedTask?.status as string | undefined;
+  const taskTerminalFromDb =
+    taskStatus === "failed" || taskStatus === "cancelled" || taskStatus === "completed";
+  const stalled = events.length === 0 && taskTerminalFromDb;
+
+  // Auto-dismiss if the bubble is stuck at "Starting up…" with no events
+  // and no DB status for too long (90s) — the worker probably died.
+  useEffect(() => {
+    if (events.length > 0 || taskTerminalFromDb) return;
+    const t = setTimeout(onDismiss, 90_000);
+    return () => clearTimeout(t);
+  }, [events.length, taskTerminalFromDb, onDismiss]);
+
+  useEffect(() => {
+    if (!stalled) return;
+    const t = setTimeout(onDismiss, 1500);
+    return () => clearTimeout(t);
+  }, [stalled, onDismiss]);
   const completedReport = completedTask?.report as
     | {
         versionId?: number | null;
@@ -774,6 +797,17 @@ export function AgentThinkingBubble({
   }, [events.length]);
 
   if (events.length === 0) {
+    if (stalled) {
+      return (
+        <div className="flex justify-start">
+          <div className="bg-destructive/10 border border-destructive/30 rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2 max-w-[92%]">
+            <span className="text-muted-foreground">
+              The task didn’t start. Please try sending again.
+            </span>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex justify-start">
         <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-xs flex items-center gap-2 max-w-[92%]">
