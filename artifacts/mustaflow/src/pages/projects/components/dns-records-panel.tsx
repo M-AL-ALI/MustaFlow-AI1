@@ -1470,6 +1470,22 @@ export function DnsRecordsPanel({
                     {certExpiringSoon && " — expiring soon!"}
                   </p>
                 )}
+                {certExpiringSoon && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const el = document.getElementById(`byo-cert-rotate-form-${domain.id}`);
+                      if (el) {
+                        el.scrollIntoView({ behavior: "smooth", block: "start" });
+                        const textarea = el.querySelector("textarea");
+                        if (textarea instanceof HTMLTextAreaElement) textarea.focus();
+                      }
+                    }}
+                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-yellow-400 underline underline-offset-2 hover:text-yellow-300"
+                  >
+                    Rotate certificate now
+                  </button>
+                )}
               </div>
               <button
                 onClick={() => void handleCertRemove()}
@@ -1487,7 +1503,7 @@ export function DnsRecordsPanel({
             </div>
           )}
 
-          <div className="space-y-1">
+          <div id={`byo-cert-rotate-form-${domain.id}`} className="space-y-1 scroll-mt-4">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               {certInfo.sslSource === "byo" ? "Rotate Certificate" : "Upload BYO Certificate"}
             </p>

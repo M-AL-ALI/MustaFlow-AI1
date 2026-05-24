@@ -17,7 +17,7 @@
  *    Writes an admin alert row to deployment_logs.
  */
 
-import { eq, isNotNull, and, isNull, lte, sql } from "drizzle-orm";
+import { eq, isNotNull, and, isNull, lte, gte, like, desc, sql } from "drizzle-orm";
 import { db, projectDomainsTable, projectsTable, deploymentLogsTable } from "@workspace/db";
 import {
   cfEnabled,
@@ -358,6 +358,139 @@ export async function runTakeoverProtectionSweep(): Promise<void> {
   }
 }
 
+// ── BYO cert rotation reminders (Task #597) ───────────────────────────────────
+
+/**
+ * Thresholds (days before expiry) at which we write rotation reminders.
+ * Each threshold fires at most once per BYO cert (de-duped via deployment_logs).
+ */
+const BYO_REMINDER_THRESHOLDS_DAYS = [30, 7] as const;
+
+/**
+ * Walk every project_domains row with sslSource='byo' and a non-null
+ * byoCertExpiresAt within the largest reminder window. For each crossed
+ * threshold (30d, 7d) write a `byo_cert_rotation_reminder_{N}d` row into
+ * deployment_logs — but only if a reminder for that hostname+threshold has
+ * not already been written for the *current* cert (i.e. since the cert was
+ * last uploaded / rotated).
+ *
+ * Rationale: the existing `runExpiryAlert` is Cloudflare-only (filters on
+ * cfHostnameId) and runs at a single 14-day threshold. BYO certs need their
+ * own multi-threshold reminder track so users have time to procure + upload
+ * a replacement cert before SSL outage.
+ */
+export async function runByoCertRotationReminders(): Promise<void> {
+  logger.info("CF scheduler: running BYO cert rotation reminder check");
+
+  try {
+    const maxWindowDays = Math.max(...BYO_REMINDER_THRESHOLDS_DAYS);
+    const cutoff = new Date(Date.now() + maxWindowDays * 24 * 60 * 60_000);
+
+    const byoDomains = await db
+      .select({
+        id: projectDomainsTable.id,
+        projectId: projectDomainsTable.projectId,
+        hostname: projectDomainsTable.hostname,
+        byoCertExpiresAt: projectDomainsTable.byoCertExpiresAt,
+        byoCertSubject: projectDomainsTable.byoCertSubject,
+        updatedAt: projectDomainsTable.updatedAt,
+      })
+      .from(projectDomainsTable)
+      .where(
+        and(
+          eq(projectDomainsTable.sslSource, "byo"),
+          isNotNull(projectDomainsTable.byoCertExpiresAt),
+          lte(projectDomainsTable.byoCertExpiresAt, cutoff),
+        ),
+      );
+
+    let written = 0;
+
+    for (const domain of byoDomains) {
+      if (!domain.byoCertExpiresAt) continue;
+      const expiresMs = domain.byoCertExpiresAt.getTime();
+      const daysLeft = Math.ceil((expiresMs - Date.now()) / (24 * 60 * 60_000));
+
+      for (const threshold of BYO_REMINDER_THRESHOLDS_DAYS) {
+        // Only fire once the cert has actually crossed this threshold.
+        if (daysLeft > threshold) continue;
+
+        const action = `byo_cert_rotation_reminder_${threshold}d`;
+
+        // De-dup: look for a prior reminder for this hostname+threshold whose
+        // log was written *after* the cert was last (re)uploaded — using
+        // domain.updatedAt as a conservative proxy for the cert install time.
+        // (BYO upload bumps updatedAt; a rotation will too, so a fresh cert
+        // re-opens the reminder window.)
+        const since = domain.updatedAt ?? new Date(0);
+        const [existing] = await db
+          .select({ id: deploymentLogsTable.id })
+          .from(deploymentLogsTable)
+          .where(
+            and(
+              eq(deploymentLogsTable.projectId, domain.projectId),
+              eq(deploymentLogsTable.env, "domain"),
+              gte(deploymentLogsTable.createdAt, since),
+              like(deploymentLogsTable.note, `%"action":"${action}"%`),
+              like(deploymentLogsTable.note, `%"hostname":"${domain.hostname}"%`),
+            ),
+          )
+          .orderBy(desc(deploymentLogsTable.createdAt))
+          .limit(1);
+
+        if (existing) continue;
+
+        try {
+          await db.insert(deploymentLogsTable).values({
+            projectId: domain.projectId,
+            userId: "system",
+            env: "domain",
+            // "failed" matches the existing alert pattern (admin attention) —
+            // do not collapse to "passed" since the dashboard surfaces failed
+            // domain rows as needing action.
+            status: "failed",
+            note: JSON.stringify({
+              action,
+              hostname: domain.hostname,
+              byoCertSubject: domain.byoCertSubject ?? null,
+              byoCertExpiresAt: domain.byoCertExpiresAt.toISOString(),
+              daysLeft,
+              thresholdDays: threshold,
+              rotateUrl: `/projects/${domain.projectId}?tab=publishing&domain=${domain.id}&cert=rotate`,
+            }),
+          });
+          written++;
+          logger.warn(
+            {
+              hostname: domain.hostname,
+              daysLeft,
+              thresholdDays: threshold,
+              projectId: domain.projectId,
+            },
+            "CF scheduler: BYO cert rotation reminder written",
+          );
+        } catch (err) {
+          logger.warn({ err, hostname: domain.hostname }, "BYO reminder: insert failed");
+        }
+      }
+    }
+
+    if (written > 0) {
+      logger.warn(
+        { count: written, scanned: byoDomains.length },
+        "CF scheduler: BYO cert rotation reminders written",
+      );
+    } else {
+      logger.info(
+        { scanned: byoDomains.length },
+        "CF scheduler: no new BYO cert rotation reminders",
+      );
+    }
+  } catch (err) {
+    logger.error({ err }, "CF scheduler: BYO cert rotation reminder check failed");
+  }
+}
+
 // ── Admin summary ─────────────────────────────────────────────────────────────
 
 export interface CfHostnameSummary {
@@ -463,6 +596,13 @@ export function startCfScheduler(): void {
       void runDanglingCnameSweep();
       void runExpiryAlert();
       void runTakeoverProtectionSweep();
+      void runByoCertRotationReminders();
     }, DAILY_INTERVAL_MS).unref();
+  }, INITIAL_DAILY_DELAY_MS).unref();
+
+  // First daily run also fires the BYO reminder (in addition to the other
+  // two jobs that ran in the warm-up block above).
+  setTimeout(() => {
+    void runByoCertRotationReminders();
   }, INITIAL_DAILY_DELAY_MS).unref();
 }
