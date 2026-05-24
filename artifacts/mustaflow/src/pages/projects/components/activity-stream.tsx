@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTaskEventStream } from "@/hooks/use-task-event-stream";
 import {
   Clock,
   BrainCircuit,
@@ -49,15 +50,6 @@ type EventType =
   | "narration"
   | "completed"
   | "failed";
-
-interface StreamEvent {
-  id: number;
-  taskId: number;
-  eventType: string;
-  message: string;
-  filePath: string | null;
-  createdAt: string | Date;
-}
 
 // ─── Event metadata ───────────────────────────────────────────────────────────
 
@@ -167,52 +159,6 @@ const PILL_STYLE_CLASSES: Record<string, string> = {
 };
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
-
-// ─── SSE hook ─────────────────────────────────────────────────────────────────
-
-/**
- * Connects to the SSE stream for a task and accumulates events in real time.
- * Replaces polling: the server pushes each event the instant it is created.
- * Auto-closes when a terminal event (completed / failed / cancelled) arrives.
- * Reconnects automatically on transient network errors (browser EventSource
- * built-in behavior) until the task ends.
- */
-function useTaskEventStream(projectId: number, taskId: number): StreamEvent[] {
-  const [events, setEvents] = useState<StreamEvent[]>([]);
-  const seenIdsRef = useRef<Set<number>>(new Set());
-
-  useEffect(() => {
-    // Reset on task change
-    seenIdsRef.current = new Set();
-    setEvents([]);
-
-    const es = new EventSource(`/api/projects/${projectId}/tasks/${taskId}/events/stream`);
-
-    es.onmessage = (raw: MessageEvent<string>) => {
-      try {
-        const event = JSON.parse(raw.data) as StreamEvent;
-        // Deduplicate: the server replays DB history on connect, so we may see
-        // the same event id twice if the client reconnects mid-stream.
-        if (seenIdsRef.current.has(event.id)) return;
-        seenIdsRef.current.add(event.id);
-        setEvents((prev) => [...prev, event]);
-        if (TERMINAL_STATUSES.has(event.eventType)) {
-          es.close();
-        }
-      } catch {
-        // ignore malformed frames
-      }
-    };
-
-    // onerror fires on transient drops — EventSource will retry automatically.
-    // We don't need to do anything; state is preserved across reconnects because
-    // the server replays history and the dedup set filters already-seen ids.
-
-    return () => es.close();
-  }, [projectId, taskId]);
-
-  return events;
-}
 
 // ─── Agent badge ──────────────────────────────────────────────────────────────
 

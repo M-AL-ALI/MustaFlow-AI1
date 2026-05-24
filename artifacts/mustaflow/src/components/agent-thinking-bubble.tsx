@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  useListTaskEvents,
-  getListTaskEventsQueryKey,
   useListTasks,
   getListTasksQueryKey,
   useListVersions,
@@ -9,6 +7,7 @@ import {
   usePatchVersion,
   useCancelTask,
 } from "@workspace/api-client-react";
+import { useTaskEventStream } from "@/hooks/use-task-event-stream";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
@@ -1198,18 +1197,7 @@ export function AgentThinkingBubble({
   const [hideThinking, setHideThinking] = useHideThinking();
   const cancelTask = useCancelTask();
 
-  const { data: events = [] } = useListTaskEvents(projectId, taskId, {
-    query: {
-      queryKey: getListTaskEventsQueryKey(projectId, taskId),
-      refetchInterval: (query) => {
-        const data = query.state.data;
-        if (!data || !Array.isArray(data)) return 700;
-        const last = (data as Array<{ eventType: string }>)[data.length - 1];
-        if (last && TERMINAL_STATUSES.has(last.eventType)) return false;
-        return 700;
-      },
-    },
-  });
+  const events = useTaskEventStream(projectId, taskId);
 
   const lastEvent = events[events.length - 1];
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
