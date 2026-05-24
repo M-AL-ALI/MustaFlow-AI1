@@ -2343,6 +2343,8 @@ export async function runBuildPipeline(args: {
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
   imageAttachments?: BuilderImageAttachment[];
+  /** Task #743: skip service-worker / fetch mocks for agentic-mode projects (real containers handle backends). */
+  builderMode?: string | null;
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<BuilderResult> {
@@ -2358,6 +2360,7 @@ export async function runBuildPipeline(args: {
     planContext,
     conversationSummary,
     imageAttachments,
+    builderMode,
     onEvent,
     signal,
   } = args;
@@ -2663,8 +2666,12 @@ export async function runBuildPipeline(args: {
     `Generated ${files.length} files for ${projectName}.`,
   );
 
-  // Inject API mocks for any fetch/axios calls found in generated files
-  files = injectApiMocks(files);
+  // Inject API mocks for any fetch/axios calls found in generated files.
+  // Task #743: agentic-mode projects run real backends (Fly container + Neon),
+  // so the service-worker mock layer would intercept real API calls. Skip it.
+  if (builderMode !== "agentic") {
+    files = injectApiMocks(files);
+  }
 
   // Auto-upgrade any vulnerable CDN URLs to safe versions
   const { files: upgradedFiles, upgrades: cdnUpgradesRaw } = applyCdnAutoUpgrades(files);
@@ -2741,6 +2748,8 @@ export async function runRefinePipeline(args: {
   /** Distilled summary of earlier conversation turns — gives the builder long-range context. */
   conversationSummary?: string;
   imageAttachments?: BuilderImageAttachment[];
+  /** Task #743: skip service-worker / fetch mocks for agentic-mode projects (real containers handle backends). */
+  builderMode?: string | null;
   onEvent?: (type: string, message: string) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<{
@@ -2767,6 +2776,7 @@ export async function runRefinePipeline(args: {
     planContext,
     conversationSummary,
     imageAttachments,
+    builderMode,
     onEvent,
     signal,
   } = args;
@@ -3194,8 +3204,9 @@ export async function runRefinePipeline(args: {
       ? parsed.nextRecommendation
       : "Refresh the Preview tab to see the change.";
 
-  // Inject API mocks for any new fetch/axios calls in changed files
-  const mockAugmented = injectApiMocks(changedFiles);
+  // Inject API mocks for any new fetch/axios calls in changed files.
+  // Task #743: agentic-mode projects run real backends, so skip the mock service worker.
+  const mockAugmented = builderMode === "agentic" ? changedFiles : injectApiMocks(changedFiles);
   // Only keep mock files that are net-new (not in existingFiles) to avoid bloating refine diffs
   const existingPathsSet = new Set(existingFiles.map((f) => f.path));
   const mockOnlyFiles = mockAugmented.filter(

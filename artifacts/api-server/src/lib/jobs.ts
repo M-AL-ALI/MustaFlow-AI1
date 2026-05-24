@@ -1708,6 +1708,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           planContext: input.planContext ?? null,
                           conversationSummary,
                           imageAttachments,
+                          builderMode: project.builderMode,
                           signal,
                         });
 
@@ -1780,6 +1781,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         databaseContext,
                         planContext: input.planContext ?? null,
                         conversationSummary,
+                        builderMode: project.builderMode,
                         signal,
                       });
           wasEscalated = true;
@@ -2091,6 +2093,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           planContext: input.planContext ?? null,
                           conversationSummary,
                           imageAttachments,
+                          builderMode: project.builderMode,
                           signal,
                         });
 
@@ -2166,6 +2169,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         planContext: input.planContext ?? null,
                         conversationSummary,
                         imageAttachments,
+                        builderMode: project.builderMode,
                       });
           wasEscalated = true;
           agentMode = refineEscalationMode;
@@ -2275,6 +2279,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                             planContext: input.planContext ?? null,
                             conversationSummary,
                             imageAttachments,
+                            builderMode: project.builderMode,
                             signal,
                           });
             if (!retryResult.correctionFailed) {

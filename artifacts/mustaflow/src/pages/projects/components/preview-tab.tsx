@@ -557,16 +557,24 @@ export function PreviewTab({
   // After a build completes for a react-vite project, resync the WC with fresh files.
   // We detect build completion via project.status transitioning away from "building".
   // Use a ref for the restart fn to keep the effect deps stable (avoids re-running on every render).
+  //
+  // Task #743: agentic-mode projects with a running container already get fresh
+  // code via Vite HMR over the proxied container URL — restarting the WC (or
+  // bumping the iframe cache-buster) would cause a full reload and break the
+  // HMR session. Skip the restart in that case.
+  const isAgentic = (project as { builderMode?: string | null }).builderMode === "agentic";
+  const containerLive = containerStatus === "running" && !!containerUrl;
   const wcRestartRef = useRef(wc.restart);
   wcRestartRef.current = wc.restart;
   const prevBuildStatusRef = useRef(project.status);
   useEffect(() => {
     const prev = prevBuildStatusRef.current;
     prevBuildStatusRef.current = project.status;
+    if (isAgentic && containerLive) return;
     if (isReactVite && prev === "building" && project.status !== "building" && hasFiles) {
       wcRestartRef.current();
     }
-  }, [project.status, isReactVite, hasFiles]);
+  }, [project.status, isReactVite, hasFiles, isAgentic, containerLive]);
 
   // Step 6: Bridge WC process stdout/stderr into the PreviewTab console panel.
   // We track the last-seen WC log ID so we only forward net-new entries each render.

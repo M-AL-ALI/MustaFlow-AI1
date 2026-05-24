@@ -138,6 +138,7 @@ import {
   useGetCveScanStatus,
   getGetCveScanStatusQueryKey,
   useAcknowledgeCveScan,
+  useCancelTask,
 } from "@workspace/api-client-react";
 import { GithubTab } from "./components/github-tab";
 import { RecipesTab } from "./components/recipes-tab";
@@ -1717,16 +1718,23 @@ export default function ProjectWorkspacePage() {
     [projectId, agentMode, planMode, runInBackground, sendRegular, queryClient, agentIdentity],
   );
 
+  const cancelTask = useCancelTask();
   const handleStopStream = useCallback(() => {
     if (streamAbortRef.current) {
       streamAbortRef.current.abort();
       streamAbortRef.current = null;
     }
+    // Task #743: also cancel the server-side task so the agent loop unwinds
+    // cleanly (event stream emits "cancelled" and any in-flight tool call
+    // gets signalled via AbortSignal).
+    if (activeTaskId != null) {
+      cancelTask.mutate({ id: projectId, taskId: activeTaskId });
+    }
     setIsStreaming(false);
     setStreamingText("");
     setPendingIsConverse(false);
     pendingIsConverseRef.current = false;
-  }, []);
+  }, [activeTaskId, projectId, cancelTask]);
 
   const handleAddKey = useCallback((keyName: string) => {
     setPrefillSecretName(keyName);
@@ -2082,7 +2090,9 @@ export default function ProjectWorkspacePage() {
               ) : (
                 <AlertCircle className="h-3 w-3" />
               )}
-              <span className="capitalize">{provisioningStatus}</span>
+              <span className="capitalize">
+                {provisioningStatus === "ready" ? "Running" : provisioningStatus}
+              </span>
               {provisioningStatus === "error" && (
                 <button
                   type="button"

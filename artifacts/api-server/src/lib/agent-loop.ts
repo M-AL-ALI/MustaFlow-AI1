@@ -1766,14 +1766,46 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           ? result.observation.slice(0, TRUNCATE_CAP)
           : JSON.stringify(result.observation).slice(0, TRUNCATE_CAP);
 
+      const redactedArgsForEvent = redactArgs(parsed);
       toolCalls.push({
         step,
         tool: callName,
-        args: redactArgs(parsed),
+        args: redactedArgsForEvent,
         ok: result.ok,
         durationMs,
         preview: observation.slice(0, 400),
       });
+
+      // Task #743: stream a structured `tool_call` event so the chat UI can
+      // render each invocation as a collapsible step with args + truncated
+      // output. Skip for tools that already have richer dedicated events
+      // (file_diff, command_output, creative previews) to avoid double-render.
+      const SKIP_TOOL_CALL_EVENT = new Set([
+        "write_file",
+        "apply_patch",
+        "delete_file",
+        "run_command",
+        "generate_image",
+        "generate_video",
+        "generate_audio",
+        "remove_image_background",
+        "report_progress",
+        "finalize",
+      ]);
+      if (!SKIP_TOOL_CALL_EVENT.has(callName)) {
+        try {
+          const payload = JSON.stringify({
+            tool: callName,
+            args: truncateArgsObject(redactedArgsForEvent),
+            ok: result.ok,
+            durationMs,
+            preview: observation.slice(0, 400),
+          });
+          await safeEvent(input.onEvent, "tool_call", payload);
+        } catch {
+          // event emission must never break the loop
+        }
+      }
 
       if (result.ok) {
         consecutiveErrors = 0;
@@ -1974,14 +2006,43 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           ? result.observation.slice(0, TRUNCATE_CAP)
           : JSON.stringify(result.observation).slice(0, TRUNCATE_CAP);
 
+      const redactedArgsForSerial = redactArgs(parsed);
       toolCalls.push({
         step,
         tool: name,
-        args: redactArgs(parsed),
+        args: redactedArgsForSerial,
         ok: result.ok,
         durationMs,
         preview: observation.slice(0, 400),
       });
+
+      // Task #743: stream a structured `tool_call` event (serial path).
+      const SKIP_TOOL_CALL_EVENT_SERIAL = new Set([
+        "write_file",
+        "apply_patch",
+        "delete_file",
+        "run_command",
+        "generate_image",
+        "generate_video",
+        "generate_audio",
+        "remove_image_background",
+        "report_progress",
+        "finalize",
+      ]);
+      if (!SKIP_TOOL_CALL_EVENT_SERIAL.has(name)) {
+        try {
+          const payload = JSON.stringify({
+            tool: name,
+            args: truncateArgsObject(redactedArgsForSerial),
+            ok: result.ok,
+            durationMs,
+            preview: observation.slice(0, 400),
+          });
+          await safeEvent(input.onEvent, "tool_call", payload);
+        } catch {
+          // event emission must never break the loop
+        }
+      }
 
       if (result.ok) {
         consecutiveErrors = 0;
@@ -2510,6 +2571,45 @@ const SECRET_PATTERNS: RegExp[] = [
   // JWTs
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
 ];
+
+/**
+ * Task #743 — produce a compact, JSON-safe object form of tool args for the
+ * `tool_call` SSE event. We keep the shape so the UI can render structured
+ * key/value rows, but cap individual string fields and the total payload to
+ * avoid streaming megabytes of inlined HTML/source through the event bus.
+ */
+function truncateArgsObject(
+  args: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!args || typeof args !== "object") return {};
+  const out: Record<string, unknown> = {};
+  let budget = 1200;
+  for (const [k, v] of Object.entries(args)) {
+    if (budget <= 0) {
+      out["…"] = "(truncated)";
+      break;
+    }
+    if (typeof v === "string") {
+      const cap = Math.min(200, budget);
+      out[k] = v.length > cap ? v.slice(0, cap) + "…" : v;
+      budget -= (out[k] as string).length + k.length + 4;
+    } else if (v === null || typeof v === "number" || typeof v === "boolean") {
+      out[k] = v;
+      budget -= String(v).length + k.length + 4;
+    } else {
+      try {
+        const json = JSON.stringify(v);
+        const cap = Math.min(200, budget);
+        out[k] = json.length > cap ? json.slice(0, cap) + "…" : json;
+        budget -= (out[k] as string).length + k.length + 4;
+      } catch {
+        out[k] = "[unserializable]";
+        budget -= k.length + 20;
+      }
+    }
+  }
+  return out;
+}
 
 function redactSecrets(text: string, literals: readonly string[] = []): string {
   let out = text;

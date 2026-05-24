@@ -97,6 +97,7 @@ const STEP_ICON: Record<string, React.ElementType> = {
   file_diff: FilePen,
   command_output: TerminalSquare,
   thinking: BrainCircuit,
+  tool_call: Wrench,
 };
 
 const STEP_COLOR: Record<string, string> = {
@@ -123,7 +124,114 @@ const STEP_COLOR: Record<string, string> = {
   file_diff: "text-yellow-400",
   command_output: "text-cyan-400",
   thinking: "text-violet-300",
+  tool_call: "text-amber-300",
 };
+
+/**
+ * Task #743 — `tool_call` payload emitted by the agentic loop for tools that
+ * don't already have a dedicated event type (web_search results, take_screenshot,
+ * read_diagnostics, etc.). Renders as a collapsible row with args + truncated
+ * preview output.
+ */
+type ToolCallPayload = {
+  tool: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  durationMs: number;
+  preview: string;
+};
+function parseToolCall(eventType: string, message: string): ToolCallPayload | null {
+  if (eventType !== "tool_call") return null;
+  if (!message || !message.startsWith("{")) return null;
+  try {
+    const obj = JSON.parse(message) as Partial<ToolCallPayload>;
+    if (typeof obj.tool !== "string") return null;
+    return {
+      tool: obj.tool,
+      args: obj.args && typeof obj.args === "object" ? (obj.args as Record<string, unknown>) : {},
+      ok: obj.ok !== false,
+      durationMs: typeof obj.durationMs === "number" ? obj.durationMs : 0,
+      preview: typeof obj.preview === "string" ? obj.preview : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function summarizeArgs(args: Record<string, unknown>): string {
+  const entries = Object.entries(args).slice(0, 4);
+  if (entries.length === 0) return "";
+  return entries
+    .map(([k, v]) => {
+      let s: string;
+      if (v === null || v === undefined) s = "—";
+      else if (typeof v === "string") s = v;
+      else if (typeof v === "number" || typeof v === "boolean") s = String(v);
+      else {
+        try {
+          s = JSON.stringify(v);
+        } catch {
+          s = "[obj]";
+        }
+      }
+      if (s.length > 60) s = s.slice(0, 60) + "…";
+      return `${k}=${s}`;
+    })
+    .join(" ");
+}
+
+function ToolCallCard({ data }: { data: ToolCallPayload }) {
+  const [expanded, setExpanded] = useState(false);
+  const argSummary = summarizeArgs(data.args);
+  const previewLines = data.preview ? data.preview.split("\n") : [];
+  return (
+    <div className="rounded-md border border-border/40 bg-muted/30 p-1.5 my-0.5 max-w-full">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-1.5 text-left group"
+      >
+        <div className="shrink-0 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors">
+          {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        </div>
+        <Wrench className="h-3 w-3 shrink-0 text-amber-300/80" />
+        <span
+          className="text-[10px] font-mono text-foreground/80 truncate flex-1"
+          title={data.tool}
+        >
+          {data.tool}
+          {argSummary && <span className="text-muted-foreground/70"> · {argSummary}</span>}
+        </span>
+        {data.durationMs > 0 && (
+          <span className="shrink-0 text-[10px] font-mono text-muted-foreground/60">
+            {data.durationMs}ms
+          </span>
+        )}
+        <span
+          className={cn(
+            "shrink-0 text-[10px] font-mono uppercase tracking-wide",
+            data.ok ? "text-green-400" : "text-red-400",
+          )}
+        >
+          {data.ok ? "ok" : "err"}
+        </span>
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-1">
+          {Object.keys(data.args).length > 0 && (
+            <pre className="max-h-32 overflow-auto rounded bg-background/60 border border-border/40 p-1.5 text-[10px] font-mono leading-snug whitespace-pre-wrap break-all">
+              {JSON.stringify(data.args, null, 2)}
+            </pre>
+          )}
+          {previewLines.length > 0 && (
+            <pre className="max-h-48 overflow-auto rounded bg-background/60 border border-border/40 p-1.5 text-[10px] font-mono leading-snug whitespace-pre-wrap break-all text-muted-foreground">
+              {data.preview}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function getStepIcon(eventType: string): React.ElementType {
   return STEP_ICON[eventType] ?? Code2;
@@ -741,6 +849,7 @@ function FinishedGroupRow({
             const creative = parseCreativeEvent(step.eventType, step.message);
             const diff = parseFileDiff(step.eventType, step.message);
             const cmd = parseCommandOutput(step.eventType, step.message);
+            const tool = parseToolCall(step.eventType, step.message);
             if (step.eventType === "thinking") {
               return <ThinkingRow key={step.id} text={step.message} isActive={false} />;
             }
@@ -754,6 +863,8 @@ function FinishedGroupRow({
                     <FileDiffCard data={diff} />
                   ) : cmd ? (
                     <CommandOutputCard data={cmd} projectId={projectId} taskId={taskId} />
+                  ) : tool ? (
+                    <ToolCallCard data={tool} />
                   ) : (
                     <>
                       <span className="text-[11px] text-muted-foreground leading-tight block truncate">
@@ -803,6 +914,8 @@ function ActiveGroupRow({
     if (diff) return `${diff.op} ${diff.path}`;
     const cmd = parseCommandOutput(lastStep.eventType, lastStep.message);
     if (cmd) return `${cmd.argv.join(" ").slice(0, 80)} (exit=${cmd.exitCode})`;
+    const tool = parseToolCall(lastStep.eventType, lastStep.message);
+    if (tool) return `${tool.tool}${tool.ok ? "" : " (failed)"}`;
     return lastStep.message;
   })();
 
@@ -810,6 +923,7 @@ function ActiveGroupRow({
   // without waiting for the group to finish.
   const lastDiff = lastStep ? parseFileDiff(lastStep.eventType, lastStep.message) : null;
   const lastCmd = lastStep ? parseCommandOutput(lastStep.eventType, lastStep.message) : null;
+  const lastTool = lastStep ? parseToolCall(lastStep.eventType, lastStep.message) : null;
   const lastThinking = lastStep?.eventType === "thinking" ? lastStep.message : null;
 
   return (
@@ -819,7 +933,8 @@ function ActiveGroupRow({
       {lastThinking && <ThinkingRow text={lastThinking} isActive={!isTerminal} />}
       {lastDiff && <FileDiffCard data={lastDiff} />}
       {lastCmd && <CommandOutputCard data={lastCmd} projectId={projectId} taskId={taskId} />}
-      {visibleSteps.length > 0 && !lastDiff && !lastCmd && !lastThinking && (
+      {lastTool && <ToolCallCard data={lastTool} />}
+      {visibleSteps.length > 0 && !lastDiff && !lastCmd && !lastTool && !lastThinking && (
         <p
           className={cn(
             "text-[10px] truncate leading-tight",
