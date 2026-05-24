@@ -454,7 +454,7 @@ const TOOLS: ChatCompletionTool[] = [
     function: {
       name: "find_files",
       description:
-        "List project file paths that match a glob pattern. Supports `*` (single segment), `?` (one char), and `**` (any depth). Examples: `src/**/*.ts`, `*.json`, `app/**/page.tsx`. Returns matching paths sorted alphabetically.",
+        "List project file paths that match a glob pattern. Supports `*` (single segment), `?` (one char), and `**` (any depth). Examples: `src/**/*.ts`, `*.json`, `app/**/page.tsx`. Returns matching paths sorted most-recently-modified first (tiebreak alphabetical).",
       parameters: {
         type: "object",
         properties: {
@@ -1042,14 +1042,33 @@ function buildSystemPrompt(
 class FileWorkspace {
   private files = new Map<string, BuilderFile>();
   private readonly initialPaths: Set<string>;
+  /**
+   * Monotonic last-modified timestamps per path. Initial-load files share the
+   * workspace's construction time; every subsequent `write` bumps the entry's
+   * mtime. Used by `find_files` to sort glob results most-recent-first
+   * (matches Replit Agent's `find_files` contract).
+   */
+  private mtimes = new Map<string, number>();
 
   constructor(initial: BuilderFile[]) {
-    for (const f of initial) this.files.set(f.path, { ...f });
+    const t0 = Date.now();
+    for (const f of initial) {
+      this.files.set(f.path, { ...f });
+      this.mtimes.set(f.path, t0);
+    }
     this.initialPaths = new Set(initial.map((f) => f.path));
   }
 
   list(): string[] {
     return Array.from(this.files.keys()).sort();
+  }
+
+  /** Paths with their last-modified timestamp (ms since epoch). */
+  listWithMtimes(): Array<{ path: string; mtime: number }> {
+    return Array.from(this.files.keys()).map((p) => ({
+      path: p,
+      mtime: this.mtimes.get(p) ?? 0,
+    }));
   }
 
   read(path: string): BuilderFile | undefined {
@@ -1060,10 +1079,12 @@ class FileWorkspace {
     const mt = mimeType ?? guessMime(path);
     const file: BuilderFile = { path, content, mimeType: mt };
     this.files.set(path, file);
+    this.mtimes.set(path, Date.now());
     return file;
   }
 
   delete(path: string): boolean {
+    this.mtimes.delete(path);
     return this.files.delete(path);
   }
 
@@ -1108,6 +1129,20 @@ class FileWorkspace {
     }
     return hits;
   }
+}
+
+/**
+ * Fire-and-forget embedding invalidation. Marks the stored project_embeddings
+ * row for `path` stale so the next `semantic_search` re-embeds it. Safe to call
+ * from hot paths — swallows errors (logged) so a transient DB issue never
+ * breaks file writes.
+ */
+function invalidateEmbeddingSafe(projectId: number, path: string): Promise<void> {
+  return import("./project-search")
+    .then((m) => m.invalidateFileEmbedding(projectId, path))
+    .catch((err) => {
+      logger.warn({ err, projectId, path }, "embedding invalidation failed (non-fatal)");
+    });
 }
 
 function guessMime(path: string): string {
@@ -2446,6 +2481,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       }
       const mime = typeof args.mime_type === "string" ? args.mime_type : undefined;
       workspace.write(path, content, mime);
+      void invalidateEmbeddingSafe(input.projectId, path);
       if (containerState.id) {
         try {
           const { writeFileToContainer } = await import("./container");
@@ -2475,6 +2511,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       }
       const next = f.content.slice(0, idx) + newText + f.content.slice(idx + oldText.length);
       workspace.write(path, next, f.mimeType);
+      void invalidateEmbeddingSafe(input.projectId, path);
       if (containerState.id) {
         try {
           const { writeFileToContainer } = await import("./container");
@@ -2490,6 +2527,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       if (!path) return { ok: false, observation: "ERROR: invalid path" };
       const removed = workspace.delete(path);
       if (!removed) return { ok: false, observation: `ERROR: file not found: ${path}` };
+      void invalidateEmbeddingSafe(input.projectId, path);
       if (containerState.id) {
         try {
           // Direct argv (no shell wrapper) — sanitizePath already rejected any
@@ -2546,8 +2584,18 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       }
       try {
         const { matchGlob } = await import("./project-search");
-        const paths = workspace.list();
-        const hits = matchGlob(pattern, paths).sort();
+        const entries = workspace.listWithMtimes();
+        const matched = matchGlob(
+          pattern,
+          entries.map((e) => e.path),
+        );
+        const matchedSet = new Set(matched);
+        // Sort matches by mtime DESC (most-recently modified first), tiebreak
+        // alphabetically — matches Replit Agent's `find_files` contract.
+        const hits = entries
+          .filter((e) => matchedSet.has(e.path))
+          .sort((a, b) => b.mtime - a.mtime || a.path.localeCompare(b.path))
+          .map((e) => e.path);
         return {
           ok: true,
           observation: hits.length === 0 ? "(no matches)" : hits.join("\n"),

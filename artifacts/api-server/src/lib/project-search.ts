@@ -261,14 +261,60 @@ function substringRank(query: string, files: ProjectFileLike[], topK: number): S
   return hits.slice(0, topK);
 }
 
+function formatVectorLiteral(vec: number[]): string {
+  // pgvector text input: `[v1,v2,...]` (no spaces required).
+  return `[${vec.join(",")}]`;
+}
+
+/**
+ * Ask pgvector to return the top-k nearest neighbours for `queryVec` within a
+ * project. Uses the `<=>` cosine-distance operator and converts back to a
+ * cosine similarity score in [-1, 1] (`score = 1 - distance`). Returns `null`
+ * if the query fails (e.g. extension missing) so the caller can fall back to
+ * in-app cosine ranking.
+ */
+async function pgvectorTopK(
+  projectId: number,
+  queryVec: number[],
+  embeddedPaths: Set<string>,
+  limit: number,
+): Promise<SemanticHit[] | null> {
+  if (embeddedPaths.size === 0) return [];
+  try {
+    const literal = formatVectorLiteral(queryVec);
+    const rows = (await db.execute(sql`
+      SELECT file_path, snippet,
+             1 - (embedding <=> ${literal}::vector) AS score
+      FROM ${projectEmbeddingsTable}
+      WHERE project_id = ${projectId}
+      ORDER BY embedding <=> ${literal}::vector
+      LIMIT ${limit}
+    `)) as unknown as { rows?: Array<{ file_path: string; snippet: string; score: number }> };
+    const list =
+      rows.rows ??
+      (rows as unknown as Array<{ file_path: string; snippet: string; score: number }>);
+    if (!Array.isArray(list)) return null;
+    return list
+      .filter((r) => embeddedPaths.has(r.file_path))
+      .map((r) => ({
+        path: r.file_path,
+        score: typeof r.score === "string" ? Number(r.score) : r.score,
+        snippet: r.snippet,
+      }));
+  } catch (err) {
+    logger.debug({ err, projectId }, "project-search: pgvector top-k query failed");
+    return null;
+  }
+}
+
 /**
  * Top-k semantically relevant files for a natural-language query.
  *
- * Uses in-memory cosine similarity over the freshly-ensured per-project
- * embedding index. (pgvector is the durable store; we cosine-rank in
- * application code so the result includes per-file snippets without an extra
- * round-trip — and so the function works even when the table is empty or the
- * vector extension is unavailable.)
+ * Prefers pgvector's native nearest-neighbour search (`<=>` cosine distance);
+ * falls back to in-app cosine similarity over the per-project embedding index
+ * if the vector extension is unavailable or the query fails. Files outside the
+ * embedding budget are merged in via substring rank so a freshly-indexed large
+ * project never silently hides relevant files.
  */
 export async function semanticSearch(
   projectId: number,
@@ -286,26 +332,41 @@ export async function semanticSearch(
     return substringRank(query, files, limit);
   }
 
-  // Merge vector-scored files with a substring-ranked tail for files whose
-  // embedding hasn't been generated yet (large first-time indexes exceed the
-  // per-call re-embed budget). Cosine scores are in [-1, 1]; we map substring
-  // hits into the same band by normalising into [0, 0.5] so any real cosine
-  // hit outranks substring-only fallbacks but the fallbacks still surface.
-  const scored: SemanticHit[] = [];
+  const currentPaths = new Set(files.map((f) => f.path));
+  const embeddedPaths = new Set<string>();
   const unembedded: ProjectFileLike[] = [];
   for (const f of files) {
     const entry = index.get(f.path);
-    if (entry?.vector) {
+    if (entry?.vector) embeddedPaths.add(f.path);
+    else unembedded.push(f);
+  }
+
+  // Preferred path: ask pgvector for the embedded nearest neighbours.
+  let scored: SemanticHit[] | null = await pgvectorTopK(projectId, queryVec, embeddedPaths, limit);
+
+  // Fallback path: in-app cosine over the in-memory index.
+  if (scored === null) {
+    scored = [];
+    for (const f of files) {
+      const entry = index.get(f.path);
+      if (!entry?.vector) continue;
       scored.push({
         path: f.path,
         score: cosineSimilarity(queryVec, entry.vector),
         snippet: entry.snippet || buildSnippet(f.content),
       });
-    } else {
-      unembedded.push(f);
     }
   }
 
+  // Drop any stale pgvector rows whose file no longer exists in the workspace
+  // (defence in depth — ensureIndex already prunes them, but a concurrent
+  // index pass could still race).
+  scored = scored.filter((h) => currentPaths.has(h.path));
+
+  // Merge in substring-ranked unembedded tail so files outside the per-call
+  // embedding budget can still surface. Cosine scores live in [-1, 1]; we map
+  // substring scores into [0, 0.5] so any real positive cosine hit outranks
+  // substring-only fallbacks while still letting fallbacks appear in results.
   if (unembedded.length > 0) {
     const fallback = substringRank(query, unembedded, limit);
     const maxFallbackScore = fallback.reduce((m, h) => Math.max(m, h.score), 0);
