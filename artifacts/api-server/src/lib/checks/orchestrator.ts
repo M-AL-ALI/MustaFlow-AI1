@@ -270,6 +270,23 @@ export async function runOrchestration(
     } else if (def.platform === "web" && isMobileProject) {
       shouldRun = false;
       reason = "Web-only check — skipped for mobile projects.";
+    }
+    // Per-project SAST scanner toggles take precedence over trigger=always /
+    // agent-selection so admins can fully disable a scanner from the project
+    // settings UI (Task #545).
+    else if (name === "semgrep-sast" && scannerToggles?.semgrep === false) {
+      shouldRun = false;
+      reason = "Disabled — projects.scannerSemgrepEnabled is false.";
+    } else if (name === "hounddog-sast") {
+      shouldRun = scannerToggles?.hounddog === true;
+      reason = shouldRun
+        ? "Enabled — projects.scannerHoundDogEnabled is true; runs on every build."
+        : "Disabled — enable projects.scannerHoundDogEnabled to run HoundDog.";
+    } else if (name === "trivy-sast") {
+      shouldRun = scannerToggles?.trivy === true;
+      reason = shouldRun
+        ? "Enabled — projects.scannerTrivyEnabled is true; runs on every build."
+        : "Disabled — enable projects.scannerTrivyEnabled to run Trivy.";
     } else if (def.trigger === "always") {
       shouldRun = true;
       reason = "Always-on check — runs after every build.";
@@ -279,15 +296,6 @@ export async function runOrchestration(
     } else if (def.trigger === "on-demand") {
       shouldRun = false;
       reason = "On-demand only — not triggered.";
-    } else if (name === "hounddog-sast" && !scannerToggles?.hounddog) {
-      shouldRun = false;
-      reason = "Disabled — enable projects.scannerHoundDogEnabled to run HoundDog.";
-    } else if (name === "trivy-sast" && !scannerToggles?.trivy) {
-      shouldRun = false;
-      reason = "Disabled — enable projects.scannerTrivyEnabled to run Trivy.";
-    } else if (name === "semgrep-sast" && scannerToggles?.semgrep === false) {
-      shouldRun = false;
-      reason = "Disabled — projects.scannerSemgrepEnabled is false.";
     } else {
       shouldRun = selection?.run ?? true;
       reason = selection?.reason ?? "Included by default.";

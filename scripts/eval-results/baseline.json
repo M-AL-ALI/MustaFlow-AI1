@@ -1,0 +1,284 @@
+{
+  "startedAt": "2026-05-24T00:00:00.000Z",
+  "finishedAt": "2026-05-24T00:00:00.000Z",
+  "model": "gpt-5-mini",
+  "totalFixtures": 30,
+  "passed": 30,
+  "failed": 0,
+  "errored": 0,
+  "perStage": {
+    "build": {
+      "passed": 5,
+      "failed": 0,
+      "avgScore": 7
+    },
+    "refine": {
+      "passed": 5,
+      "failed": 0,
+      "avgScore": 7
+    },
+    "plan": {
+      "passed": 5,
+      "failed": 0,
+      "avgScore": 7
+    },
+    "intent": {
+      "passed": 5,
+      "failed": 0,
+      "avgScore": 7
+    },
+    "converse": {
+      "passed": 5,
+      "failed": 0,
+      "avgScore": 7
+    },
+    "architect": {
+      "passed": 5,
+      "failed": 0,
+      "avgScore": 7
+    }
+  },
+  "results": [
+    {
+      "id": "build-todo",
+      "stage": "build",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "build-pricing",
+      "stage": "build",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "build-portfolio",
+      "stage": "build",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "build-counter",
+      "stage": "build",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "build-form",
+      "stage": "build",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "refine-dark-mode",
+      "stage": "refine",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "refine-mobile",
+      "stage": "refine",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "refine-validation",
+      "stage": "refine",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "refine-typo",
+      "stage": "refine",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "refine-add-row",
+      "stage": "refine",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "plan-blog",
+      "stage": "plan",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "plan-ecom",
+      "stage": "plan",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "plan-events",
+      "stage": "plan",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "plan-faq",
+      "stage": "plan",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "plan-dashboard",
+      "stage": "plan",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "intent-build-new",
+      "stage": "intent",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "intent-refine",
+      "stage": "intent",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "intent-question",
+      "stage": "intent",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "intent-meta",
+      "stage": "intent",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "intent-plan",
+      "stage": "intent",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "converse-greeting",
+      "stage": "converse",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "converse-clarify",
+      "stage": "converse",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "converse-confirm",
+      "stage": "converse",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "converse-blocked",
+      "stage": "converse",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "converse-frustrated",
+      "stage": "converse",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "architect-sql",
+      "stage": "architect",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "architect-eval",
+      "stage": "architect",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "architect-const",
+      "stage": "architect",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "architect-localstorage-token",
+      "stage": "architect",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    },
+    {
+      "id": "architect-fine",
+      "stage": "architect",
+      "score": 7,
+      "passed": true,
+      "reasoning": "Initial committed baseline placeholder. Refresh by running `pnpm --filter @workspace/scripts run eval-prompts -- --update-baseline` after a verified production prompt change.",
+      "outputPreview": ""
+    }
+  ],
+  "_note": "Synthetic committed baseline (Task #545). Every fixture is pinned at score 7 — any production run that drops a fixture below 6 will register as a loser and, beyond the 10% regression threshold, will fail CI. Refresh via --update-baseline once a real production run is available."
+}

@@ -538,6 +538,15 @@ async function main() {
   } catch {
     baseline = null;
   }
+  // Task #545: in CI we require an explicit committed baseline so the
+  // regression gate is actually enforceable. Without one, any silent prompt
+  // regression would just become the new baseline and pass.
+  if (!baseline && !updateBaseline && process.env["CI"] === "true") {
+    console.error(
+      "\nFAIL: no baseline.json found in scripts/eval-results/. Commit a baseline (run locally with --update-baseline) before relying on this gate in CI.",
+    );
+    process.exit(1);
+  }
   const comparison = compare(latest, baseline);
 
   const full = { ...latest, comparison };
