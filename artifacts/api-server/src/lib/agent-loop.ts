@@ -956,10 +956,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       });
       const durationMs = Date.now() - tStart;
 
+      // Most tool observations are truncated to MAX_OBSERVATION_CHARS (8KB) so
+      // a runaway stdout can't blow the context window. Tools that need to
+      // return raw binary-ish payloads (e.g. take_screenshot's base64 PNG) set
+      // `noTruncate` and we cap them at a much larger ceiling instead.
+      const TRUNCATE_CAP = result.noTruncate ? 7_000_000 : MAX_OBSERVATION_CHARS;
       const observation =
         typeof result.observation === "string"
-          ? result.observation.slice(0, MAX_OBSERVATION_CHARS)
-          : JSON.stringify(result.observation).slice(0, MAX_OBSERVATION_CHARS);
+          ? result.observation.slice(0, TRUNCATE_CAP)
+          : JSON.stringify(result.observation).slice(0, TRUNCATE_CAP);
 
       toolCalls.push({
         step,
@@ -1712,7 +1717,9 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   ctx.containerState.installed = true;
 }
 
-export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observation: string }> {
+export async function executeTool(
+  ctx: ToolCtx,
+): Promise<{ ok: boolean; observation: string; noTruncate?: boolean }> {
   const { name, args, workspace, stack, input, commandsRun, step, containerState } = ctx;
   if (input.signal.aborted) {
     return { ok: false, observation: "ERROR: aborted by user" };
@@ -2263,6 +2270,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observat
       // see what it rendered.
       return {
         ok: true,
+        noTruncate: true,
         observation: JSON.stringify({
           url: targetUrl || "(inline)",
           bytes: shot.bytes ?? null,

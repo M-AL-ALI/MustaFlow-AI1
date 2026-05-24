@@ -155,7 +155,7 @@ function isPrivateIp(ip: string): boolean {
  * Combined with isSafePublicUrl, this defends against DNS rebinding + literal
  * private-IP hostnames.
  */
-async function isSafeResolvedUrl(u: string): Promise<boolean> {
+export async function isSafeResolvedUrl(u: string): Promise<boolean> {
   if (!isSafePublicUrl(u)) return false;
   try {
     const host = new URL(u).hostname.replace(/^\[|\]$/g, "");
@@ -317,7 +317,7 @@ const CHROMIUM_PATHS = [
 export async function takeScreenshot(input: ScreenshotInput): Promise<ScreenshotResult> {
   if (!input.inlineHtml) {
     if (!isHttpUrl(input.url)) return { ok: false, error: "URL must be http(s)" };
-    if (!isSafePublicUrl(input.url))
+    if (!(await isSafeResolvedUrl(input.url)))
       return { ok: false, error: "URL points to a private/internal host" };
   }
   const w = Math.min(Math.max(input.width ?? 1280, 320), 1920);
