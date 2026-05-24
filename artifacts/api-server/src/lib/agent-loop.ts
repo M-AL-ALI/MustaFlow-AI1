@@ -1780,27 +1780,17 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // render each invocation as a collapsible step with args + truncated
       // output. Skip for tools that already have richer dedicated events
       // (file_diff, command_output, creative previews) to avoid double-render.
-      const SKIP_TOOL_CALL_EVENT = new Set([
-        "write_file",
-        "apply_patch",
-        "delete_file",
-        "run_command",
-        "generate_image",
-        "generate_video",
-        "generate_audio",
-        "remove_image_background",
-        "report_progress",
-        "finalize",
-      ]);
-      if (!SKIP_TOOL_CALL_EVENT.has(callName)) {
+      if (shouldEmitToolCallEvent(callName)) {
         try {
-          const payload = JSON.stringify({
-            tool: callName,
-            args: truncateArgsObject(redactedArgsForEvent),
-            ok: result.ok,
-            durationMs,
-            preview: observation.slice(0, 400),
-          });
+          const payload = JSON.stringify(
+            buildToolCallEventPayload(
+              callName,
+              redactedArgsForEvent,
+              result.ok,
+              durationMs,
+              observation,
+            ),
+          );
           await safeEvent(input.onEvent, "tool_call", payload);
         } catch {
           // event emission must never break the loop
@@ -2017,27 +2007,17 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       });
 
       // Task #743: stream a structured `tool_call` event (serial path).
-      const SKIP_TOOL_CALL_EVENT_SERIAL = new Set([
-        "write_file",
-        "apply_patch",
-        "delete_file",
-        "run_command",
-        "generate_image",
-        "generate_video",
-        "generate_audio",
-        "remove_image_background",
-        "report_progress",
-        "finalize",
-      ]);
-      if (!SKIP_TOOL_CALL_EVENT_SERIAL.has(name)) {
+      if (shouldEmitToolCallEvent(name)) {
         try {
-          const payload = JSON.stringify({
-            tool: name,
-            args: truncateArgsObject(redactedArgsForSerial),
-            ok: result.ok,
-            durationMs,
-            preview: observation.slice(0, 400),
-          });
+          const payload = JSON.stringify(
+            buildToolCallEventPayload(
+              name,
+              redactedArgsForSerial,
+              result.ok,
+              durationMs,
+              observation,
+            ),
+          );
           await safeEvent(input.onEvent, "tool_call", payload);
         } catch {
           // event emission must never break the loop
@@ -2578,6 +2558,58 @@ const SECRET_PATTERNS: RegExp[] = [
  * key/value rows, but cap individual string fields and the total payload to
  * avoid streaming megabytes of inlined HTML/source through the event bus.
  */
+/**
+ * Task #743 — tools that already emit richer dedicated SSE events
+ * (file_diff, command_output, creative previews, narration on
+ * report_progress/finalize). For these, the agent loop SKIPS the generic
+ * `tool_call` event so the chat UI doesn't double-render them.
+ */
+export const TOOL_CALL_DEDICATED_EVENTS: ReadonlySet<string> = new Set([
+  "write_file",
+  "apply_patch",
+  "delete_file",
+  "run_command",
+  "generate_image",
+  "generate_video",
+  "generate_audio",
+  "remove_image_background",
+  "report_progress",
+  "finalize",
+]);
+
+export function shouldEmitToolCallEvent(toolName: string): boolean {
+  return !TOOL_CALL_DEDICATED_EVENTS.has(toolName);
+}
+
+export type ToolCallEventPayload = {
+  tool: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  durationMs: number;
+  preview: string;
+};
+
+/**
+ * Task #743 — build the JSON payload streamed as a `tool_call` SSE event.
+ * Args are run through the size-capped truncator; preview is the first
+ * ~400 chars of the (already-redacted) observation.
+ */
+export function buildToolCallEventPayload(
+  toolName: string,
+  redactedArgs: Record<string, unknown>,
+  ok: boolean,
+  durationMs: number,
+  observation: string,
+): ToolCallEventPayload {
+  return {
+    tool: toolName,
+    args: truncateArgsObject(redactedArgs),
+    ok,
+    durationMs,
+    preview: typeof observation === "string" ? observation.slice(0, 400) : "",
+  };
+}
+
 function truncateArgsObject(
   args: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> {
