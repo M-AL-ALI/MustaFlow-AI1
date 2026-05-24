@@ -37,6 +37,7 @@
     "migrate-cf-hostname-columns": "tsx ./src/migrate-cf-hostname-columns.ts",
     "migrate-canvas-variants": "tsx ./src/migrate-canvas-variants.ts",
     "migrate-lesson-contribution-reward": "tsx ./src/migrate-lesson-contribution-reward.ts",
+    "migrate-canvas-variants-v2": "tsx ./src/migrate-canvas-variants-v2.ts",
     "migrate-blueprints": "tsx ./src/migrate-blueprints.ts",
     "migrate-deployment-substrate": "tsx ./src/migrate-deployment-substrate.ts",
     "migrate-project-artifacts": "tsx ./src/migrate-project-artifacts.ts",

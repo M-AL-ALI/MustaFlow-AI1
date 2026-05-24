@@ -54,7 +54,7 @@ import backgroundJobsRouter from "./background-jobs";
 import previewSnapshotsRouter from "./preview-snapshots";
 import uploadsRouter from "./uploads";
 import transcribeRouter from "./transcribe";
-import canvasRouter from "./canvas";
+import canvasRouter, { publicCanvasRouter } from "./canvas";
 import aiInlineRouter from "./ai-inline";
 import blueprintsRouter from "./blueprints";
 import plansRouter from "./plans";
@@ -90,6 +90,7 @@ router.use(sslWebhookRouter); // POST /domain/ssl-webhook (Cloudflare → us)
 router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
 router.use(v1Router); // POST/GET /v1/* — PAT-authed public REST API (own auth middleware)
 router.use(abuseRouter); // POST /abuse-reports (public intake, no auth)
+router.use(publicCanvasRouter); // GET /canvas/share/:token, /canvas/ab/:testId — public variant previews
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
@@ -134,6 +135,7 @@ const KNOWN_PREFIXES = [
   "/environments",
   "/addons",
   "/usage",
+  "/canvas",
 ];
 
 router.use((req, res, next) => {
