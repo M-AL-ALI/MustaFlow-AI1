@@ -204,15 +204,13 @@ export default function BillingPage() {
     void fetchData();
   }, [fetchData]);
 
-  async function _handleManageSubscription() {
-    if (workspaceId == null) return;
+  async function handleManageSubscription() {
     setPortalLoading(true);
     try {
       const res = await fetch("/api/billing/subscription/portal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          workspaceId,
           returnUrl: `${window.location.origin}/billing`,
         }),
       });

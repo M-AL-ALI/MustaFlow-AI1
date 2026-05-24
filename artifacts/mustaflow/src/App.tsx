@@ -35,6 +35,8 @@ import WorkspaceUsagePage from "./pages/workspace-usage";
 import WorkspaceAuditPage from "./pages/workspace-audit";
 import MyDomainsPage from "./pages/account/domains";
 import WorkspaceDomainsPage from "./pages/workspace-domains";
+import OrgSettingsPage from "./pages/org-settings";
+import OrgNewPage from "./pages/org-new";
 
 // Components
 import { AppLayout } from "./components/layout/app-layout";
@@ -450,6 +452,20 @@ function ClerkProviderWithRoutes() {
                 <Protected>
                   <AppLayout>
                     <MyDomainsPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/orgs/new">
+                <Protected>
+                  <AppLayout>
+                    <OrgNewPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/orgs/:orgId">
+                <Protected>
+                  <AppLayout>
+                    <OrgSettingsPage />
                   </AppLayout>
                 </Protected>
               </Route>

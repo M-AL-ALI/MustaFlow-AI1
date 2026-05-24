@@ -21,6 +21,7 @@ import {
 } from "@/components/template-picker";
 import type { TemplateCategory } from "@/lib/templates";
 import { CollaborationCard } from "./collaboration-card";
+import { ShareLinkPanel } from "./share-link-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -305,6 +306,9 @@ export function ManageTab({
             }
           }}
         />
+
+        {/* Share Links */}
+        <ShareLinkPanel projectId={projectId} />
 
         {/* Export */}
         <div className="bg-card border border-border rounded-xl p-5 space-y-3">

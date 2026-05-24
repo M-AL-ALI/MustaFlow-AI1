@@ -162,6 +162,10 @@ export const projectsTable = pgTable("projects", {
   // Null = fall back to the platform's default 404/500 HTML.
   errorPage404: text("error_page_404"),
   errorPage500: text("error_page_500"),
+  // organizationId: the org this project belongs to.
+  // Null = legacy personal project (not yet migrated to an org).
+  // Set via migrate-collaboration backfill or explicitly on project creation.
+  organizationId: integer("organization_id"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

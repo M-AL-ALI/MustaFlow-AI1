@@ -58,6 +58,7 @@
     "migrate-cdn-perfection": "tsx ./src/migrate-cdn-perfection.ts",
     "migrate-subscriptions": "tsx ./src/migrate-subscriptions.ts",
     "migrate-runtime-breadth": "tsx ./src/migrate-runtime-breadth.ts",
+    "migrate-collaboration": "tsx ./src/migrate-collaboration.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

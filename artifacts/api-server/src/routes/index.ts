@@ -71,6 +71,11 @@ import abuseRouter from "./abuse";
 import metricsRouter from "./metrics";
 import statusRouter from "./status";
 import healthProjectRouter from "./health-project";
+import orgsRouter from "./orgs";
+import commentsRouter from "./comments";
+import sharingRouter, { publicShareRouter } from "./sharing";
+import notificationsCollabRouter from "./notifications-collab";
+import projectActivityRouter from "./project-activity";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -91,6 +96,7 @@ router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
 router.use(v1Router); // POST/GET /v1/* — PAT-authed public REST API (own auth middleware)
 router.use(abuseRouter); // POST /abuse-reports (public intake, no auth)
 router.use(publicCanvasRouter); // GET /canvas/share/:token, /canvas/ab/:testId — public variant previews
+router.use(publicShareRouter); // GET /share/:token (public, no auth)
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
@@ -100,6 +106,9 @@ const KNOWN_PREFIXES = [
   "/status",
   "/metrics",
   "/abuse-reports",
+  "/orgs",
+  "/notifications",
+  "/share",
   "/workspaces",
   "/projects",
   "/audit",
@@ -229,6 +238,11 @@ router.use(bandwidthRouter);
 router.use(runtimeRouter);
 router.use(healthProjectRouter); // GET /projects/:id/health — per-project metrics
 router.use(purchasedDomainsRouter);
+router.use(orgsRouter);
+router.use(commentsRouter);
+router.use(sharingRouter);
+router.use(notificationsCollabRouter);
+router.use(projectActivityRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

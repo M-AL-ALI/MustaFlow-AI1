@@ -143,6 +143,9 @@ import { WorkspaceTour } from "./components/workspace-tour";
 import { MemoryIndicator } from "./components/memory-indicator";
 import { BrandPill } from "./components/brand-pill";
 import { AgentPromptCardsList, type AgentPromptCard } from "./components/agent-prompt-cards";
+import { CommentsPanel } from "./components/comments-panel";
+import { ActivityLogTab } from "./components/activity-log-tab";
+import { NotificationsBell } from "@/components/notifications-bell";
 import { cn } from "@/lib/utils";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -674,6 +677,8 @@ const ADVANCED_TABS = [
   { label: "Resources", value: "resources", icon: BookOpen },
   { label: "Analytics", value: "analytics", icon: Activity },
   { label: "Health", value: "health", icon: HeartPulse },
+  { label: "Comments", value: "comments", icon: MessageSquare },
+  { label: "Activity", value: "activity-log", icon: Activity },
 ];
 
 const WORKSPACE_TABS = [...PRIMARY_TABS, ...ADVANCED_TABS];
@@ -2050,6 +2055,7 @@ export default function ProjectWorkspacePage() {
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <SubscriptionTierBadge tier={subscriptionTier} />
+          <NotificationsBell />
           <CreditBalancePill />
           <button
             onClick={startTour}
@@ -3243,6 +3249,8 @@ export default function ProjectWorkspacePage() {
             {activeTab === "health" && <HealthTab projectId={projectId} />}
             {activeTab === "resources" && <ResourcesTab />}
             {activeTab === "integrations" && <IntegrationsTab projectId={projectId} />}
+            {activeTab === "comments" && <CommentsPanel projectId={projectId} />}
+            {activeTab === "activity-log" && <ActivityLogTab projectId={projectId} />}
             {activeTab === "manage" && (
               <ManageTab
                 projectId={projectId}

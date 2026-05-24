@@ -160,6 +160,22 @@ The intended user journey is: Login → create project → build app → preview
 - **Iframe sandbox**: `allow-scripts allow-forms allow-popups` (no `allow-same-origin`) — matches preview-tab posture so a malicious AI-generated variant can't reach the parent's cookies/storage.
 - **Drift**: Canvas routes are not yet in `lib/api-spec/openapi.yaml`; the frontend uses raw `fetch()` for these endpoints (same pattern as visual-edit / verify-secret / push-github calls already in the codebase). Adding Orval hooks is a clean future task once the contract stabilises.
 
+## Theme E — Collaboration & Teams (Task #627)
+
+- **Organizations**: `organizations` table (id, name, slug, type: `personal|team`, ownerId, settings jsonb). Every user gets a personal org auto-created. `org_members` (orgId, userId, role: `owner|admin|editor|viewer`). `org_invites` (orgId, email, role, token, expiresAt, acceptedAt).
+- **RBAC**: Org routes use internal `getUserOrgRole()` helper — returns null if not a member. `requireProjectOwnership` is unchanged (backward compatible); org-scoped project access is handled per-route.
+- **Comments**: `project_comments` table (projectId, authorId, filePath, lineNumber, body, parentId for threading, resolvedAt, deletedAt). Full threaded CRUD at `GET/POST /api/projects/:id/comments`, `PATCH/DELETE /api/projects/:id/comments/:commentId`. Reply endpoint: `POST /api/projects/:id/comments/:commentId/reply`. Resolve: `POST /api/projects/:id/comments/:commentId/resolve`.
+- **Share links**: `share_links` table (projectId, createdBy, token, label, scope: `draft|snapshot`, snapshotVersionId, viewCount, expiresAt, revokedAt). `POST /api/projects/:id/share`, `GET /api/projects/:id/share`, `DELETE /api/projects/:id/share/:linkId`. Public viewer: `GET /share/:token` mounted before auth wall (no auth required).
+- **Notifications**: `notifications` table (userId, type, title, body, link, readAt, actorId, entityType, entityId). Full inbox at `GET /api/notifications`, `PATCH /api/notifications/:id/read`, `POST /api/notifications/read-all`, `DELETE /api/notifications/:id`.
+- **Activity log**: `project_activity` table (projectId, actorId, eventType, summary, metadata jsonb). `GET /api/projects/:id/activity-log`.
+- **Org API routes** (`/api/orgs`): list, create, get, patch, delete, member list/remove, role update, invite list/create/accept/delete.
+- **Migration**: `pnpm --filter @workspace/scripts run migrate-collaboration` — idempotent DDL for all 7 tables + `organization_id` column on `projects` + backfill (personal org per user, project assignment).
+- **Frontend components**: `notifications-bell.tsx` (header bell, inbox dropdown), `org-switcher.tsx` (sidebar org dropdown with team org list + settings link), `comments-panel.tsx` (threaded inline comments per project), `share-link-panel.tsx` (create/list/revoke view-only share links, now in Manage tab), `activity-log-tab.tsx` (paginated activity feed), `pages/org-settings.tsx` (org rename, member table, invite form), `pages/org-new.tsx` (create new team org).
+- **Sidebar**: OrgSwitcher added below WorkspaceSwitcher; "Organizations" added to secondary nav items.
+- **Workspace page**: CommentsPanel + ActivityLogTab added as Advanced tabs; NotificationsBell in header.
+- **Routes added to App.tsx**: `/orgs/new`, `/orgs/:orgId`.
+- **Key files**: `lib/db/src/schema/{organizations,org-members,org-invites,project-comments,notifications,project-activity,share-links}.ts`, `artifacts/api-server/src/routes/{orgs,comments,sharing,notifications-collab,project-activity}.ts`, `artifacts/mustaflow/src/components/{notifications-bell,org-switcher,share-link-panel}.tsx`, `artifacts/mustaflow/src/pages/projects/components/{comments-panel,activity-log-tab}.tsx`.
+
 ## Known limitations (honest status)
 
 - **Mobile generation**: Intentionally absent from the UI. The builder only produces static HTML/CSS/JS. Expo/React Native support is a future milestone.

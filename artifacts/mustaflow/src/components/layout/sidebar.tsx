@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   Trash2,
   ShoppingCart,
+  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser, useClerk } from "@clerk/react";
@@ -33,6 +34,7 @@ import { useState, useEffect, useCallback } from "react";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { BackgroundJobsPanel } from "@/components/background-jobs-panel";
+import { OrgSwitcher } from "@/components/org-switcher";
 
 const NAV_ITEMS = [
   { name: "Home", href: "/", icon: Home },
@@ -48,6 +50,7 @@ const SECONDARY_NAV_ITEMS = [
   { name: "My Domains", href: "/account/domains", icon: ShoppingCart },
   { name: "Integrations", href: "/integrations", icon: Blocks },
   { name: "Billing", href: "/billing", icon: CreditCard },
+  { name: "Organizations", href: "/orgs/new", icon: Building2 },
 ];
 
 const TERTIARY_NAV_ITEMS = [
@@ -311,6 +314,7 @@ function SidebarInner({
   onClose: () => void;
 }) {
   const { isSignedIn } = useUser();
+  const [currentOrgId, setCurrentOrgId] = useState<number | null>(null);
   return (
     <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col overflow-y-auto">
       <CreateProjectModal open={createOpen} onOpenChange={setCreateOpen} />
@@ -329,6 +333,16 @@ function SidebarInner({
 
       {/* Workspace switcher — visible when signed in */}
       {isSignedIn && <WorkspaceSwitcher />}
+
+      {/* Org switcher — visible when signed in */}
+      {isSignedIn && (
+        <div className="px-3 pb-1">
+          <OrgSwitcher
+            currentOrgId={currentOrgId}
+            onOrgChange={(id) => setCurrentOrgId(id)}
+          />
+        </div>
+      )}
 
       {/* Create button — visible when signed in */}
       {isSignedIn && (
