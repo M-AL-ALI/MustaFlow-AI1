@@ -191,8 +191,8 @@ export default function ExtensionsPage() {
 
     fetch(`/api/extensions?${params}`, { signal: controller.signal })
       .then((r) => r.json())
-      .then((data: Extension[]) => setExtensions(data))
-      .catch(() => {})
+      .then((data: unknown) => setExtensions(Array.isArray(data) ? (data as Extension[]) : []))
+      .catch(() => setExtensions([]))
       .finally(() => setLoading(false));
 
     return () => controller.abort();

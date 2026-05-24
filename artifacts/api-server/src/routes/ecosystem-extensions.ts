@@ -73,8 +73,10 @@ publicExtensionsRouter.get("/extensions", async (req, res): Promise<void> => {
 
     res.json(results);
   } catch (err) {
-    logger.error({ err }, "Failed to list extensions");
-    res.status(500).json({ error: "Failed to load extensions" });
+    // Table may be missing in dev DBs — fail-open with an empty list so the
+    // page renders instead of crashing the client filter().
+    logger.warn({ err }, "Failed to list extensions — returning empty list");
+    res.json([]);
   }
 });
 
