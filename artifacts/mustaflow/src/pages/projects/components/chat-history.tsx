@@ -47,6 +47,8 @@ import {
   getListVersionsQueryKey,
   useRerunTaskTests,
   useListTasks,
+  useListTaskEvents,
+  getListTaskEventsQueryKey,
   useListTestRuns,
   getListTestRunsQueryKey,
   useListProjectFiles,
@@ -1696,6 +1698,15 @@ function MessageRow({
           </div>
         )}
 
+        {/* Subagent activity (live) — shows designer/explorer/tester/reviewer events */}
+        {isReport &&
+          (() => {
+            const tId = (planPayload as { taskId?: number }).taskId;
+            return typeof tId === "number" && tId > 0 ? (
+              <SubagentActivityPanel projectId={projectId} taskId={tId} />
+            ) : null;
+          })()}
+
         {/* Expandable report chip */}
         {isReport && (
           <div className="mt-2">
@@ -1816,6 +1827,76 @@ function MessageRow({
               </div>
             );
           })()}
+      </div>
+    </div>
+  );
+}
+
+function SubagentActivityPanel({ projectId, taskId }: { projectId: number; taskId: number }) {
+  const { data: events = [] } = useListTaskEvents(projectId, taskId, {
+    query: {
+      queryKey: getListTaskEventsQueryKey(projectId, taskId),
+      refetchInterval: 1800,
+    },
+  });
+  const subEvents = (
+    events as Array<{
+      id: number;
+      eventType: string;
+      message: string;
+      createdAt: string;
+    }>
+  ).filter((e) => typeof e.eventType === "string" && e.eventType.startsWith("subagent_"));
+  if (subEvents.length === 0) return null;
+  type Row = { role: string; phase: string; detail: string; key: number };
+  const rows: Row[] = subEvents.slice(-8).map((e) => {
+    let parsed: { role?: string; detail?: string };
+    try {
+      parsed = JSON.parse(e.message) as { role?: string; detail?: string };
+    } catch {
+      parsed = {};
+    }
+    return {
+      role: parsed.role ?? "subagent",
+      phase: e.eventType.replace("subagent_", ""),
+      detail: parsed.detail ?? "",
+      key: e.id || e.createdAt.length + Math.random(),
+    };
+  });
+  const roleColor: Record<string, string> = {
+    designer: "text-pink-400 border-pink-500/30 bg-pink-500/10",
+    explorer: "text-sky-400 border-sky-500/30 bg-sky-500/10",
+    tester: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
+    reviewer: "text-amber-400 border-amber-500/30 bg-amber-500/10",
+  };
+  return (
+    <div className="mt-2 rounded-lg border border-border/60 bg-card/50 px-2.5 py-1.5">
+      <div className="flex items-center gap-1.5 mb-1">
+        <Zap className="h-3 w-3 text-muted-foreground" />
+        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+          Subagent activity
+        </span>
+        <span className="text-[9px] text-muted-foreground/60 ml-auto">
+          {subEvents.length} event{subEvents.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="space-y-0.5">
+        {rows.map((r) => (
+          <div key={r.key} className="flex items-center gap-1.5 text-[10px]">
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded font-medium border shrink-0",
+                roleColor[r.role] ?? "text-muted-foreground border-border bg-muted",
+              )}
+            >
+              {r.role}
+            </span>
+            <span className="text-muted-foreground shrink-0">
+              {r.phase === "started" ? "▶" : r.phase === "done" ? "✓" : "…"}
+            </span>
+            <span className="text-foreground/80 truncate">{r.detail}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -2490,16 +2490,38 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               .slice(0, 6)
               .map((f) => ({ path: f.path, content: f.content }));
 
-            const review = await runArchitectReview({
-              userRequest: userPrompt,
-              agentMode,
-              planContext: input.planContext ?? null,
-              diff: reviewDiff,
-              commandsRun,
-              fileExcerpts,
-              assistantSummary,
-              knownWarnings: report.warnings,
+            const { dispatchReviewerStandalone } = await import("./subagent");
+            const dispatchResult = await dispatchReviewerStandalone({
+              input: {
+                mode: "refine",
+                projectId,
+                projectName: project.name,
+                projectKind: project.kind,
+                projectFormat: project.projectFormat ?? null,
+                stack: project.stack ?? null,
+                userPrompt,
+                agentMode,
+                planContext: input.planContext ?? null,
+                existingFiles: [],
+                taskId,
+                onEvent: async () => {},
+                signal: new AbortController().signal,
+              },
+              brief: `Architect review for task #${taskId}`,
+              reviewer: {
+                diff: reviewDiff,
+                commandsRun,
+                fileExcerpts,
+                assistantSummary,
+                planContext: input.planContext ?? null,
+                knownWarnings: report.warnings,
+              },
+              skipCredits: true,
             });
+            if (!dispatchResult.review) {
+              throw new Error("dispatchReviewerStandalone returned no review");
+            }
+            const review = dispatchResult.review;
 
             // Charge credits (best-effort — never block the build).
             let creditsCharged = 0;

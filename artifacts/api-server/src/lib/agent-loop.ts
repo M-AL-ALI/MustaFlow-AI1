@@ -329,7 +329,7 @@ function runInprocessValidator(
 // Tool catalog (OpenAI schema)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TOOLS: ChatCompletionTool[] = [
+export const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
@@ -958,6 +958,58 @@ const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "dispatch_subagent",
+      description:
+        "Spawn a specialist subagent with a focused brief and a role-tuned tool catalog. Roles:\n• designer — generate/edit media (images, audio, background removal) and place them in the workspace.\n• explorer — read-only investigation (list_files, read_file, search, semantic_search, find_files, fetch_prod_logs) — never writes.\n• tester — run Playwright E2E (smoke or supplied scenarios) against the live preview.\n• reviewer — architect code review of the current diff (verdict + findings + suggested fixes).\nCosts per dispatch: designer 3, explorer 1, tester 2, reviewer 2. Each subagent runs in its own scoped agent-loop with a tighter step cap; control returns here with a structured summary you can act on.",
+      parameters: {
+        type: "object",
+        properties: {
+          role: {
+            type: "string",
+            enum: ["designer", "explorer", "tester", "reviewer"],
+          },
+          brief: {
+            type: "string",
+            description:
+              "One-paragraph instruction for the subagent. Include the concrete deliverable (e.g. 'design a hero illustration at assets/hero.png matching the brand', 'find every file that references the legacy /v1 endpoint', 'run E2E covering signup → checkout', 'review the diff for security regressions').",
+          },
+          scenarios: {
+            type: "array",
+            description: "Optional E2E scenarios (tester role only). Same shape as run_e2e.",
+            items: { type: "object" },
+          },
+        },
+        required: ["role", "brief"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "plan_subtasks",
+      description:
+        "Decompose a goal into an ordered DAG of subtasks and execute each in an ISOLATED workspace clone, then 3-way merge the results back. Use for changes that touch several independent areas (e.g. 'add auth + analytics + dark mode'). Each subtask runs as its own agent-loop with a tighter step cap. Conflicts (same path edited by two subtasks divergently from the base) keep the parent's live version and are reported back so you can reconcile. Costs 1 credit per planned subtask (rounded up to the explorer rate). Use sparingly — for a single coherent change, just edit directly.",
+      parameters: {
+        type: "object",
+        properties: {
+          goal: {
+            type: "string",
+            description: "The overall outcome you want once all subtasks merge.",
+          },
+          max_subtasks: {
+            type: "integer",
+            description: "Hard cap on subtasks (1-6). Default 4.",
+          },
+        },
+        required: ["goal"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "finalize",
       description:
         "Signal that the build is complete. Provide a 1-3 sentence summary for the user. Call this only after all required checks pass.",
@@ -1039,7 +1091,7 @@ function buildSystemPrompt(
 // In-memory file workspace
 // ─────────────────────────────────────────────────────────────────────────────
 
-class FileWorkspace {
+export class FileWorkspace {
   private files = new Map<string, BuilderFile>();
   private readonly initialPaths: Set<string>;
   /**
@@ -1113,6 +1165,26 @@ class FileWorkspace {
 
   primeInitial(files: BuilderFile[]): void {
     for (const f of files) this.initialContentCache.set(f.path, f.content);
+  }
+
+  /**
+   * Snapshot of current files. Used by subagent isolation (Task #535) to
+   * capture the base before a sub-task runs in a cloned workspace.
+   */
+  snapshot(): BuilderFile[] {
+    return Array.from(this.files.values()).map((f) => ({ ...f }));
+  }
+
+  /**
+   * Create an isolated copy of this workspace. Sub-tasks (Task #535) mutate
+   * the clone freely; the parent workspace stays untouched until the
+   * three-way merge step. The clone's `initialPaths` mirrors the parent's
+   * current state so its own `diff()` reports edits made *inside* the clone.
+   */
+  clone(): FileWorkspace {
+    const copy = new FileWorkspace(this.snapshot());
+    copy.primeInitial(this.snapshot());
+    return copy;
   }
 
   search(query: string): string[] {
@@ -3498,6 +3570,14 @@ export async function executeTool(ctx: ToolCtx): Promise<{
     }
     case "finalize": {
       return { ok: true, observation: "finalized" };
+    }
+    case "dispatch_subagent": {
+      const { dispatchSubagentFromTool } = await import("./subagent");
+      return dispatchSubagentFromTool(ctx, args);
+    }
+    case "plan_subtasks": {
+      const { planSubtasksFromTool } = await import("./subagent");
+      return planSubtasksFromTool(ctx, args);
     }
     default:
       return { ok: false, observation: `ERROR: unknown tool: ${name}` };
