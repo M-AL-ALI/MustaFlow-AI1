@@ -1085,7 +1085,7 @@ export function PreviewTab({
         </div>
       )}
       {/* Preview toolbar */}
-      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-card overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="shrink-0 flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-1.5 border-b border-border bg-card">
         {/* Device size switcher */}
         <div className="flex items-center bg-muted border border-border rounded-lg p-0.5 gap-0.5 shrink-0">
           {(["desktop", "tablet", "mobile"] as DeviceFrame[]).map((d) => {
