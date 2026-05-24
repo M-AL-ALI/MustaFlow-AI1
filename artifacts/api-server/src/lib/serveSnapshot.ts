@@ -2,7 +2,7 @@
 // Used by both the /api/p/:slug/ public route and the custom-domain middleware.
 
 import type { Response } from "express";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -10,11 +10,68 @@ import {
   previewSnapshotsTable,
   domainServeEventsTable,
   projectDomainsTable,
+  projectBandwidthTable,
 } from "@workspace/db";
 import { guessMime } from "./builder";
 import { injectBridge } from "./consoleBridge";
 import { isBinaryMime } from "./binary-mime";
 import { recordProdLog, hashIp } from "./prodLogs";
+import { logger } from "./logger";
+
+// ── Bandwidth metering (Task #624) ────────────────────────────────────────────
+// In-memory accumulator keyed by "projectId:YYYY-MM". Flushed to DB every 30 s.
+// Using a best-effort upsert so a flush failure never impacts request serving.
+
+const bwAccumulator = new Map<string, { bytes: number; requests: number }>();
+
+function bwCurrentMonth(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function bwAccumulate(projectId: number, bytes: number): void {
+  const key = `${projectId}:${bwCurrentMonth()}`;
+  const prev = bwAccumulator.get(key) ?? { bytes: 0, requests: 0 };
+  bwAccumulator.set(key, { bytes: prev.bytes + bytes, requests: prev.requests + 1 });
+}
+
+async function bwFlush(): Promise<void> {
+  if (bwAccumulator.size === 0) return;
+  const snapshot = new Map(bwAccumulator);
+  bwAccumulator.clear();
+
+  const entries = [...snapshot.entries()].map(([key, val]) => {
+    const [projectIdStr, month] = key.split(":") as [string, string];
+    return { projectId: Number(projectIdStr), month, bytes: val.bytes, requests: val.requests };
+  });
+
+  for (const entry of entries) {
+    try {
+      await db
+        .insert(projectBandwidthTable)
+        .values({
+          projectId: entry.projectId,
+          month: entry.month,
+          bytesServed: entry.bytes,
+          requestCount: entry.requests,
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: [projectBandwidthTable.projectId, projectBandwidthTable.month],
+          set: {
+            bytesServed: sql`${projectBandwidthTable.bytesServed} + ${entry.bytes}`,
+            requestCount: sql`${projectBandwidthTable.requestCount} + ${entry.requests}`,
+            updatedAt: sql`now()`,
+          },
+        });
+    } catch (err) {
+      logger.warn({ err, projectId: entry.projectId }, "bwFlush: upsert failed");
+    }
+  }
+}
+
+// Flush every 30 seconds. `unref()` so the timer doesn't keep Node alive.
+setInterval(() => { void bwFlush(); }, 30_000).unref();
 
 type SnapshotFile = { path: string; content: string; mimeType?: string };
 
@@ -332,6 +389,8 @@ export async function serveSnapshot(
       prodContainerUrl: projectsTable.prodContainerUrl,
       prodContainerStatus: projectsTable.prodContainerStatus,
       deletedAt: projectsTable.deletedAt,
+      errorPage404: projectsTable.errorPage404,
+      errorPage500: projectsTable.errorPage500,
     })
     .from(projectsTable)
     .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
@@ -416,14 +475,21 @@ export async function serveSnapshot(
   if (!file) file = snapshot.find((f) => f.path === "index.html");
 
   if (!file) {
-    res.status(404).type("text/html").send(NOT_FOUND_HTML);
+    // Serve custom 404 page if configured, otherwise fall back to platform default.
+    const custom404 = project.errorPage404 ?? null;
+    res
+      .status(404)
+      .type("text/html")
+      .send(custom404 ?? NOT_FOUND_HTML);
     return;
   }
 
   const mime = file.mimeType || guessMime(file.path);
   res.type(mime).setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
   if (isBinaryMime(mime)) {
-    res.end(Buffer.from(file.content, "base64"));
+    const buf = Buffer.from(file.content, "base64");
+    bwAccumulate(projectId, buf.length);
+    res.end(buf);
   } else {
     const isHtml = mime === "text/html";
     if (isHtml) {
@@ -445,8 +511,10 @@ export async function serveSnapshot(
         ogImageUrl: ogUrl,
         slug,
       });
+      bwAccumulate(projectId, Buffer.byteLength(html, "utf8"));
       res.send(html);
     } else {
+      bwAccumulate(projectId, Buffer.byteLength(file.content, "utf8"));
       res.send(file.content);
     }
   }

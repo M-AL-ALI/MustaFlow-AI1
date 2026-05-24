@@ -150,6 +150,94 @@ router.post("/p/:slug/analytics/ping", async (req, res): Promise<void> => {
   res.json({ ok: true });
 });
 
+// ── GET /api/projects/:id/analytics/traffic ───────────────────────────────────
+// Auth-gated — daily page views (last 30d), top paths, unique visitors, referrers.
+// Used by the Publishing tab Analytics section.
+router.get(
+  "/projects/:id/analytics/traffic",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+
+    const windowDays = Math.min(90, Math.max(1, Number(req.query.days ?? 30)));
+    const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+
+    // Daily view counts
+    const dailyRows = await db
+      .select({
+        day: sql<string>`date_trunc('day', ${pageViewsTable.visitedAt})::date::text`,
+        views: sql<number>`count(*)`,
+        uniqueSessions: sql<number>`count(distinct ${pageViewsTable.sessionId})`,
+      })
+      .from(pageViewsTable)
+      .where(and(eq(pageViewsTable.projectId, projectId), gte(pageViewsTable.visitedAt, since)))
+      .groupBy(sql`date_trunc('day', ${pageViewsTable.visitedAt})`)
+      .orderBy(sql`date_trunc('day', ${pageViewsTable.visitedAt})`);
+
+    // Top pages
+    const topPageRows = await db
+      .select({
+        path: pageViewsTable.pagePath,
+        views: sql<number>`count(*)`,
+      })
+      .from(pageViewsTable)
+      .where(and(eq(pageViewsTable.projectId, projectId), gte(pageViewsTable.visitedAt, since)))
+      .groupBy(pageViewsTable.pagePath)
+      .orderBy(desc(sql`count(*)`))
+      .limit(10);
+
+    // Total views + unique sessions in window
+    const [totals] = await db
+      .select({
+        total: sql<number>`count(*)`,
+        sessions: sql<number>`count(distinct ${pageViewsTable.sessionId})`,
+      })
+      .from(pageViewsTable)
+      .where(and(eq(pageViewsTable.projectId, projectId), gte(pageViewsTable.visitedAt, since)));
+
+    // Top referrers
+    const referrerRows = await db
+      .select({
+        referrer: pageViewsTable.referrer,
+        count: sql<number>`count(*)`,
+      })
+      .from(pageViewsTable)
+      .where(
+        and(
+          eq(pageViewsTable.projectId, projectId),
+          gte(pageViewsTable.visitedAt, since),
+          sql`${pageViewsTable.referrer} IS NOT NULL AND ${pageViewsTable.referrer} != ''`,
+        ),
+      )
+      .groupBy(pageViewsTable.referrer)
+      .orderBy(desc(sql`count(*)`))
+      .limit(8);
+
+    res.json({
+      windowDays,
+      totalViews: Number(totals?.total ?? 0),
+      uniqueVisitors: Number(totals?.sessions ?? 0),
+      dailyBreakdown: dailyRows.map((r) => ({
+        day: r.day,
+        views: Number(r.views),
+        uniqueSessions: Number(r.uniqueSessions),
+      })),
+      topPages: topPageRows.map((r) => ({
+        path: r.path,
+        views: Number(r.views),
+      })),
+      topReferrers: referrerRows.map((r) => ({
+        referrer: r.referrer ?? "(direct)",
+        count: Number(r.count),
+      })),
+    });
+  },
+);
+
 // ── GET /api/projects/:id/analytics/summary ───────────────────────────────────
 // Auth-gated — only the project owner may see page view analytics.
 router.get(

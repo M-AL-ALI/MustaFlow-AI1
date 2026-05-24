@@ -1241,6 +1241,10 @@ export interface HostnameRoute {
   maintenance: boolean;
   /** Optional Cloudflare region hint (e.g. "weur", "enam"). Null = no preference. */
   preferredRegion: string | null;
+  /** Custom 404 HTML served by the Worker when a file is not found. Null = platform default. */
+  errorPage404?: string | null;
+  /** Custom 500 HTML served by the Worker on origin error / R2 5xx. Null = platform default. */
+  errorPage500?: string | null;
 }
 
 function kvApiBase(): string {
@@ -1319,10 +1323,20 @@ export async function syncHostnameKVAfterPublish(opts: {
   versionId: number | null;
   maintenance?: boolean;
   preferredRegion?: string | null;
+  errorPage404?: string | null;
+  errorPage500?: string | null;
 }): Promise<void> {
   if (!kvEnabled()) return;
 
-  const { hostname, projectId, versionId, maintenance = false, preferredRegion = null } = opts;
+  const {
+    hostname,
+    projectId,
+    versionId,
+    maintenance = false,
+    preferredRegion = null,
+    errorPage404 = null,
+    errorPage500 = null,
+  } = opts;
 
   if (versionId === null) {
     await deleteHostnameKV(hostname).catch(() => {
@@ -1345,6 +1359,8 @@ export async function syncHostnameKVAfterPublish(opts: {
     versionHistory: history,
     maintenance,
     preferredRegion,
+    errorPage404: errorPage404 ?? undefined,
+    errorPage500: errorPage500 ?? undefined,
   }).catch(() => {
     /* best-effort */
   });
@@ -1363,6 +1379,8 @@ export async function syncAllHostnamesKV(opts: {
   customDomains: string[];
   maintenance?: boolean;
   preferredRegion?: string | null;
+  errorPage404?: string | null;
+  errorPage500?: string | null;
 }): Promise<void> {
   if (!kvEnabled()) return;
   const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
@@ -1386,6 +1404,8 @@ export async function syncAllHostnamesKV(opts: {
         versionId: opts.versionId,
         maintenance: opts.maintenance,
         preferredRegion: opts.preferredRegion,
+        errorPage404: opts.errorPage404,
+        errorPage500: opts.errorPage500,
       }),
     ),
   );

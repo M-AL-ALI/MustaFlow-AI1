@@ -2775,7 +2775,9 @@ export function PublishingTab({
   const [savingSecurityGate, setSavingSecurityGate] = useState(false);
 
   // Environment sub-tab (inside the web platform tab)
-  const [envTab, setEnvTab] = useState<"production" | "staging" | "previews">("production");
+  const [envTab, setEnvTab] = useState<"production" | "staging" | "previews" | "analytics">(
+    "production",
+  );
 
   // Staging publish state
   const [isStaging, setIsStaging] = useState(false);
@@ -2829,6 +2831,135 @@ export function PublishingTab({
       setPreviewSnapshotsLoading(false);
     }
   }, [projectId]);
+
+  // ── Preview link generator state (Task #624) ─────────────────────────────
+  const [previewLinkLoading, setPreviewLinkLoading] = useState(false);
+  const [previewLinkResult, setPreviewLinkResult] = useState<{
+    previewSlug: string;
+    internalUrl: string;
+    expiresAt: string;
+  } | null>(null);
+  const [previewLinkError, setPreviewLinkError] = useState<string | null>(null);
+  const [previewLinkCopied, setPreviewLinkCopied] = useState(false);
+
+  const createPreviewLink = useCallback(async () => {
+    setPreviewLinkLoading(true);
+    setPreviewLinkError(null);
+    setPreviewLinkResult(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/preview-link`, { method: "POST" });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        internalUrl?: string;
+        previewSlug?: string;
+        expiresAt?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setPreviewLinkError(data.error ?? "Failed to create preview link");
+      } else {
+        setPreviewLinkResult({
+          previewSlug: data.previewSlug ?? "",
+          internalUrl: data.internalUrl ?? "",
+          expiresAt: data.expiresAt ?? "",
+        });
+      }
+    } catch {
+      setPreviewLinkError("Network error. Please try again.");
+    } finally {
+      setPreviewLinkLoading(false);
+    }
+  }, [projectId]);
+
+  const copyPreviewLink = useCallback(() => {
+    if (!previewLinkResult) return;
+    void navigator.clipboard.writeText(window.location.origin + previewLinkResult.internalUrl);
+    setPreviewLinkCopied(true);
+    setTimeout(() => setPreviewLinkCopied(false), 2000);
+  }, [previewLinkResult]);
+
+  // ── Bandwidth metering state (Task #624) ─────────────────────────────────
+  type BandwidthData = {
+    month: string;
+    bytesServed: number;
+    requestCount: number;
+    bytesServedFormatted: string;
+    tierBytes: number;
+    tierBytesFormatted: string;
+    pctUsed: number;
+    atSoftCap: boolean;
+    atHardCap: boolean;
+  };
+  const [bandwidthData, setBandwidthData] = useState<BandwidthData | null>(null);
+  const [bandwidthLoading, setBandwidthLoading] = useState(false);
+
+  const fetchBandwidth = useCallback(async () => {
+    setBandwidthLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/bandwidth`);
+      if (res.ok) {
+        const data = (await res.json()) as BandwidthData;
+        setBandwidthData(data);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setBandwidthLoading(false);
+    }
+  }, [projectId]);
+
+  // ── Analytics traffic state (Task #624) ──────────────────────────────────
+  type TrafficData = {
+    totalViews: number;
+    uniqueVisitors: number;
+    windowDays: number;
+    dailyBreakdown: { day: string; views: number; uniqueSessions: number }[];
+    topPages: { path: string; views: number }[];
+    topReferrers: { referrer: string; count: number }[];
+  };
+  const [trafficData, setTrafficData] = useState<TrafficData | null>(null);
+  const [trafficLoading, setTrafficLoading] = useState(false);
+
+  const fetchTrafficData = useCallback(async () => {
+    setTrafficLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/analytics/traffic?days=30`);
+      if (res.ok) {
+        const data = (await res.json()) as TrafficData;
+        setTrafficData(data);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setTrafficLoading(false);
+    }
+  }, [projectId]);
+
+  // ── Custom error pages state (Task #624) ─────────────────────────────────
+  const [errorPage404, setErrorPage404] = useState<string>("");
+  const [errorPage500, setErrorPage500] = useState<string>("");
+  const [savingErrorPages, setSavingErrorPages] = useState(false);
+  const [errorPagesSaved, setErrorPagesSaved] = useState(false);
+
+  const saveErrorPages = useCallback(async () => {
+    setSavingErrorPages(true);
+    setErrorPagesSaved(false);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          errorPage404: errorPage404.trim() || null,
+          errorPage500: errorPage500.trim() || null,
+        }),
+      });
+      if (res.ok) setErrorPagesSaved(true);
+    } catch {
+      /* ignore */
+    } finally {
+      setSavingErrorPages(false);
+    }
+  }, [projectId, errorPage404, errorPage500]);
 
   // Domain management state
   type DomainInfo = {
@@ -3478,20 +3609,25 @@ export function PublishingTab({
         {/* ── WEB ─────────────────────────────────────────────────────────── */}
         {platform === "web" && (
           <div className="space-y-5">
-            {/* Environment sub-tabs: Production / Staging / Previews */}
+            {/* Environment sub-tabs: Production / Staging / Previews / Analytics */}
             <div className="flex gap-1 bg-muted/40 rounded-lg p-1 border border-border">
               {(
                 [
                   { id: "production" as const, label: "Production" },
                   { id: "staging" as const, label: "Staging" },
                   { id: "previews" as const, label: "Previews" },
-                ] as { id: "production" | "staging" | "previews"; label: string }[]
+                  { id: "analytics" as const, label: "Analytics" },
+                ] as { id: "production" | "staging" | "previews" | "analytics"; label: string }[]
               ).map(({ id, label }) => (
                 <button
                   key={id}
                   onClick={() => {
                     setEnvTab(id);
                     if (id === "previews") void fetchPreviewSnapshots();
+                    if (id === "analytics") {
+                      void fetchTrafficData();
+                      void fetchBandwidth();
+                    }
                   }}
                   className={cn(
                     "flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-colors",
@@ -3641,6 +3777,64 @@ export function PublishingTab({
                       No previews yet. Build the app to generate a preview URL.
                     </p>
                   )}
+                  {/* Manual preview link generator */}
+                  <div className="border-t border-border pt-3 space-y-2">
+                    <p className="text-xs font-medium">Create a shareable draft link</p>
+                    <p className="text-xs text-muted-foreground">
+                      Snapshot current files into a new 7-day preview link without publishing to
+                      production.
+                    </p>
+                    {previewLinkError && (
+                      <p className="text-xs text-destructive">{previewLinkError}</p>
+                    )}
+                    {previewLinkResult && (
+                      <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <a
+                            href={previewLinkResult.internalUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary underline break-all flex-1"
+                          >
+                            {window.location.origin + previewLinkResult.internalUrl}
+                          </a>
+                          <button
+                            onClick={copyPreviewLink}
+                            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                            title="Copy link"
+                          >
+                            {previewLinkCopied ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Expires{" "}
+                          {new Date(previewLinkResult.expiresAt).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </p>
+                      </div>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => void createPreviewLink()}
+                      disabled={previewLinkLoading}
+                    >
+                      {previewLinkLoading ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                      ) : (
+                        <Link2 className="h-3.5 w-3.5 mr-2" />
+                      )}
+                      {previewLinkLoading ? "Creating…" : "Create Preview Link"}
+                    </Button>
+                  </div>
 
                   {!previewSnapshotsLoading && previewSnapshots.length > 0 && (
                     <div className="space-y-2">
@@ -3692,6 +3886,225 @@ export function PublishingTab({
                         );
                       })}
                     </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Analytics tab (Task #624) ─────────────────────────────────── */}
+            {envTab === "analytics" && (
+              <div className="space-y-4">
+                {/* Traffic overview */}
+                <div className="border border-border rounded-xl p-4 bg-card space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-sm flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-muted-foreground" />
+                      Traffic Overview — last 30 days
+                    </h3>
+                    <button
+                      onClick={() => void fetchTrafficData()}
+                      disabled={trafficLoading}
+                      className="text-xs text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+                    >
+                      {trafficLoading ? "Loading…" : "Refresh"}
+                    </button>
+                  </div>
+
+                  {trafficLoading && (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    </div>
+                  )}
+
+                  {!trafficLoading && !trafficData && (
+                    <p className="text-xs text-muted-foreground text-center py-4 italic">
+                      Click Refresh to load traffic data.
+                    </p>
+                  )}
+
+                  {trafficData && (
+                    <>
+                      {/* Summary row */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-lg bg-muted/40 border border-border px-4 py-3 space-y-0.5">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                            Page Views
+                          </p>
+                          <p className="text-xl font-semibold tabular-nums">
+                            {trafficData.totalViews.toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-muted/40 border border-border px-4 py-3 space-y-0.5">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                            Unique Visitors
+                          </p>
+                          <p className="text-xl font-semibold tabular-nums">
+                            {trafficData.uniqueVisitors.toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Daily bar chart */}
+                      {trafficData.dailyBreakdown.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                            Daily Views
+                          </p>
+                          <div className="flex items-end gap-0.5 h-20">
+                            {(() => {
+                              const maxViews = Math.max(
+                                1,
+                                ...trafficData.dailyBreakdown.map((d) => d.views),
+                              );
+                              return trafficData.dailyBreakdown.slice(-30).map((d) => (
+                                <div
+                                  key={d.day}
+                                  title={`${d.day}: ${d.views} views`}
+                                  className="flex-1 bg-primary/70 rounded-sm hover:bg-primary transition-colors min-w-0"
+                                  style={{ height: `${Math.max(4, (d.views / maxViews) * 100)}%` }}
+                                />
+                              ));
+                            })()}
+                          </div>
+                          <div className="flex justify-between text-[10px] text-muted-foreground">
+                            <span>
+                              {trafficData.dailyBreakdown[0]?.day?.slice(5) ?? ""}
+                            </span>
+                            <span>
+                              {trafficData.dailyBreakdown[trafficData.dailyBreakdown.length - 1]?.day?.slice(5) ?? ""}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* Top pages */}
+                {trafficData && trafficData.topPages.length > 0 && (
+                  <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                    <h3 className="font-semibold text-sm flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-muted-foreground" />
+                      Top Pages
+                    </h3>
+                    <div className="space-y-1.5">
+                      {trafficData.topPages.map((p) => {
+                        const maxViews = trafficData.topPages[0]?.views ?? 1;
+                        const pct = Math.round((p.views / maxViews) * 100);
+                        return (
+                          <div key={p.path} className="space-y-0.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-mono text-muted-foreground truncate max-w-[60%]">
+                                {p.path || "/"}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground shrink-0">
+                                {p.views.toLocaleString()} views
+                              </span>
+                            </div>
+                            <div className="h-1 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary/60 rounded-full"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Top referrers */}
+                {trafficData && trafficData.topReferrers.length > 0 && (
+                  <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                    <h3 className="font-semibold text-sm flex items-center gap-2">
+                      <Link2 className="h-4 w-4 text-muted-foreground" />
+                      Top Referrers
+                    </h3>
+                    <div className="divide-y divide-border">
+                      {trafficData.topReferrers.map((r) => (
+                        <div
+                          key={r.referrer}
+                          className="flex items-center justify-between py-2 text-xs"
+                        >
+                          <span className="text-muted-foreground truncate max-w-[70%]">
+                            {r.referrer}
+                          </span>
+                          <span className="text-muted-foreground shrink-0">
+                            {r.count.toLocaleString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Bandwidth summary in analytics tab */}
+                <div className="border border-border rounded-xl p-4 bg-card space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-sm flex items-center gap-2">
+                      <Server className="h-4 w-4 text-muted-foreground" />
+                      Bandwidth — {bandwidthData?.month ?? "this month"}
+                    </h3>
+                    <button
+                      onClick={() => void fetchBandwidth()}
+                      disabled={bandwidthLoading}
+                      className="text-xs text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+                    >
+                      {bandwidthLoading ? "Loading…" : "Refresh"}
+                    </button>
+                  </div>
+                  {bandwidthData ? (
+                    <div className="space-y-3">
+                      {(bandwidthData.atSoftCap || bandwidthData.atHardCap) && (
+                        <div
+                          className={cn(
+                            "flex items-start gap-2 text-xs rounded-lg px-3 py-2",
+                            bandwidthData.atHardCap
+                              ? "bg-destructive/10 border border-destructive/20 text-destructive"
+                              : "bg-yellow-500/10 border border-yellow-500/20 text-yellow-600",
+                          )}
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                          <span>
+                            {bandwidthData.atHardCap
+                              ? "Hard cap reached. Contact support to increase your bandwidth allowance."
+                              : "Approaching bandwidth limit (80%+ used this month)."}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">
+                          {bandwidthData.bytesServedFormatted} of {bandwidthData.tierBytesFormatted}
+                        </span>
+                        <span className="font-medium">{bandwidthData.pctUsed}%</span>
+                      </div>
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all",
+                            bandwidthData.atHardCap
+                              ? "bg-destructive"
+                              : bandwidthData.atSoftCap
+                                ? "bg-yellow-500"
+                                : "bg-primary",
+                          )}
+                          style={{ width: `${Math.min(100, bandwidthData.pctUsed)}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                        <span>{bandwidthData.requestCount.toLocaleString()} requests</span>
+                        <span>Resets next month</span>
+                      </div>
+                    </div>
+                  ) : bandwidthLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">
+                      Click Refresh to load bandwidth data.
+                    </p>
                   )}
                 </div>
               </div>
@@ -4552,6 +4965,64 @@ export function PublishingTab({
                         <Save className="h-3.5 w-3.5 mr-2" />
                       )}
                       Save Settings
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Custom error pages (Task #624) */}
+                <div className="border border-border rounded-xl p-4 bg-card space-y-4">
+                  <h3 className="font-semibold text-sm flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                    Custom Error Pages
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Paste full HTML to serve for 404 (not found) and 500 (server error) responses.
+                    Leave blank to use the platform default pages.
+                  </p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                        404 — Page not found
+                      </label>
+                      <textarea
+                        value={errorPage404}
+                        onChange={(e) => setErrorPage404(e.target.value)}
+                        placeholder="<!doctype html><html>…</html>"
+                        rows={3}
+                        className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                        500 — Server error
+                      </label>
+                      <textarea
+                        value={errorPage500}
+                        onChange={(e) => setErrorPage500(e.target.value)}
+                        placeholder="<!doctype html><html>…</html>"
+                        rows={3}
+                        className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                      />
+                    </div>
+                    {errorPagesSaved && (
+                      <div className="flex items-center gap-1.5 text-xs text-green-600">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Saved
+                      </div>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => void saveErrorPages()}
+                      disabled={savingErrorPages}
+                    >
+                      {savingErrorPages ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5 mr-2" />
+                      )}
+                      Save Error Pages
                     </Button>
                   </div>
                 </div>

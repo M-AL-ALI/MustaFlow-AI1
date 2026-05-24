@@ -158,6 +158,10 @@ export const projectsTable = pgTable("projects", {
   // Null = no preference (Cloudflare picks the closest PoP).
   // Example values: "weur" (Western Europe), "enam" (Eastern North America), "apac" (Asia Pacific).
   preferredRegion: text("preferred_region"),
+  // Custom error pages — HTML served by the edge Worker and DB fallback on miss / origin error.
+  // Null = fall back to the platform's default 404/500 HTML.
+  errorPage404: text("error_page_404"),
+  errorPage500: text("error_page_500"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

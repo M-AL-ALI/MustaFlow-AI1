@@ -14,11 +14,13 @@
 
 import { Router, type IRouter } from "express";
 import { eq, sql, isNull, and } from "drizzle-orm";
+import { randomBytes } from "crypto";
 import {
   db,
   projectsTable,
   projectFilesTable,
   projectVersionsTable,
+  previewSnapshotsTable,
   deploymentLogsTable,
   projectDomainsTable,
   secretsTable,
@@ -240,6 +242,8 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
               versionId: deploymentVersion.id,
               customDomains: [],
               preferredRegion: project.preferredRegion ?? null,
+              errorPage404: project.errorPage404 ?? null,
+              errorPage500: project.errorPage500 ?? null,
             }),
             new Promise<void>((resolve) => setTimeout(resolve, 5000)),
           ]);
@@ -416,6 +420,8 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
             versionId: snapshotId,
             customDomains,
             preferredRegion: project.preferredRegion ?? null,
+            errorPage404: project.errorPage404 ?? null,
+            errorPage500: project.errorPage500 ?? null,
           }),
           new Promise<void>((resolve) => setTimeout(resolve, 5000)),
         ]);
@@ -672,6 +678,8 @@ router.post("/projects/:id/promote", requireProjectOwnership, async (req, res): 
           versionId: project.stagingPublishedSnapshotId!,
           customDomains,
           preferredRegion: project.preferredRegion ?? null,
+          errorPage404: project.errorPage404 ?? null,
+          errorPage500: project.errorPage500 ?? null,
         });
         await purgeCacheForProject({ publicSlug: slug, customDomains });
       } catch {
@@ -851,6 +859,94 @@ router.post("/projects/:id/unpublish", requireProjectOwnership, async (req, res)
     publicUrlDisabled: true,
   });
 });
+
+// ── POST /api/projects/:id/preview-link ──────────────────────────────────────
+// Creates a shareable, time-limited preview link from the current project files.
+// Snapshots files into a project_versions row (environment="preview") and a
+// preview_snapshots row with a 7-day expiry. The URL is served by the existing
+// /api/p/:slug/ route just like any other preview snapshot.
+router.post(
+  "/projects/:id/preview-link",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+
+    const [project] = await db
+      .select({ id: projectsTable.id, name: projectsTable.name })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const files = await db
+      .select({ path: projectFilesTable.path, content: projectFilesTable.content, mimeType: projectFilesTable.mimeType })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId));
+
+    if (files.length === 0) {
+      res.status(400).json({ error: "No files found. Build the app first." });
+      return;
+    }
+
+    const filesSnapshot = files.map((f) => ({
+      path: f.path,
+      content: f.content,
+      mimeType: f.mimeType ?? undefined,
+    }));
+
+    const label = `Preview link — ${new Date().toISOString().slice(0, 10)}`;
+
+    const [version] = await db
+      .insert(projectVersionsTable)
+      .values({
+        projectId,
+        label,
+        filesSnapshot,
+        environment: "preview",
+      })
+      .returning({ id: projectVersionsTable.id });
+
+    if (!version) {
+      res.status(500).json({ error: "Failed to create version snapshot" });
+      return;
+    }
+
+    // Use a hex slug so it cannot be guessed
+    const previewSlug = `${project.name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16) || "preview"}-lnk-${randomBytes(8).toString("hex")}`;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const [snap] = await db
+      .insert(previewSnapshotsTable)
+      .values({
+        projectId,
+        versionId: version.id,
+        previewSlug,
+        expiresAt,
+      })
+      .returning({ id: previewSnapshotsTable.id, previewSlug: previewSnapshotsTable.previewSlug });
+
+    if (!snap) {
+      res.status(500).json({ error: "Failed to create preview snapshot record" });
+      return;
+    }
+
+    const internalUrl = `/api/p/${snap.previewSlug}/preview/`;
+    const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
+    const previewUrl = `https://${snap.previewSlug}.${PLATFORM_DOMAIN}/`;
+
+    res.json({
+      ok: true,
+      previewSlug: snap.previewSlug,
+      previewUrl,
+      internalUrl,
+      expiresAt: expiresAt.toISOString(),
+      versionId: version.id,
+    });
+  },
+);
 
 // ── POST /api/projects/:id/maintenance ───────────────────────────────────────
 // Toggle the Cloudflare edge CDN maintenance mode for a project.
