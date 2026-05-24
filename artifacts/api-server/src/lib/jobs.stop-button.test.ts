@@ -22,6 +22,7 @@ const {
   insertIdCounter,
   updateCallCount,
   mockRunBuildPipeline,
+  mockRunAgentLoop,
   makeSelectChain,
   makeUpdateChain,
   makeInsertChain,
@@ -203,6 +204,9 @@ const {
   // ── The mock builder that blocks on the signal ────────────────────────────
   const mockRunBuildPipeline = vi.fn();
 
+  // ── The mock agentic loop that blocks on the signal ───────────────────────
+  const mockRunAgentLoop = vi.fn();
+
   // ── DB factory (called fresh per test via makeDb) ─────────────────────────
   function makeDb() {
     const transactionMock = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -283,6 +287,7 @@ const {
     PROJECT_ID,
     mockProject,
     publishTaskEventSpy,
+    mockRunAgentLoop,
   };
 });
 
@@ -412,6 +417,15 @@ vi.mock("./durable-queue", () => ({
 vi.mock("./provisioning", () => ({
   enqueueProvisionProjectJob: vi.fn(),
   runProvisionProjectJob: vi.fn().mockResolvedValue(undefined),
+}));
+
+// ── The agent-loop mock — blocks on the abort signal ─────────────────────────
+vi.mock("./agent-loop", () => ({
+  get runAgentLoop() {
+    return mockRunAgentLoop;
+  },
+  loopResultToBuildResult: vi.fn(),
+  loopResultToRefineResult: vi.fn(),
 }));
 
 // ── The builder mock — blocks on the abort signal ────────────────────────────
@@ -586,6 +600,129 @@ describe("Task #753 — Stop button cancellation (stubbed AI provider)", () => {
     // First cancel — should succeed
     const first = cancelActiveJob(TASK_ID);
     // Second cancel on the same task — controller already removed
+    const second = cancelActiveJob(TASK_ID);
+
+    await jobPromise;
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+  }, 10_000);
+});
+
+// ── Agentic builder path (AGENTIC_BUILDER_ENABLED=true) ───────────────────────
+
+describe("Task #754 — Stop button cancellation via agentic builder loop", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    emittedEventRows.length = 0;
+    insertIdCounter.value = 1;
+    updateCallCount.value = 0;
+
+    // Enable the agentic builder so runJob routes through runAgentLoop instead
+    // of runBuildPipeline.
+    process.env.AGENTIC_BUILDER_ENABLED = "true";
+
+    // runAgentLoop blocks indefinitely until the AbortSignal fires, then
+    // rejects with the same error message that runJob's catch block recognises.
+    mockRunAgentLoop.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) =>
+        new Promise<never>((_, reject) => {
+          if (signal.aborted) {
+            reject(new Error("Build cancelled"));
+            return;
+          }
+          signal.addEventListener("abort", () => reject(new Error("Build cancelled")), {
+            once: true,
+          });
+        }),
+    );
+  });
+
+  afterEach(() => {
+    delete process.env.AGENTIC_BUILDER_ENABLED;
+  });
+
+  it("runJob (agentic) emits the 'cancelled' SSE event when cancelActiveJob is called mid-build", async () => {
+    const jobPromise = runJob({
+      taskId: TASK_ID,
+      projectId: PROJECT_ID,
+      kind: "build",
+      userPrompt: "Build me a todo app with colourful cards",
+      agentMode: "lite",
+    });
+
+    // Allow the job to advance through its setup DB calls and reach the
+    // agent loop (all awaits in the setup path resolve immediately because
+    // they hit our synchronous-resolve mocks).
+    for (let i = 0; i < 6; i++) {
+      await new Promise<void>((r) => setImmediate(r));
+    }
+
+    // Simulate the user clicking Stop.
+    const aborted = cancelActiveJob(TASK_ID);
+    expect(aborted).toBe(true);
+
+    // Wait for runJob to finish the catch/finally path.
+    await jobPromise;
+
+    // ── Assert: "cancelled" SSE event recorded in task_events ─────────────
+    const cancelledEvents = emittedEventRows.filter((e) => e.eventType === "cancelled");
+    expect(cancelledEvents).toHaveLength(1);
+    expect(cancelledEvents[0]).toMatchObject({
+      taskId: TASK_ID,
+      eventType: "cancelled",
+      message: "Build cancelled by user.",
+    });
+
+    // ── Assert: publishTaskEvent (browser SSE fanout) called with "cancelled"
+    const cancelledPub = publishTaskEventSpy.mock.calls.find(
+      ([arg]: [{ eventType: string }]) => arg.eventType === "cancelled",
+    );
+    expect(cancelledPub).toBeDefined();
+    expect(cancelledPub![0]).toMatchObject({
+      taskId: TASK_ID,
+      eventType: "cancelled",
+    });
+  }, 10_000);
+
+  it("agentic: 'queued' event precedes 'cancelled' — event ordering is preserved", async () => {
+    const jobPromise = runJob({
+      taskId: TASK_ID,
+      projectId: PROJECT_ID,
+      kind: "build",
+      userPrompt: "A dashboard with real-time charts",
+      agentMode: "lite",
+    });
+
+    for (let i = 0; i < 6; i++) {
+      await new Promise<void>((r) => setImmediate(r));
+    }
+
+    cancelActiveJob(TASK_ID);
+    await jobPromise;
+
+    const types = emittedEventRows.map((r) => r.eventType);
+    expect(types).toContain("queued");
+    expect(types).toContain("cancelled");
+    const queuedIdx = types.indexOf("queued");
+    const cancelledIdx = types.indexOf("cancelled");
+    expect(queuedIdx).toBeLessThan(cancelledIdx);
+  }, 10_000);
+
+  it("agentic: cancelActiveJob returns true only once per in-flight task (idempotency)", async () => {
+    const jobPromise = runJob({
+      taskId: TASK_ID,
+      projectId: PROJECT_ID,
+      kind: "build",
+      userPrompt: "An e-commerce storefront",
+      agentMode: "eco",
+    });
+
+    for (let i = 0; i < 6; i++) {
+      await new Promise<void>((r) => setImmediate(r));
+    }
+
+    const first = cancelActiveJob(TASK_ID);
     const second = cancelActiveJob(TASK_ID);
 
     await jobPromise;
