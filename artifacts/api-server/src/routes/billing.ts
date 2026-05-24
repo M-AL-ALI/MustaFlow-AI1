@@ -21,6 +21,7 @@ import { getOrCreateCredits } from "./credits";
 import {
   stripeAvailable,
   getUncachableStripeClient,
+  getStripePublishableKey,
   invalidateStripeCredentialCache,
 } from "../lib/stripeClient";
 import { logger } from "../lib/logger";
@@ -269,8 +270,12 @@ router.get("/billing/transactions", async (req, res): Promise<void> => {
 // GET /api/billing/packages
 router.get("/billing/packages", async (_req, res): Promise<void> => {
   const configured = await stripeAvailable();
+  // Publishable key is safe to expose to the browser (it's the pk_ key designed
+  // for client-side use). Needed for the embedded checkout flow.
+  const publishableKey = configured ? ((await getStripePublishableKey()) ?? "") : "";
   res.json({
     stripeConfigured: configured,
+    publishableKey,
     packages: CREDIT_PACKAGES.map((p) => ({
       id: p.id,
       label: p.label,
@@ -301,10 +306,12 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
     return;
   }
 
-  const { packageId, successUrl, cancelUrl } = req.body as {
+  const { packageId, uiMode, successUrl, cancelUrl, returnUrl } = req.body as {
     packageId?: string;
+    uiMode?: "hosted" | "embedded";
     successUrl?: string;
     cancelUrl?: string;
+    returnUrl?: string;
   };
 
   const pkg = CREDIT_PACKAGES.find((p) => p.id === packageId);
@@ -315,8 +322,10 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
     return;
   }
 
-  if (!successUrl || !cancelUrl) {
-    res.status(400).json({ error: "successUrl and cancelUrl are required" });
+  const mode = uiMode === "embedded" ? "embedded" : "hosted";
+
+  if (mode === "hosted" && (!successUrl || !cancelUrl)) {
+    res.status(400).json({ error: "successUrl and cancelUrl are required for hosted checkout" });
     return;
   }
 
@@ -339,21 +348,38 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
           },
         };
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
+    const baseParams = {
+      mode: "payment" as const,
       line_items: [lineItem],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
       metadata: {
         userId,
         packageId: pkg.id,
         credits: String(pkg.credits),
       },
-    });
+    };
+
+    const session =
+      mode === "embedded"
+        ? await stripe.checkout.sessions.create({
+            ...baseParams,
+            ui_mode: "embedded",
+            // When no return_url is provided, configure the session so the
+            // embedded form stays in place after payment and the client polls
+            // (via session status / webhook + credit refetch) for completion.
+            ...(returnUrl
+              ? { return_url: returnUrl }
+              : { redirect_on_completion: "never" as const }),
+          })
+        : await stripe.checkout.sessions.create({
+            ...baseParams,
+            success_url: successUrl!,
+            cancel_url: cancelUrl!,
+          });
 
     res.json({
       sessionId: session.id,
-      checkoutUrl: session.url,
+      checkoutUrl: session.url ?? undefined,
+      clientSecret: session.client_secret ?? undefined,
       package: {
         id: pkg.id,
         label: pkg.label,

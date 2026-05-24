@@ -69,6 +69,7 @@ export * from './backgroundJob';
 export * from './backgroundJobRunMode';
 export * from './backgroundJobStatus';
 export * from './billingCheckoutInput';
+export * from './billingCheckoutInputUiMode';
 export * from './billingCheckoutResult';
 export * from './billingPackage';
 export * from './billingPackagesResult';

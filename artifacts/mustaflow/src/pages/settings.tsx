@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useUser, useClerk } from "@clerk/react";
 import {
   Sun,
@@ -14,10 +14,20 @@ import {
   ExternalLink,
   History,
   ArrowUpRight,
+  X,
 } from "lucide-react";
+import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
+import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
 import { applyTheme, getStoredTheme, type AppearanceMode } from "@/lib/theme";
 import { useGetUserCredits, useListCreditTransactions } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 interface UserPrefs {
   emailBuildComplete?: boolean;
@@ -36,6 +46,7 @@ interface CreditPackage {
 
 interface PackagesResponse {
   stripeConfigured: boolean;
+  publishableKey?: string;
   packages: CreditPackage[];
 }
 
@@ -383,11 +394,32 @@ function AppearanceOption({
   );
 }
 
+// Cache the loadStripe promise per publishable key so we don't re-init the
+// Stripe.js singleton across re-renders. Map keeps it safe if the key changes
+// at runtime (e.g. after Stripe connector reconfiguration).
+const stripePromises = new Map<string, Promise<StripeJs | null>>();
+function getStripePromise(pk: string): Promise<StripeJs | null> {
+  let p = stripePromises.get(pk);
+  if (!p) {
+    p = loadStripe(pk);
+    stripePromises.set(pk, p);
+  }
+  return p;
+}
+
 function CreditsTab() {
+  const { toast } = useToast();
   const [packages, setPackages] = useState<PackagesResponse | null>(null);
   const [packagesLoading, setPackagesLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
+
+  // Embedded checkout state
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [activePkg, setActivePkg] = useState<CreditPackage | null>(null);
+  const lastBalanceRef = useRef<number | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const {
     data: creditsData,
@@ -429,31 +461,96 @@ function CreditsTab() {
     if (!pkg.available) return;
     setCheckoutLoading(pkg.id);
     try {
-      const origin = window.location.origin;
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           packageId: pkg.id,
-          successUrl: `${origin}/settings?tab=credits&payment=success`,
-          cancelUrl: `${origin}/settings?tab=credits&payment=cancelled`,
+          uiMode: "embedded",
         }),
       });
       const data = (await res.json()) as {
         setupRequired?: boolean;
-        checkoutUrl?: string;
+        clientSecret?: string;
         error?: string;
       };
 
-      if (data.setupRequired) return;
-      if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
+      if (data.setupRequired) {
+        toast({
+          title: "Payments not configured",
+          description: data.error ?? "Stripe is not set up on this platform yet.",
+          variant: "destructive",
+        });
+        return;
       }
+      if (data.error) {
+        toast({
+          title: "Couldn't start checkout",
+          description: data.error,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!data.clientSecret) {
+        toast({
+          title: "Couldn't start checkout",
+          description: "Stripe did not return a checkout session.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Snapshot current balance so the polling loop can detect a credit
+      // increase from the webhook and auto-close the modal.
+      lastBalanceRef.current = creditsData?.balance ?? 0;
+      setActivePkg(pkg);
+      setClientSecret(data.clientSecret);
+      setCheckoutOpen(true);
     } catch {
-      // ignore
+      toast({
+        title: "Couldn't start checkout",
+        description: "Please try again in a moment.",
+        variant: "destructive",
+      });
     } finally {
       setCheckoutLoading(null);
     }
+  }
+
+  // While the embedded checkout modal is open, poll the credit balance every
+  // 3s. When the webhook credits the account, refresh the UI and show success.
+  useEffect(() => {
+    if (!checkoutOpen) {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      return;
+    }
+    const id = setInterval(() => {
+      void (async () => {
+        const { data: fresh } = await refetchCredits();
+        const baseline = lastBalanceRef.current;
+        if (typeof baseline === "number" && fresh && fresh.balance > baseline) {
+          void refetchTx();
+          toast({
+            title: "Payment successful",
+            description: `${activePkg?.credits.toLocaleString() ?? ""} credits added to your account.`,
+          });
+          setCheckoutOpen(false);
+          setClientSecret(null);
+          setActivePkg(null);
+        }
+      })();
+    }, 3000);
+    pollRef.current = id;
+    return () => clearInterval(id);
+  }, [checkoutOpen, refetchCredits, refetchTx, toast, activePkg]);
+
+  function handleCloseCheckout() {
+    setCheckoutOpen(false);
+    setClientSecret(null);
+    setActivePkg(null);
   }
 
   const balance = creditsData?.balance ?? 0;
@@ -626,6 +723,53 @@ function CreditsTab() {
           </div>
         )}
       </div>
+
+      {/* Embedded Stripe Checkout modal */}
+      <Dialog
+        open={checkoutOpen}
+        onOpenChange={(open) => {
+          if (!open) handleCloseCheckout();
+        }}
+      >
+        <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-5 py-4 border-b border-border">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <DialogTitle className="text-base">
+                  {activePkg ? `Buy ${activePkg.label}` : "Checkout"}
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  {activePkg
+                    ? `${activePkg.credits.toLocaleString()} credits · $${activePkg.priceUsd}`
+                    : "Complete your purchase to add credits."}
+                </DialogDescription>
+              </div>
+              <button
+                onClick={handleCloseCheckout}
+                className="rounded-md p-1.5 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </DialogHeader>
+          <div className="max-h-[75vh] overflow-y-auto">
+            {clientSecret && packages?.publishableKey ? (
+              <EmbeddedCheckoutProvider
+                key={clientSecret}
+                stripe={getStripePromise(packages.publishableKey)}
+                options={{ clientSecret }}
+              >
+                <EmbeddedCheckout />
+              </EmbeddedCheckoutProvider>
+            ) : (
+              <div className="px-5 py-12 text-sm text-muted-foreground text-center">
+                Preparing checkout…
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

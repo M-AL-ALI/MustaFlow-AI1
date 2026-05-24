@@ -3327,6 +3327,7 @@ export const GetUserCreditsResponse = zod.object({
  */
 export const ListBillingPackagesResponse = zod.object({
   "stripeConfigured": zod.boolean(),
+  "publishableKey": zod.string().optional().describe('Stripe publishable key for embedded checkout (empty when Stripe is not configured)'),
   "packages": zod.array(zod.object({
   "id": zod.string(),
   "label": zod.string(),
@@ -3343,12 +3344,15 @@ export const ListBillingPackagesResponse = zod.object({
  */
 export const CreateBillingCheckoutBody = zod.object({
   "packageId": zod.string(),
-  "successUrl": zod.string(),
-  "cancelUrl": zod.string()
+  "uiMode": zod.enum(['hosted', 'embedded']).optional().describe('Stripe Checkout UI mode. \"embedded\" returns a clientSecret; \"hosted\" (default) returns a checkoutUrl for full-page redirect.'),
+  "successUrl": zod.string().optional().describe('Required when uiMode is \"hosted\"; ignored for \"embedded\".'),
+  "cancelUrl": zod.string().optional().describe('Required when uiMode is \"hosted\"; ignored for \"embedded\".'),
+  "returnUrl": zod.string().optional().describe('Optional return URL for embedded mode (used after payment completion). When omitted, the checkout stays in-place and the client handles success via webhook + refetch.')
 })
 
 export const CreateBillingCheckoutResponse = zod.object({
   "checkoutUrl": zod.string().optional(),
+  "clientSecret": zod.string().optional().describe('Stripe Checkout client secret for embedded mode.'),
   "sessionId": zod.string().optional(),
   "setupRequired": zod.boolean().optional(),
   "message": zod.string().optional(),

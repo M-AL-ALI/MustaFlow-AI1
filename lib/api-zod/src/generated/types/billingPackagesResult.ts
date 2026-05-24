@@ -9,5 +9,7 @@ import type { BillingPackage } from './billingPackage';
 
 export interface BillingPackagesResult {
   stripeConfigured: boolean;
+  /** Stripe publishable key for embedded checkout (empty when Stripe is not configured) */
+  publishableKey?: string;
   packages: BillingPackage[];
 }

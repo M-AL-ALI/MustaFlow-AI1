@@ -1691,17 +1691,38 @@ export interface BillingPackage {
 
 export interface BillingPackagesResult {
   stripeConfigured: boolean;
+  /** Stripe publishable key for embedded checkout (empty when Stripe is not configured) */
+  publishableKey?: string;
   packages: BillingPackage[];
 }
 
+/**
+ * Stripe Checkout UI mode. "embedded" returns a clientSecret; "hosted" (default) returns a checkoutUrl for full-page redirect.
+ */
+export type BillingCheckoutInputUiMode = typeof BillingCheckoutInputUiMode[keyof typeof BillingCheckoutInputUiMode];
+
+
+export const BillingCheckoutInputUiMode = {
+  hosted: 'hosted',
+  embedded: 'embedded',
+} as const;
+
 export interface BillingCheckoutInput {
   packageId: string;
-  successUrl: string;
-  cancelUrl: string;
+  /** Stripe Checkout UI mode. "embedded" returns a clientSecret; "hosted" (default) returns a checkoutUrl for full-page redirect. */
+  uiMode?: BillingCheckoutInputUiMode;
+  /** Required when uiMode is "hosted"; ignored for "embedded". */
+  successUrl?: string;
+  /** Required when uiMode is "hosted"; ignored for "embedded". */
+  cancelUrl?: string;
+  /** Optional return URL for embedded mode (used after payment completion). When omitted, the checkout stays in-place and the client handles success via webhook + refetch. */
+  returnUrl?: string;
 }
 
 export interface BillingCheckoutResult {
   checkoutUrl?: string;
+  /** Stripe Checkout client secret for embedded mode. */
+  clientSecret?: string;
   sessionId?: string;
   setupRequired?: boolean;
   message?: string;

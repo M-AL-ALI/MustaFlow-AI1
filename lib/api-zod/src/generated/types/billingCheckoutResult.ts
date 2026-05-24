@@ -8,6 +8,8 @@
 
 export interface BillingCheckoutResult {
   checkoutUrl?: string;
+  /** Stripe Checkout client secret for embedded mode. */
+  clientSecret?: string;
   sessionId?: string;
   setupRequired?: boolean;
   message?: string;

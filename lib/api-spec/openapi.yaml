@@ -5206,6 +5206,9 @@ components:
       required: [stripeConfigured, packages]
       properties:
         stripeConfigured: { type: boolean }
+        publishableKey:
+          type: string
+          description: Stripe publishable key for embedded checkout (empty when Stripe is not configured)
         packages:
           type: array
           items:
@@ -5213,16 +5216,30 @@ components:
 
     BillingCheckoutInput:
       type: object
-      required: [packageId, successUrl, cancelUrl]
+      required: [packageId]
       properties:
         packageId: { type: string }
-        successUrl: { type: string }
-        cancelUrl: { type: string }
+        uiMode:
+          type: string
+          enum: [hosted, embedded]
+          description: Stripe Checkout UI mode. "embedded" returns a clientSecret; "hosted" (default) returns a checkoutUrl for full-page redirect.
+        successUrl:
+          type: string
+          description: Required when uiMode is "hosted"; ignored for "embedded".
+        cancelUrl:
+          type: string
+          description: Required when uiMode is "hosted"; ignored for "embedded".
+        returnUrl:
+          type: string
+          description: Optional return URL for embedded mode (used after payment completion). When omitted, the checkout stays in-place and the client handles success via webhook + refetch.
 
     BillingCheckoutResult:
       type: object
       properties:
         checkoutUrl: { type: string }
+        clientSecret:
+          type: string
+          description: Stripe Checkout client secret for embedded mode.
         sessionId: { type: string }
         setupRequired: { type: boolean }
         message: { type: string }

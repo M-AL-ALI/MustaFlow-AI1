@@ -5,9 +5,16 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { BillingCheckoutInputUiMode } from './billingCheckoutInputUiMode';
 
 export interface BillingCheckoutInput {
   packageId: string;
-  successUrl: string;
-  cancelUrl: string;
+  /** Stripe Checkout UI mode. "embedded" returns a clientSecret; "hosted" (default) returns a checkoutUrl for full-page redirect. */
+  uiMode?: BillingCheckoutInputUiMode;
+  /** Required when uiMode is "hosted"; ignored for "embedded". */
+  successUrl?: string;
+  /** Required when uiMode is "hosted"; ignored for "embedded". */
+  cancelUrl?: string;
+  /** Optional return URL for embedded mode (used after payment completion). When omitted, the checkout stays in-place and the client handles success via webhook + refetch. */
+  returnUrl?: string;
 }
