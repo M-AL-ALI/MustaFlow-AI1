@@ -104,16 +104,13 @@ export function DomainPurchaseWidget({ projectId }: { projectId: number }) {
         <div className="flex items-start gap-2 text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
           <ExternalLink className="h-3.5 w-3.5 shrink-0 mt-0.5" />
           <span>
-            Domain search requires Namecheap credentials. Configure them in the server env to
-            enable purchases.
+            Domain search requires Namecheap credentials. Configure them in the server env to enable
+            purchases.
           </span>
         </div>
       )}
 
-      <form
-        onSubmit={(e) => void handleSearch(e)}
-        className="flex gap-2"
-      >
+      <form onSubmit={(e) => void handleSearch(e)} className="flex gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input

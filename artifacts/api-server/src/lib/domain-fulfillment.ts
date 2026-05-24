@@ -11,12 +11,7 @@
 
 import { eq, and, isNull } from "drizzle-orm";
 import { db, purchasedDomainsTable, projectDomainsTable, projectsTable } from "@workspace/db";
-import {
-  namecheapEnabled,
-  register,
-  getPricing,
-  type WhoisContact,
-} from "./namecheap";
+import { namecheapEnabled, register, getPricing, type WhoisContact } from "./namecheap";
 import { publishDomainEvent } from "./event-bus";
 import { logger } from "./logger";
 import { randomBytes } from "crypto";
@@ -38,11 +33,7 @@ const DEFAULT_CONTACT: WhoisContact = {
 };
 
 // ── activateSslForDomain import (dynamic to avoid circular deps) ──────────────
-async function triggerSsl(
-  domainRowId: number,
-  hostname: string,
-  projectId: number,
-): Promise<void> {
+async function triggerSsl(domainRowId: number, hostname: string, projectId: number): Promise<void> {
   try {
     const { activateSslForDomain } = await import("../routes/ssl");
     await activateSslForDomain(domainRowId, hostname, null, projectId, false);
@@ -97,7 +88,9 @@ export async function fulfillDomainPurchase(
   const [existing] = await db
     .select()
     .from(purchasedDomainsTable)
-    .where(and(eq(purchasedDomainsTable.hostname, hostname), eq(purchasedDomainsTable.userId, userId)));
+    .where(
+      and(eq(purchasedDomainsTable.hostname, hostname), eq(purchasedDomainsTable.userId, userId)),
+    );
   if (existing) {
     return { domain: existing, alreadyRegistered: true };
   }
@@ -111,7 +104,10 @@ export async function fulfillDomainPurchase(
   if (namecheapEnabled()) {
     const result = await register(hostname, resolvedContact, years);
     if (!result?.success) {
-      logger.error({ hostname, error: result?.error }, "Namecheap registration failed after payment");
+      logger.error(
+        { hostname, error: result?.error },
+        "Namecheap registration failed after payment",
+      );
       throw new Error(
         `Domain registration failed: ${result?.error ?? "Unknown Namecheap error"}. Your payment was captured — contact support.`,
       );

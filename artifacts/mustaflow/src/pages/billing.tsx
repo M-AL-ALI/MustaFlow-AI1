@@ -86,6 +86,7 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [planCheckoutLoading, setPlanCheckoutLoading] = useState<string | null>(null);
+  const [portalLoading, setPortalLoading] = useState(false);
 
   const workspaceId = currentWorkspace?.id ?? null;
 
@@ -166,6 +167,51 @@ export default function BillingPage() {
       });
     } finally {
       setPlanCheckoutLoading(null);
+    }
+  }
+
+  async function handleManageSubscription() {
+    if (workspaceId == null) return;
+    setPortalLoading(true);
+    try {
+      const res = await fetch("/api/billing/subscription/portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId,
+          returnUrl: `${window.location.origin}/billing`,
+        }),
+      });
+      const data = (await res.json()) as {
+        setupRequired?: boolean;
+        portalUrl?: string;
+        error?: string;
+      };
+      if (data.setupRequired) {
+        toast({
+          title: "Billing not configured",
+          description: "Stripe is not yet configured. Contact your administrator.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (data.portalUrl) {
+        window.location.href = data.portalUrl;
+      } else if (data.error) {
+        toast({
+          title: "Could not open billing portal",
+          description: data.error,
+          variant: "destructive",
+        });
+      }
+    } catch {
+      toast({
+        title: "Could not open billing portal",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPortalLoading(false);
     }
   }
 
@@ -290,13 +336,29 @@ export default function BillingPage() {
                   </p>
                 )}
               {subscription?.subscription?.cancelAtPeriodEnd && (
-                <p className="text-xs text-yellow-600 mt-0.5">
-                  Cancels at end of current period
-                </p>
+                <p className="text-xs text-yellow-600 mt-0.5">Cancels at end of current period</p>
               )}
             </div>
             {!workspaceId && (
-              <p className="text-xs text-muted-foreground">Select a workspace to manage your plan.</p>
+              <p className="text-xs text-muted-foreground">
+                Select a workspace to manage your plan.
+              </p>
+            )}
+            {workspaceId && subscription?.subscription?.stripeSubscriptionId && (
+              <button
+                onClick={() => void handleManageSubscription()}
+                disabled={portalLoading}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {portalLoading ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <>
+                    Manage subscription
+                    <ExternalLink className="h-3 w-3" />
+                  </>
+                )}
+              </button>
             )}
           </div>
 

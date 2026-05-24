@@ -2632,9 +2632,7 @@ function BuyDomainSection({ projectId }: { projectId: number }) {
       >
         <Globe className="h-3.5 w-3.5" />
         <span>Buy a domain</span>
-        <ChevronDown
-          className={cn("h-3 w-3 transition-transform", open && "rotate-180")}
-        />
+        <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
         <div className="mt-2">

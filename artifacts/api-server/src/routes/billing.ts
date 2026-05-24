@@ -378,7 +378,10 @@ async function handleStripeWebhook(
     const hostname = session?.metadata?.hostname;
 
     if (!domainUserId || !hostname) {
-      logger.warn({ eventId: event.id, sessionType }, "Domain webhook: missing userId or hostname in metadata");
+      logger.warn(
+        { eventId: event.id, sessionType },
+        "Domain webhook: missing userId or hostname in metadata",
+      );
       res.status(400).json({ error: "Missing userId or hostname in session metadata" });
       return;
     }
@@ -395,11 +398,9 @@ async function handleStripeWebhook(
         const pricePaidUsd = session?.amount_total
           ? String(session.amount_total / 100)
           : (session?.metadata?.priceUsd ?? "12.99");
-        const stripeCustomerId =
-          typeof session?.customer === "string" ? session.customer : null;
+        const stripeCustomerId = typeof session?.customer === "string" ? session.customer : null;
         const projectIdStr = session?.metadata?.projectId;
-        const projectId =
-          projectIdStr ? (parseInt(projectIdStr, 10) || undefined) : undefined;
+        const projectId = projectIdStr ? parseInt(projectIdStr, 10) || undefined : undefined;
         const years = session?.metadata?.years ? parseInt(session.metadata.years, 10) || 1 : 1;
 
         const { alreadyRegistered } = await fulfillDomainPurchase({
@@ -436,7 +437,13 @@ async function handleStripeWebhook(
         { eventId: event.id, hostname },
         "Domain transfer webhook: payment acknowledged, client confirm handles transfer initiation",
       );
-      res.json({ ok: true, eventId: event.id, hostname, type: "domain_transfer", acknowledged: true });
+      res.json({
+        ok: true,
+        eventId: event.id,
+        hostname,
+        type: "domain_transfer",
+        acknowledged: true,
+      });
     }
     return;
   }
@@ -971,6 +978,89 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     res.status(502).json({ error: `Stripe API error: ${msg}` });
   }
 });
+// POST /api/billing/subscription/portal — create a Stripe Billing Portal session
+// so the workspace owner can cancel, change plan, or update payment method.
+router.post("/billing/subscription/portal", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
 
+  const { workspaceId, returnUrl } = req.body as {
+    workspaceId?: number;
+    returnUrl?: string;
+  };
+
+  if (typeof workspaceId !== "number" || !Number.isFinite(workspaceId)) {
+    res.status(400).json({ error: "workspaceId is required" });
+    return;
+  }
+  if (!returnUrl || typeof returnUrl !== "string") {
+    res.status(400).json({ error: "returnUrl is required" });
+    return;
+  }
+
+  const [ws] = await db
+    .select({ id: workspacesTable.id, ownerUserId: workspacesTable.ownerUserId })
+    .from(workspacesTable)
+    .where(and(eq(workspacesTable.id, workspaceId), isNull(workspacesTable.deletedAt)));
+  if (!ws) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
+  if (ws.ownerUserId !== userId) {
+    res.status(403).json({ error: "You do not own this workspace" });
+    return;
+  }
+
+  const [sub] = await db
+    .select({ customerId: workspaceSubscriptionsTable.stripeCustomerId })
+    .from(workspaceSubscriptionsTable)
+    .where(eq(workspaceSubscriptionsTable.workspaceId, workspaceId));
+
+  if (!sub?.customerId) {
+    res.status(400).json({
+      error: "No active subscription found for this workspace. Upgrade to a paid plan first.",
+    });
+    return;
+  }
+
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) {
+    res.json({
+      setupRequired: true,
+      message:
+        "Stripe is not configured. Connect the Stripe integration (or set STRIPE_SECRET_KEY) to manage subscriptions.",
+    });
+    return;
+  }
+
+  try {
+    const { stripeCircuit, withRetry, isTransientError } = await import("../lib/resilience");
+    const session = await stripeCircuit.call(() =>
+      withRetry(
+        () =>
+          stripe.billingPortal.sessions.create({
+            customer: sub.customerId!,
+            return_url: returnUrl,
+          }),
+        {
+          maxAttempts: 2,
+          baseDelayMs: 1_000,
+          shouldRetry: isTransientError,
+          label: "stripe:billingPortal.sessions.create",
+        },
+      ),
+    );
+    res.json({ portalUrl: session.url });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    if (/api key|authentication|invalid_api_key/i.test(msg)) {
+      invalidateStripeCredentialCache();
+    }
+    res.status(502).json({ error: `Stripe API error: ${msg}` });
+  }
+});
 
 export default router;
