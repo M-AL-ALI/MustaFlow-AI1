@@ -10,6 +10,8 @@ import {
   useListTasks,
   useRollbackVersion,
   useListSuggestions,
+  useGetUserCredits,
+  getGetUserCreditsQueryKey,
   useGetMyPreferences,
   useUpdateMyPreferences,
   getGetMyPreferencesQueryKey,
@@ -473,7 +475,7 @@ function ErrorCard({
         <span className="text-destructive/90 leading-relaxed">{message}</span>
       </div>
       {isInsufficientCredits && (
-        <div className="border-t border-destructive/20 pt-2">
+        <div className="border-t border-destructive/20 pt-2 flex items-center gap-2 flex-wrap">
           <button
             onClick={onBuyCredits}
             className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-2.5 py-1 rounded-lg transition-colors"
@@ -481,6 +483,13 @@ function ErrorCard({
             <CreditCard className="h-3 w-3" />
             Buy credits
           </button>
+          <a
+            href="/settings?tab=credits"
+            className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground border border-border bg-muted/30 hover:bg-muted/60 px-2.5 py-1 rounded-lg transition-colors"
+          >
+            Open Credits & Billing
+            <ExternalLink className="h-3 w-3" />
+          </a>
         </div>
       )}
       {suggestions && suggestions.length > 0 && (
@@ -508,6 +517,100 @@ function ErrorCard({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+const LOW_CREDITS_THRESHOLD = 20;
+
+function LowCreditsBanner({
+  projectId,
+  onBuyCredits,
+}: {
+  projectId: number;
+  onBuyCredits: () => void;
+}) {
+  const { data, isLoading } = useGetUserCredits({
+    query: {
+      queryKey: getGetUserCreditsQueryKey(),
+      refetchInterval: 60_000,
+      refetchOnWindowFocus: true,
+    },
+  });
+  const [dismissed, setDismissed] = useState(false);
+  const balance = data?.balance ?? null;
+
+  useEffect(() => {
+    try {
+      const key = `mustaflow_low_credits_dismissed_${projectId}`;
+      setDismissed(sessionStorage.getItem(key) === "1");
+    } catch {
+      setDismissed(false);
+    }
+  }, [projectId]);
+
+  if (isLoading || balance === null || balance >= LOW_CREDITS_THRESHOLD || dismissed) {
+    return null;
+  }
+
+  const isEmpty = balance <= 0;
+
+  const handleDismiss = () => {
+    setDismissed(true);
+    try {
+      sessionStorage.setItem(`mustaflow_low_credits_dismissed_${projectId}`, "1");
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        "shrink-0 flex items-center justify-between gap-2 px-4 py-1.5 border-b text-[11px] z-30",
+        isEmpty
+          ? "bg-destructive/10 border-destructive/20 text-destructive"
+          : "bg-yellow-500/10 border-yellow-500/20 text-yellow-500",
+      )}
+    >
+      <div className="flex items-center gap-1.5 min-w-0">
+        <AlertTriangle className="h-3 w-3 shrink-0" />
+        <span className="truncate">
+          {isEmpty ? (
+            <>You're out of build credits. Top up to start your next build.</>
+          ) : (
+            <>
+              Only <strong className="font-semibold">{balance}</strong>{" "}
+              {balance === 1 ? "credit" : "credits"} left — top up before your next build to avoid
+              interruptions.
+            </>
+          )}
+        </span>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <button
+          onClick={onBuyCredits}
+          className={cn(
+            "inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-semibold transition-colors",
+            isEmpty
+              ? "border-destructive/40 bg-destructive/10 hover:bg-destructive/20"
+              : "border-yellow-500/40 bg-yellow-500/10 hover:bg-yellow-500/20",
+          )}
+        >
+          <CreditCard className="h-2.5 w-2.5" />
+          Buy credits
+        </button>
+        {!isEmpty && (
+          <button
+            onClick={handleDismiss}
+            className="p-0.5 rounded hover:bg-foreground/10 transition-colors opacity-70 hover:opacity-100"
+            title="Dismiss until next session"
+            aria-label="Dismiss low credits warning"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1678,6 +1781,8 @@ export default function ProjectWorkspacePage() {
   return (
     <div className="flex flex-col h-full bg-background w-full overflow-hidden text-foreground">
       <CreateProjectModal open={newProjectOpen} onOpenChange={setNewProjectOpen} />
+
+      <LowCreditsBanner projectId={projectId} onBuyCredits={() => setBuyCreditsOpen(true)} />
 
       {cveNewCount > 0 && (
         <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-1.5 bg-red-500/10 border-b border-red-500/20 text-[11px] text-red-400 z-30">
