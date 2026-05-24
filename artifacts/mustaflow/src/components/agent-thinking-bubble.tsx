@@ -32,7 +32,7 @@ import {
   Camera,
   Globe,
   Palette,
-  Stethoscope,
+  AlertCircle,
   Timer,
   Bookmark,
   Pencil,
@@ -84,7 +84,7 @@ const STEP_ICON: Record<string, React.ElementType> = {
   web_fetch: Globe,
   web_search: Search,
   extract_branding: Palette,
-  read_diagnostics: Stethoscope,
+  read_diagnostics: AlertCircle,
 };
 
 const STEP_COLOR: Record<string, string> = {

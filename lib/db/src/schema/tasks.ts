@@ -198,6 +198,18 @@ export type TaskReport = {
      */
     skillsLoaded?: string[];
     e2eResults?: E2eRunSummary | null;
+    /**
+     * Per-task "Agent Senses" usage counters (Task #529). Tracks how many
+     * times the agent invoked each sense tool. Drives post-loop credit
+     * accounting (1 credit per 5 web sense calls) and admin reporting.
+     */
+    senseCalls?: {
+      screenshot: number;
+      webFetch: number;
+      webSearch: number;
+      branding: number;
+      diagnostics: number;
+    };
   } | null;
   /**
    * Populated when Playwright end-to-end scenarios ran against the live preview

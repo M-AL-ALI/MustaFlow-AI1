@@ -3045,6 +3045,23 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }).catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
       }
 
+      // --- Task #529: charge for web sense usage (1 credit per 5 combined calls) ---
+      // Only web_fetch + web_search + extract_branding are billable. Screenshots
+      // and read_diagnostics are free (already gated by their own budgets).
+      const senseCalls = report.agentLoop?.senseCalls;
+      if (project.ownerId && senseCalls) {
+        const webCalls =
+          (senseCalls.webFetch ?? 0) + (senseCalls.webSearch ?? 0) + (senseCalls.branding ?? 0);
+        const senseCost = Math.ceil(webCalls / 5);
+        if (senseCost > 0) {
+          void deductCredits(project.ownerId, senseCost, {
+            type: "senses",
+            description: `Web senses (${webCalls} call${webCalls === 1 ? "" : "s"}) — project ${projectId}`,
+            projectId,
+          }).catch((err) => logger.warn({ err }, "Sense credit deduction failed (non-fatal)"));
+        }
+      }
+
       // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
       void maybeEscalateWarnings(projectId, report.warnings ?? []);
       const nativeFeaturesNote =

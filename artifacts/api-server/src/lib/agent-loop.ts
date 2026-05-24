@@ -810,6 +810,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const e2eResults: E2eRunSummary[] = [];
   // Task-level screenshot budget (5MB) shared across smoke, run_e2e tool, and re-run.
   const screenshotBudget = { remaining: 5 * 1024 * 1024 };
+  // Task #529: combined budget for web_fetch + web_search + extract_branding.
+  // 20 calls / task — keeps cost predictable and bounds total egress.
+  const fetchBudget = { remaining: 20 };
   const senseCounts = { screenshot: 0, webFetch: 0, webSearch: 0, branding: 0, diagnostics: 0 };
   let totalTokens = 0;
 
@@ -947,6 +950,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         loadedSkills,
         e2eResults,
         screenshotBudget,
+        fetchBudget,
         senseCounts,
       });
       const durationMs = Date.now() - tStart;
@@ -1267,6 +1271,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               loadedSkills,
               e2eResults,
               screenshotBudget,
+              fetchBudget,
               senseCounts,
             });
             toolCalls.push({
@@ -1491,6 +1496,10 @@ export interface ToolCtx {
    * run decrements it by the sum of its base64-decoded screenshot sizes.
    */
   screenshotBudget: { remaining: number };
+  /** Per-task budget for combined web sense calls (web_fetch + web_search +
+   *  extract_branding). Default 20. Each call decrements by 1; calls past the
+   *  budget return an ERROR observation without making the network request. */
+  fetchBudget: { remaining: number };
   /** Mutable counters for Task #529 "Agent Senses" tools — used for the
    *  loop report and post-loop credit accounting (1 credit per 5 web calls). */
   senseCounts: {
@@ -2218,7 +2227,11 @@ export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observat
           observation: `ERROR: screenshot budget exhausted (${ctx.screenshotBudget.remaining} bytes left).`,
         };
       }
-      await safeEvent(input.onEvent, "take_screenshot", `Capturing screenshot of ${targetUrl || "preview"}…`);
+      await safeEvent(
+        input.onEvent,
+        "take_screenshot",
+        `Capturing screenshot of ${targetUrl || "preview"}…`,
+      );
       const shot = await takeScreenshot({
         url: targetUrl,
         inlineHtml: !requestedUrl && !previewUrl ? (fallbackHtml ?? undefined) : undefined,
@@ -2229,7 +2242,10 @@ export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observat
       });
       ctx.senseCounts.screenshot += 1;
       if (!shot.ok) {
-        return { ok: false, observation: `ERROR: take_screenshot failed: ${shot.error ?? "unknown"}` };
+        return {
+          ok: false,
+          observation: `ERROR: take_screenshot failed: ${shot.error ?? "unknown"}`,
+        };
       }
       const actualBytes = shot.bytes ?? 0;
       if (actualBytes > ctx.screenshotBudget.remaining) {
@@ -2239,12 +2255,11 @@ export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observat
           observation: `ERROR: screenshot (${actualBytes} bytes) exceeds remaining budget (${ctx.screenshotBudget.remaining} bytes). Reduce viewport size or skip full_page.`,
         };
       }
-      ctx.screenshotBudget.remaining = Math.max(
-        ctx.screenshotBudget.remaining - actualBytes,
-        0,
-      );
-      // Keep the observation small — return metadata + base64-prefix only.
-      const preview = (shot.base64 ?? "").slice(0, 80);
+      ctx.screenshotBudget.remaining = Math.max(ctx.screenshotBudget.remaining - actualBytes, 0);
+      // Return the full base64 PNG so vision-capable models can inspect the
+      // image. Observation truncation at the loop level caps total size, but
+      // we expose the whole image up to that cap so the model can actually
+      // see what it rendered.
       return {
         ok: true,
         observation: JSON.stringify({
@@ -2252,9 +2267,9 @@ export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observat
           bytes: shot.bytes ?? null,
           width: shot.width ?? null,
           height: shot.height ?? null,
-          base64Preview: preview,
+          mimeType: "image/png",
+          base64: shot.base64 ?? "",
           budgetRemaining: ctx.screenshotBudget.remaining,
-          note: "Full base64 is not echoed back to keep the observation small. The screenshot was captured server-side — describe what you intended to verify in your next reasoning step.",
         }),
       };
     }
@@ -2262,6 +2277,13 @@ export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observat
       const { webFetch } = await import("./agent-senses");
       const url = typeof args.url === "string" ? args.url.trim() : "";
       if (!url) return { ok: false, observation: "ERROR: web_fetch requires { url }" };
+      if (ctx.fetchBudget.remaining <= 0) {
+        return {
+          ok: false,
+          observation: `ERROR: web sense budget exhausted (web_fetch + web_search + extract_branding). Limit is 20 calls per task.`,
+        };
+      }
+      ctx.fetchBudget.remaining -= 1;
       await safeEvent(input.onEvent, "web_fetch", `Fetching ${url}…`);
       const r = await webFetch({ url, signal: input.signal });
       ctx.senseCounts.webFetch += 1;
@@ -2283,6 +2305,13 @@ export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observat
       const { webSearch } = await import("./agent-senses");
       const query = typeof args.query === "string" ? args.query.trim() : "";
       if (!query) return { ok: false, observation: "ERROR: web_search requires { query }" };
+      if (ctx.fetchBudget.remaining <= 0) {
+        return {
+          ok: false,
+          observation: `ERROR: web sense budget exhausted (web_fetch + web_search + extract_branding). Limit is 20 calls per task.`,
+        };
+      }
+      ctx.fetchBudget.remaining -= 1;
       const limit = typeof args.limit === "number" ? args.limit : undefined;
       await safeEvent(input.onEvent, "web_search", `Searching: ${query.slice(0, 80)}`);
       const r = await webSearch({ query, limit, signal: input.signal });
@@ -2302,11 +2331,21 @@ export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observat
       const { extractBranding } = await import("./agent-senses");
       const url = typeof args.url === "string" ? args.url.trim() : "";
       if (!url) return { ok: false, observation: "ERROR: extract_branding requires { url }" };
+      if (ctx.fetchBudget.remaining <= 0) {
+        return {
+          ok: false,
+          observation: `ERROR: web sense budget exhausted (web_fetch + web_search + extract_branding). Limit is 20 calls per task.`,
+        };
+      }
+      ctx.fetchBudget.remaining -= 1;
       await safeEvent(input.onEvent, "extract_branding", `Extracting brand from ${url}…`);
       const r = await extractBranding({ url, signal: input.signal });
       ctx.senseCounts.branding += 1;
       if (!r.ok) {
-        return { ok: false, observation: `ERROR: extract_branding failed: ${r.error ?? "unknown"}` };
+        return {
+          ok: false,
+          observation: `ERROR: extract_branding failed: ${r.error ?? "unknown"}`,
+        };
       }
       return {
         ok: true,
@@ -2327,8 +2366,9 @@ export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observat
       const path = typeof args.path === "string" ? args.path.trim() : "";
       if (!path) return { ok: false, observation: "ERROR: read_diagnostics requires { path }" };
       const toolArg =
-        typeof args.tool === "string" && ["tsc", "node", "python", "auto"].includes(args.tool)
-          ? (args.tool as "tsc" | "node" | "python" | "auto")
+        typeof args.tool === "string" &&
+        ["tsc", "node", "python", "eslint", "auto"].includes(args.tool)
+          ? (args.tool as "tsc" | "node" | "python" | "eslint" | "auto")
           : "auto";
       // On-demand container provisioning so the model can call this even
       // before any run_command has booted a container.

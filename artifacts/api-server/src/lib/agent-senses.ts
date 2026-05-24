@@ -330,7 +330,8 @@ export async function webFetch(input: WebFetchInput): Promise<WebFetchResult> {
       error: res.error ?? "request failed",
     };
   }
-  const isHtml = res.contentType.includes("text/html") || /<html[\s>]/i.test(res.body.slice(0, 400));
+  const isHtml =
+    res.contentType.includes("text/html") || /<html[\s>]/i.test(res.body.slice(0, 400));
   if (isHtml) {
     const { title, text } = htmlToText(res.body);
     return {
@@ -460,7 +461,14 @@ const COLOR_RE = /#(?:[0-9a-fA-F]{3}){1,2}\b|rgba?\([^)]+\)|hsla?\([^)]+\)/g;
 
 export async function extractBranding(input: BrandingInput): Promise<BrandingResult> {
   if (!isHttpUrl(input.url)) {
-    return { ok: false, url: input.url, favicons: [], fonts: [], colors: [], error: "URL must be http(s)" };
+    return {
+      ok: false,
+      url: input.url,
+      favicons: [],
+      fonts: [],
+      colors: [],
+      error: "URL must be http(s)",
+    };
   }
   if (!isSafePublicUrl(input.url)) {
     return {
@@ -603,10 +611,14 @@ export async function extractBranding(input: BrandingInput): Promise<BrandingRes
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface DiagnosticsInput {
-  /** Project file path inside the container (e.g. "src/App.tsx"). Required. */
+  /**
+   * Project file path or glob inside the container (e.g. "src/App.tsx",
+   * "src/**\/*.ts"). Required. Globs are passed to the underlying tool as-is
+   * and expanded by the shell — they must consist only of safe path chars.
+   */
   path: string;
   /** Tool to run. Auto-detected from extension if absent. */
-  tool?: "tsc" | "node" | "python" | "auto";
+  tool?: "tsc" | "node" | "python" | "eslint" | "auto";
 }
 
 export interface Diagnostic {
@@ -687,7 +699,14 @@ export async function readDiagnostics(input: {
 }): Promise<DiagnosticsResult> {
   const { args, containerId, projectId, signal } = input;
   if (!args.path) {
-    return { ok: false, tool: "unknown", path: "", diagnostics: [], raw: "", error: "path required" };
+    return {
+      ok: false,
+      tool: "unknown",
+      path: "",
+      diagnostics: [],
+      raw: "",
+      error: "path required",
+    };
   }
   if (!containerId) {
     return {
@@ -700,13 +719,14 @@ export async function readDiagnostics(input: {
     };
   }
 
-  // Sanitize path: reject absolute paths, traversal, control chars, or anything
-  // that could escape the single-quote shell wrapper or balloon arg length.
+  // Sanitize path: reject absolute paths, traversal, control chars, or shell
+  // metacharacters. Glob chars (* ? [ ]) are explicitly allowed so callers can
+  // pass patterns like "src/**/*.ts".
   if (
     args.path.length > 512 ||
     args.path.startsWith("/") ||
     args.path.includes("..") ||
-    /[\u0000-\u001f\u007f'`$\\;&|<>(){}\n\r]/.test(args.path)
+    /[\u0000-\u001f\u007f'"`$\\;&|<>(){}\n\r ]/.test(args.path)
   ) {
     return {
       ok: false,
@@ -714,11 +734,14 @@ export async function readDiagnostics(input: {
       path: args.path,
       diagnostics: [],
       raw: "",
-      error: "invalid path: must be a relative project file with no shell metacharacters",
+      error:
+        "invalid path: must be a relative project path (globs allowed) with no shell metacharacters",
     };
   }
-  const ext = args.path.split(".").pop()?.toLowerCase() ?? "";
-  const auto = args.tool && args.tool !== "auto" ? args.tool : detectToolFromExt(ext);
+  const isGlob = /[*?\[]/.test(args.path);
+  const ext = isGlob ? "" : (args.path.split(".").pop()?.toLowerCase() ?? "");
+  const auto =
+    args.tool && args.tool !== "auto" ? args.tool : isGlob ? "tsc" : detectToolFromExt(ext);
 
   const quotedPath = shellQuote(args.path);
   let argv: string[];
@@ -732,6 +755,12 @@ export async function readDiagnostics(input: {
     argv = ["sh", "-lc", `node --check ${quotedPath} 2>&1`];
   } else if (auto === "python") {
     argv = ["sh", "-lc", `python -m py_compile ${quotedPath} 2>&1`];
+  } else if (auto === "eslint") {
+    argv = [
+      "sh",
+      "-lc",
+      `npx --yes eslint --no-color --format compact ${quotedPath} 2>&1 | head -n 200`,
+    ];
   } else {
     return {
       ok: false,
@@ -766,6 +795,7 @@ export async function readDiagnostics(input: {
   if (auto === "tsc") diagnostics = parseTscOutput(raw, args.path);
   else if (auto === "python") diagnostics = parsePythonOutput(raw, args.path);
   else if (auto === "node") diagnostics = parseNodeOutput(raw, args.path);
+  else if (auto === "eslint") diagnostics = parseEslintOutput(raw);
 
   return {
     ok: true,
@@ -781,6 +811,31 @@ function detectToolFromExt(ext: string): "tsc" | "node" | "python" | "unknown" {
   if (["js", "jsx", "mjs", "cjs"].includes(ext)) return "node";
   if (["py", "pyi"].includes(ext)) return "python";
   return "unknown";
+}
+
+/**
+ * Parse `eslint --format compact` output:
+ *   /abs/path/file.ts: line 12, col 5, Error - Unexpected console (no-console)
+ */
+function parseEslintOutput(raw: string): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const m = line.match(
+      /^(.+?):\s+line\s+(\d+),\s+col\s+(\d+),\s+(Error|Warning|Info)\s+-\s+(.*)$/,
+    );
+    if (!m) continue;
+    const [, file, lineNo, col, sev, msg] = m;
+    const severity: Diagnostic["severity"] =
+      sev === "Error" ? "error" : sev === "Warning" ? "warning" : "info";
+    out.push({
+      file,
+      line: Number(lineNo) || null,
+      col: Number(col) || null,
+      severity,
+      message: msg.slice(0, 280),
+    });
+  }
+  return out.slice(0, 50);
 }
 
 function shellQuote(s: string): string {
