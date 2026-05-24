@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   KeyRound,
-  BrainCircuit,
   ChevronDown,
   ChevronRight,
   ArrowDown,
@@ -35,6 +34,7 @@ import {
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
+import { AgentIcon } from "@/components/agent-icon";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -563,8 +563,8 @@ const completedAnimations = new Set<number>();
 export function TypingIndicator() {
   return (
     <div className="flex justify-start items-end gap-2">
-      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-primary/25 to-primary/10 border border-primary/25 flex items-center justify-center shrink-0">
-        <BrainCircuit className="w-3 h-3 text-primary/80" />
+      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-primary/25 to-primary/10 border border-primary/25 flex items-center justify-center shrink-0 text-primary/80">
+        <AgentIcon size={12} state="active" />
       </div>
       <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2.5 flex items-center gap-1">
         {[0, 1, 2].map((i) => (
@@ -708,7 +708,9 @@ function ArchitectReviewCard({ review }: { review: NonNullable<TaskReport["archi
         className="w-full flex items-center gap-2 text-[11px] hover:opacity-80 transition-opacity"
         data-testid="architect-review-toggle"
       >
-        <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-violet-400" />
+        <span className="shrink-0 text-violet-400">
+          <AgentIcon size={14} />
+        </span>
         <span className="font-semibold text-foreground">
           {review.isReReview ? "Architect re-review" : "Architect review"}
         </span>
@@ -1560,7 +1562,9 @@ function InlinePlanCard({ plan }: { plan: StructuredPlan }) {
   return (
     <div className="mt-2 bg-background border border-border rounded-lg p-3 text-xs space-y-2">
       <div className="flex items-center gap-2 font-semibold text-foreground">
-        <BrainCircuit className="h-3.5 w-3.5 text-secondary" />
+        <span className="text-secondary">
+          <AgentIcon size={14} />
+        </span>
         Plan
       </div>
       {plan.goal && (
@@ -1916,7 +1920,7 @@ function MessageRow({
               onClick={() => setPlanExpanded((v) => !v)}
               className="flex items-center gap-1.5 text-[10px] font-medium px-2 py-1 rounded-md bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/15 transition-colors"
             >
-              <BrainCircuit className="h-3 w-3" />
+              <AgentIcon size={12} />
               View plan
               {planExpanded ? (
                 <ChevronDown className="h-3 w-3 ml-0.5" />

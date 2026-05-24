@@ -24,6 +24,7 @@ import {
   getListSuggestionsQueryKey,
 } from "@workspace/api-client-react";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
+import { AgentIcon } from "@/components/agent-icon";
 import { CreditBalancePill } from "@/components/credit-balance-pill";
 import { BILLING_ENABLED } from "@/lib/billing-flag";
 import { CodeEditorTab } from "./components/code-editor-tab";
@@ -2182,7 +2183,9 @@ export default function ProjectWorkspacePage() {
           {viewingHistoryPlan && (
             <div className="absolute inset-0 z-30 flex flex-col bg-background/95 backdrop-blur-sm">
               <div className="shrink-0 px-3 py-2 border-b border-border flex items-center gap-2">
-                <BrainCircuit className="h-3.5 w-3.5 text-secondary" />
+                <span className="text-secondary">
+                  <AgentIcon size={14} />
+                </span>
                 <span className="text-xs font-semibold text-foreground flex-1">Plan snapshot</span>
                 <button
                   onClick={() => setViewingHistoryPlan(null)}
@@ -2215,8 +2218,8 @@ export default function ProjectWorkspacePage() {
             <>
               {/* Chat panel header */}
               <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
-                <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
-                  <Sparkles style={{ width: 10, height: 10 }} className="text-white" />
+                <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center text-white">
+                  <AgentIcon size={10} state={isBusy ? "active" : "idle"} />
                 </div>
                 <span className="text-xs font-semibold text-foreground">AI Builder</span>
                 <span

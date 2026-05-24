@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, ArrowRight, Loader2, CheckCircle2, Monitor } from "lucide-react";
+import { ArrowRight, Loader2, CheckCircle2, Monitor } from "lucide-react";
+import { AgentIcon } from "@/components/agent-icon";
 
 const PROMPT_TEXT = "A marketplace for local artists to sell prints";
 
@@ -88,7 +89,7 @@ function TypingPhase() {
       </div>
       <div className="bg-card border border-border rounded-2xl p-2 flex items-center gap-2 shadow-lg">
         <div className="pl-3 text-primary shrink-0">
-          <Sparkles className="h-5 w-5" />
+          <AgentIcon size={20} state={done ? "idle" : "active"} />
         </div>
         <div className="flex-1 text-sm py-2 px-1 text-foreground min-h-[2rem] flex items-center">
           <span>{displayed}</span>

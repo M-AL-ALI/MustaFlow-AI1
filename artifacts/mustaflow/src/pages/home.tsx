@@ -1,6 +1,7 @@
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AgentIcon } from "@/components/agent-icon";
 import {
   Monitor,
   LayoutDashboard,
@@ -77,7 +78,7 @@ const HOW_IT_WORKS = [
   },
   {
     step: "2",
-    icon: Sparkles,
+    icon: AgentIcon,
     title: "AI builds it for you",
     description:
       "MustaFlow AI plans, codes, and assembles your app in seconds. Preview it live as it takes shape.",
@@ -316,7 +317,7 @@ export default function HomePage() {
             <div className="absolute -inset-6 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.18)_0%,transparent_70%)] blur-2xl rounded-full pointer-events-none" />
             <div className="relative bg-card border border-border shadow-xl rounded-2xl p-2 flex items-center gap-2 input-glow">
               <div className="pl-4 text-primary">
-                <Sparkles className="h-6 w-6" />
+                <AgentIcon size={24} />
               </div>
               <Input
                 value={prompt}

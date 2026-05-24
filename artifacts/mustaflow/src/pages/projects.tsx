@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { CreateProjectModal } from "@/components/create-project-modal";
+import { AgentIcon } from "@/components/agent-icon";
 import {
   FolderKanban,
   Activity,
@@ -23,7 +24,6 @@ import {
   AlertCircle,
   Plus,
   ArrowRight,
-  Sparkles,
   CheckSquare,
   Square,
   ChevronDown,
@@ -90,7 +90,9 @@ function QuickStartBox() {
   return (
     <div className="relative rounded-2xl border border-border bg-card p-5 shadow-sm">
       <div className="flex items-center gap-2 mb-3">
-        <Sparkles className="h-4 w-4 text-primary" />
+        <span className="text-primary">
+          <AgentIcon size={16} />
+        </span>
         <span className="text-sm font-semibold text-foreground">Quick start</span>
       </div>
       <div className="flex gap-2">
@@ -121,8 +123,8 @@ function QuickStartBox() {
 function WelcomeCard({ onCreateProject }: { onCreateProject: () => void }) {
   return (
     <div className="rounded-2xl border border-primary/20 bg-primary/5 p-8 text-center space-y-4">
-      <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto">
-        <Sparkles className="h-7 w-7 text-primary" />
+      <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto text-primary">
+        <AgentIcon size={28} />
       </div>
       <div>
         <h2 className="text-xl font-bold mb-2">Welcome to MustaFlow AI</h2>
@@ -182,7 +184,7 @@ function GettingStartedChecklist({
     },
     {
       id: "build",
-      icon: Sparkles,
+      icon: AgentIcon,
       label: "Run your first AI build",
       description: "Send a message in the AI Builder chat and watch your app come to life.",
       done: hasBuilt,

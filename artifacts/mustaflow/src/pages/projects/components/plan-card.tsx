@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
-  BrainCircuit,
   ServerCog,
   CheckCircle2,
   AlertTriangle,
@@ -26,6 +25,7 @@ import {
   ListChecks,
   Clock,
 } from "lucide-react";
+import { AgentIcon } from "@/components/agent-icon";
 import { PlanDecomposeView } from "./plan-decompose";
 import { PlanHistoryPanel } from "./plan-history";
 import { cn } from "@/lib/utils";
@@ -685,7 +685,9 @@ export function PlanCard({
     <div className="mt-2 bg-background border border-border rounded-xl text-xs overflow-hidden">
       {/* Header */}
       <div className="px-3 py-2.5 border-b border-border flex items-start gap-2">
-        <BrainCircuit className="h-3.5 w-3.5 text-secondary shrink-0 mt-0.5" />
+        <span className="text-secondary shrink-0 mt-0.5">
+          <AgentIcon size={14} />
+        </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="font-semibold text-foreground">
