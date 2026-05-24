@@ -3361,6 +3361,22 @@ export const CreateBillingCheckoutResponse = zod.object({
 
 
 /**
+ * @summary Get the current status of a Stripe Checkout session (used as a backup signal when the webhook is slow)
+ */
+export const GetBillingCheckoutSessionParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+export const GetBillingCheckoutSessionResponse = zod.object({
+  "sessionId": zod.string(),
+  "status": zod.enum(['open', 'complete', 'expired', 'unknown']).describe('Stripe session.status (open | complete | expired) or \"unknown\" if not retrievable.'),
+  "paymentStatus": zod.enum(['paid', 'unpaid', 'no_payment_required', 'payment_failed']).optional().describe('Stripe session.payment_status (paid | unpaid | no_payment_required | payment_failed).'),
+  "creditsGranted": zod.boolean().optional().describe('Whether the credits for this session have already been recorded in credit_transactions (i.e. the webhook fired).'),
+  "error": zod.string().optional()
+})
+
+
+/**
  * @summary List credit transactions for current user
  */
 export const ListCreditTransactionsResponse = zod.object({

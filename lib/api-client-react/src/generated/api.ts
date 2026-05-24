@@ -44,6 +44,7 @@ import type {
   AppTestRun,
   BillingCheckoutInput,
   BillingCheckoutResult,
+  BillingCheckoutSessionStatus,
   BillingPackagesResult,
   ChatExchange,
   ChatMessage,
@@ -9397,6 +9398,83 @@ export const useCreateBillingCheckout = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getCreateBillingCheckoutMutationOptions(options));
     }
+
+export const getGetBillingCheckoutSessionUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/billing/checkout/${sessionId}`
+}
+
+/**
+ * @summary Get the current status of a Stripe Checkout session (used as a backup signal when the webhook is slow)
+ */
+export const getBillingCheckoutSession = async (sessionId: string, options?: RequestInit): Promise<BillingCheckoutSessionStatus> => {
+
+  return customFetch<BillingCheckoutSessionStatus>(getGetBillingCheckoutSessionUrl(sessionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBillingCheckoutSessionQueryKey = (sessionId: string,) => {
+    return [
+    `/api/billing/checkout/${sessionId}`
+    ] as const;
+    }
+
+
+export const getGetBillingCheckoutSessionQueryOptions = <TData = Awaited<ReturnType<typeof getBillingCheckoutSession>>, TError = ErrorType<unknown>>(sessionId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBillingCheckoutSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBillingCheckoutSessionQueryKey(sessionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBillingCheckoutSession>>> = ({ signal }) => getBillingCheckoutSession(sessionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(sessionId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBillingCheckoutSession>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetBillingCheckoutSessionQueryResult = NonNullable<Awaited<ReturnType<typeof getBillingCheckoutSession>>>
+export type GetBillingCheckoutSessionQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the current status of a Stripe Checkout session (used as a backup signal when the webhook is slow)
+ */
+
+export function useGetBillingCheckoutSession<TData = Awaited<ReturnType<typeof getBillingCheckoutSession>>, TError = ErrorType<unknown>>(
+ sessionId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBillingCheckoutSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetBillingCheckoutSessionQueryOptions(sessionId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListCreditTransactionsUrl = () => {
 

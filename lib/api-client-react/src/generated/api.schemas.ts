@@ -1734,6 +1734,43 @@ export interface BillingCheckoutResult {
   error?: string;
 }
 
+/**
+ * Stripe session.status (open | complete | expired) or "unknown" if not retrievable.
+ */
+export type BillingCheckoutSessionStatusStatus = typeof BillingCheckoutSessionStatusStatus[keyof typeof BillingCheckoutSessionStatusStatus];
+
+
+export const BillingCheckoutSessionStatusStatus = {
+  open: 'open',
+  complete: 'complete',
+  expired: 'expired',
+  unknown: 'unknown',
+} as const;
+
+/**
+ * Stripe session.payment_status (paid | unpaid | no_payment_required | payment_failed).
+ */
+export type BillingCheckoutSessionStatusPaymentStatus = typeof BillingCheckoutSessionStatusPaymentStatus[keyof typeof BillingCheckoutSessionStatusPaymentStatus];
+
+
+export const BillingCheckoutSessionStatusPaymentStatus = {
+  paid: 'paid',
+  unpaid: 'unpaid',
+  no_payment_required: 'no_payment_required',
+  payment_failed: 'payment_failed',
+} as const;
+
+export interface BillingCheckoutSessionStatus {
+  sessionId: string;
+  /** Stripe session.status (open | complete | expired) or "unknown" if not retrievable. */
+  status: BillingCheckoutSessionStatusStatus;
+  /** Stripe session.payment_status (paid | unpaid | no_payment_required | payment_failed). */
+  paymentStatus?: BillingCheckoutSessionStatusPaymentStatus;
+  /** Whether the credits for this session have already been recorded in credit_transactions (i.e. the webhook fired). */
+  creditsGranted?: boolean;
+  error?: string;
+}
+
 export interface AdminMe {
   userId: string;
   role: string;

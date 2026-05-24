@@ -10,7 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and, like } from "drizzle-orm";
 import {
   db,
   creditTransactionsTable,
@@ -312,6 +312,80 @@ router.get("/billing/packages", async (_req, res): Promise<void> => {
       available: configured,
     })),
   });
+});
+
+// GET /api/billing/checkout/:sessionId — backup signal for slow webhooks.
+// Returns the Stripe session.status + payment_status plus whether the credits
+// for this session have already been recorded in credit_transactions.
+router.get("/billing/checkout/:sessionId", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+
+  const sessionId = req.params.sessionId;
+  if (!sessionId || typeof sessionId !== "string") {
+    res.status(400).json({ error: "Missing sessionId" });
+    return;
+  }
+
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) {
+    res.json({ sessionId, status: "unknown", error: "Stripe not configured" });
+    return;
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    // Ownership check: only the user who created the session can read it.
+    // Strict — sessions without a userId in metadata are treated as not-yours.
+    const sessionUserId = session.metadata?.userId;
+    if (sessionUserId !== userId) {
+      res.status(403).json({ error: "Session belongs to a different user" });
+      return;
+    }
+
+    // Detect whether the webhook has already credited this session by
+    // looking for our purchase transaction that embeds the (unique) event id
+    // for this session — fallback: match on the session metadata pack + recent
+    // transactions. We rely on the description tag we write in handleStripeWebhook:
+    // "Stripe purchase: ... [event evt_xxx]". Since we don't store the session
+    // id directly, we approximate by checking for a recent purchase of the same
+    // package after the session was created.
+    let creditsGranted = false;
+    const createdAtMs = (session.created ?? 0) * 1000;
+    if (createdAtMs > 0) {
+      const packageId = session.metadata?.packageId ?? "";
+      const recent = await db
+        .select({ id: creditTransactionsTable.id })
+        .from(creditTransactionsTable)
+        .where(
+          and(
+            eq(creditTransactionsTable.userId, userId),
+            eq(creditTransactionsTable.type, "purchase"),
+            like(creditTransactionsTable.description, `%${packageId}%`),
+            sql`${creditTransactionsTable.createdAt} >= ${new Date(createdAtMs)}`,
+          ),
+        )
+        .limit(1);
+      creditsGranted = recent.length > 0;
+    }
+
+    res.json({
+      sessionId: session.id,
+      status: session.status ?? "unknown",
+      paymentStatus: session.payment_status ?? undefined,
+      creditsGranted,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    if (/api key|authentication|invalid_api_key/i.test(msg)) {
+      invalidateStripeCredentialCache();
+    }
+    res.status(502).json({ sessionId, status: "unknown", error: `Stripe API error: ${msg}` });
+  }
 });
 
 // POST /api/billing/checkout

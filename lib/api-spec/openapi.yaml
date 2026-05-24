@@ -2643,6 +2643,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/BillingCheckoutResult"
 
+  /billing/checkout/{sessionId}:
+    get:
+      operationId: getBillingCheckoutSession
+      tags: [credits]
+      summary: Get the current status of a Stripe Checkout session (used as a backup signal when the webhook is slow)
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Checkout session status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingCheckoutSessionStatus"
+
   /credits/transactions:
     get:
       operationId: listCreditTransactions
@@ -5246,6 +5264,24 @@ components:
         sessionId: { type: string }
         setupRequired: { type: boolean }
         message: { type: string }
+        error: { type: string }
+
+    BillingCheckoutSessionStatus:
+      type: object
+      required: [sessionId, status]
+      properties:
+        sessionId: { type: string }
+        status:
+          type: string
+          description: Stripe session.status (open | complete | expired) or "unknown" if not retrievable.
+          enum: [open, complete, expired, unknown]
+        paymentStatus:
+          type: string
+          description: Stripe session.payment_status (paid | unpaid | no_payment_required | payment_failed).
+          enum: [paid, unpaid, no_payment_required, payment_failed]
+        creditsGranted:
+          type: boolean
+          description: Whether the credits for this session have already been recorded in credit_transactions (i.e. the webhook fired).
         error: { type: string }
 
     AdminMe:

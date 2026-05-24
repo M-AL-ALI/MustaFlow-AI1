@@ -16,11 +16,16 @@ import {
   ArrowUpRight,
   X,
   Receipt,
+  Loader2,
 } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
 import { applyTheme, getStoredTheme, type AppearanceMode } from "@/lib/theme";
-import { useGetUserCredits, useListCreditTransactions } from "@workspace/api-client-react";
+import {
+  useGetUserCredits,
+  useListCreditTransactions,
+  getBillingCheckoutSession,
+} from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -419,6 +424,12 @@ function CreditsTab() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [activePkg, setActivePkg] = useState<CreditPackage | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // "Processing" = user submitted payment in Stripe and we're waiting for
+  // either the webhook to land OR our session-status check to confirm "paid".
+  // "Failed" = Stripe reported payment_failed for this session.
+  const [paymentState, setPaymentState] = useState<"idle" | "processing" | "failed">("idle");
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const lastBalanceRef = useRef<number | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -473,6 +484,7 @@ function CreditsTab() {
       const data = (await res.json()) as {
         setupRequired?: boolean;
         clientSecret?: string;
+        sessionId?: string;
         error?: string;
       };
 
@@ -506,6 +518,9 @@ function CreditsTab() {
       lastBalanceRef.current = creditsData?.balance ?? 0;
       setActivePkg(pkg);
       setClientSecret(data.clientSecret);
+      setActiveSessionId(data.sessionId ?? null);
+      setPaymentState("idle");
+      setPaymentError(null);
       setCheckoutOpen(true);
     } catch {
       toast({
@@ -518,8 +533,14 @@ function CreditsTab() {
     }
   }
 
-  // While the embedded checkout modal is open, poll the credit balance every
-  // 3s. When the webhook credits the account, refresh the UI and show success.
+  // While the embedded checkout modal is open, poll two signals in parallel:
+  //   (1) the user's credit balance — the webhook bumps it when payment lands
+  //   (2) the Stripe Checkout session status — backup signal in case the
+  //       webhook is slow or STRIPE_WEBHOOK_SECRET isn't configured in dev.
+  // Once the user has submitted payment (signalled by Stripe's onComplete or
+  // by the session reporting paid/complete), we flip to "processing" so the
+  // balance card shows a clear "Processing payment…" indicator instead of a
+  // silent wait. If the session reports payment_failed, we surface an error.
   useEffect(() => {
     if (!checkoutOpen) {
       if (pollRef.current) {
@@ -528,31 +549,82 @@ function CreditsTab() {
       }
       return;
     }
+
+    function finishSuccess() {
+      void refetchTx();
+      toast({
+        title: "Payment successful",
+        description: `${activePkg?.credits.toLocaleString() ?? ""} credits added to your account.`,
+      });
+      setCheckoutOpen(false);
+      setClientSecret(null);
+      setActivePkg(null);
+      setActiveSessionId(null);
+      setPaymentState("idle");
+      setPaymentError(null);
+    }
+
     const id = setInterval(() => {
       void (async () => {
+        // Signal 1: webhook landed → balance increased.
         const { data: fresh } = await refetchCredits();
         const baseline = lastBalanceRef.current;
         if (typeof baseline === "number" && fresh && fresh.balance > baseline) {
-          void refetchTx();
-          toast({
-            title: "Payment successful",
-            description: `${activePkg?.credits.toLocaleString() ?? ""} credits added to your account.`,
-          });
-          setCheckoutOpen(false);
-          setClientSecret(null);
-          setActivePkg(null);
+          finishSuccess();
+          return;
+        }
+
+        // Signal 2: session status — works even if webhook is delayed/missing.
+        if (!activeSessionId) return;
+        try {
+          const status = await getBillingCheckoutSession(activeSessionId);
+          if (status.paymentStatus === "payment_failed") {
+            setPaymentState("failed");
+            setPaymentError(
+              "Your payment was declined. Please try a different card or contact your bank.",
+            );
+            return;
+          }
+          if (status.paymentStatus === "paid" || status.status === "complete") {
+            // Show the "processing" indicator until webhook actually credits.
+            if (paymentState !== "processing") setPaymentState("processing");
+            // If the webhook has already credited (our server checks
+            // credit_transactions), the balance refetch above will catch it
+            // on the next tick. Otherwise we keep showing "processing".
+            if (status.creditsGranted) {
+              await refetchCredits();
+              finishSuccess();
+            }
+          }
+        } catch {
+          // Network blips are fine — keep polling.
         }
       })();
-    }, 3000);
+    }, 2000);
     pollRef.current = id;
     return () => clearInterval(id);
-  }, [checkoutOpen, refetchCredits, refetchTx, toast, activePkg]);
+  }, [checkoutOpen, refetchCredits, refetchTx, toast, activePkg, activeSessionId, paymentState]);
 
   function handleCloseCheckout() {
     setCheckoutOpen(false);
     setClientSecret(null);
     setActivePkg(null);
+    setActiveSessionId(null);
+    setPaymentState("idle");
+    setPaymentError(null);
   }
+
+  // Stripe fires onComplete on the EmbeddedCheckout when the user finishes
+  // submitting payment (with redirect_on_completion: "never"). Use it to flip
+  // to "processing" immediately, before any polling round-trip lands.
+  const checkoutOptions = clientSecret
+    ? {
+        clientSecret,
+        onComplete: () => {
+          setPaymentState((prev) => (prev === "failed" ? prev : "processing"));
+        },
+      }
+    : null;
 
   const balance = creditsData?.balance ?? 0;
   const isLowBalance = balance < 10;
@@ -588,7 +660,13 @@ function CreditsTab() {
       {/* Balance card */}
       <div
         className={`border rounded-xl bg-card p-6 flex items-center justify-between ${
-          isLowBalance ? "border-yellow-500/30 bg-yellow-500/5" : "border-border"
+          paymentState === "failed"
+            ? "border-red-500/30 bg-red-500/5"
+            : paymentState === "processing"
+              ? "border-primary/40 bg-primary/5"
+              : isLowBalance
+                ? "border-yellow-500/30 bg-yellow-500/5"
+                : "border-border"
         }`}
       >
         <div className="space-y-1">
@@ -597,7 +675,20 @@ function CreditsTab() {
           </p>
           <p className="text-4xl font-bold">{creditsLoading ? "…" : balance.toLocaleString()}</p>
           <p className="text-xs text-muted-foreground">build credits</p>
-          {isLowBalance && !creditsLoading && (
+          {paymentState === "processing" && (
+            <p className="text-xs text-primary font-medium mt-1 flex items-center gap-1.5">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Processing payment
+              {activePkg ? ` — ${activePkg.credits.toLocaleString()} credits on the way` : "…"}
+            </p>
+          )}
+          {paymentState === "failed" && (
+            <p className="text-xs text-red-600 font-medium mt-1 flex items-start gap-1.5">
+              <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+              <span>{paymentError ?? "Payment failed. Please try again."}</span>
+            </p>
+          )}
+          {paymentState === "idle" && isLowBalance && !creditsLoading && (
             <p className="text-xs text-yellow-600 font-medium mt-1">
               Running low — top up to keep building.
             </p>
@@ -769,11 +860,23 @@ function CreditsTab() {
             </div>
           </DialogHeader>
           <div className="max-h-[75vh] overflow-y-auto">
-            {clientSecret && packages?.publishableKey ? (
+            {paymentState === "processing" && (
+              <div className="px-5 py-3 border-b border-border bg-primary/5 text-sm text-primary flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Processing payment — adding credits to your account…</span>
+              </div>
+            )}
+            {paymentState === "failed" && (
+              <div className="px-5 py-3 border-b border-border bg-red-500/5 text-sm text-red-600 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>{paymentError ?? "Payment failed. Please try again."}</span>
+              </div>
+            )}
+            {clientSecret && checkoutOptions && packages?.publishableKey ? (
               <EmbeddedCheckoutProvider
                 key={clientSecret}
                 stripe={getStripePromise(packages.publishableKey)}
-                options={{ clientSecret }}
+                options={checkoutOptions}
               >
                 <EmbeddedCheckout />
               </EmbeddedCheckoutProvider>
