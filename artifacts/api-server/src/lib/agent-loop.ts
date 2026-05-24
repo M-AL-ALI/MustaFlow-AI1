@@ -801,6 +801,118 @@ const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "user_query",
+      description:
+        "Pause the build and ask the user a single clarifying question with an interactive widget in chat. Returns { response, kind } once the user answers, or { canceled: true, reason: 'timeout'|'aborted' } after ~5 min / cancel. Use only when the answer cannot reasonably be inferred — payment provider choice, brand color preference, deploy region, etc. Do NOT use for questions you can answer yourself (lib choice, file naming).",
+      parameters: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "One short question, ≤ 500 chars." },
+          kind: {
+            type: "string",
+            enum: ["choice", "boolean", "text"],
+            description:
+              "choice = chip buttons; boolean = confirm/cancel; text = free-form short answer.",
+          },
+          options: {
+            type: "array",
+            items: { type: "string" },
+            description: "Required when kind=choice; 2-6 labels, ≤ 60 chars each.",
+          },
+          allow_multiple: {
+            type: "boolean",
+            description: "Only for kind=choice. Default false.",
+          },
+        },
+        required: ["question", "kind"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "request_secret",
+      description:
+        "Pause the build and ask the user to provide a missing secret (API key, token). Renders an inline secret-entry form that writes to the project's encrypted secrets store via the existing AES-256-GCM path — the model NEVER sees the secret value. Returns { saved: true, name } once saved, or { canceled: true } after ~5 min / cancel. Use this instead of telling the user 'go to Tools & Files → Secrets'.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Env var name (UPPER_SNAKE_CASE), e.g. 'OPENAI_API_KEY'.",
+          },
+          category: {
+            type: "string",
+            enum: ["api_key", "oauth", "webhook", "database", "other"],
+            description: "Defaults to 'api_key'.",
+          },
+          help_url: {
+            type: "string",
+            description: "Optional link explaining where the user can obtain this secret.",
+          },
+          reason: {
+            type: "string",
+            description: "Short one-line justification shown to the user.",
+          },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "install_package",
+      description:
+        "Install a single dependency by runtime — a structured, typed wrapper around pkg_install. runtime=node routes to npm; runtime=python routes to pip. Use this for the common case; pkg_install remains available if you need a specific manager (pnpm/yarn) or want to install dev deps under those managers.",
+      parameters: {
+        type: "object",
+        properties: {
+          runtime: { type: "string", enum: ["node", "python"] },
+          name: { type: "string", description: "Package name." },
+          version: {
+            type: "string",
+            description:
+              "Optional version spec. node: semver range ('^3.22.0' / 'latest'). python: PEP 440 ('2.5.0' / '>=1.0,<2').",
+          },
+          dev: {
+            type: "boolean",
+            description: "Mark as devDependency (node/npm only — ignored for python).",
+          },
+        },
+        required: ["runtime", "name"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "suggest_deploy",
+      description:
+        "After a successful build, present the user with a one-click 'Publish now' chip in chat. Does NOT pause the build — fire-and-forget. Use only when checks have passed and the preview is verified. The card triggers the existing publish flow (snapshot → public URL).",
+      parameters: {
+        type: "object",
+        properties: {
+          environment: {
+            type: "string",
+            enum: ["testing", "production"],
+            description: "Defaults to 'testing'.",
+          },
+          note: {
+            type: "string",
+            description: "Short caption shown on the suggestion card (≤ 200 chars).",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "finalize",
       description:
         "Signal that the build is complete. Provide a 1-3 sentence summary for the user. Call this only after all required checks pass.",
@@ -1141,6 +1253,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       "generate_video",
       "generate_audio",
       "remove_image_background",
+      // Task #532: human-in-the-loop tools pause the loop awaiting user input.
+      // Must be serial so a single LLM turn can't fan out multiple modal
+      // prompts simultaneously. install_package is serial because it shells
+      // into the container like pkg_install.
+      "user_query",
+      "request_secret",
+      "install_package",
     ]);
 
     // Parse a tool call's arguments once.
@@ -1280,6 +1399,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               creativeBudget,
               creativeCounts,
               presentedAssets,
+              loopStartedAt: startedAt,
+              loopWallClockMs: wallClockMs,
             })
               .then((r) => ({ ok: r.ok, observation: r.observation, noTruncate: r.noTruncate }))
               .catch((err) => ({
@@ -1333,6 +1454,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         creativeBudget,
         creativeCounts,
         presentedAssets,
+        loopStartedAt: startedAt,
+        loopWallClockMs: wallClockMs,
       });
       const durationMs = Date.now() - tStart;
 
@@ -1664,6 +1787,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               creativeBudget,
               creativeCounts,
               presentedAssets,
+              loopStartedAt: startedAt,
+              loopWallClockMs: wallClockMs,
             });
             toolCalls.push({
               step: step + 1,
@@ -1922,6 +2047,12 @@ export interface ToolCtx {
     mimeType: string;
     description?: string;
   }>;
+  /** Task #532: epoch ms when the loop started + the effective wall-clock cap
+   *  for this run. Used by paused tools (user_query/request_secret) to bound
+   *  their per-prompt timeout by the loop's remaining budget so a pause can
+   *  never outlive the loop's hard ceiling from #509. */
+  loopStartedAt: number;
+  loopWallClockMs: number;
 }
 
 /**
@@ -2871,6 +3002,259 @@ export async function executeTool(
       return {
         ok: true,
         observation: `presented asset "${name}" (${path}, ${sizeBytes} bytes, ${mimeType})`,
+      };
+    }
+    case "user_query": {
+      const question = typeof args.question === "string" ? args.question.trim() : "";
+      const kind = typeof args.kind === "string" ? args.kind : "";
+      if (!question) {
+        return { ok: false, observation: "ERROR: user_query requires a non-empty question" };
+      }
+      if (kind !== "choice" && kind !== "boolean" && kind !== "text") {
+        return { ok: false, observation: "ERROR: kind must be one of choice|boolean|text" };
+      }
+      const rawOptions = Array.isArray(args.options) ? (args.options as unknown[]) : [];
+      const options = rawOptions
+        .map((o) => (typeof o === "string" ? o.trim().slice(0, 60) : ""))
+        .filter((s) => s.length > 0)
+        .slice(0, 6);
+      if (kind === "choice" && options.length < 2) {
+        return {
+          ok: false,
+          observation: "ERROR: kind=choice requires at least 2 non-empty options",
+        };
+      }
+      const allowMultiple = kind === "choice" && args.allow_multiple === true;
+      if (!input.taskId) {
+        return { ok: false, observation: "ERROR: user_query requires an active task context" };
+      }
+      const { createPrompt } = await import("./agent-prompts");
+      const payload = {
+        question: question.slice(0, 500),
+        kind,
+        options: kind === "choice" ? options : [],
+        allowMultiple,
+      };
+      // Cap prompt timeout by the loop's remaining wall-clock budget so a
+      // pause can never exceed the per-task ceiling from #509.
+      const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+      const { promptId, promise } = createPrompt({
+        taskId: input.taskId,
+        projectId: input.projectId,
+        kind: "user_query",
+        payload,
+        signal: input.signal,
+        timeoutMs: remainingMs,
+      });
+      await safeEvent(
+        input.onEvent,
+        "agent_prompt",
+        JSON.stringify({ promptId, kind: "user_query", payload }),
+      );
+      const resp = await promise;
+      return { ok: true, observation: JSON.stringify({ kind, ...resp }) };
+    }
+    case "request_secret": {
+      const name = typeof args.name === "string" ? args.name.trim() : "";
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,80}$/.test(name)) {
+        return {
+          ok: false,
+          observation: "ERROR: invalid secret name (use UPPER_SNAKE_CASE, ≤ 80 chars)",
+        };
+      }
+      const category =
+        typeof args.category === "string" &&
+        ["api_key", "oauth", "webhook", "database", "other"].includes(args.category)
+          ? args.category
+          : "api_key";
+      // Sanitize help_url: only http(s) schemes allowed (defense vs javascript:/data: XSS).
+      let helpUrl: string | null = null;
+      if (typeof args.help_url === "string") {
+        const candidate = args.help_url.trim().slice(0, 500);
+        try {
+          const parsed = new URL(candidate);
+          if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+            helpUrl = parsed.toString();
+          }
+        } catch {
+          /* invalid URL → drop */
+        }
+      }
+      const reason = typeof args.reason === "string" ? args.reason.trim().slice(0, 280) : null;
+      if (!input.taskId) {
+        return { ok: false, observation: "ERROR: request_secret requires an active task context" };
+      }
+      const { createPrompt } = await import("./agent-prompts");
+      const payload = { name, category, helpUrl, reason };
+      const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+      const { promptId, promise } = createPrompt({
+        taskId: input.taskId,
+        projectId: input.projectId,
+        kind: "request_secret",
+        payload,
+        signal: input.signal,
+        timeoutMs: remainingMs,
+      });
+      await safeEvent(
+        input.onEvent,
+        "agent_prompt",
+        JSON.stringify({ promptId, kind: "request_secret", payload }),
+      );
+      const resp = await promise;
+      return { ok: true, observation: JSON.stringify(resp) };
+    }
+    case "install_package": {
+      const runtime = typeof args.runtime === "string" ? args.runtime : "";
+      if (runtime !== "node" && runtime !== "python") {
+        return { ok: false, observation: "ERROR: runtime must be 'node' or 'python'" };
+      }
+      const dev = args.dev === true;
+      const manager = runtime === "node" ? "npm" : "pip";
+      const strictness = ctx.input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS;
+      const decision = evaluatePkgInstall(
+        { manager, pkg: args.name, version: args.version },
+        strictness,
+      );
+      if (!decision.ok) {
+        await writeToolAudit(ctx, {
+          toolName: "install_package",
+          argv: [runtime, String(args.name ?? "?"), String(args.version ?? "")],
+          exitCode: 126,
+          durationMs: 0,
+          blocked: true,
+          blockReason: decision.reason,
+          stdoutTail: "",
+          stderrTail: `BLOCKED: ${decision.reason}`,
+        });
+        return {
+          ok: false,
+          observation: JSON.stringify({
+            blocked: true,
+            reason: decision.reason,
+            runtime,
+            name: args.name ?? null,
+            version: args.version ?? null,
+          }),
+        };
+      }
+      if (stack === "static-html" || stack === "mobile-cross") {
+        const reason = "install_package not available for this stack";
+        await writeToolAudit(ctx, {
+          toolName: "install_package",
+          argv: decision.argv,
+          exitCode: 126,
+          durationMs: 0,
+          blocked: true,
+          blockReason: reason,
+          stdoutTail: "",
+          stderrTail: `BLOCKED: ${reason}`,
+        });
+        return {
+          ok: false,
+          observation: JSON.stringify({
+            blocked: true,
+            reason,
+            runtime,
+            name: decision.pkg,
+            version: decision.version,
+          }),
+        };
+      }
+      // Rewrite --save → --save-dev for npm devDependencies.
+      const argv =
+        dev && manager === "npm"
+          ? decision.argv.map((tok) => (tok === "--save" ? "--save-dev" : tok))
+          : decision.argv;
+      if (!containerState.id) {
+        const prov = await ensureContainerProvisioned(ctx);
+        if (!prov.ok) {
+          return {
+            ok: false,
+            observation: `ERROR: cannot provision container: ${prov.reason ?? "unknown"}`,
+          };
+        }
+      }
+      await safeEvent(
+        input.onEvent,
+        "narration",
+        `Installing ${decision.pkg}${decision.version ? `@${decision.version}` : ""} via ${manager}${dev ? " (dev)" : ""}…`,
+      );
+      const t = Date.now();
+      const r = await execWithTimeout(
+        containerState.id!,
+        argv,
+        input.projectId,
+        PKG_INSTALL_TIMEOUT_MS,
+        input.signal,
+      );
+      const dur = Date.now() - t;
+      const exitCode = r.timedOut ? 124 : r.ok ? 0 : 1;
+      commandsRun.push({
+        step,
+        argv,
+        exitCode,
+        durationMs: dur,
+        stdoutPreview: r.ok ? r.output.slice(0, 400) : "",
+        stderrPreview: r.ok ? "" : r.output.slice(0, 400),
+      });
+      await writeToolAudit(ctx, {
+        toolName: "install_package",
+        argv,
+        exitCode,
+        durationMs: dur,
+        blocked: false,
+        blockReason: null,
+        stdoutTail: r.ok ? r.output.slice(-400) : "",
+        stderrTail: r.ok ? "" : r.output.slice(-400),
+      });
+      if (r.aborted) return { ok: false, observation: "ERROR: aborted by user" };
+      if (r.timedOut) {
+        return {
+          ok: false,
+          observation: JSON.stringify({
+            ok: false,
+            runtime,
+            manager,
+            name: decision.pkg,
+            requestedVersion: decision.version || null,
+            dev,
+            exitCode,
+            timedOut: true,
+            error: `install exceeded ${PKG_INSTALL_TIMEOUT_MS}ms`,
+          }),
+        };
+      }
+      return {
+        ok: r.ok,
+        observation: JSON.stringify({
+          ok: r.ok,
+          runtime,
+          manager,
+          name: decision.pkg,
+          requestedVersion: decision.version || null,
+          installedVersion: extractInstalledVersion(manager, decision.pkg, r.output),
+          dev,
+          exitCode,
+          output: r.output.slice(0, MAX_OBSERVATION_CHARS),
+        }),
+      };
+    }
+    case "suggest_deploy": {
+      const environment = args.environment === "production" ? "production" : "testing";
+      const note = typeof args.note === "string" ? args.note.trim().slice(0, 200) : null;
+      const payload = { environment, note, projectId: input.projectId };
+      // Fire-and-forget — does NOT pause the loop. The frontend listens for
+      // "agent_prompt" SSE frames with kind="suggest_deploy" and renders a
+      // one-click chip that triggers the existing publish flow.
+      const promptId = `suggest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await safeEvent(
+        input.onEvent,
+        "agent_prompt",
+        JSON.stringify({ promptId, kind: "suggest_deploy", payload }),
+      );
+      return {
+        ok: true,
+        observation: JSON.stringify({ suggested: true, environment, note }),
       };
     }
     case "finalize": {

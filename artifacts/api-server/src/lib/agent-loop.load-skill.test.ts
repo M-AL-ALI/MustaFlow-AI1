@@ -69,6 +69,8 @@ function makeCtx(
     creativeBudget: { remaining: 5 },
     creativeCounts: { image: 0, video: 0, audio: 0, bgRemoval: 0 },
     presentedAssets: [],
+    loopStartedAt: Date.now(),
+    loopWallClockMs: 480_000,
   };
   return base;
 }

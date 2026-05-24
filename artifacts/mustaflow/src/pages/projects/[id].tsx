@@ -100,6 +100,7 @@ import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
 import { WorkspaceTour } from "./components/workspace-tour";
 import { MemoryIndicator } from "./components/memory-indicator";
+import { AgentPromptCardsList, type AgentPromptCard } from "./components/agent-prompt-cards";
 import { cn } from "@/lib/utils";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -657,6 +658,7 @@ export default function ProjectWorkspacePage() {
     versionB: { id: number; userRequest: string; changelogEntry?: string | null };
   } | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+  const [agentPrompts, setAgentPrompts] = useState<AgentPromptCard[]>([]);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
     const valid = WORKSPACE_TABS.map((t) => t.value);
@@ -1082,10 +1084,16 @@ export default function ProjectWorkspacePage() {
     if (!activeTaskId) return;
     // Reset dedup set per task so it stays bounded across long sessions
     seenPageMapEventIdsRef.current = new Set();
+    setAgentPrompts([]);
+    const seenPromptIds = new Set<string>();
     const es = new EventSource(`/api/projects/${projectId}/tasks/${activeTaskId}/events/stream`);
     es.onmessage = (e: MessageEvent<string>) => {
       try {
-        const event = JSON.parse(e.data) as { id: number; eventType: string };
+        const event = JSON.parse(e.data) as {
+          id: number;
+          eventType: string;
+          message?: string;
+        };
         if (
           event.eventType === "page_map_updated" &&
           !seenPageMapEventIdsRef.current.has(event.id)
@@ -1094,6 +1102,34 @@ export default function ProjectWorkspacePage() {
           void queryClient.invalidateQueries({
             queryKey: getGetPageMapQueryKey(projectId),
           });
+        } else if (event.eventType === "agent_prompt" && event.message) {
+          try {
+            const parsed = JSON.parse(event.message) as {
+              promptId: string;
+              kind: "user_query" | "request_secret" | "suggest_deploy";
+              payload: Record<string, unknown>;
+            };
+            if (!parsed.promptId || seenPromptIds.has(parsed.promptId)) return;
+            seenPromptIds.add(parsed.promptId);
+            setAgentPrompts((prev) => [
+              ...prev,
+              {
+                promptId: parsed.promptId,
+                kind: parsed.kind,
+                payload: parsed.payload ?? {},
+                receivedAt: Date.now(),
+              },
+            ]);
+          } catch {
+            /* malformed prompt frame */
+          }
+        } else if (
+          event.eventType === "completed" ||
+          event.eventType === "failed" ||
+          event.eventType === "cancelled"
+        ) {
+          // Drop any unanswered prompts when the task ends.
+          setAgentPrompts([]);
         }
       } catch {
         // ignore malformed frames
@@ -1101,6 +1137,10 @@ export default function ProjectWorkspacePage() {
     };
     return () => es.close();
   }, [activeTaskId, projectId, queryClient]);
+
+  const dismissAgentPrompt = useCallback((promptId: string) => {
+    setAgentPrompts((prev) => prev.filter((p) => p.promptId !== promptId));
+  }, []);
 
   // Auto-generate a plan analysis when a project opens with no messages yet
   useEffect(() => {
@@ -2190,6 +2230,14 @@ export default function ProjectWorkspacePage() {
                         );
                       });
                     })()}
+
+                    {/* Task #532: human-in-the-loop prompts from the agent loop */}
+                    <AgentPromptCardsList
+                      projectId={projectId}
+                      taskId={activeTaskId}
+                      prompts={agentPrompts}
+                      onDismiss={dismissAgentPrompt}
+                    />
 
                     {/* Live streaming bubble — shown while SSE converse stream is active */}
                     {isStreaming && !sendMessage.isPending && (
