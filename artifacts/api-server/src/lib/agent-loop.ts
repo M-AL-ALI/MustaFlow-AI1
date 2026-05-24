@@ -148,6 +148,14 @@ export type AgentLoopReport = {
   /** Skill names the model invoked `load_skill` for during this run. */
   skillsLoaded: string[];
   e2eResults?: E2eRunSummary | null;
+  /** Counts of "agent senses" tool invocations (Task #529). */
+  senseCalls?: {
+    screenshot: number;
+    webFetch: number;
+    webSearch: number;
+    branding: number;
+    diagnostics: number;
+  };
 };
 
 export type AgentLoopResult = {
@@ -513,6 +521,94 @@ const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "take_screenshot",
+      description:
+        "Capture a PNG screenshot of the project's live preview URL (or any http(s) URL). Use to visually verify layout, before/after refactors, or design feedback. Shares a 5MB per-task screenshot budget with run_e2e — exceeding the budget returns an error.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description:
+              "URL to capture. Omit to screenshot the project's own preview URL when one is available.",
+          },
+          width: { type: "integer", description: "Viewport width (default 1280, max 1920)." },
+          height: { type: "integer", description: "Viewport height (default 800, max 1200)." },
+          full_page: { type: "boolean", description: "Capture the full scrollable page." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_fetch",
+      description:
+        "Fetch an http(s) URL and return cleaned text/markdown. HTML is parsed (scripts/styles stripped). Use for reading docs, API references, or any external page. Response capped at 6,000 chars. Costs 1 credit per 5 calls (combined across web_fetch / web_search / extract_branding).",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string" } },
+        required: ["url"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description:
+        "Search the web via Brave Search. Returns up to 10 hits with title/url/snippet. Use for current information (library versions, error messages, design references) you cannot infer from project files. Requires BRAVE_SEARCH_API_KEY — returns a structured 'not configured' error if absent.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          limit: { type: "integer", description: "Max hits (1-10, default 5)." },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "extract_branding",
+      description:
+        "Extract brand signals from a website: title, theme color, primary colors, fonts (Google Fonts + inline font-family), favicon, og:image. Use when the user references a brand URL ('match acme.com') or you need design tokens for a redesign.",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string" } },
+        required: ["url"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_diagnostics",
+      description:
+        "Run a fast language-aware diagnostic probe (tsc/node --check/python -m py_compile) for a single file and return structured diagnostics (file/line/severity/message). Faster than running the full per-stack check profile. Requires the project container to be available; falls back to an error if not.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Project file path inside the container." },
+          tool: {
+            type: "string",
+            enum: ["tsc", "node", "python", "auto"],
+            description: "Diagnostic tool; defaults to auto from extension.",
+          },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "load_skill",
       description:
         "Load the full instructions for a named skill from the registry. Call this BEFORE generating code for a stack/feature listed in the 'Available skills' section. Returns the SKILL.md body. Loading the same skill twice in one run is free — it returns the cached content.",
@@ -714,6 +810,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const e2eResults: E2eRunSummary[] = [];
   // Task-level screenshot budget (5MB) shared across smoke, run_e2e tool, and re-run.
   const screenshotBudget = { remaining: 5 * 1024 * 1024 };
+  const senseCounts = { screenshot: 0, webFetch: 0, webSearch: 0, branding: 0, diagnostics: 0 };
   let totalTokens = 0;
 
   const startedAt = Date.now();
@@ -850,6 +947,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         loadedSkills,
         e2eResults,
         screenshotBudget,
+        senseCounts,
       });
       const durationMs = Date.now() - tStart;
 
@@ -1027,6 +1125,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         checkResults,
         skillsLoaded: Array.from(loadedSkills.keys()),
         e2eResults: e2eResults[e2eResults.length - 1] ?? null,
+        senseCalls: { ...senseCounts },
       },
     };
   }
@@ -1168,6 +1267,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               loadedSkills,
               e2eResults,
               screenshotBudget,
+              senseCounts,
             });
             toolCalls.push({
               step: step + 1,
@@ -1255,6 +1355,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       checkResults,
       skillsLoaded: Array.from(loadedSkills.keys()),
       e2eResults: lastE2e,
+      senseCalls: { ...senseCounts },
     },
   };
 }
@@ -1390,6 +1491,15 @@ export interface ToolCtx {
    * run decrements it by the sum of its base64-decoded screenshot sizes.
    */
   screenshotBudget: { remaining: number };
+  /** Mutable counters for Task #529 "Agent Senses" tools — used for the
+   *  loop report and post-loop credit accounting (1 credit per 5 web calls). */
+  senseCounts: {
+    screenshot: number;
+    webFetch: number;
+    webSearch: number;
+    branding: number;
+    diagnostics: number;
+  };
 }
 
 /**
@@ -2086,6 +2196,171 @@ export async function executeTool(ctx: ToolCtx): Promise<{ ok: boolean; observat
       ctx.e2eResults.push(summary);
       const obs = renderE2eObservation(summary);
       return { ok: summary.failed === 0, observation: obs };
+    }
+    case "take_screenshot": {
+      const { takeScreenshot } = await import("./agent-senses");
+      const requestedUrl = typeof args.url === "string" && args.url.trim() ? args.url.trim() : null;
+      const previewUrl = input.previewUrl ?? null;
+      const fallbackHtml =
+        stack === "static-html" ? (workspace.read("index.html")?.content ?? null) : null;
+      const targetUrl = requestedUrl ?? previewUrl ?? "";
+      if (!targetUrl && !fallbackHtml) {
+        return {
+          ok: false,
+          observation:
+            "ERROR: no URL or preview available. Pass `url` explicitly, or start the project container so a preview URL is available.",
+        };
+      }
+      const sizeEstimate = 200_000; // rough guard before launch
+      if (ctx.screenshotBudget.remaining < sizeEstimate) {
+        return {
+          ok: false,
+          observation: `ERROR: screenshot budget exhausted (${ctx.screenshotBudget.remaining} bytes left).`,
+        };
+      }
+      await safeEvent(input.onEvent, "take_screenshot", `Capturing screenshot of ${targetUrl || "preview"}…`);
+      const shot = await takeScreenshot({
+        url: targetUrl,
+        inlineHtml: !requestedUrl && !previewUrl ? (fallbackHtml ?? undefined) : undefined,
+        width: typeof args.width === "number" ? args.width : undefined,
+        height: typeof args.height === "number" ? args.height : undefined,
+        fullPage: args.full_page === true,
+        signal: input.signal,
+      });
+      ctx.senseCounts.screenshot += 1;
+      if (!shot.ok) {
+        return { ok: false, observation: `ERROR: take_screenshot failed: ${shot.error ?? "unknown"}` };
+      }
+      const actualBytes = shot.bytes ?? 0;
+      if (actualBytes > ctx.screenshotBudget.remaining) {
+        // Reject: the capture exceeded the remaining budget. Do not deduct.
+        return {
+          ok: false,
+          observation: `ERROR: screenshot (${actualBytes} bytes) exceeds remaining budget (${ctx.screenshotBudget.remaining} bytes). Reduce viewport size or skip full_page.`,
+        };
+      }
+      ctx.screenshotBudget.remaining = Math.max(
+        ctx.screenshotBudget.remaining - actualBytes,
+        0,
+      );
+      // Keep the observation small — return metadata + base64-prefix only.
+      const preview = (shot.base64 ?? "").slice(0, 80);
+      return {
+        ok: true,
+        observation: JSON.stringify({
+          url: targetUrl || "(inline)",
+          bytes: shot.bytes ?? null,
+          width: shot.width ?? null,
+          height: shot.height ?? null,
+          base64Preview: preview,
+          budgetRemaining: ctx.screenshotBudget.remaining,
+          note: "Full base64 is not echoed back to keep the observation small. The screenshot was captured server-side — describe what you intended to verify in your next reasoning step.",
+        }),
+      };
+    }
+    case "web_fetch": {
+      const { webFetch } = await import("./agent-senses");
+      const url = typeof args.url === "string" ? args.url.trim() : "";
+      if (!url) return { ok: false, observation: "ERROR: web_fetch requires { url }" };
+      await safeEvent(input.onEvent, "web_fetch", `Fetching ${url}…`);
+      const r = await webFetch({ url, signal: input.signal });
+      ctx.senseCounts.webFetch += 1;
+      if (!r.ok && r.status === 0) {
+        return { ok: false, observation: `ERROR: web_fetch failed: ${r.error ?? "request error"}` };
+      }
+      return {
+        ok: r.ok,
+        observation: JSON.stringify({
+          url: r.url,
+          status: r.status,
+          contentType: r.contentType,
+          title: r.title ?? null,
+          text: r.text ?? "",
+        }),
+      };
+    }
+    case "web_search": {
+      const { webSearch } = await import("./agent-senses");
+      const query = typeof args.query === "string" ? args.query.trim() : "";
+      if (!query) return { ok: false, observation: "ERROR: web_search requires { query }" };
+      const limit = typeof args.limit === "number" ? args.limit : undefined;
+      await safeEvent(input.onEvent, "web_search", `Searching: ${query.slice(0, 80)}`);
+      const r = await webSearch({ query, limit, signal: input.signal });
+      ctx.senseCounts.webSearch += 1;
+      if (!r.ok) {
+        return {
+          ok: false,
+          observation: `ERROR: web_search (${r.provider}) — ${r.error ?? "no hits"}`,
+        };
+      }
+      return {
+        ok: true,
+        observation: JSON.stringify({ provider: r.provider, hits: r.hits }),
+      };
+    }
+    case "extract_branding": {
+      const { extractBranding } = await import("./agent-senses");
+      const url = typeof args.url === "string" ? args.url.trim() : "";
+      if (!url) return { ok: false, observation: "ERROR: extract_branding requires { url }" };
+      await safeEvent(input.onEvent, "extract_branding", `Extracting brand from ${url}…`);
+      const r = await extractBranding({ url, signal: input.signal });
+      ctx.senseCounts.branding += 1;
+      if (!r.ok) {
+        return { ok: false, observation: `ERROR: extract_branding failed: ${r.error ?? "unknown"}` };
+      }
+      return {
+        ok: true,
+        observation: JSON.stringify({
+          url: r.url,
+          title: r.title,
+          description: r.description,
+          themeColor: r.themeColor,
+          colors: r.colors,
+          fonts: r.fonts,
+          favicons: r.favicons,
+          ogImage: r.ogImage,
+        }),
+      };
+    }
+    case "read_diagnostics": {
+      const { readDiagnostics } = await import("./agent-senses");
+      const path = typeof args.path === "string" ? args.path.trim() : "";
+      if (!path) return { ok: false, observation: "ERROR: read_diagnostics requires { path }" };
+      const toolArg =
+        typeof args.tool === "string" && ["tsc", "node", "python", "auto"].includes(args.tool)
+          ? (args.tool as "tsc" | "node" | "python" | "auto")
+          : "auto";
+      // On-demand container provisioning so the model can call this even
+      // before any run_command has booted a container.
+      if (!ctx.containerState.id) {
+        const ensured = await ensureContainerProvisioned(ctx);
+        if (!ensured.ok) {
+          return {
+            ok: false,
+            observation: `ERROR: read_diagnostics needs a container — ${ensured.reason ?? "unavailable"}`,
+          };
+        }
+      }
+      await safeEvent(input.onEvent, "read_diagnostics", `Diagnostics → ${path}`);
+      const r = await readDiagnostics({
+        args: { path, tool: toolArg },
+        containerId: ctx.containerState.id,
+        projectId: input.projectId,
+        signal: input.signal,
+      });
+      ctx.senseCounts.diagnostics += 1;
+      if (!r.ok) {
+        return { ok: false, observation: `ERROR: read_diagnostics: ${r.error ?? "unknown"}` };
+      }
+      return {
+        ok: true,
+        observation: JSON.stringify({
+          tool: r.tool,
+          path: r.path,
+          diagnostics: r.diagnostics,
+          rawTail: r.raw,
+        }),
+      };
     }
     case "finalize": {
       return { ok: true, observation: "finalized" };

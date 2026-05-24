@@ -29,6 +29,10 @@ import {
   GitBranch,
   FilePen,
   Database,
+  Camera,
+  Globe,
+  Palette,
+  Stethoscope,
   Timer,
   Bookmark,
   Pencil,
@@ -76,6 +80,11 @@ const STEP_ICON: Record<string, React.ElementType> = {
   restoring_files: BookOpen,
   completed: CheckCircle2,
   failed: XCircle,
+  take_screenshot: Camera,
+  web_fetch: Globe,
+  web_search: Search,
+  extract_branding: Palette,
+  read_diagnostics: Stethoscope,
 };
 
 const STEP_COLOR: Record<string, string> = {

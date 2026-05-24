@@ -64,6 +64,7 @@ function makeCtx(
     loadedSkills: overrides.loadedSkills ?? new Map(),
     e2eResults: [],
     screenshotBudget: { remaining: 5 * 1024 * 1024 },
+    senseCounts: { screenshot: 0, webFetch: 0, webSearch: 0, branding: 0, diagnostics: 0 },
   };
   return base;
 }
