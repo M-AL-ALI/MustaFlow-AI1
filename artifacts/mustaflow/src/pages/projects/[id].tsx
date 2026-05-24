@@ -77,6 +77,9 @@ import {
   HeartPulse,
   Crown,
   Cpu,
+  Loader2,
+  AlertCircle,
+  Moon,
 } from "lucide-react";
 
 function SubscriptionTierBadge({ tier }: { tier: "free" | "pro" | "team" }) {
@@ -1123,6 +1126,58 @@ export default function ProjectWorkspacePage() {
   }, [projectId]);
   // ── End container state ────────────────────────────────────────────────────
 
+  // ── Provisioning state (Task #738) ─────────────────────────────────────────
+  // Tracks the agentic auto-provisioning lifecycle for new projects:
+  // provisioning → ready → hibernated → error. Polls while in flight and
+  // exposes a retry action when the last attempt failed.
+  type ProvisioningStatus = "idle" | "provisioning" | "ready" | "hibernated" | "error";
+  const [provisioningStatus, setProvisioningStatus] = useState<ProvisioningStatus>("idle");
+  const [provisioningError, setProvisioningError] = useState<string | null>(null);
+  const [retryingProvisioning, setRetryingProvisioning] = useState(false);
+
+  useEffect(() => {
+    if (!project) return;
+    const st = (project as { provisioningStatus?: string }).provisioningStatus;
+    if (st) setProvisioningStatus(st as ProvisioningStatus);
+    const err = (project as { provisioningError?: string | null }).provisioningError;
+    setProvisioningError(err ?? null);
+  }, [project]);
+
+  useEffect(() => {
+    if (provisioningStatus !== "provisioning") return;
+    const t = setInterval(() => {
+      // Task #738 — poll the dedicated lightweight provisioning-status
+      // endpoint instead of the full project payload to keep the request
+      // small and avoid re-fetching unrelated project state on a 4s timer.
+      fetch(`/api/projects/${projectId}/provision/status`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: { provisioningStatus?: string; provisioningError?: string | null } | null) => {
+          if (!data) return;
+          if (data.provisioningStatus) {
+            setProvisioningStatus(data.provisioningStatus as ProvisioningStatus);
+          }
+          setProvisioningError(data.provisioningError ?? null);
+        })
+        .catch(() => {});
+    }, 4000);
+    return () => clearInterval(t);
+  }, [provisioningStatus, projectId]);
+
+  const handleRetryProvisioning = useCallback(() => {
+    setRetryingProvisioning(true);
+    fetch(`/api/projects/${projectId}/provision/retry`, { method: "POST" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { provisioningStatus?: string } | null) => {
+        if (data?.provisioningStatus) {
+          setProvisioningStatus(data.provisioningStatus as ProvisioningStatus);
+          setProvisioningError(null);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setRetryingProvisioning(false));
+  }, [projectId]);
+  // ── End provisioning state ─────────────────────────────────────────────────
+
   const [focusMode, setFocusMode] = useState(false);
   const [pageMapSyncing, setPageMapSyncing] = useState(false);
   const pageMapSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1994,6 +2049,53 @@ export default function ProjectWorkspacePage() {
           >
             {project.status}
           </span>
+          {provisioningStatus !== "idle" && (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
+                provisioningStatus === "ready"
+                  ? "bg-green-500/10 text-green-400 border-green-500/20"
+                  : provisioningStatus === "provisioning"
+                    ? "bg-primary/10 text-primary border-primary/20"
+                    : provisioningStatus === "hibernated"
+                      ? "bg-muted text-muted-foreground border-border"
+                      : "bg-destructive/10 text-destructive border-destructive/20",
+              )}
+              title={
+                provisioningStatus === "error" && provisioningError
+                  ? provisioningError
+                  : provisioningStatus === "provisioning"
+                    ? "Setting up your container and database…"
+                    : provisioningStatus === "ready"
+                      ? "Container + database ready"
+                      : provisioningStatus === "hibernated"
+                        ? "Container is hibernated (auto-stopped). It will wake on next use."
+                        : ""
+              }
+            >
+              {provisioningStatus === "provisioning" ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : provisioningStatus === "ready" ? (
+                <CheckCircle2 className="h-3 w-3" />
+              ) : provisioningStatus === "hibernated" ? (
+                <Moon className="h-3 w-3" />
+              ) : (
+                <AlertCircle className="h-3 w-3" />
+              )}
+              <span className="capitalize">{provisioningStatus}</span>
+              {provisioningStatus === "error" && (
+                <button
+                  type="button"
+                  onClick={handleRetryProvisioning}
+                  disabled={retryingProvisioning}
+                  className="ml-1 inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-foreground disabled:opacity-60"
+                  title="Retry provisioning"
+                >
+                  {retryingProvisioning ? "Retrying…" : "Retry"}
+                </button>
+              )}
+            </span>
+          )}
         </div>
         <div className="w-px h-5 bg-border shrink-0" />
         <div className="flex-1 overflow-x-auto min-w-0">

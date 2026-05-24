@@ -691,6 +691,10 @@ export const ListProjectsResponseItem = zod.object({
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
   "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "builderMode": zod.enum(['static-legacy', 'agentic']).optional().describe('Task #738. \'agentic\' = project was created with auto-provisioned Fly container + Neon Postgres. \'static-legacy\' = legacy in-DB static-HTML projects.'),
+  "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
+  "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
+  "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -765,6 +769,10 @@ export const GetProjectResponse = zod.object({
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
   "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "builderMode": zod.enum(['static-legacy', 'agentic']).optional().describe('Task #738. \'agentic\' = project was created with auto-provisioned Fly container + Neon Postgres. \'static-legacy\' = legacy in-DB static-HTML projects.'),
+  "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
+  "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
+  "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -844,6 +852,10 @@ export const UpdateProjectResponse = zod.object({
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
   "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "builderMode": zod.enum(['static-legacy', 'agentic']).optional().describe('Task #738. \'agentic\' = project was created with auto-provisioned Fly container + Neon Postgres. \'static-legacy\' = legacy in-DB static-HTML projects.'),
+  "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
+  "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
+  "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -905,6 +917,10 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
   "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "builderMode": zod.enum(['static-legacy', 'agentic']).optional().describe('Task #738. \'agentic\' = project was created with auto-provisioned Fly container + Neon Postgres. \'static-legacy\' = legacy in-DB static-HTML projects.'),
+  "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
+  "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
+  "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -966,6 +982,10 @@ export const RestoreProjectResponse = zod.object({
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
   "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "builderMode": zod.enum(['static-legacy', 'agentic']).optional().describe('Task #738. \'agentic\' = project was created with auto-provisioned Fly container + Neon Postgres. \'static-legacy\' = legacy in-DB static-HTML projects.'),
+  "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
+  "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
+  "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -1026,6 +1046,10 @@ export const GetProjectsSummaryResponse = zod.object({
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
   "dbStatus": zod.enum(['none', 'provisioning', 'connected', 'error']).optional().describe('Current database lifecycle state.'),
   "dbConnectionId": zod.string().nullish().describe('Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned.'),
+  "builderMode": zod.enum(['static-legacy', 'agentic']).optional().describe('Task #738. \'agentic\' = project was created with auto-provisioned Fly container + Neon Postgres. \'static-legacy\' = legacy in-DB static-HTML projects.'),
+  "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
+  "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
+  "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -4032,6 +4056,40 @@ export const StartContainerResponse = zod.object({
   "containerId": zod.string().nullish(),
   "containerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error']),
   "containerUrl": zod.string().nullish()
+})
+
+
+/**
+ * Lightweight polling endpoint the workspace header uses to track the
+provisioning lifecycle (`provisioning → ready → hibernated → error`).
+
+ * @summary Get current provisioning lifecycle for a project (Task
+ */
+export const GetProjectProvisioningStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetProjectProvisioningStatusResponse = zod.object({
+  "builderMode": zod.string(),
+  "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']),
+  "provisioningError": zod.string().nullish(),
+  "containerStatus": zod.string().nullish()
+})
+
+
+/**
+ * Idempotent: skips container creation if `containerId` is set and skips
+Neon Postgres creation if `neonProjectId` is set. Use when
+`provisioningStatus` is "error".
+
+ * @summary Re-run the auto-provisioning pipeline for a project (Task
+ */
+export const RetryProjectProvisioningParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RetryProjectProvisioningResponse = zod.object({
+  "provisioningStatus": zod.enum(['provisioning'])
 })
 
 

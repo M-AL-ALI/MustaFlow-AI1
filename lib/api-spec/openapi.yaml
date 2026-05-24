@@ -3443,6 +3443,74 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/provision/status:
+    get:
+      operationId: getProjectProvisioningStatus
+      tags: [projects]
+      summary: Get current provisioning lifecycle for a project (Task #738)
+      description: |
+        Lightweight polling endpoint the workspace header uses to track the
+        provisioning lifecycle (`provisioning → ready → hibernated → error`).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Current provisioning lifecycle
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [builderMode, provisioningStatus]
+                properties:
+                  builderMode: { type: string }
+                  provisioningStatus:
+                    type: string
+                    enum: [idle, provisioning, ready, hibernated, error]
+                  provisioningError: { type: string, nullable: true }
+                  containerStatus: { type: string, nullable: true }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/provision/retry:
+    post:
+      operationId: retryProjectProvisioning
+      tags: [projects]
+      summary: Re-run the auto-provisioning pipeline for a project (Task #738)
+      description: |
+        Idempotent: skips container creation if `containerId` is set and skips
+        Neon Postgres creation if `neonProjectId` is set. Use when
+        `provisioningStatus` is "error".
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Provisioning job re-enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [provisioningStatus]
+                properties:
+                  provisioningStatus:
+                    type: string
+                    enum: [provisioning]
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Provisioning already in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/container/stop:
     post:
       operationId: stopContainer
@@ -4536,6 +4604,20 @@ components:
         dbConnectionId:
           type: ["string", "null"]
           description: "Opaque identifier for the provisioned database (e.g. Neon project ID). Null = not provisioned."
+        builderMode:
+          type: string
+          enum: [static-legacy, agentic]
+          description: "Task #738. 'agentic' = project was created with auto-provisioned Fly container + Neon Postgres. 'static-legacy' = legacy in-DB static-HTML projects."
+        neonProjectId:
+          type: ["string", "null"]
+          description: "Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project)."
+        provisioningStatus:
+          type: string
+          enum: [idle, provisioning, ready, hibernated, error]
+          description: "Lifecycle of the auto-provision background job (Task #738)."
+        provisioningError:
+          type: ["string", "null"]
+          description: "Most recent provisioning error message, or null when last attempt succeeded."
         blockPublishOnCritical:
           type: boolean
           description: "When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true."

@@ -24,6 +24,7 @@ import {
 } from "@workspace/api-zod";
 import { buildInitialAssistantMessage } from "../lib/ai";
 import { resolveAgentIdentity } from "../lib/jobs";
+import { enqueueProvisionProjectJob } from "../lib/provisioning";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -211,6 +212,10 @@ router.post("/projects", async (req, res): Promise<void> => {
       platform,
       projectFormat,
       stack: resolvedStack,
+      // Task #738 — new projects opt into the agentic builder (real Fly
+      // container + Neon Postgres). Existing rows keep their legacy default.
+      builderMode: "agentic",
+      provisioningStatus: "provisioning",
       lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
     })
     .returning();
@@ -1165,8 +1170,86 @@ export default function HomeScreen() {
     });
   }
 
+  // Task #738 — kick off background provisioning for the new project. Fire
+  // and forget: the response returns immediately and the workspace UI polls
+  // `provisioningStatus` to surface progress.
+  enqueueProvisionProjectJob(project.id);
+
   res.status(201).json(GetProjectResponse.parse(project));
 });
+
+// ── GET /api/projects/:id/provision/status ────────────────────────────────────
+// Task #738 — dedicated, lightweight endpoint the workspace header polls for
+// the provisioning lifecycle (`provisioning → ready → hibernated → error`).
+// Returning just the provisioning fields keeps the polled payload small and
+// independent from the much larger full-project response.
+router.get(
+  "/projects/:id/provision/status",
+  requireProjectAccess,
+  async (req: import("express").Request, res: import("express").Response): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+    const [row] = await db
+      .select({
+        builderMode: projectsTable.builderMode,
+        provisioningStatus: projectsTable.provisioningStatus,
+        provisioningError: projectsTable.provisioningError,
+        containerStatus: projectsTable.containerStatus,
+      })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+    if (!row) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    res.json({
+      builderMode: row.builderMode,
+      provisioningStatus: row.provisioningStatus,
+      provisioningError: row.provisioningError,
+      containerStatus: row.containerStatus,
+    });
+  },
+);
+
+// ── POST /api/projects/:id/provision/retry ────────────────────────────────────
+// Task #738 — when auto-provisioning fails (e.g. Fly outage, Neon quota), the
+// workspace header surfaces a "Retry" action. This route re-runs the
+// idempotent provisioning pipeline. Only the project owner can retry.
+router.post(
+  "/projects/:id/provision/retry",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+    const [project] = await db
+      .select({
+        id: projectsTable.id,
+        provisioningStatus: projectsTable.provisioningStatus,
+      })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (project.provisioningStatus === "provisioning") {
+      res.status(409).json({ error: "Provisioning is already in progress." });
+      return;
+    }
+    await db
+      .update(projectsTable)
+      .set({ provisioningStatus: "provisioning", provisioningError: null })
+      .where(eq(projectsTable.id, projectId));
+    enqueueProvisionProjectJob(projectId);
+    res.json({ provisioningStatus: "provisioning" });
+  },
+);
 
 // ── Trash / soft-delete recovery ──────────────────────────────────────────────
 // Soft-deleted projects (deletedAt IS NOT NULL) remain in the DB for a 30-day

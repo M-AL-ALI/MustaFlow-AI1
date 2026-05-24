@@ -10,6 +10,7 @@ import { ensureFlyApp } from "./lib/container";
 import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
 import { startCveScheduler } from "./lib/cve-scheduler";
 import { failStuckBackgroundTasksOnBoot } from "./lib/jobs";
+import { resumeStuckProvisioningOnBoot } from "./lib/provisioning";
 
 const execFileAsync = promisify(execFile);
 
@@ -47,6 +48,10 @@ startCveScheduler();
 // Task #509: Mark any background tasks that were mid-flight when the process died
 // as failed and refund their reserved credits. Best-effort — non-fatal on errors.
 void failStuckBackgroundTasksOnBoot();
+// Task #738 — resume any agentic provisioning jobs that were mid-flight when
+// the server crashed. The provisioning pipeline is idempotent so this just
+// re-runs the steps that didn't get to persist.
+void resumeStuckProvisioningOnBoot();
 
 // Create an HTTP server so we can attach WebSocket upgrade handlers alongside Express.
 const server = createServer(app);

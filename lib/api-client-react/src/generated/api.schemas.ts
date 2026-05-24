@@ -221,6 +221,31 @@ export const ProjectDbStatus = {
   error: 'error',
 } as const;
 
+/**
+ * Task #738. 'agentic' = project was created with auto-provisioned Fly container + Neon Postgres. 'static-legacy' = legacy in-DB static-HTML projects.
+ */
+export type ProjectBuilderMode = typeof ProjectBuilderMode[keyof typeof ProjectBuilderMode];
+
+
+export const ProjectBuilderMode = {
+  'static-legacy': 'static-legacy',
+  agentic: 'agentic',
+} as const;
+
+/**
+ * Lifecycle of the auto-provision background job (Task #738).
+ */
+export type ProjectProvisioningStatus = typeof ProjectProvisioningStatus[keyof typeof ProjectProvisioningStatus];
+
+
+export const ProjectProvisioningStatus = {
+  idle: 'idle',
+  provisioning: 'provisioning',
+  ready: 'ready',
+  hibernated: 'hibernated',
+  error: 'error',
+} as const;
+
 export interface Project {
   id: number;
   /** @nullable */
@@ -299,6 +324,20 @@ export interface Project {
      * @nullable
      */
   dbConnectionId?: string | null;
+  /** Task #738. 'agentic' = project was created with auto-provisioned Fly container + Neon Postgres. 'static-legacy' = legacy in-DB static-HTML projects. */
+  builderMode?: ProjectBuilderMode;
+  /**
+     * Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).
+     * @nullable
+     */
+  neonProjectId?: string | null;
+  /** Lifecycle of the auto-provision background job (Task #738). */
+  provisioningStatus?: ProjectProvisioningStatus;
+  /**
+     * Most recent provisioning error message, or null when last attempt succeeded.
+     * @nullable
+     */
+  provisioningError?: string | null;
   /** When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true. */
   blockPublishOnCritical?: boolean;
   /** Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate. */
@@ -3724,6 +3763,35 @@ export type ListGithubBranches200BranchesItem = {
 
 export type ListGithubBranches200 = {
   branches: ListGithubBranches200BranchesItem[];
+};
+
+export type GetProjectProvisioningStatus200ProvisioningStatus = typeof GetProjectProvisioningStatus200ProvisioningStatus[keyof typeof GetProjectProvisioningStatus200ProvisioningStatus];
+
+
+export const GetProjectProvisioningStatus200ProvisioningStatus = {
+  idle: 'idle',
+  provisioning: 'provisioning',
+  ready: 'ready',
+  hibernated: 'hibernated',
+  error: 'error',
+} as const;
+
+export type GetProjectProvisioningStatus200 = {
+  builderMode: string;
+  provisioningStatus: GetProjectProvisioningStatus200ProvisioningStatus;
+  provisioningError?: string | null;
+  containerStatus?: string | null;
+};
+
+export type RetryProjectProvisioning200ProvisioningStatus = typeof RetryProjectProvisioning200ProvisioningStatus[keyof typeof RetryProjectProvisioning200ProvisioningStatus];
+
+
+export const RetryProjectProvisioning200ProvisioningStatus = {
+  provisioning: 'provisioning',
+} as const;
+
+export type RetryProjectProvisioning200 = {
+  provisioningStatus: RetryProjectProvisioning200ProvisioningStatus;
 };
 
 export type StopContainer200 = {

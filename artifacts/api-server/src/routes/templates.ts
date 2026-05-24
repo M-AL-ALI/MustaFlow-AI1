@@ -25,6 +25,7 @@ import {
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { requireAdmin } from "../lib/adminAuth";
+import { enqueueProvisionProjectJob } from "../lib/provisioning";
 import { logger } from "../lib/logger";
 import { z } from "zod";
 
@@ -248,6 +249,10 @@ router.post("/gallery-templates/:slug/use", async (req, res): Promise<void> => {
         platform: tpl.platform === "mobile" ? "cross" : "web",
         stack: tpl.stack as string,
         status: "draft",
+        // Task #738 — gallery-template instances are new projects and must
+        // get their own container + Neon DB.
+        builderMode: "agentic",
+        provisioningStatus: "provisioning",
       })
       .returning({ id: projectsTable.id });
 
@@ -255,6 +260,7 @@ router.post("/gallery-templates/:slug/use", async (req, res): Promise<void> => {
       res.status(500).json({ error: "Failed to create project" });
       return;
     }
+    enqueueProvisionProjectJob(newProject.id);
 
     // Seed files from snapshot if available
     if (tpl.filesSnapshot && typeof tpl.filesSnapshot === "object") {
@@ -317,6 +323,9 @@ router.post("/gallery-templates/:slug/fork", async (req, res): Promise<void> => 
         platform: tpl.platform === "mobile" ? "cross" : "web",
         stack: tpl.stack as string,
         status: "draft",
+        // Task #738 — forked templates are new infra → auto-provision.
+        builderMode: "agentic",
+        provisioningStatus: "provisioning",
       })
       .returning({ id: projectsTable.id });
 
@@ -324,6 +333,7 @@ router.post("/gallery-templates/:slug/fork", async (req, res): Promise<void> => 
       res.status(500).json({ error: "Failed to fork template" });
       return;
     }
+    enqueueProvisionProjectJob(newProject.id);
 
     if (tpl.filesSnapshot && typeof tpl.filesSnapshot === "object") {
       const fileEntries = Object.entries(tpl.filesSnapshot as Record<string, string>);

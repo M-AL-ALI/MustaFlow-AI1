@@ -109,6 +109,7 @@ import type {
   GetContainerLogsParams,
   GetProjectDomainDnsHistory200,
   GetProjectDomainDnsHistoryParams,
+  GetProjectProvisioningStatus200,
   GetPublishReadinessParams,
   GetPurchasedDomainAuthCode200,
   GetSecretAuditLogParams,
@@ -205,6 +206,7 @@ import type {
   RequestProjectUploadUrl200,
   RequestProjectUploadUrlBody,
   RerunTestsResult,
+  RetryProjectProvisioning200,
   RevokeAdminRole200,
   RollbackInput,
   RollbackProjectDomainDnsChange200,
@@ -11859,6 +11861,160 @@ export const useStartContainer = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getStartContainerMutationOptions(options));
+    }
+
+export const getGetProjectProvisioningStatusUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/provision/status`
+}
+
+/**
+ * Lightweight polling endpoint the workspace header uses to track the
+provisioning lifecycle (`provisioning → ready → hibernated → error`).
+
+ * @summary Get current provisioning lifecycle for a project (Task
+ */
+export const getProjectProvisioningStatus = async (id: number, options?: RequestInit): Promise<GetProjectProvisioningStatus200> => {
+
+  return customFetch<GetProjectProvisioningStatus200>(getGetProjectProvisioningStatusUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectProvisioningStatusQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/provision/status`
+    ] as const;
+    }
+
+
+export const getGetProjectProvisioningStatusQueryOptions = <TData = Awaited<ReturnType<typeof getProjectProvisioningStatus>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectProvisioningStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectProvisioningStatusQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectProvisioningStatus>>> = ({ signal }) => getProjectProvisioningStatus(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectProvisioningStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectProvisioningStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectProvisioningStatus>>>
+export type GetProjectProvisioningStatusQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get current provisioning lifecycle for a project (Task
+ */
+
+export function useGetProjectProvisioningStatus<TData = Awaited<ReturnType<typeof getProjectProvisioningStatus>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectProvisioningStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectProvisioningStatusQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getRetryProjectProvisioningUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/provision/retry`
+}
+
+/**
+ * Idempotent: skips container creation if `containerId` is set and skips
+Neon Postgres creation if `neonProjectId` is set. Use when
+`provisioningStatus` is "error".
+
+ * @summary Re-run the auto-provisioning pipeline for a project (Task
+ */
+export const retryProjectProvisioning = async (id: number, options?: RequestInit): Promise<RetryProjectProvisioning200> => {
+
+  return customFetch<RetryProjectProvisioning200>(getRetryProjectProvisioningUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRetryProjectProvisioningMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryProjectProvisioning>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof retryProjectProvisioning>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['retryProjectProvisioning'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof retryProjectProvisioning>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  retryProjectProvisioning(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RetryProjectProvisioningMutationResult = NonNullable<Awaited<ReturnType<typeof retryProjectProvisioning>>>
+
+    export type RetryProjectProvisioningMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Re-run the auto-provisioning pipeline for a project (Task
+ */
+export const useRetryProjectProvisioning = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryProjectProvisioning>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof retryProjectProvisioning>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getRetryProjectProvisioningMutationOptions(options));
     }
 
 export const getStopContainerUrl = (id: number,) => {

@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db, projectsTable, projectFilesTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
+import { enqueueProvisionProjectJob } from "../lib/provisioning";
 
 const router: IRouter = Router();
 
@@ -31,6 +32,10 @@ router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res)
       status: "draft",
       agentMode: original.agentMode,
       lastTaskSummary: `Duplicated from "${original.name}"`,
+      // Task #738 — duplicated projects are brand-new infra and must get
+      // their own container + Neon DB, not reuse the source project's.
+      builderMode: "agentic",
+      provisioningStatus: "provisioning",
     })
     .returning();
 
@@ -64,6 +69,8 @@ router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res)
     projectId: newProject.id,
     userId: req.userId,
   });
+
+  enqueueProvisionProjectJob(newProject.id);
 
   res.status(201).json({
     id: newProject.id,

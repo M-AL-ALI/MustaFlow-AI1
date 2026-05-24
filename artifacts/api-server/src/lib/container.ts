@@ -622,10 +622,25 @@ export async function provisionContainer(
     await waitForMachineReady(machineId, 30);
   }
 
-  // Mark as running
+  // Mark as running. Task #738 — once the container is back up, flip a
+  // previously "hibernated" project back to "ready" so the workspace header
+  // reflects the live state. Leave projects still in "provisioning" or
+  // "error" alone — those signals must be preserved for the user.
+  const [{ ps } = { ps: null as string | null }] = await db
+    .select({ ps: projectsTable.provisioningStatus })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId));
+  const nextProvisioning = ps === "hibernated" ? "ready" : ps;
   await db
     .update(projectsTable)
-    .set({ containerStatus: "running", containerId: machineId, containerUrl })
+    .set({
+      containerStatus: "running",
+      containerId: machineId,
+      containerUrl,
+      ...(nextProvisioning && nextProvisioning !== ps
+        ? { provisioningStatus: nextProvisioning }
+        : {}),
+    })
     .where(eq(projectsTable.id, projectId));
 
   return { containerId: machineId, status: "running", containerUrl };
@@ -655,9 +670,21 @@ export async function hibernateContainer(projectId: number): Promise<void> {
   if (!project?.containerId) return;
 
   await stopContainer(project.containerId, projectId);
+  // Task #738 — also propagate to provisioningStatus so the workspace header
+  // shows the "hibernated" state. Only override when the project had reached
+  // "ready"; if it's still "provisioning" or in "error" we leave that signal
+  // intact so users see the real problem.
+  const [{ ps } = { ps: null as string | null }] = await db
+    .select({ ps: projectsTable.provisioningStatus })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId));
+  const nextProvisioning = ps === "ready" || ps === "hibernated" ? "hibernated" : ps;
   await db
     .update(projectsTable)
-    .set({ containerStatus: "hibernated" })
+    .set({
+      containerStatus: "hibernated",
+      ...(nextProvisioning ? { provisioningStatus: nextProvisioning } : {}),
+    })
     .where(eq(projectsTable.id, projectId));
 }
 

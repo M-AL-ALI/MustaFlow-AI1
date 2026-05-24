@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProjectAgentMode } from './projectAgentMode';
+import type { ProjectBuilderMode } from './projectBuilderMode';
 import type { ProjectContainerStatus } from './projectContainerStatus';
 import type { ProjectDbProvider } from './projectDbProvider';
 import type { ProjectDbStatus } from './projectDbStatus';
@@ -15,6 +16,7 @@ import type { ProjectPlatform } from './projectPlatform';
 import type { ProjectPolicyStrictness } from './projectPolicyStrictness';
 import type { ProjectProdContainerStatus } from './projectProdContainerStatus';
 import type { ProjectProjectFormat } from './projectProjectFormat';
+import type { ProjectProvisioningStatus } from './projectProvisioningStatus';
 import type { ProjectStack } from './projectStack';
 import type { ProjectStatus } from './projectStatus';
 
@@ -96,6 +98,20 @@ export interface Project {
      * @nullable
      */
   dbConnectionId?: string | null;
+  /** Task #738. 'agentic' = project was created with auto-provisioned Fly container + Neon Postgres. 'static-legacy' = legacy in-DB static-HTML projects. */
+  builderMode?: ProjectBuilderMode;
+  /**
+     * Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).
+     * @nullable
+     */
+  neonProjectId?: string | null;
+  /** Lifecycle of the auto-provision background job (Task #738). */
+  provisioningStatus?: ProjectProvisioningStatus;
+  /**
+     * Most recent provisioning error message, or null when last attempt succeeded.
+     * @nullable
+     */
+  provisioningError?: string | null;
   /** When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true. */
   blockPublishOnCritical?: boolean;
   /** Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate. */

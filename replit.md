@@ -38,6 +38,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/scripts run migrate-preferred-region` — adds `preferred_region` to `projects` (edge CDN geo-routing)
 - `pnpm --filter @workspace/scripts run migrate-runtime-breadth` — creates `scheduled_job_runs`, `managed_addons`, `project_environments`, `environment_promotions`, `usage_events` tables (Task #628)
 - `pnpm --filter @workspace/scripts run migrate-secret-scoping` — adds `min_role` column + check constraint to `project_secrets` (Task #632; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-agentic-provisioning` — adds `builder_mode`, `neon_project_id`, `provisioning_status`, `provisioning_error` to `projects` (Task #738; run before deploy)
 
 ## Stack
 
@@ -111,6 +112,14 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **Offline indicator**: `OfflineIndicator` component — mounts globally; listens to `online/offline` browser events; shows a dismissible banner when the browser loses connectivity.
 - **Privacy & Data settings tab**: New "Privacy & Data" tab in Settings — GDPR data export button, Privacy Policy + Trust page + DPA request links, account data deletion form (requires typing "DELETE" to confirm).
 - **Key files**: `artifacts/api-server/src/routes/gdpr.ts`, `scripts/src/migrate-secret-scoping.ts`, `artifacts/mustaflow/src/pages/trust.tsx`, `artifacts/mustaflow/src/components/onboarding-tour.tsx`, `artifacts/mustaflow/src/components/offline-indicator.tsx`.
+
+## Task #738 — Agentic auto-provisioning (Fly + Neon)
+
+- New projects are stamped `builder_mode = 'agentic'` and `provisioning_status = 'provisioning'` at creation; a background job (`enqueueProvisionProjectJob` in `artifacts/api-server/src/lib/provisioning.ts`) creates a Fly.io machine + a Neon Postgres project, then stores the connection string as the `DATABASE_URL` project secret (encrypted via `encryptionService`).
+- The pipeline is idempotent: container creation is skipped when `containerId` is set, Neon creation when `neonProjectId` is set. Safe to re-run via `POST /api/projects/:id/provision/retry`.
+- Required env for full auto-provisioning: `FLY_API_TOKEN` (+ `FLY_APP_NAME`, `FLY_ORG_SLUG`, `FLY_REGION`) and `NEON_API_KEY`. When missing, the corresponding step no-ops and the project still settles into `ready` (matches dev-mode degradation elsewhere).
+- The workspace top bar shows a provisioning badge (`provisioning → ready → hibernated → error`) with a "Retry" link when the last attempt failed (`artifacts/mustaflow/src/pages/projects/[id].tsx`).
+- Existing projects are untouched — they keep `builder_mode = 'static-legacy'` and `provisioning_status = 'idle'` so the badge stays hidden.
 
 ## Known limitations (honest status)
 

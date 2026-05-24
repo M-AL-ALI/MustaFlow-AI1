@@ -88,6 +88,25 @@ export const projectsTable = pgTable("projects", {
   dbProvider: text("db_provider").notNull().default("none"),
   dbStatus: text("db_status").notNull().default("none"),
   dbConnectionId: text("db_connection_id"),
+  // Task #738 — auto-provisioning at project creation.
+  // builderMode: "agentic" = every new project boots into a real Fly machine +
+  //   Neon Postgres workspace at creation time. "static-legacy" = the old
+  //   in-DB static-HTML flow with no per-project infra. Existing projects keep
+  //   "static-legacy"; new projects default to "agentic".
+  builderMode: text("builder_mode").notNull().default("agentic"),
+  // neonProjectId: the Neon project id captured at provisioning time. Used to
+  // de-duplicate retries and to delete the project on hard-delete. Mirrors
+  // dbConnectionId for the Postgres path but is preserved even when the user
+  // later swaps providers.
+  neonProjectId: text("neon_project_id"),
+  // provisioningStatus: lifecycle of the auto-provision background job.
+  //   idle         — never started (legacy projects).
+  //   provisioning — background job is running (create container + Neon DB).
+  //   ready        — both container created and DATABASE_URL secret stored.
+  //   hibernated   — container has auto-stopped after idle period.
+  //   error        — last attempt failed. See provisioningError for the message.
+  provisioningStatus: text("provisioning_status").notNull().default("idle"),
+  provisioningError: text("provisioning_error"),
   // blockPublishOnCritical: when true, the publish readiness gate blocks publish if any
   // unresolved critical (error-severity) security findings exist from the latest check run.
   // Default true — matches Replit's "block on critical vulnerabilities" opt-in model.
