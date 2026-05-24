@@ -146,3 +146,6 @@ channel = "stable-25_05"
 
 [userenv.shared]
 ENCRYPTION_KEY = "hFUWtwdSp/TfLttnGDuZF8hxwQ+9Q2fpqSVC4+m4/5Y="
+FLY_APP_NAME = "mustaflow-containers"
+FLY_REGION = "iad"
+FLY_ORG_SLUG = "personal"

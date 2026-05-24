@@ -324,7 +324,7 @@ export async function execInContainer(
   try {
     const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/exec`, {
       method: "POST",
-      body: JSON.stringify({ cmd: command, cwd: workdir, timeout: 300 }),
+      body: JSON.stringify({ command, cwd: workdir, timeout: 300 }),
     });
 
     if (!res.ok) {
