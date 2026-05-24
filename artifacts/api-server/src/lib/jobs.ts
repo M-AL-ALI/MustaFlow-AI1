@@ -52,7 +52,7 @@ import { logger } from "./logger";
 import { writeKnowledge } from "./knowledge";
 import { generateEmbedding, cosineSimilarity } from "./embeddings";
 import type { DiffSummary } from "@workspace/db";
-import { getOrCreateCredits, deductCredits, refundCredits } from "../routes/credits";
+import { getOrCreateCredits, deductCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../routes/credits";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
 import { runAudit } from "./auditor";
@@ -1451,7 +1451,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         .where(eq(agentTasksTable.id, taskId))
         .limit(1)
         .then((r) => (r[0]?.reserved ?? null) !== null));
-    if (project.ownerId && !creditsAlreadyReserved) {
+    if (CREDITS_ENFORCEMENT_ENABLED && project.ownerId && !creditsAlreadyReserved) {
       const credits = await getOrCreateCredits(project.ownerId);
       if (credits.balance < creditCost) {
         const msg = `Insufficient credits. This ${agentMode} build costs ${creditCost} credit(s) but your balance is ${credits.balance}. Top up in Billing to continue.`;

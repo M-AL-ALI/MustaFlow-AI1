@@ -34,7 +34,7 @@ import {
   CREDIT_COST,
   backgroundWallClockFor,
 } from "../lib/jobs";
-import { deductCredits, getOrCreateCredits } from "./credits";
+import { deductCredits, getOrCreateCredits, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
 import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
 import { fetchAttachmentAsDataUri } from "./images";
@@ -385,7 +385,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       );
       const cost = creditCostFor(mode as Parameters<typeof creditCostFor>[0], resolvedProvider);
       const credits = await getOrCreateCredits(project.ownerId);
-      if (credits.balance < cost) {
+      if (CREDITS_ENFORCEMENT_ENABLED && credits.balance < cost) {
         res.status(402).json({
           error: `Insufficient credits. A background ${mode} run reserves ${cost} credit(s) but your balance is ${credits.balance}. Top up in Billing.`,
         });

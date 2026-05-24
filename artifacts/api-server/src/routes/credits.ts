@@ -11,6 +11,11 @@ import { db, userCreditsTable, creditTransactionsTable } from "@workspace/db";
 
 const router: IRouter = Router();
 
+// Global kill switch — when false, credit checks/deductions are skipped so
+// users can test the builder for free. Default OFF (no charging) until the
+// owner flips CREDITS_ENFORCEMENT=true in env.
+export const CREDITS_ENFORCEMENT_ENABLED = process.env.CREDITS_ENFORCEMENT === "true";
+
 // Upsert user credit row, returning current balance.
 export async function getOrCreateCredits(
   userId: string,
@@ -67,6 +72,13 @@ export async function deductCredits(
   },
 ): Promise<{ newBalance: number } | { insufficient: true; balance: number }> {
   const credits = await getOrCreateCredits(userId);
+
+  // When credit enforcement is disabled, no-op: don't deduct, don't write
+  // a transaction row, and never return "insufficient". Lets users test
+  // the builder for free until charging is explicitly enabled.
+  if (!CREDITS_ENFORCEMENT_ENABLED) {
+    return { newBalance: credits.balance };
+  }
 
   if (credits.balance < amount) {
     return { insufficient: true, balance: credits.balance };

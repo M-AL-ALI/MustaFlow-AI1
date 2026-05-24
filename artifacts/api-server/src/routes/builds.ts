@@ -12,7 +12,7 @@ import { eq, and, inArray, desc } from "drizzle-orm";
 import { db, projectsTable, deploymentLogsTable, secretsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService } from "../lib/encryption";
-import { getOrCreateCredits, deductCredits } from "./credits";
+import { getOrCreateCredits, deductCredits, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
 import { logger } from "../lib/logger";
 import { getEasBuildLogs } from "../lib/eas";
 import { enqueueEasJob, EAS_BUILD_CREDIT_COST, extractAppJsonSummary } from "../lib/jobs";
@@ -72,7 +72,7 @@ router.post("/projects/:id/builds", requireProjectOwnership, async (req, res): P
   // Credit pre-flight check
   if (project.ownerId) {
     const credits = await getOrCreateCredits(project.ownerId);
-    if (credits.balance < EAS_BUILD_CREDIT_COST) {
+    if (CREDITS_ENFORCEMENT_ENABLED && credits.balance < EAS_BUILD_CREDIT_COST) {
       res.status(402).json({
         error: `Insufficient credits. An EAS build costs ${EAS_BUILD_CREDIT_COST} credits but your balance is ${credits.balance}. Top up in Billing to continue.`,
       });
