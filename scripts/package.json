@@ -36,6 +36,7 @@
     "migrate-canvas-variants": "tsx ./src/migrate-canvas-variants.ts",
     "migrate-blueprints": "tsx ./src/migrate-blueprints.ts",
     "migrate-deployment-substrate": "tsx ./src/migrate-deployment-substrate.ts",
+    "migrate-project-artifacts": "tsx ./src/migrate-project-artifacts.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

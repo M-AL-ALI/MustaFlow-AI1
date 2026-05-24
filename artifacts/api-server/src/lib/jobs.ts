@@ -278,24 +278,46 @@ async function writeFiles(
   projectId: number,
   files: BuilderFile[],
   replaceAll: boolean,
+  artifactId?: number | null,
 ): Promise<void> {
+  // Resolve which artifact the new file rows should be stamped with (Task #544).
+  // Defaults to the project's primary artifact so legacy callers keep working.
+  const { resolveArtifactId } = await import("./artifacts");
+  const resolvedArtifactId = await resolveArtifactId(projectId, artifactId ?? null);
+
   if (replaceAll) {
-    await db.delete(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
+    if (resolvedArtifactId !== null) {
+      // Scope the wipe to the active artifact so other artifacts in the same
+      // project aren't clobbered by a rebuild of one of them.
+      await db
+        .delete(projectFilesTable)
+        .where(
+          and(
+            eq(projectFilesTable.projectId, projectId),
+            eq(projectFilesTable.artifactId, resolvedArtifactId),
+          ),
+        );
+    } else {
+      await db.delete(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
+    }
   } else if (files.length > 0) {
-    await db.delete(projectFilesTable).where(
-      and(
-        eq(projectFilesTable.projectId, projectId),
-        inArray(
-          projectFilesTable.path,
-          files.map((f) => f.path),
-        ),
+    const baseConds = [
+      eq(projectFilesTable.projectId, projectId),
+      inArray(
+        projectFilesTable.path,
+        files.map((f) => f.path),
       ),
-    );
+    ];
+    if (resolvedArtifactId !== null) {
+      baseConds.push(eq(projectFilesTable.artifactId, resolvedArtifactId));
+    }
+    await db.delete(projectFilesTable).where(and(...baseConds));
   }
   if (files.length > 0) {
     await db.insert(projectFilesTable).values(
       files.map((f) => ({
         projectId,
+        artifactId: resolvedArtifactId,
         path: f.path,
         content: f.content,
         mimeType: f.mimeType,

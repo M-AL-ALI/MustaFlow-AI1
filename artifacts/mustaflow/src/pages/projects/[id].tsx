@@ -77,6 +77,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
 import { CanvasTab } from "./components/canvas-tab";
+import { ArtifactTabs } from "./components/artifact-tabs";
 import { IntegrationSetupCard } from "./components/integration-setup-card";
 import { ToolsTab } from "./components/tools-tab";
 import { PublishingTab } from "./components/publishing-tab";
@@ -682,6 +683,14 @@ export default function ProjectWorkspacePage() {
   const [prefillSecretName, setPrefillSecretName] = useState<string | null>(null);
   const [viewingHistoryPlan, setViewingHistoryPlan] = useState<StructuredPlan | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  // Active artifact (Task #544). Initialised from ?artifactId in the URL;
+  // ArtifactTabs auto-selects the primary artifact if no value is set.
+  const [activeArtifactId, setActiveArtifactId] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search).get("artifactId");
+    const parsed = raw ? Number(raw) : NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  });
   const [leftPanelTab, setLeftPanelTab] = useState<"chat" | "files" | "history" | "saved">(() => {
     try {
       const stored = localStorage.getItem(`mustaflow_lpanel_${projectId}`);
@@ -1691,6 +1700,13 @@ export default function ProjectWorkspacePage() {
           </button>
         </div>
       )}
+
+      {/* ── Artifact tab strip (Task #544) ── */}
+      <ArtifactTabs
+        projectId={projectId}
+        activeArtifactId={activeArtifactId}
+        onSelect={setActiveArtifactId}
+      />
 
       {/* ── Top bar ── */}
       <div className="border-b border-border bg-card shrink-0 flex items-center gap-2 px-4 h-12 z-20 relative">

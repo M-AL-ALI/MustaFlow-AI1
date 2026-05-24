@@ -8,6 +8,12 @@ export const projectFilesTable = pgTable(
     projectId: integer("project_id")
       .notNull()
       .references(() => projectsTable.id, { onDelete: "cascade" }),
+    // artifactId: which artifact (within the project) this file belongs to.
+    // Nullable for backward compat with rows written before Task #544; the migration
+    // backfills every legacy row to the project's primary artifact. New writes
+    // should always stamp this field. Reads that omit artifactId scope to the
+    // primary artifact via a JOIN on project_artifacts.is_primary = true.
+    artifactId: integer("artifact_id"),
     path: text("path").notNull(),
     content: text("content").notNull(),
     mimeType: text("mime_type").notNull().default("text/html"),

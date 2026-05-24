@@ -17,16 +17,25 @@ const router: IRouter = Router();
 
 router.get("/projects/:id/files", requireProjectOwnership, async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
+  // Optional artifactId filter (Task #544). Omitted = return every file in the
+  // project regardless of artifact, preserving legacy single-artifact behaviour.
+  const artifactIdRaw = typeof req.query.artifactId === "string" ? req.query.artifactId : "";
+  const artifactIdFilter = artifactIdRaw ? Number(artifactIdRaw) : null;
+  const conds = [eq(projectFilesTable.projectId, projectId)];
+  if (artifactIdFilter && Number.isFinite(artifactIdFilter)) {
+    conds.push(eq(projectFilesTable.artifactId, artifactIdFilter));
+  }
   const rows = await db
     .select({
       id: projectFilesTable.id,
       path: projectFilesTable.path,
       mimeType: projectFilesTable.mimeType,
       size: projectFilesTable.content,
+      artifactId: projectFilesTable.artifactId,
       updatedAt: projectFilesTable.updatedAt,
     })
     .from(projectFilesTable)
-    .where(eq(projectFilesTable.projectId, projectId))
+    .where(and(...conds))
     .orderBy(asc(projectFilesTable.path));
 
   res.json(
@@ -35,6 +44,7 @@ router.get("/projects/:id/files", requireProjectOwnership, async (req, res): Pro
       path: r.path,
       mimeType: r.mimeType,
       size: r.size.length,
+      artifactId: r.artifactId,
       updatedAt: r.updatedAt,
     })),
   );
@@ -142,10 +152,17 @@ router.post("/projects/:id/files", requireProjectOwnership, async (req, res): Pr
   }
 
   const mimeType = guessMime(normalizedPath);
+  // Stamp artifact_id (Task #544). Use explicit ?artifactId query param when
+  // present, otherwise resolve to the project's primary artifact.
+  const { resolveArtifactId } = await import("../lib/artifacts");
+  const artifactIdRaw = typeof req.query.artifactId === "string" ? req.query.artifactId : "";
+  const hint = artifactIdRaw ? Number(artifactIdRaw) : null;
+  const resolvedArtifactId = await resolveArtifactId(projectId, hint);
   const [created] = await db
     .insert(projectFilesTable)
     .values({
       projectId,
+      artifactId: resolvedArtifactId,
       path: normalizedPath,
       content,
       mimeType,

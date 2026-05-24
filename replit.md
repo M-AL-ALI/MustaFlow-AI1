@@ -390,5 +390,5 @@ The intended user journey is: Login → create project → build app → preview
 - **Known limitations (real-world infra gaps)**:
   - **CDN push is a stub**. Real R2/Workers or Bunny PUT upload + edge-routing cutover is follow-up #608 — requires provisioning the bucket + token, which is operator work outside this code change.
   - **Multi-region probes**: probes run from this server's region only; true 3-region 1-minute probes need fan-out workers or a third-party (UptimeRobot/Checkly), tracked as future work.
-  - **Always-on background worker lifecycle**: `reserved_vm` keeps the app container always-on (`min_machines_running:1`), but a *separate* persistent worker process model (think `worker.ts` next to `app.ts`) is not yet defined.
+  - **Always-on background worker lifecycle**: `reserved_vm` keeps the app container always-on (`min_machines_running:1`), but a _separate_ persistent worker process model (think `worker.ts` next to `app.ts`) is not yet defined.
 - **Env vars (optional)**: `CDN_PROVIDER` (`r2|bunny|none`, default `none`), `CDN_PUBLIC_BASE` (e.g. `https://cdn.mustaflow.app`), `CDN_API_TOKEN` (reserved for follow-up). Without these, CDN is disabled and the toggle is locked off in the UI.
