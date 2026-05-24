@@ -597,8 +597,9 @@ const TOOLS: ChatCompletionTool[] = [
           path: { type: "string", description: "Project file path inside the container." },
           tool: {
             type: "string",
-            enum: ["tsc", "node", "python", "auto"],
-            description: "Diagnostic tool; defaults to auto from extension.",
+            enum: ["tsc", "node", "python", "eslint", "auto"],
+            description:
+              "Diagnostic tool; defaults to auto from extension. Use 'eslint' for lint diagnostics. `path` may be a glob (e.g. 'src/**/*.ts').",
           },
         },
         required: ["path"],

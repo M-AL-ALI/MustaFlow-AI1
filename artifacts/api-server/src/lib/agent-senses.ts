@@ -15,6 +15,8 @@
  */
 
 import { Parser } from "htmlparser2";
+import { promises as dns } from "node:dns";
+import { isIP } from "node:net";
 import { logger } from "./logger";
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -35,15 +37,18 @@ async function httpGet(
   const timer = setTimeout(() => timeoutCtrl.abort(), FETCH_TIMEOUT_MS);
   const compound = mergeSignals(signal, timeoutCtrl.signal);
   try {
-    const res = await fetch(url, {
+    const fetched = await safeFetch(url, {
       method: "GET",
       headers: {
         "User-Agent": USER_AGENT,
         Accept: opts?.acceptHtml ? "text/html,application/xhtml+xml" : "*/*",
       },
-      redirect: "follow",
       signal: compound,
     });
+    if ("error" in fetched) {
+      return { ok: false, status: 0, contentType: "", body: "", error: fetched.error };
+    }
+    const { res } = fetched;
     const contentType = res.headers.get("content-type") ?? "";
     const reader = res.body?.getReader();
     let total = 0;
@@ -116,6 +121,89 @@ export function isSafePublicUrl(u: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** IPv4 private/loopback/link-local/metadata + IPv6 loopback/ULA/link-local. */
+function isPrivateIp(ip: string): boolean {
+  const fam = isIP(ip);
+  if (fam === 4) {
+    const [a, b] = ip.split(".").map(Number);
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true; // link-local + cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    return false;
+  }
+  if (fam === 6) {
+    const lc = ip.toLowerCase();
+    if (lc === "::" || lc === "::1") return true;
+    if (lc.startsWith("fc") || lc.startsWith("fd")) return true; // ULA
+    if (lc.startsWith("fe80:")) return true; // link-local
+    if (lc.startsWith("::ffff:")) {
+      const v4 = lc.slice(7);
+      if (isIP(v4) === 4) return isPrivateIp(v4);
+    }
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Resolve the URL's hostname (skipping lookup if it's already an IP literal),
+ * then reject if any resolved address points to a private/internal range.
+ * Combined with isSafePublicUrl, this defends against DNS rebinding + literal
+ * private-IP hostnames.
+ */
+async function isSafeResolvedUrl(u: string): Promise<boolean> {
+  if (!isSafePublicUrl(u)) return false;
+  try {
+    const host = new URL(u).hostname.replace(/^\[|\]$/g, "");
+    if (isIP(host)) return !isPrivateIp(host);
+    const addrs = await dns.lookup(host, { all: true, verbatim: true });
+    if (addrs.length === 0) return false;
+    return addrs.every((a) => !isPrivateIp(a.address));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fetch with manual redirect handling. Each hop's resolved address is checked
+ * against the private-IP block-list so a public host cannot redirect to a
+ * private/internal target (SSRF defense).
+ */
+const MAX_REDIRECTS = 5;
+async function safeFetch(
+  initialUrl: string,
+  init: RequestInit & { signal: AbortSignal },
+): Promise<{ res: Response; finalUrl: string } | { error: string }> {
+  let url = initialUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (!(await isSafeResolvedUrl(url))) {
+      return {
+        error: `URL ${hop === 0 ? "" : "(after redirect) "}points to a private/internal host`,
+      };
+    }
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, redirect: "manual" });
+    } catch (err) {
+      return { error: String((err as Error).message ?? err) };
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) return { res, finalUrl: url };
+      try {
+        url = new URL(loc, url).toString();
+      } catch {
+        return { error: "invalid redirect location" };
+      }
+      continue;
+    }
+    return { res, finalUrl: url };
+  }
+  return { error: "too many redirects" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -641,12 +729,13 @@ export interface DiagnosticsResult {
 /** Parse `tsc --noEmit` style output into structured diagnostics. */
 function parseTscOutput(raw: string, filterPath: string): Diagnostic[] {
   const out: Diagnostic[] = [];
+  const isGlob = /[*?\[]/.test(filterPath);
   for (const line of raw.split(/\r?\n/)) {
     // file.ts(12,5): error TS2304: Cannot find name 'foo'.
     const m = line.match(/^(.+?)\((\d+),(\d+)\):\s+(error|warning|info)\s+([A-Z]+\d+)?:?\s*(.*)$/);
     if (!m) continue;
     const [, file, lineNo, col, sev, code, msg] = m;
-    if (filterPath && !file.includes(filterPath)) continue;
+    if (filterPath && !isGlob && !file.includes(filterPath)) continue;
     out.push({
       file,
       line: Number(lineNo) || null,
@@ -746,11 +835,16 @@ export async function readDiagnostics(input: {
   const quotedPath = shellQuote(args.path);
   let argv: string[];
   if (auto === "tsc") {
-    argv = [
-      "sh",
-      "-lc",
-      `npx --yes tsc --noEmit --pretty false 2>&1 | grep -F ${quotedPath} | head -n 50`,
-    ];
+    // For a single file, filter tsc output by literal path match. For a glob,
+    // there's no usable literal substring, so return the full tsc output and
+    // let the model match by file extension/directory in its reasoning.
+    argv = isGlob
+      ? ["sh", "-lc", `npx --yes tsc --noEmit --pretty false 2>&1 | head -n 50`]
+      : [
+          "sh",
+          "-lc",
+          `npx --yes tsc --noEmit --pretty false 2>&1 | grep -F ${quotedPath} | head -n 50`,
+        ];
   } else if (auto === "node") {
     argv = ["sh", "-lc", `node --check ${quotedPath} 2>&1`];
   } else if (auto === "python") {
