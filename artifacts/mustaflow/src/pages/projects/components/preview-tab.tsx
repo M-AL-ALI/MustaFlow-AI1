@@ -1816,17 +1816,17 @@ export function PreviewTab({
 
       {/* Validation warnings banner */}
       {validationWarnings.length > 0 && !validationDismissed && (
-        <div className="shrink-0 border-b border-orange-500/20 bg-orange-500/8">
+        <div className="shrink-0 border-b border-orange-500/30 bg-orange-500/5 dark:bg-orange-500/8">
           <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
-            <AlertTriangle className="h-3.5 w-3.5 text-orange-400 shrink-0" />
-            <span className="flex-1 text-[11px] font-semibold text-orange-400">
+            <AlertTriangle className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400 shrink-0" />
+            <span className="flex-1 text-[11px] font-semibold text-orange-700 dark:text-orange-400">
               {validationWarnings.length} validation{" "}
               {validationWarnings.length === 1 ? "issue" : "issues"} found — the AI flagged problems
               it could not fully resolve
             </span>
             <button
               onClick={() => setValidationDismissed(true)}
-              className="shrink-0 text-orange-400/60 hover:text-orange-400 transition-colors"
+              className="shrink-0 text-orange-600/60 hover:text-orange-700 dark:text-orange-400/60 dark:hover:text-orange-400 transition-colors"
               title="Dismiss"
             >
               <X className="h-3.5 w-3.5" />
@@ -1836,16 +1836,16 @@ export function PreviewTab({
             {validationWarnings.map((warning, idx) => (
               <div
                 key={idx}
-                className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/20 rounded-lg px-2.5 py-2"
+                className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/30 rounded-lg px-2.5 py-2"
               >
-                <Wrench className="h-3 w-3 text-orange-400 shrink-0 mt-0.5" />
-                <span className="flex-1 text-[11px] text-orange-300/90 leading-relaxed">
+                <Wrench className="h-3 w-3 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
+                <span className="flex-1 text-[11px] text-orange-800 dark:text-orange-300/90 leading-relaxed">
                   {warning}
                 </span>
                 {onFixPrompt && (
                   <button
                     onClick={() => onFixPrompt(`Fix this issue: ${warning}`)}
-                    className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-orange-500/20 border border-orange-500/30 text-orange-300 hover:bg-orange-500/30 transition-colors whitespace-nowrap"
+                    className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-orange-500/20 border border-orange-500/40 text-orange-800 dark:text-orange-300 hover:bg-orange-500/30 transition-colors whitespace-nowrap"
                   >
                     Ask AI to fix this
                   </button>
@@ -1858,24 +1858,24 @@ export function PreviewTab({
 
       {/* Mobile preview readiness panel — explains why buttons may not "work" + secret checklist */}
       {showMobileReadiness && (
-        <div className="shrink-0 border-b border-purple-500/20 bg-purple-500/8">
+        <div className="shrink-0 border-b border-purple-500/30 bg-purple-500/5 dark:bg-purple-500/8">
           <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
-            <Smartphone className="h-3.5 w-3.5 text-purple-300 shrink-0" />
-            <span className="flex-1 text-[11px] font-semibold text-purple-300">
+            <Smartphone className="h-3.5 w-3.5 text-purple-700 dark:text-purple-300 shrink-0" />
+            <span className="flex-1 text-[11px] font-semibold text-purple-700 dark:text-purple-300">
               Mobile preview readiness — what works here vs. on a real device
             </span>
             <button
               onClick={() => setReadinessDismissed(true)}
-              className="shrink-0 text-purple-300/60 hover:text-purple-300 transition-colors"
+              className="shrink-0 text-purple-700/60 hover:text-purple-700 dark:text-purple-300/60 dark:hover:text-purple-300 transition-colors"
               title="Dismiss"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
           <div className="px-3 pb-2 space-y-1.5">
-            <div className="flex items-start gap-2 bg-purple-500/10 border border-purple-500/20 rounded-lg px-2.5 py-2">
-              <Info className="h-3 w-3 text-purple-300 shrink-0 mt-0.5" />
-              <span className="flex-1 text-[11px] text-purple-200/90 leading-relaxed">
+            <div className="flex items-start gap-2 bg-purple-500/10 border border-purple-500/30 rounded-lg px-2.5 py-2">
+              <Info className="h-3 w-3 text-purple-700 dark:text-purple-300 shrink-0 mt-0.5" />
+              <span className="flex-1 text-[11px] text-purple-900 dark:text-purple-200/90 leading-relaxed">
                 This window shows an <span className="font-semibold">interactive mockup</span> of
                 your mobile app rendered in the browser. Buttons give visual feedback so you can
                 walk the flow, but anything that needs the phone&apos;s camera, GPS, push, deep
@@ -1885,10 +1885,10 @@ export function PreviewTab({
             </div>
 
             {requiredSecretsFromReport.length > 0 && (
-              <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg px-2.5 py-2">
+              <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg px-2.5 py-2">
                 <div className="flex items-center gap-2 mb-1.5">
-                  <Plug className="h-3 w-3 text-purple-300 shrink-0" />
-                  <span className="text-[11px] font-semibold text-purple-200">
+                  <Plug className="h-3 w-3 text-purple-700 dark:text-purple-300 shrink-0" />
+                  <span className="text-[11px] font-semibold text-purple-900 dark:text-purple-200">
                     Secrets needed for full functionality (
                     {setSecretNames.size > 0
                       ? `${requiredSecretsFromReport.length - missingSecrets.length}/${requiredSecretsFromReport.length} set`
@@ -1898,7 +1898,7 @@ export function PreviewTab({
                   {onJumpToSecrets && missingSecrets.length > 0 && (
                     <button
                       onClick={onJumpToSecrets}
-                      className="ml-auto shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-purple-500/25 border border-purple-500/40 text-purple-100 hover:bg-purple-500/40 transition-colors whitespace-nowrap"
+                      className="ml-auto shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-purple-500/25 border border-purple-500/40 text-purple-900 dark:text-purple-100 hover:bg-purple-500/40 transition-colors whitespace-nowrap"
                     >
                       Set up secrets
                     </button>
@@ -1913,8 +1913,8 @@ export function PreviewTab({
                         className={cn(
                           "inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border",
                           isSet
-                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-                            : "bg-amber-500/10 border-amber-500/30 text-amber-300",
+                            ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300"
+                            : "bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-300",
                         )}
                         title={isSet ? "Set" : "Not set — buttons that use this will be no-ops"}
                       >
@@ -1932,10 +1932,10 @@ export function PreviewTab({
             )}
 
             {(latestReport?.nativeFeatures?.length ?? 0) > 0 && (
-              <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg px-2.5 py-2">
+              <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg px-2.5 py-2">
                 <div className="flex items-center gap-2 mb-1">
-                  <Smartphone className="h-3 w-3 text-purple-300 shrink-0" />
-                  <span className="text-[11px] font-semibold text-purple-200">
+                  <Smartphone className="h-3 w-3 text-purple-700 dark:text-purple-300 shrink-0" />
+                  <span className="text-[11px] font-semibold text-purple-900 dark:text-purple-200">
                     Device-only features in this app
                   </span>
                 </div>
@@ -1943,14 +1943,14 @@ export function PreviewTab({
                   {(latestReport?.nativeFeatures ?? []).map((f) => (
                     <span
                       key={f}
-                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border bg-blue-500/10 border-blue-500/30 text-blue-300"
+                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border bg-blue-500/10 border-blue-500/40 text-blue-700 dark:text-blue-300"
                     >
                       <Smartphone className="h-2.5 w-2.5" />
                       {f}
                     </span>
                   ))}
                 </div>
-                <p className="text-[10px] text-purple-300/60 mt-1">
+                <p className="text-[10px] text-purple-700/70 dark:text-purple-300/60 mt-1">
                   These need a real phone — they will be simulated in the preview but only run on
                   device through Expo Go.
                 </p>
@@ -1962,15 +1962,15 @@ export function PreviewTab({
 
       {/* Native features notice — mobile projects only */}
       {isMobile && nativeFeatures.length > 0 && !nativeFeaturesDismissed && (
-        <div className="shrink-0 border-b border-blue-500/20 bg-blue-500/8">
+        <div className="shrink-0 border-b border-blue-500/30 bg-blue-500/5 dark:bg-blue-500/8">
           <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
-            <ShieldAlert className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-            <span className="flex-1 text-[11px] font-semibold text-blue-400">
+            <ShieldAlert className="h-3.5 w-3.5 text-blue-700 dark:text-blue-400 shrink-0" />
+            <span className="flex-1 text-[11px] font-semibold text-blue-700 dark:text-blue-400">
               Native device features detected — web preview may not show full functionality
             </span>
             <button
               onClick={() => setNativeFeaturesDismissed(true)}
-              className="shrink-0 text-blue-400/60 hover:text-blue-400 transition-colors"
+              className="shrink-0 text-blue-700/60 hover:text-blue-700 dark:text-blue-400/60 dark:hover:text-blue-400 transition-colors"
               title="Dismiss"
             >
               <X className="h-3.5 w-3.5" />
@@ -1980,14 +1980,18 @@ export function PreviewTab({
             {nativeFeatures.map((feature, idx) => (
               <div
                 key={idx}
-                className="flex items-center gap-2 bg-blue-500/10 border border-blue-500/20 rounded-lg px-2.5 py-1.5"
+                className="flex items-center gap-2 bg-blue-500/10 border border-blue-500/30 rounded-lg px-2.5 py-1.5"
               >
-                <Smartphone className="h-3 w-3 text-blue-400 shrink-0" />
-                <span className="flex-1 text-[11px] text-blue-300/90">{feature}</span>
-                <span className="text-[10px] text-blue-400/60 shrink-0">Requires real device</span>
+                <Smartphone className="h-3 w-3 text-blue-700 dark:text-blue-400 shrink-0" />
+                <span className="flex-1 text-[11px] text-blue-800 dark:text-blue-300/90">
+                  {feature}
+                </span>
+                <span className="text-[10px] text-blue-700/70 dark:text-blue-400/60 shrink-0">
+                  Requires real device
+                </span>
               </div>
             ))}
-            <p className="text-[10px] text-blue-400/60 px-0.5 pt-0.5">
+            <p className="text-[10px] text-blue-700/70 dark:text-blue-400/60 px-0.5 pt-0.5">
               These native capabilities are included in the Expo/React Native code but cannot run in
               the web preview iframe. Use Expo Go on a real device to test them.
             </p>
