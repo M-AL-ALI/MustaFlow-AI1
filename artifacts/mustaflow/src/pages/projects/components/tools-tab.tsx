@@ -1148,6 +1148,7 @@ export function ToolsTab({
   defaultTab,
   onSendMessage,
   onNavigateToFile,
+  onRollbackSuccess,
 }: {
   projectId: number;
   projectKind?: string;
@@ -1156,6 +1157,7 @@ export function ToolsTab({
   defaultTab?: string;
   onSendMessage?: (text: string) => void;
   onNavigateToFile?: (filePath: string, line?: number | null) => void;
+  onRollbackSuccess?: () => void;
 }) {
   const queryClient = useQueryClient();
   const isMobile =
@@ -1308,6 +1310,7 @@ export function ToolsTab({
                     versions={versions}
                     isLoading={versionsLoading}
                     currentFiles={files ?? []}
+                    onRollbackSuccess={onRollbackSuccess}
                   />
                 </div>
               </details>

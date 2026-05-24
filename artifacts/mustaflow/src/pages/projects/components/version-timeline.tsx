@@ -666,11 +666,13 @@ export function VersionTimeline({
   versions,
   isLoading,
   currentFiles,
+  onRollbackSuccess,
 }: {
   projectId: number;
   versions: ProjectVersion[] | undefined;
   isLoading: boolean;
   currentFiles: ProjectFileSummary[];
+  onRollbackSuccess?: () => void;
 }) {
   const queryClient = useQueryClient();
 
@@ -681,7 +683,8 @@ export function VersionTimeline({
   const handleRollbackSuccess = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
     queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
-  }, [queryClient, projectId]);
+    onRollbackSuccess?.();
+  }, [queryClient, projectId, onRollbackSuccess]);
 
   if (isLoading) {
     return (

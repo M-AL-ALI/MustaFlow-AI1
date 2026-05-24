@@ -3423,6 +3423,7 @@ export default function ProjectWorkspacePage() {
                     setActiveTab("code");
                   }
                 }}
+                onRollbackSuccess={() => setBuildRefreshCount((n) => n + 1)}
               />
             )}
             {activeTab === "publishing" && (
@@ -3531,6 +3532,7 @@ export default function ProjectWorkspacePage() {
                 void queryClient.invalidateQueries({
                   queryKey: getListMessagesQueryKey(projectId),
                 });
+                setBuildRefreshCount((n) => n + 1);
               },
             },
           );
