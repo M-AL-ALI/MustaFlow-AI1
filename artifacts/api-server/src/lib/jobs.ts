@@ -17,6 +17,7 @@ import {
   checkRunsTable,
   appTestRunsTable,
   cveFindingsTable,
+  projectDomainsTable,
   type TaskReport,
   type FileSnapshotEntry,
   type CvePatchStatus,
@@ -88,6 +89,14 @@ export const CREDIT_COST: Record<string, number> = {
   power: 5,
   pro: 10,
 };
+
+/**
+ * Sentinel prefix for domain-rewrite refine tasks enqueued by the domain
+ * attachment/promotion flow. Jobs with this prefix:
+ *   - Skip architect review (mechanical URL rewrite, not a logic change).
+ *   - Are recognised in the builder as needing domain-focused rewrite prompts.
+ */
+export const DOMAIN_REWRITE_SENTINEL = "[domain-rewrite]";
 
 /**
  * Per-mode wall-clock cap for long-running background workflows (Task #509).
@@ -1154,7 +1163,7 @@ export async function runJob(input: JobInput): Promise<void> {
       return;
     }
 
-    const [{ context: knowledgeContext, applied: knowledgeApplied }, conversationSummary] =
+    const [{ context: rawKnowledgeContext, applied: knowledgeApplied }, conversationSummary] =
       await Promise.all([
         loadKnowledgeContext(projectId, userPrompt),
         (async () => {
@@ -1176,6 +1185,49 @@ export async function runJob(input: JobInput): Promise<void> {
           }
         })(),
       ]);
+
+    // ── Domain context — inject primary domain so the builder uses real absolute URLs ──
+    let domainContextStr: string | undefined;
+    try {
+      const [primaryDomain] = await db
+        .select({ hostname: projectDomainsTable.hostname })
+        .from(projectDomainsTable)
+        .where(
+          and(
+            eq(projectDomainsTable.projectId, projectId),
+            eq(projectDomainsTable.isPrimary, true),
+          ),
+        )
+        .limit(1);
+
+      const platformDomain = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
+      const platformSubdomain = project.publicSlug
+        ? `${project.publicSlug}.${platformDomain}`
+        : null;
+
+      const primaryUrl = primaryDomain
+        ? `https://${primaryDomain.hostname}`
+        : platformSubdomain
+          ? `https://${platformSubdomain}`
+          : null;
+
+      if (primaryUrl) {
+        const domainType = primaryDomain ? "custom domain" : "platform subdomain";
+        domainContextStr = `DOMAIN CONTEXT — This project's public URL is: ${primaryUrl} (${domainType}).
+When generating code that requires absolute URLs (canonical <link> tags, <meta property="og:url">, <meta property="og:image">, sitemap.xml <loc> entries, robots.txt Sitemap line, Stripe success_url/cancel_url, OAuth redirect_uri, webhook endpoints), always use: ${primaryUrl}
+Do NOT use window.location.origin, localhost, or placeholder domains in these contexts — use the primary URL above.`;
+      }
+    } catch {
+      // Non-fatal — domain context is best-effort
+    }
+
+    // Merge vault knowledge + domain context into a single context string
+    const knowledgeContext =
+      rawKnowledgeContext && domainContextStr
+        ? `${rawKnowledgeContext}\n\n${domainContextStr}`
+        : rawKnowledgeContext
+          ? rawKnowledgeContext
+          : (domainContextStr ?? undefined);
 
     // Build database context when the project has a provisioned DB
     let databaseContext: string | undefined;
@@ -2471,6 +2523,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         const isArchitectAutoFix = (input.userPrompt ?? "").startsWith(
           "The Architect Reviewer flagged this build",
         );
+        const isDomainRewrite = (input.userPrompt ?? "").startsWith(DOMAIN_REWRITE_SENTINEL);
         const totalFilesTouched =
           (diffSummary?.filesAdded.length ?? 0) +
           (diffSummary?.filesModified.length ?? 0) +
@@ -2510,6 +2563,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         // resolved the originally flagged critical/fail findings.
         let skipReason: string | null = null;
         if (!project.architectReviewEnabled) skipReason = "disabled";
+        else if (isDomainRewrite) skipReason = "domain-rewrite";
         else if (!isArchitectAutoFix && totalFilesTouched === 0) skipReason = "no-diff";
         else if (!isArchitectAutoFix && isTrivialEdit) skipReason = "trivial-edit";
 
@@ -3157,7 +3211,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           userPrompt,
           assistantSummary,
           snapshot.map((f) => f.path),
-          knowledgeContext,
+          knowledgeContext ?? "",
         ).catch((err) => logger.warn({ err, taskId }, "Background suggestion generation failed"));
       });
 

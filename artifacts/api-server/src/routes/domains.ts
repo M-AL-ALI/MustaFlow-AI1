@@ -20,12 +20,22 @@ import { Router, type IRouter } from "express";
 import { eq, isNull, and, asc, desc, inArray } from "drizzle-orm";
 import { promises as dns } from "dns";
 import { randomBytes } from "crypto";
-import { db, projectsTable, projectDomainsTable, deploymentLogsTable } from "@workspace/db";
+import {
+  db,
+  projectsTable,
+  projectDomainsTable,
+  deploymentLogsTable,
+  agentTasksTable,
+  chatMessagesTable,
+} from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { activateSslForDomain, activateSslForProject } from "./ssl";
 import { deleteCustomHostname } from "../lib/cloudflare";
 import { createLimiterForDomainVerify } from "../lib/rateLimit";
 import { publishDomainEvent } from "../lib/event-bus";
+import { enqueueJob, DOMAIN_REWRITE_SENTINEL } from "../lib/jobs";
+import { writeKnowledge } from "../lib/knowledge";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -163,6 +173,112 @@ const RESERVED_LABELS = new Set([
 
 function generateVerificationToken(): string {
   return `mustaflow-verify=${randomBytes(16).toString("hex")}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Domain-rewrite helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build the sentinel refine prompt that instructs the AI to rewrite all
+ * hard-coded URLs to use the new primary domain. The sentinel prefix lets
+ * runJob detect this as a domain-rewrite task and skip the architect review.
+ */
+function buildDomainRewritePrompt(
+  newDomain: string,
+  oldDomain: string | null,
+  publicSlug: string | null,
+): string {
+  const platformDomain = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
+  const platformSubdomain = publicSlug ? `${publicSlug}.${platformDomain}` : null;
+  const oldUrls = [oldDomain, platformSubdomain].filter(Boolean).map((d) => `https://${d}`);
+
+  return `${DOMAIN_REWRITE_SENTINEL} A custom domain has been attached to this project. Rewrite all hard-coded URLs to use the new primary domain.
+
+NEW PRIMARY DOMAIN: https://${newDomain}
+OLD DOMAINS TO REPLACE: ${oldUrls.length > 0 ? oldUrls.join(", ") : "any placeholder or localhost URLs"}
+
+WHAT TO REWRITE (change URL strings only — do not touch logic, styles, or structure):
+1. canonical <link rel="canonical" href="..."> → https://${newDomain}
+2. <meta property="og:url" content="..."> → https://${newDomain}
+3. <meta property="og:image" content="..."> if the URL is absolute and matches old domain → https://${newDomain}/...
+4. sitemap.xml — regenerate with <loc>https://${newDomain}/...</loc> for every page (generate the file if it does not exist)
+5. robots.txt — update the Sitemap: line to https://${newDomain}/sitemap.xml (generate the file if it does not exist)
+6. Stripe callbacks: success_url, cancel_url, and any webhook endpoint strings → https://${newDomain}
+7. OAuth redirect_uri values → https://${newDomain}/...
+8. Any other absolute URL string in JS/HTML/JSON that contains one of the old domains listed above
+
+CONSTRAINTS:
+- Only touch files that contain the old domains or localhost/placeholder absolute callback URLs
+- Do NOT change relative URLs (/path, ./path)
+- Do NOT change window.location, window.location.origin, or dynamic URL construction
+- Do NOT change any logic, styling, data, or functionality
+- Return ONLY changed files — this is a mechanical URL rewrite`;
+}
+
+/**
+ * Enqueue a background refine task that rewrites hard-coded URLs across the
+ * project to use the new primary domain. Non-fatal — logs and returns on any error.
+ */
+async function enqueueDomainRewriteJob(
+  projectId: number,
+  newDomain: string,
+  oldDomain: string | null,
+  publicSlug: string | null,
+  userId: string,
+): Promise<void> {
+  try {
+    const prompt = buildDomainRewritePrompt(newDomain, oldDomain, publicSlug);
+    const title = `URL rewrite for ${newDomain}`;
+
+    const [task] = await db
+      .insert(agentTasksTable)
+      .values({
+        projectId,
+        title,
+        kind: "main",
+        status: "queued",
+        prompt,
+        agentIdentity: "task",
+        runMode: "foreground",
+      })
+      .returning({ id: agentTasksTable.id });
+
+    if (!task) return;
+
+    await db.insert(chatMessagesTable).values({
+      projectId,
+      role: "assistant",
+      content: `Domain **${newDomain}** attached. Scanning project files for hard-coded URLs (canonical tags, OG meta, sitemap.xml, robots.txt, Stripe callbacks, OAuth redirect URIs) and preparing rewrites…`,
+      agentMode: "eco",
+      planMode: false,
+      plan: { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>,
+    });
+
+    enqueueJob({
+      taskId: task.id,
+      projectId,
+      kind: "refine",
+      userPrompt: prompt,
+      agentMode: "eco",
+      agentIdentity: "task",
+    });
+
+    // Write a Knowledge Vault entry so future builds know the project's domain
+    void writeKnowledge({
+      projectId,
+      userId,
+      title: `Primary domain: ${newDomain}`,
+      content: `This project's primary custom domain is ${newDomain}. All absolute URLs in generated code (canonical tags, OG meta, sitemap.xml, robots.txt, Stripe callbacks, OAuth redirect URIs) should use https://${newDomain}.`,
+      type: "domain_config",
+      category: "configuration",
+      severity: "info",
+      tags: ["domain", newDomain],
+      approvedForReuse: false,
+    });
+  } catch (err) {
+    logger.warn({ err, projectId, newDomain }, "Failed to enqueue domain rewrite job (non-fatal)");
+  }
 }
 
 function buildSubdomain(slug: string | null | undefined): string | null {
@@ -403,6 +519,10 @@ router.post("/projects/:id/domains", requireProjectOwnership, async (req, res): 
           updatedAt: new Date(),
         })
         .where(eq(projectsTable.id, projectId));
+
+      // Fire-and-forget URL rewrite job: updates canonical/OG/sitemap/Stripe/OAuth URLs
+      const project = await getProjectOrNull(projectId);
+      void enqueueDomainRewriteJob(projectId, hostname, null, project?.publicSlug ?? null, userId);
     }
 
     res.status(201).json({
@@ -544,6 +664,16 @@ router.patch(
       return;
     }
 
+    // Record old primary domain before clearing, so the rewrite job can reference it
+    const [prevPrimary] = await db
+      .select({ hostname: projectDomainsTable.hostname })
+      .from(projectDomainsTable)
+      .where(
+        and(eq(projectDomainsTable.projectId, projectId), eq(projectDomainsTable.isPrimary, true)),
+      )
+      .limit(1);
+    const oldPrimaryHostname = prevPrimary?.hostname ?? null;
+
     // Clear primary flag on all sibling domains
     await db
       .update(projectDomainsTable)
@@ -598,6 +728,18 @@ router.patch(
           /* best-effort */
         });
     });
+
+    // Fire-and-forget URL rewrite job when the primary domain changes
+    if (domain.hostname !== oldPrimaryHostname) {
+      const project = await getProjectOrNull(projectId);
+      void enqueueDomainRewriteJob(
+        projectId,
+        domain.hostname,
+        oldPrimaryHostname,
+        project?.publicSlug ?? null,
+        userId,
+      );
+    }
 
     res.json({ domainId, isPrimary: true });
   },
@@ -1028,6 +1170,50 @@ router.get(
     );
     const allPassed = allRequired.every((c) => c.passed === true);
 
+    // ── Agent diagnose mode (?explain=true) ──────────────────────────────────
+    // When requested, pipe the structured check results to gpt-5-mini and
+    // return a plain-language explanation + suggested fix action.
+    let agentExplanation: { summary: string; suggestedFix: string } | null = null;
+    const explainMode = req.query.explain === "true" || req.query.explain === "1";
+    if (explainMode) {
+      try {
+        const checksSummary = checks
+          .map(
+            (c) =>
+              `[${c.passed ? "PASS" : "FAIL"}] ${c.label}: ${c.detail}${c.fixHint ? ` Fix: ${c.fixHint}` : ""}`,
+          )
+          .join("\n");
+
+        const { createChatCompletion, resolveStageProvider } = await import("../lib/ai-providers");
+        const { provider, model } = resolveStageProvider("converse", "eco", "gpt-5-mini");
+        const aiResponse = await createChatCompletion({
+          provider,
+          model,
+          max_completion_tokens: 512,
+          messages: [
+            {
+              role: "system",
+              content:
+                'You are a helpful DNS and domain-setup assistant. You receive structured diagnostic check results for a custom domain and explain what is wrong in plain English (2-4 sentences max), then give one clear, actionable fix the user should do right now. Be concise. Return JSON: { "summary": string, "suggestedFix": string }',
+            },
+            {
+              role: "user",
+              content: `Domain: ${hostname}\nStatus: ${domain.verificationStatus}\nSSL: ${domain.sslStatus}\nAll passed: ${allPassed}\n\nChecks:\n${checksSummary}`,
+            },
+          ],
+          response_format: { type: "json_object" },
+        });
+        const raw = aiResponse.choices[0]?.message?.content?.trim() ?? "{}";
+        const parsed = JSON.parse(raw) as { summary?: string; suggestedFix?: string };
+        agentExplanation = {
+          summary: parsed.summary ?? "Diagnostic complete.",
+          suggestedFix: parsed.suggestedFix ?? "Check the failing steps above for fix hints.",
+        };
+      } catch (err) {
+        req.log.warn({ err }, "Agent diagnose AI call failed (non-fatal)");
+      }
+    }
+
     res.json({
       hostname,
       isApex,
@@ -1039,7 +1225,71 @@ router.get(
       cnameTarget: CNAME_TARGET,
       txtName,
       txtValue: token,
+      ...(agentExplanation ? { agentExplanation } : {}),
     });
+  },
+);
+
+// ── POST /api/projects/:id/suggest-domains ─────────────────────────────────
+// Ask the AI to suggest 5 domain name candidates based on the project's
+// name and description. Availability check is a future milestone (D8).
+router.post(
+  "/projects/:id/suggest-domains",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+
+    const [project] = await db
+      .select({ name: projectsTable.name, description: projectsTable.description })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const { hint } = req.body as { hint?: string };
+
+    try {
+      const { createChatCompletion, resolveStageProvider } = await import("../lib/ai-providers");
+      const { provider, model } = resolveStageProvider("converse", "eco", "gpt-5-mini");
+      const aiResponse = await createChatCompletion({
+        provider,
+        model,
+        max_completion_tokens: 256,
+        messages: [
+          {
+            role: "system",
+            content:
+              'You are a domain-name creative assistant. You suggest short, memorable, brand-friendly domain names. Return ONLY strict JSON: { "suggestions": [{ "domain": string, "tld": string, "rationale": string }] } with exactly 5 items. Prefer .com, .io, .app, .co. Keep each domain under 20 chars. No hyphens unless the brand clearly benefits.',
+          },
+          {
+            role: "user",
+            content: `Project name: ${project.name}\nDescription: ${project.description ?? "Not provided"}\n${hint ? `Additional hint: ${hint}` : ""}\n\nSuggest 5 domain names.`,
+          },
+        ],
+        response_format: { type: "json_object" },
+      });
+      const raw = aiResponse.choices[0]?.message?.content?.trim() ?? "{}";
+      const parsed = JSON.parse(raw) as {
+        suggestions?: Array<{ domain: string; tld: string; rationale: string }>;
+      };
+      const suggestions = (parsed.suggestions ?? []).slice(0, 5).map((s) => ({
+        domain: String(s.domain ?? "")
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/g, ""),
+        tld: String(s.tld ?? ".com"),
+        full: `${String(s.domain ?? "")
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/g, "")}${String(s.tld ?? ".com")}`,
+        rationale: String(s.rationale ?? ""),
+      }));
+      res.json({ suggestions });
+    } catch (err) {
+      req.log.warn({ err, projectId }, "Domain suggestion AI call failed");
+      res.status(500).json({ error: "Failed to generate domain suggestions. Please try again." });
+    }
   },
 );
 
