@@ -26,6 +26,7 @@ import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
 import { generateOgSvg } from "../lib/ogImage";
 import { deployProductionContainer, destroyContainer } from "../lib/container";
+import { pushSnapshotToCdn, cdnConfigured } from "../lib/cdn";
 import { encryptionService } from "../lib/encryption";
 import { getUnresolvedCriticalFindings } from "./readiness";
 import { runPostPublishHealthCheck, recordHealthCheck, getDeclaredRoutes } from "../lib/prodLogs";
@@ -203,7 +204,16 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   let prodContainerUrl: string | null = project.prodContainerUrl ?? null;
   let prodContainerStatus = project.prodContainerStatus ?? "stopped";
   let prodContainerId = project.prodContainerId ?? null;
-  if (project.containerId && process.env.FLY_API_TOKEN) {
+
+  // Task #543: respect deployment type. "static" never deploys a container,
+  // even if the project has a dev container. "autoscale" + "reserved_vm"
+  // both go through the blue/green path; container.ts reads the type to
+  // set min_machines_running appropriately.
+  const deploymentType = project.deploymentType ?? "static";
+  const shouldDeployContainer =
+    deploymentType !== "static" && !!project.containerId && !!process.env.FLY_API_TOKEN;
+
+  if (shouldDeployContainer) {
     req.log.info({ projectId }, "Project has dev container — deploying production container");
     try {
       const secretRows = await db
@@ -289,6 +299,40 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       });
   });
 
+  // Task #543: edge CDN push (no-op when CDN_PROVIDER is unset).
+  // Runs in the background — never blocks publish. On success, stamps
+  // cdnLastPushedAt so the Publishing tab can show "Edge cache: just now".
+  // Note: cdnPushQueued reflects that we *kicked off* a background push, not
+  // that bytes are live on the edge. cdnLastPushedAt (stamped below on
+  // success) is the source of truth for actual propagation.
+  let cdnPushQueued = false;
+  if (project.cdnEnabled && cdnConfigured()) {
+    cdnPushQueued = true;
+    setImmediate(() => {
+      void (async () => {
+        try {
+          const result = await pushSnapshotToCdn(
+            projectId,
+            slug,
+            files.map((f) => ({ path: f.path, content: f.content, mimeType: f.mimeType })),
+          );
+          if (result) {
+            await db
+              .update(projectsTable)
+              .set({ cdnLastPushedAt: new Date() })
+              .where(eq(projectsTable.id, projectId));
+            req.log.info(
+              { projectId, slug, files: result.filesUploaded, provider: result.provider },
+              "CDN push complete",
+            );
+          }
+        } catch (err) {
+          req.log.warn({ err, projectId }, "CDN push failed (non-fatal)");
+        }
+      })();
+    });
+  }
+
   // Post-publish health check — Task #511. Runs in the background so the
   // publish response returns immediately. Writes a Knowledge Vault entry on
   // failure and persists the outcome to prod_health_checks for the banner.
@@ -345,6 +389,8 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     filesPublished: files.length,
     containerDeployed,
     containerUrl: prodContainerUrl,
+    deploymentType,
+    cdnPushQueued,
     note: containerDeployed
       ? "Production container deployed. Public URL proxies to the live container."
       : "Public URL serves the frozen snapshot. Draft edits do not affect it until you publish again.",

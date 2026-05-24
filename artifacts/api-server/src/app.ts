@@ -14,6 +14,7 @@ import { logger } from "./lib/logger";
 import { startProdLogRetentionWorker } from "./lib/prodLogs";
 import "./lib/preview-purge";
 import { startCfScheduler } from "./lib/cf-scheduler";
+import { startDeploymentScheduler } from "./lib/deployment-scheduler";
 
 // Kick off the prod-log retention sweeper (Task #511). Hourly, best-effort.
 startProdLogRetentionWorker();
@@ -22,6 +23,10 @@ startProdLogRetentionWorker();
 // Handles cert-status polling (5-min) + dangling-CNAME sweep + expiry alerts (daily).
 // No-ops gracefully when CF_ZONE_ID / CF_API_TOKEN are not set.
 startCfScheduler();
+
+// Kick off the deployment substrate scheduler (Task #543).
+// Sweeps due schedules every minute + runs synthetic uptime probes every 5 min.
+startDeploymentScheduler();
 
 const app: Express = express();
 

@@ -363,3 +363,26 @@ The intended user journey is: Login → create project → build app → preview
   - HTTP install doesn't run `npm install` server-side — the next build's container provision step does. Static-html projects ignore the `packages` array entirely.
   - Blueprint files don't yet warn the user if they conflict with framework-generated code (e.g. installing `db-postgres` over a project that already has `lib/db.ts`).
 - Env vars: none new.
+
+## Task #543 — Deployment Substrate
+
+- **Scope**: Per-project deployment type + region, CDN push hook, scheduled deploys/probes, synthetic uptime monitoring. Pragmatic shippable slice — real CDN upload and email alert dispatch are follow-ups.
+- **DB**: `projects.{deploymentType,region,cdnEnabled,cdnLastPushedAt,healthCheckPath,uptimeAlertEmail}` columns + `deployment_schedules` table. Apply with `pnpm --filter @workspace/scripts run migrate-deployment-substrate` (idempotent, `IF NOT EXISTS`).
+- **Deployment types**: `static` (default — snapshot+CDN only, no container), `autoscale` (container with `min_machines_running:0` scale-to-zero), `reserved_vm` (container with `min_machines_running:1` always-on). `container.ts:createProductionContainer` now accepts `{region, deploymentType}`; `deployProductionContainer` reads `projects.region` + `projects.deploymentType` and forwards. Publish skips container deploy entirely when type is `static`.
+- **CDN hook**: `artifacts/api-server/src/lib/cdn.ts` — `pushSnapshotToCdn()` is a stub that returns the derived public URL and logs intent. Gated on `CDN_PROVIDER` env (`r2|bunny|none`) + `CDN_PUBLIC_BASE`. Publish triggers it in background (non-fatal) when `project.cdnEnabled && cdnConfigured()` and stamps `cdnLastPushedAt` on success. Real S3/R2 PUT upload + cache-busting is follow-up #608.
+- **Cron parser**: `artifacts/api-server/src/lib/cron-eval.ts` — minimal 5-field parser supporting `*`, `N`, `*/N`, `A,B,C`, `A-B[/step]`. Rejects unsupported tokens. `nextCronTick` looks ahead up to 366 days.
+- **Scheduler**: `artifacts/api-server/src/lib/deployment-scheduler.ts` started in `app.ts`. Two loops, both `setInterval().unref()`:
+  - **Sweep** every 60s — finds enabled schedules where `nextRunAt <= now`, fires them, recomputes next tick. Currently handles `health_probe` (one-shot probe); `task_run` and `redeploy` are stamped but no-op pending wiring.
+  - **Uptime** every 5 min — picks up to 20 published projects, runs `GET <healthCheckPath>` with 8s timeout, writes outcome to `prod_health_checks`. Failures emit a Knowledge Vault `warning` entry the owner sees in the Knowledge tab.
+- **API routes** (`artifacts/api-server/src/routes/deployment-config.ts`, all `requireProjectOwnership`, mounted at `/api/projects/:id/...`):
+  - `GET/PATCH /deployment-config` — read/edit type, region, cdnEnabled, healthCheckPath, uptimeAlertEmail. Returns `cdn.configured/provider`, `availableTypes/Regions`, and pricing copy.
+  - `GET /uptime` — last 50 probes + uptime % rollup.
+  - `POST /uptime/probe` — fire a manual probe now.
+  - `GET/POST/PATCH/DELETE /schedules[/:sid]` — full CRUD. Validates cron via `parseCron`.
+- **UI**: New `DeploymentSubstratePanel` in `publishing-tab.tsx`, rendered above the Domains section. Sections: deployment-type picker (3 tiles with pricing copy), region/health-path/alert-email/CDN-toggle grid, uptime tile with "Probe now" button, schedules manager (kind + cron + note + add/toggle/delete). Uses raw `fetch()` (canvas-variants pattern — Orval drift kept tight).
+- **Drift**: New routes not in `lib/api-spec/openapi.yaml`. Frontend uses raw fetch. Adding Orval hooks is a clean follow-up once the contract stabilizes.
+- **Known limitations**:
+  - CDN push is a stub — no real R2/Bunny upload. Follow-up #608.
+  - Uptime alert email field stored but no SMTP dispatcher yet. Follow-up #610.
+  - `task_run` and `redeploy` schedule kinds stamp lastRunStatus but are no-ops pending agent-task enqueue / republish-from-snapshot wiring.
+- **Env vars (optional)**: `CDN_PROVIDER` (`r2|bunny|none`, default `none`), `CDN_PUBLIC_BASE` (e.g. `https://cdn.mustaflow.app`), `CDN_API_TOKEN` (reserved for follow-up). Without these, CDN is disabled and the toggle is locked off in the UI.

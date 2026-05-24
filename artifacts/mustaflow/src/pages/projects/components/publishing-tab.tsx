@@ -576,6 +576,368 @@ function ChecklistGroup({
 // Lets users pick a human-friendly subdomain after their first publish.
 // Calls POST /api/projects/:id/subdomain and updates the displayed URL.
 
+// ── DeploymentSubstratePanel ─────────────────────────────────────────────────
+// Task #543: deployment type, region, CDN flag, health-check path, uptime
+// summary, schedules CRUD. Uses raw fetch (canvas-variants pattern).
+type DeploymentConfig = {
+  deploymentType: "static" | "autoscale" | "reserved_vm";
+  region: string | null;
+  cdnEnabled: boolean;
+  cdnLastPushedAt: string | null;
+  healthCheckPath: string;
+  uptimeAlertEmail: string | null;
+  cdn: { configured: boolean; provider: string };
+  availableTypes: readonly ("static" | "autoscale" | "reserved_vm")[];
+  availableRegions: readonly string[];
+  pricing: Record<string, { label: string; price: string; description: string }>;
+};
+type UptimeSummary = {
+  uptimePct: number | null;
+  sampleSize: number;
+  lastCheck: {
+    status: string;
+    rootStatus: number | null;
+    rootLatencyMs: number | null;
+    createdAt: string;
+  } | null;
+};
+type Schedule = {
+  id: number;
+  kind: "redeploy" | "task_run" | "health_probe";
+  cronExpr: string;
+  enabled: boolean;
+  note: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: string | null;
+  nextRunAt: string | null;
+};
+
+function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
+  const [config, setConfig] = useState<DeploymentConfig | null>(null);
+  const [uptime, setUptime] = useState<UptimeSummary | null>(null);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [newCron, setNewCron] = useState("0 * * * *");
+  const [newKind, setNewKind] = useState<Schedule["kind"]>("health_probe");
+  const [newNote, setNewNote] = useState("");
+
+  const refresh = useCallback(async () => {
+    try {
+      const [cRes, uRes, sRes] = await Promise.all([
+        fetch(`/api/projects/${projectId}/deployment-config`),
+        fetch(`/api/projects/${projectId}/uptime`),
+        fetch(`/api/projects/${projectId}/schedules`),
+      ]);
+      if (cRes.ok) setConfig((await cRes.json()) as DeploymentConfig);
+      if (uRes.ok) setUptime((await uRes.json()) as UptimeSummary);
+      if (sRes.ok) {
+        const data = (await sRes.json()) as { schedules: Schedule[] };
+        setSchedules(data.schedules);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function patch(update: Partial<DeploymentConfig>): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/deployment-config`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(update),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runProbeNow(): Promise<void> {
+    setBusy(true);
+    try {
+      await fetch(`/api/projects/${projectId}/uptime/probe`, { method: "POST" });
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createSchedule(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/schedules`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cronExpr: newCron, kind: newKind, note: newNote || null }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      setNewNote("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleSchedule(id: number, enabled: boolean): Promise<void> {
+    await fetch(`/api/projects/${projectId}/schedules/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    await refresh();
+  }
+
+  async function deleteSchedule(id: number): Promise<void> {
+    await fetch(`/api/projects/${projectId}/schedules/${id}`, { method: "DELETE" });
+    await refresh();
+  }
+
+  if (!config) {
+    return (
+      <div className="border border-border rounded-xl p-5 bg-card text-xs text-muted-foreground">
+        Loading deployment config…
+      </div>
+    );
+  }
+
+  const uptimeColor =
+    uptime?.uptimePct === null
+      ? "text-muted-foreground"
+      : (uptime?.uptimePct ?? 0) >= 99
+        ? "text-green-600"
+        : (uptime?.uptimePct ?? 0) >= 95
+          ? "text-yellow-600"
+          : "text-red-600";
+
+  return (
+    <div className="border border-border rounded-xl p-5 bg-card space-y-5">
+      <h3 className="font-semibold text-sm flex items-center gap-2">
+        <Rocket className="h-4 w-4 text-muted-foreground" />
+        Deployment Substrate
+      </h3>
+
+      {error && (
+        <div className="text-xs text-red-600 bg-red-500/10 border border-red-500/20 rounded px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      {/* Deployment type */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Deployment type
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          {config.availableTypes.map((t) => {
+            const meta = config.pricing[t];
+            const active = config.deploymentType === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                disabled={busy}
+                onClick={() => void patch({ deploymentType: t })}
+                className={cn(
+                  "text-left rounded-lg border p-3 transition-colors",
+                  active ? "border-primary bg-primary/5" : "border-border hover:border-primary/40",
+                )}
+              >
+                <div className="text-sm font-medium">{meta?.label ?? t}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">{meta?.price}</div>
+                <div className="text-[11px] text-muted-foreground mt-1">{meta?.description}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Region + CDN + health path */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <label className="text-xs space-y-1">
+          <span className="font-medium text-muted-foreground uppercase tracking-wide">Region</span>
+          <select
+            disabled={busy}
+            value={config.region ?? ""}
+            onChange={(e) => void patch({ region: (e.target.value || null) as never })}
+            className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="">Default</option>
+            {config.availableRegions.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs space-y-1">
+          <span className="font-medium text-muted-foreground uppercase tracking-wide">
+            Health check path
+          </span>
+          <input
+            disabled={busy}
+            defaultValue={config.healthCheckPath}
+            onBlur={(e) => {
+              if (e.target.value !== config.healthCheckPath) {
+                void patch({ healthCheckPath: e.target.value as never });
+              }
+            }}
+            className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm font-mono"
+          />
+        </label>
+        <label className="text-xs space-y-1">
+          <span className="font-medium text-muted-foreground uppercase tracking-wide">
+            Uptime alert email
+          </span>
+          <input
+            type="email"
+            disabled={busy}
+            defaultValue={config.uptimeAlertEmail ?? ""}
+            placeholder="alerts@example.com"
+            onBlur={(e) => void patch({ uptimeAlertEmail: (e.target.value || null) as never })}
+            className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
+          />
+        </label>
+        <label className="text-xs flex items-center gap-2 pt-5">
+          <input
+            type="checkbox"
+            disabled={busy || !config.cdn.configured}
+            checked={config.cdnEnabled}
+            onChange={(e) => void patch({ cdnEnabled: e.target.checked as never })}
+          />
+          <span>
+            Push to edge CDN on publish{" "}
+            {!config.cdn.configured && (
+              <span className="text-muted-foreground">
+                (CDN_PROVIDER not configured — disabled)
+              </span>
+            )}
+            {config.cdnLastPushedAt && (
+              <span className="text-muted-foreground block text-[10px]">
+                Last push: {new Date(config.cdnLastPushedAt).toLocaleString()}
+              </span>
+            )}
+          </span>
+        </label>
+      </div>
+
+      {/* Uptime tile */}
+      <div className="rounded-lg border border-border bg-muted/30 p-3 flex items-center justify-between">
+        <div>
+          <div className="text-[11px] text-muted-foreground uppercase tracking-wide">
+            Uptime (last {uptime?.sampleSize ?? 0} probes)
+          </div>
+          <div className={cn("text-xl font-semibold tabular-nums", uptimeColor)}>
+            {uptime?.uptimePct === null || uptime?.uptimePct === undefined
+              ? "—"
+              : `${uptime.uptimePct.toFixed(1)}%`}
+          </div>
+          {uptime?.lastCheck && (
+            <div className="text-[11px] text-muted-foreground mt-1">
+              Last: {uptime.lastCheck.status} · {uptime.lastCheck.rootStatus ?? "—"} ·{" "}
+              {uptime.lastCheck.rootLatencyMs ?? "—"}ms ·{" "}
+              {new Date(uptime.lastCheck.createdAt).toLocaleString()}
+            </div>
+          )}
+        </div>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void runProbeNow()}>
+          <Activity className="h-3 w-3 mr-1" /> Probe now
+        </Button>
+      </div>
+
+      {/* Schedules */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Scheduled deploys & probes
+        </p>
+        <div className="flex flex-col md:flex-row gap-2">
+          <select
+            value={newKind}
+            onChange={(e) => setNewKind(e.target.value as Schedule["kind"])}
+            className="rounded border border-border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="health_probe">Health probe</option>
+            <option value="task_run">Task run</option>
+            <option value="redeploy">Redeploy (preview)</option>
+          </select>
+          <input
+            value={newCron}
+            onChange={(e) => setNewCron(e.target.value)}
+            placeholder="0 * * * *"
+            className="rounded border border-border bg-background px-2 py-1.5 text-sm font-mono flex-1 md:max-w-[160px]"
+          />
+          <input
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            placeholder="Optional note"
+            className="rounded border border-border bg-background px-2 py-1.5 text-sm flex-1"
+          />
+          <Button size="sm" disabled={busy} onClick={() => void createSchedule()}>
+            Add
+          </Button>
+        </div>
+        {schedules.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground italic">No schedules configured.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {schedules.map((s) => (
+              <li
+                key={s.id}
+                className="flex items-center justify-between gap-2 rounded border border-border bg-background px-3 py-2 text-xs"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="font-mono">
+                    {s.kind} · {s.cronExpr}
+                  </div>
+                  {s.note && <div className="text-muted-foreground truncate">{s.note}</div>}
+                  <div className="text-[10px] text-muted-foreground">
+                    next: {s.nextRunAt ? new Date(s.nextRunAt).toLocaleString() : "—"}
+                    {s.lastRunAt &&
+                      ` · last: ${new Date(s.lastRunAt).toLocaleString()} (${s.lastRunStatus ?? "—"})`}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void toggleSchedule(s.id, !s.enabled)}
+                  className="text-[10px] px-2 py-0.5 rounded-full border border-border hover:bg-muted"
+                >
+                  {s.enabled ? "enabled" : "paused"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteSchedule(s.id)}
+                  className="text-muted-foreground hover:text-red-600"
+                  aria-label="Delete schedule"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CustomSubdomainPicker({
   projectId,
   currentSlug,
@@ -3607,6 +3969,9 @@ export function PublishingTab({
                     </div>
                   </div>
                 </div>
+
+                {/* Deployment Substrate (Task #543) */}
+                <DeploymentSubstratePanel projectId={projectId} />
 
                 {/* Domain Management */}
                 <div className="border border-border rounded-xl p-5 bg-card space-y-5">

@@ -633,6 +633,7 @@ export async function createProductionContainer(
   projectId: number,
   envVars: Record<string, string>,
   runtime?: string | null,
+  opts?: { region?: string | null; deploymentType?: string | null },
 ): Promise<ProdContainerInfo | null> {
   if (!isConfigured()) {
     logger.warn({ projectId }, "FLY_API_TOKEN not set — prod container creation skipped");
@@ -640,10 +641,15 @@ export async function createProductionContainer(
   }
 
   const machineName = `prod-${projectId}-${Date.now()}`;
+  // Task #543: respect per-project region + deployment type.
+  // reserved_vm → always-on (min_machines_running:1)
+  // autoscale   → scale-to-zero on demand (min_machines_running:0)
+  const region = opts?.region && opts.region.trim() ? opts.region.trim() : FLY_REGION;
+  const minMachines = opts?.deploymentType === "autoscale" ? 0 : 1;
 
   const body = {
     name: machineName,
-    region: FLY_REGION,
+    region,
     config: {
       image: stackConfig(runtime).image,
       env: {
@@ -674,7 +680,7 @@ export async function createProductionContainer(
           internal_port: 3000,
           autostop: "stop",
           autostart: true,
-          min_machines_running: 1,
+          min_machines_running: minMachines,
           checks: [],
         },
       ],
@@ -762,14 +768,22 @@ export async function deployProductionContainer(
 
   await writeLog(projectId, "system", "Starting blue/green production deploy…");
 
-  // Load project stack so the container uses the correct Docker image
+  // Load project stack + deployment substrate config (Task #543) so the
+  // container uses the right image AND the right region + scaling profile.
   const [proj] = await db
-    .select({ stack: projectsTable.stack })
+    .select({
+      stack: projectsTable.stack,
+      region: projectsTable.region,
+      deploymentType: projectsTable.deploymentType,
+    })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
 
   // Create new green container
-  const greenInfo = await createProductionContainer(projectId, envVars, proj?.stack);
+  const greenInfo = await createProductionContainer(projectId, envVars, proj?.stack, {
+    region: proj?.region ?? null,
+    deploymentType: proj?.deploymentType ?? null,
+  });
   if (!greenInfo) {
     await writeLog(projectId, "system", "Failed to create new prod container — aborting deploy");
     return null;

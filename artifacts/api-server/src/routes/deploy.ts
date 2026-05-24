@@ -134,7 +134,17 @@ router.post("/projects/:id/deploy", requireProjectOwnership, async (req, res): P
   let prodContainerId = project.prodContainerId ?? null;
   let containerDeployed = false;
 
-  if (project.projectFormat === "react-vite" && process.env.FLY_API_TOKEN) {
+  // Task #543: respect per-project deploymentType. "static" never deploys a
+  // container even if projectFormat would otherwise qualify. autoscale +
+  // reserved_vm both go through the blue/green path; container.ts reads the
+  // type to set min_machines_running appropriately.
+  const deploymentType = project.deploymentType ?? "static";
+  const containerEligible =
+    deploymentType !== "static" &&
+    project.projectFormat === "react-vite" &&
+    !!process.env.FLY_API_TOKEN;
+
+  if (containerEligible) {
     try {
       // Load secrets for env injection
       const secretRows = await db

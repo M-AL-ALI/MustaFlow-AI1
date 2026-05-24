@@ -30,3 +30,4 @@ export * from "./project-embeddings";
 export * from "./domains";
 export * from "./canvas-variants";
 export * from "./blueprints";
+export * from "./deployment-schedules";

@@ -35,6 +35,7 @@
     "migrate-cf-hostname-columns": "tsx ./src/migrate-cf-hostname-columns.ts",
     "migrate-canvas-variants": "tsx ./src/migrate-canvas-variants.ts",
     "migrate-blueprints": "tsx ./src/migrate-blueprints.ts",
+    "migrate-deployment-substrate": "tsx ./src/migrate-deployment-substrate.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

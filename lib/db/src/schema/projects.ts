@@ -126,6 +126,20 @@ export const projectsTable = pgTable("projects", {
   // redirectWwwApex: when true, requests to www.<apex> are 301-redirected to apex (or vice versa).
   // Only meaningful when both the apex and www subdomain are attached as project_domains rows.
   redirectWwwApex: boolean("redirect_www_apex").notNull().default(false),
+  // Deployment substrate (Task #543).
+  // deploymentType: static = snapshot+CDN only (default), autoscale = on-demand container w/ scale-to-zero,
+  // reserved_vm = always-on container (min_machines_running:1).
+  deploymentType: text("deployment_type").notNull().default("static"),
+  // region: Fly region code (e.g. iad, lhr, syd, fra, nrt). Null = use FLY_REGION env default.
+  region: text("region"),
+  // cdnEnabled: when true and CDN_PROVIDER is configured, publish pushes the snapshot to the edge CDN.
+  cdnEnabled: boolean("cdn_enabled").notNull().default(false),
+  // cdnLastPushedAt: timestamp of last successful CDN push (null if never pushed).
+  cdnLastPushedAt: timestamp("cdn_last_pushed_at", { withTimezone: true }),
+  // healthCheckPath: relative URL the synthetic uptime probe hits (default "/").
+  healthCheckPath: text("health_check_path").notNull().default("/"),
+  // uptimeAlertEmail: address that receives consecutive-failure alerts. Null = no email alerts.
+  uptimeAlertEmail: text("uptime_alert_email"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
