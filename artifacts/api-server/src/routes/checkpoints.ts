@@ -171,7 +171,85 @@ router.post(
       return;
     }
 
-    // ── 2) Restore files + truncate chat (transactional) ─────────────────
+    // ── 2) Restore linked DB snapshot FIRST (external/non-transactional) ──
+    // We do DB restore before touching files/chat. If it fails, we abort
+    // before mutating the project so the user is never left with code+chat
+    // rewound but DB not. The forward safety checkpoint is preserved either
+    // way so the user can manually recover if needed.
+    let dbSnapshotRestored = false;
+    let dbSnapshotError: string | null = null;
+    let dbSnapshotAttempted = false;
+    try {
+      const [linkedSnapshot] = await db
+        .select()
+        .from(dbSnapshotsTable)
+        .where(
+          and(
+            eq(dbSnapshotsTable.projectId, projectId),
+            eq(dbSnapshotsTable.versionId, checkpointId),
+          ),
+        )
+        .orderBy(desc(dbSnapshotsTable.createdAt))
+        .limit(1);
+
+      if (linkedSnapshot) {
+        dbSnapshotAttempted = true;
+        const dumpContent =
+          (await downloadSnapshotBlob(linkedSnapshot.objectKey)) ?? linkedSnapshot.dumpContent;
+        if (!dumpContent) {
+          dbSnapshotError = "Database snapshot content is missing from storage.";
+        } else if (linkedSnapshot.provider === "postgres") {
+          const [secretRow] = await db
+            .select()
+            .from(secretsTable)
+            .where(
+              and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")),
+            );
+          if (!secretRow) {
+            dbSnapshotError = "DATABASE_URL secret not found — DB restore skipped.";
+          } else {
+            const connectionString = encryptionService.decrypt(secretRow.valueEncrypted);
+            if (!connectionString || connectionString.includes("localhost:5432")) {
+              dbSnapshotError = "DATABASE_URL is a placeholder — DB restore skipped.";
+            } else {
+              await restorePostgresDump(connectionString, dumpContent);
+              dbSnapshotRestored = true;
+            }
+          }
+        } else if (linkedSnapshot.provider === "sqlite") {
+          const [proj] = await db
+            .select({
+              containerId: projectsTable.containerId,
+              containerStatus: projectsTable.containerStatus,
+            })
+            .from(projectsTable)
+            .where(eq(projectsTable.id, projectId));
+          if (!proj?.containerId || proj.containerStatus !== "running") {
+            dbSnapshotError = "SQLite restore requires an active container — DB restore skipped.";
+          } else {
+            await restoreSQLiteSnapshot(proj.containerId, dumpContent, projectId);
+            dbSnapshotRestored = true;
+          }
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      dbSnapshotError = `Database restore failed: ${message}`;
+      logger.error({ err, projectId, checkpointId }, "Checkpoint DB restore failed");
+    }
+
+    // Abort if a DB snapshot was attached but the restore failed — keeps
+    // code+chat+db in a consistent state. Forward checkpoint is preserved.
+    if (dbSnapshotAttempted && !dbSnapshotRestored) {
+      res.status(500).json({
+        error: dbSnapshotError ?? "Database restore failed",
+        forwardCheckpointId,
+        aborted: true,
+      });
+      return;
+    }
+
+    // ── 3) Restore files + truncate chat (transactional) ─────────────────
     let truncatedMessages = 0;
     try {
       await db.transaction(async (tx) => {
@@ -239,67 +317,6 @@ router.post(
       await invalidateProjectEmbeddings(projectId);
     } catch (err) {
       req.log.warn({ err, projectId }, "checkpoint restore: invalidate embeddings failed");
-    }
-
-    // ── 3) Restore linked DB snapshot ─────────────────────────────────────
-    let dbSnapshotRestored = false;
-    let dbSnapshotError: string | null = null;
-    try {
-      const [linkedSnapshot] = await db
-        .select()
-        .from(dbSnapshotsTable)
-        .where(
-          and(
-            eq(dbSnapshotsTable.projectId, projectId),
-            eq(dbSnapshotsTable.versionId, checkpointId),
-          ),
-        )
-        .orderBy(desc(dbSnapshotsTable.createdAt))
-        .limit(1);
-
-      if (linkedSnapshot) {
-        const dumpContent =
-          (await downloadSnapshotBlob(linkedSnapshot.objectKey)) ?? linkedSnapshot.dumpContent;
-        if (!dumpContent) {
-          dbSnapshotError = "Database snapshot content is missing from storage.";
-        } else if (linkedSnapshot.provider === "postgres") {
-          const [secretRow] = await db
-            .select()
-            .from(secretsTable)
-            .where(
-              and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")),
-            );
-          if (!secretRow) {
-            dbSnapshotError = "DATABASE_URL secret not found — DB restore skipped.";
-          } else {
-            const connectionString = encryptionService.decrypt(secretRow.valueEncrypted);
-            if (!connectionString || connectionString.includes("localhost:5432")) {
-              dbSnapshotError = "DATABASE_URL is a placeholder — DB restore skipped.";
-            } else {
-              await restorePostgresDump(connectionString, dumpContent);
-              dbSnapshotRestored = true;
-            }
-          }
-        } else if (linkedSnapshot.provider === "sqlite") {
-          const [proj] = await db
-            .select({
-              containerId: projectsTable.containerId,
-              containerStatus: projectsTable.containerStatus,
-            })
-            .from(projectsTable)
-            .where(eq(projectsTable.id, projectId));
-          if (!proj?.containerId || proj.containerStatus !== "running") {
-            dbSnapshotError = "SQLite restore requires an active container — DB restore skipped.";
-          } else {
-            await restoreSQLiteSnapshot(proj.containerId, dumpContent, projectId);
-            dbSnapshotRestored = true;
-          }
-        }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      dbSnapshotError = `Database restore failed: ${message}`;
-      logger.error({ err, projectId, checkpointId }, "Checkpoint DB restore failed");
     }
 
     // ── 4) System message marker (lands AFTER truncation, so it stays) ────

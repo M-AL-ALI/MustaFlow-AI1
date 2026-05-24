@@ -34,6 +34,8 @@ import {
 import { IntegrationsRegistry } from "./integrations-registry";
 import { GithubTab } from "./github-tab";
 import { VersionTimeline } from "./version-timeline";
+import { CheckpointsTab } from "./checkpoints-tab";
+import { WorkflowsPanel } from "./workflows-panel";
 import { QualityPanel } from "./quality-panel";
 import {
   useListSecrets,
@@ -1250,22 +1252,28 @@ export function ToolsTab({
               </div>
             </TabsContent>
 
-            <TabsContent value="versions" className="h-full m-0 pt-2">
-              <VersionTimeline
-                projectId={projectId}
-                versions={versions}
-                isLoading={versionsLoading}
-                currentFiles={files ?? []}
-              />
+            <TabsContent value="versions" className="h-full m-0 pt-2 overflow-y-auto">
+              <CheckpointsTab projectId={projectId} />
+              <details className="mt-4 mx-3 border-t border-border/40 pt-3">
+                <summary className="text-[11px] text-muted-foreground cursor-pointer select-none">
+                  Show legacy version timeline
+                </summary>
+                <div className="mt-2">
+                  <VersionTimeline
+                    projectId={projectId}
+                    versions={versions}
+                    isLoading={versionsLoading}
+                    currentFiles={files ?? []}
+                  />
+                </div>
+              </details>
             </TabsContent>
 
-            <TabsContent
-              value="shell"
-              className="h-full m-0 border border-border rounded-md bg-black p-4 text-green-400 font-mono text-sm"
-            >
-              <div className="text-gray-400">
-                Shell access is not exposed in this prototype. The AI Builder runs generation
-                server-side; check Versions for change history and Logs for activity.
+            <TabsContent value="shell" className="h-full m-0 p-4 overflow-y-auto">
+              <WorkflowsPanel projectId={projectId} />
+              <div className="mt-6 text-[11px] text-gray-400">
+                Full interactive shell access is available in the Terminal tab. Workflows above run
+                inside the project's container.
               </div>
             </TabsContent>
 

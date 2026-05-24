@@ -569,6 +569,23 @@ export const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "run_workflow",
+      description:
+        "Run a named workflow declared in the project's workflows.yaml (or one of the per-stack defaults). Lets you start dev servers, run tests, build, etc. without re-typing the command. Returns combined stdout+stderr.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Workflow name as declared in workflows.yaml." },
+          timeout_ms: { type: "integer" },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "report_progress",
       description:
         "Emit a short narrative step shown in the chat (one short sentence). Use sparingly between major actions.",
@@ -1456,6 +1473,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     // across an await, which is not atomic under Promise.all.
     const SERIAL_TOOLS = new Set([
       "run_command",
+      "run_workflow",
       "pkg_install",
       "read_diagnostics",
       "fetch_prod_logs",
@@ -2867,6 +2885,79 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         ok: r.ok,
         observation: `exit=${exitCode}\n${r.output.slice(0, MAX_OBSERVATION_CHARS)}`,
       };
+    }
+    case "run_workflow": {
+      const name = typeof args.name === "string" ? args.name : "";
+      if (!name) return { ok: false, observation: "ERROR: workflow name is required" };
+      if (stack === "static-html" || stack === "mobile-cross") {
+        return {
+          ok: false,
+          observation:
+            "ERROR: workflows require a container shell, which this stack does not provide.",
+        };
+      }
+      if (!containerState.id) {
+        const prov = await ensureContainerProvisioned(ctx);
+        if (!prov.ok) {
+          return {
+            ok: false,
+            observation: `ERROR: cannot provision container: ${prov.reason ?? "unknown"}`,
+          };
+        }
+      }
+      await ensureInstalled(ctx, input.signal, step);
+      try {
+        const { findWorkflow } = await import("./workflows");
+        const wf = await findWorkflow(input.projectId, name);
+        if (!wf) {
+          return {
+            ok: false,
+            observation: `ERROR: workflow "${name}" not found in workflows.yaml or stack defaults`,
+          };
+        }
+        const cwd = wf.cwd ?? ".";
+        const envPrefix = wf.env
+          ? Object.entries(wf.env)
+              .map(([k, v]) => `${k}='${String(v).replace(/'/g, "'\\''")}'`)
+              .join(" ") + " "
+          : "";
+        const inner = `cd '${cwd.replace(/'/g, "'\\''")}' && ${envPrefix}${wf.command}`;
+        const argv = ["sh", "-lc", inner];
+        const timeoutMs =
+          typeof args.timeout_ms === "number" && args.timeout_ms > 0
+            ? Math.min(args.timeout_ms, PER_CALL_TIMEOUT_CAP_MS)
+            : PER_CALL_TIMEOUT_DEFAULT_MS;
+        const t = Date.now();
+        const r = await execWithTimeout(
+          containerState.id!,
+          argv,
+          input.projectId,
+          timeoutMs,
+          input.signal,
+        );
+        const dur = Date.now() - t;
+        const exitCode = r.timedOut ? 124 : r.ok ? 0 : 1;
+        commandsRun.push({
+          step,
+          argv,
+          exitCode,
+          durationMs: dur,
+          stdoutPreview: r.ok ? r.output.slice(0, 400) : "",
+          stderrPreview: r.ok ? "" : r.output.slice(0, 400),
+        });
+        if (r.aborted) return { ok: false, observation: "ERROR: aborted by user" };
+        if (r.timedOut)
+          return { ok: false, observation: `ERROR: workflow exceeded ${timeoutMs}ms timeout` };
+        return {
+          ok: r.ok,
+          observation: `workflow[${wf.name}] exit=${exitCode}\n${r.output.slice(0, MAX_OBSERVATION_CHARS)}`,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          observation: `ERROR: workflow run failed: ${(err as Error).message ?? String(err)}`,
+        };
+      }
     }
     case "pkg_install": {
       const strictness = ctx.input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS;

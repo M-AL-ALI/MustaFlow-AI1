@@ -11,6 +11,19 @@ async function main() {
     ON chat_messages (checkpoint_id)
     WHERE checkpoint_id IS NOT NULL
   `);
+  console.log("Adding FK chat_messages.checkpoint_id → project_versions.id (set null on delete)…");
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chat_messages_checkpoint_id_fkey'
+      ) THEN
+        ALTER TABLE chat_messages
+          ADD CONSTRAINT chat_messages_checkpoint_id_fkey
+          FOREIGN KEY (checkpoint_id) REFERENCES project_versions(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
+  `);
   console.log("Done.");
   await pool.end();
 }

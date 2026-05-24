@@ -9,6 +9,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
+import { projectVersionsTable } from "./versions";
 
 export const chatMessagesTable = pgTable(
   "chat_messages",
@@ -27,7 +28,9 @@ export const chatMessagesTable = pgTable(
     // Set on assistant/system messages that announce a successful build/refine,
     // so the chat UI can offer "Rewind to here" → restore files + db + truncate
     // chat back to this point.
-    checkpointId: integer("checkpoint_id"),
+    checkpointId: integer("checkpoint_id").references(() => projectVersionsTable.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
