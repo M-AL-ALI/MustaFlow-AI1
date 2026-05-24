@@ -2713,12 +2713,22 @@ async function executeCreativeTool(
 
   // Decide where to write. generate_image writes to args.path. generate_audio
   // writes to args.path. remove_image_background writes to args.out_path (or
-  // overwrites args.path when omitted). generate_video would write to
+  // a sibling `.no-bg.png` next to args.path when omitted — overwriting the
+  // source would mismatch the extension for .jpg/.webp inputs). generate_video
   // args.path — but it always fails today.
   let writePath = outPath;
-  if (tool === "remove_image_background" && typeof args.out_path === "string") {
-    const sanitized = sanitizePath(args.out_path);
-    if (sanitized) writePath = sanitized;
+  if (tool === "remove_image_background") {
+    if (typeof args.out_path === "string") {
+      const sanitized = sanitizePath(args.out_path);
+      if (sanitized) writePath = sanitized;
+    } else {
+      // Default to a sibling `<stem>.no-bg.png` so a .jpg/.webp source isn't
+      // overwritten with PNG bytes under the wrong extension.
+      const dot = outPath.lastIndexOf(".");
+      const slash = outPath.lastIndexOf("/");
+      const stem = dot > slash ? outPath.slice(0, dot) : outPath;
+      writePath = `${stem}.no-bg.png`;
+    }
   }
 
   workspace.write(writePath, result.base64, result.mimeType);

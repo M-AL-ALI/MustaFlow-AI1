@@ -260,6 +260,88 @@ function IconStrip({
   );
 }
 
+/**
+ * Task #530 — parse the JSON preview payload emitted by the agentic builder
+ * for creative tools (generate_image / generate_video / generate_audio /
+ * remove_image_background). The backend emits two events per call: a short
+ * "tool → path" line first, then a JSON payload with preview metadata
+ * (path, mimeType, sizeKB, previewDataUri). Only the second one parses.
+ */
+type CreativePreview = {
+  tool: string;
+  path: string;
+  mimeType: string;
+  sizeKB: string;
+  previewDataUri: string | null;
+};
+const CREATIVE_EVENTS = new Set([
+  "generate_image",
+  "generate_video",
+  "generate_audio",
+  "remove_image_background",
+]);
+function parseCreativeEvent(eventType: string, message: string): CreativePreview | null {
+  if (!CREATIVE_EVENTS.has(eventType)) return null;
+  if (!message || !message.startsWith("{")) return null;
+  try {
+    const obj = JSON.parse(message) as Partial<CreativePreview>;
+    if (typeof obj.path !== "string" || typeof obj.mimeType !== "string") return null;
+    return {
+      tool: String(obj.tool ?? eventType),
+      path: obj.path,
+      mimeType: obj.mimeType,
+      sizeKB: String(obj.sizeKB ?? ""),
+      previewDataUri: typeof obj.previewDataUri === "string" ? obj.previewDataUri : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function CreativePreviewCard({ data }: { data: CreativePreview }) {
+  const isImage = data.mimeType.startsWith("image/");
+  const isAudio = data.mimeType.startsWith("audio/");
+  const isVideo = data.mimeType.startsWith("video/");
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-border/40 bg-muted/30 p-1.5 my-0.5 max-w-full">
+      {isImage && data.previewDataUri ? (
+        <img
+          src={data.previewDataUri}
+          alt={data.path}
+          className="h-10 w-10 shrink-0 rounded object-cover border border-border/40"
+        />
+      ) : (
+        <div className="h-10 w-10 shrink-0 rounded bg-background/60 border border-border/40 flex items-center justify-center">
+          <Sparkles className="h-4 w-4 text-violet-400" />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <span className="text-[11px] text-foreground/90 leading-tight block truncate font-medium">
+          {data.tool.replace(/_/g, " ")}
+        </span>
+        <span className="text-[10px] font-mono text-muted-foreground/70 truncate block">
+          {data.path}
+        </span>
+        <span className="text-[10px] text-muted-foreground/50 block">
+          {data.mimeType}
+          {data.sizeKB ? ` • ${data.sizeKB} KB` : ""}
+        </span>
+        {isAudio && data.previewDataUri && (
+          <audio src={data.previewDataUri} controls className="w-full h-6 mt-1" />
+        )}
+        {isVideo && data.previewDataUri && (
+          <video
+            src={data.previewDataUri}
+            controls
+            className="w-full max-h-32 mt-1 rounded"
+            muted
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FinishedGroupRow({ group }: { group: StepGroup }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -298,17 +380,24 @@ function FinishedGroupRow({ group }: { group: StepGroup }) {
           {group.steps.map((step) => {
             const Icon = getStepIcon(step.eventType);
             const color = getStepColor(step.eventType);
+            const creative = parseCreativeEvent(step.eventType, step.message);
             return (
               <div key={step.id} className="flex items-start gap-1.5 py-0.5">
                 <Icon className={cn("h-3 w-3 shrink-0 mt-px", color, "opacity-60")} />
-                <div className="min-w-0">
-                  <span className="text-[11px] text-muted-foreground leading-tight block truncate">
-                    {step.message}
-                  </span>
-                  {step.filePath && (
-                    <span className="text-[10px] font-mono text-muted-foreground/50 truncate block">
-                      {step.filePath}
-                    </span>
+                <div className="min-w-0 flex-1">
+                  {creative ? (
+                    <CreativePreviewCard data={creative} />
+                  ) : (
+                    <>
+                      <span className="text-[11px] text-muted-foreground leading-tight block truncate">
+                        {step.message}
+                      </span>
+                      {step.filePath && (
+                        <span className="text-[10px] font-mono text-muted-foreground/50 truncate block">
+                          {step.filePath}
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
