@@ -20,6 +20,13 @@ import { useToast } from "@/hooks/use-toast";
 
 type DomainStatus = "pending_verification" | "verified" | "failed";
 
+interface AttachedProject {
+  projectId: number;
+  projectName: string;
+  hostname: string;
+  projectDomainId: number;
+}
+
 interface WorkspaceDomain {
   id: number;
   workspaceId: number;
@@ -30,6 +37,7 @@ interface WorkspaceDomain {
   verifiedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  attachedProjects?: AttachedProject[];
 }
 
 interface DomainQuota {
@@ -232,9 +240,15 @@ export default function WorkspaceDomainsPage() {
 
   async function releaseDomain(domain: WorkspaceDomain) {
     if (!workspaceId) return;
+    const attached = domain.attachedProjects ?? [];
+    const projectsLine =
+      attached.length === 0
+        ? "No projects are currently using this domain."
+        : `The following ${attached.length === 1 ? "project" : `${attached.length} projects`} will be detached:\n\n` +
+          attached.map((p) => `  • ${p.projectName} (${p.hostname})`).join("\n");
     if (
       !window.confirm(
-        `Release ${domain.hostname}? Projects using it will be detached and the hostname will be released to other workspaces.`,
+        `Release ${domain.hostname}?\n\n${projectsLine}\n\nThe hostname will be released and can be claimed by other workspaces.`,
       )
     )
       return;
@@ -497,6 +511,34 @@ function DomainCard({
           <Trash2 size={14} />
         </button>
       </div>
+
+      {/* Attached project summary — always visible (collapsed view) */}
+      {domain.attachedProjects && domain.attachedProjects.length > 0 && (
+        <div className="border-t border-neutral-800 px-5 py-3 bg-neutral-950/30">
+          <div className="flex items-center gap-2 text-xs text-neutral-400 mb-2">
+            <Link2 size={12} />
+            <span>
+              Used by {domain.attachedProjects.length}{" "}
+              {domain.attachedProjects.length === 1 ? "project" : "projects"}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {domain.attachedProjects.map((p) => (
+              <Link
+                key={p.projectDomainId}
+                href={`/projects/${p.projectId}`}
+                className="inline-flex items-center gap-2 px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-lg text-xs text-neutral-200 transition-colors max-w-full"
+                title={`${p.projectName} → ${p.hostname}`}
+              >
+                <span className="truncate max-w-[160px]">{p.projectName}</span>
+                <span className="text-neutral-500 font-mono truncate max-w-[200px]">
+                  {p.hostname}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {expanded && (
         <div className="border-t border-neutral-800 px-5 py-4 space-y-5 bg-neutral-950/40">

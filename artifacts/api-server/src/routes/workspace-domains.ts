@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
-import { eq, and, asc, desc, gte, lte, isNull } from "drizzle-orm";
+import { eq, and, asc, desc, gte, lte, isNull, inArray } from "drizzle-orm";
 import { promises as dns } from "dns";
 import { randomBytes } from "crypto";
 import {
@@ -272,13 +272,57 @@ router.get("/workspaces/:id/domains", requireWorkspaceMember, async (req, res): 
     .where(eq(workspaceDomainsTable.workspaceId, workspaceId))
     .orderBy(asc(workspaceDomainsTable.createdAt));
 
+  // Attached projects: every project_domains row that references one of these
+  // workspace domains. Join projects to get the human-readable name. Soft-deleted
+  // projects are excluded so released-domain warnings only mention live projects.
+  const domainIds = domains.map((d) => d.id);
+  const attachedRows = domainIds.length
+    ? await db
+        .select({
+          workspaceDomainId: projectDomainsTable.workspaceDomainId,
+          projectDomainId: projectDomainsTable.id,
+          hostname: projectDomainsTable.hostname,
+          projectId: projectsTable.id,
+          projectName: projectsTable.name,
+        })
+        .from(projectDomainsTable)
+        .innerJoin(projectsTable, eq(projectDomainsTable.projectId, projectsTable.id))
+        .where(
+          and(
+            isNull(projectsTable.deletedAt),
+            inArray(projectDomainsTable.workspaceDomainId, domainIds),
+          ),
+        )
+    : [];
+
+  const attachedByDomain = new Map<
+    number,
+    { projectId: number; projectName: string; hostname: string; projectDomainId: number }[]
+  >();
+  for (const row of attachedRows) {
+    if (row.workspaceDomainId == null) continue;
+    const list = attachedByDomain.get(row.workspaceDomainId) ?? [];
+    list.push({
+      projectId: row.projectId,
+      projectName: row.projectName,
+      hostname: row.hostname,
+      projectDomainId: row.projectDomainId,
+    });
+    attachedByDomain.set(row.workspaceDomainId, list);
+  }
+
+  const domainsWithProjects = domains.map((d) => ({
+    ...d,
+    attachedProjects: attachedByDomain.get(d.id) ?? [],
+  }));
+
   // Count to show quota info
   const plan = await (await import("../lib/plans")).resolveWorkspacePlan(workspaceId);
   const { PLAN_QUOTAS } = await import("../lib/plans");
   const quota = PLAN_QUOTAS[plan];
 
   res.json({
-    domains,
+    domains: domainsWithProjects,
     quota: {
       plan,
       maxCustomDomains: quota.maxCustomDomains,
