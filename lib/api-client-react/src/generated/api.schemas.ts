@@ -3020,6 +3020,194 @@ export interface DnsHistoryEntry {
   createdAt: string;
 }
 
+export type PurchasedDomainStatus = typeof PurchasedDomainStatus[keyof typeof PurchasedDomainStatus];
+
+
+export const PurchasedDomainStatus = {
+  active: 'active',
+  pending: 'pending',
+  transfer_pending: 'transfer_pending',
+  expired: 'expired',
+  cancelled: 'cancelled',
+  released: 'released',
+} as const;
+
+export interface PurchasedDomain {
+  id: number;
+  userId: string;
+  hostname: string;
+  registrar: string;
+  /** @nullable */
+  registeredAt?: string | null;
+  /** @nullable */
+  expiresAt?: string | null;
+  autoRenew: boolean;
+  whoisPrivacy: boolean;
+  status: PurchasedDomainStatus;
+  /** @nullable */
+  namecheapOrderId?: string | null;
+  /** @nullable */
+  stripePaymentIntentId?: string | null;
+  /** @nullable */
+  projectId?: number | null;
+  /** @nullable */
+  renewalStripePaymentIntentId?: string | null;
+  /** @nullable */
+  lastRenewalAt?: string | null;
+  /** @nullable */
+  renewalFailedAt?: string | null;
+  /** @nullable */
+  renewalFailureReason?: string | null;
+  /** @nullable */
+  transferAuthCode?: string | null;
+  /** @nullable */
+  whoisFirstName?: string | null;
+  /** @nullable */
+  whoisLastName?: string | null;
+  /** @nullable */
+  whoisEmail?: string | null;
+  /** @nullable */
+  whoisPhone?: string | null;
+  /** @nullable */
+  whoisAddress?: string | null;
+  /** @nullable */
+  whoisCity?: string | null;
+  /** @nullable */
+  whoisStateProvince?: string | null;
+  /** @nullable */
+  whoisPostalCode?: string | null;
+  /** @nullable */
+  whoisCountry?: string | null;
+  /** @nullable */
+  stripeCustomerId?: string | null;
+  /** @nullable */
+  pricePaidUsd?: string | null;
+  /** @nullable */
+  renewalPriceUsd?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PurchasedDomainResponse {
+  domain: PurchasedDomain;
+  alreadyRegistered?: boolean;
+  note?: string;
+}
+
+export interface PurchasedDomainsResponse {
+  domains: PurchasedDomain[];
+}
+
+export interface DomainSearchResult {
+  domain: string;
+  tld: string;
+  /** @nullable */
+  available?: boolean | null;
+  isPremium: boolean;
+  /** @nullable */
+  price?: number | null;
+  /** @nullable */
+  renewalPrice?: number | null;
+}
+
+export interface DomainSearchResponse {
+  results: DomainSearchResult[];
+  namecheapEnabled: boolean;
+}
+
+export interface WhoisContactInput {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  stateProvince?: string;
+  postalCode?: string;
+  country?: string;
+}
+
+export interface WhoisContactUpdate {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  stateProvince?: string;
+  postalCode?: string;
+  country?: string;
+}
+
+export interface PurchaseDomainInput {
+  hostname: string;
+  projectId?: number;
+  /** @minimum 1 */
+  years?: number;
+  contact?: WhoisContactInput;
+  successUrl?: string;
+  cancelUrl?: string;
+}
+
+export interface PurchaseDomainResponse {
+  sessionId?: string;
+  checkoutUrl?: string;
+  clientSecret?: string;
+  paymentIntentId?: string;
+  hostname?: string;
+  priceUsd?: number;
+  years?: number;
+  setupRequired?: boolean;
+  message?: string;
+}
+
+export interface ConfirmPurchaseInput {
+  hostname: string;
+  paymentIntentId?: string;
+  sessionId?: string;
+  projectId?: number;
+  years?: number;
+  contact?: WhoisContactInput;
+}
+
+export interface TransferDomainInput {
+  hostname: string;
+  authCode: string;
+  projectId?: number;
+  contact?: WhoisContactInput;
+  successUrl?: string;
+  cancelUrl?: string;
+}
+
+export interface TransferDomainResponse {
+  sessionId?: string;
+  checkoutUrl?: string;
+  clientSecret?: string;
+  paymentIntentId?: string;
+  hostname?: string;
+  priceUsd?: number;
+  note?: string;
+  setupRequired?: boolean;
+  message?: string;
+}
+
+export interface ConfirmTransferInput {
+  hostname: string;
+  authCode?: string;
+  paymentIntentId?: string;
+  sessionId?: string;
+  projectId?: number;
+  contact?: WhoisContactInput;
+}
+
+export interface RenewDomainResponse {
+  sessionId?: string;
+  checkoutUrl?: string;
+  clientSecret?: string;
+  paymentIntentId?: string;
+  priceUsd?: number;
+}
+
 export type RequestProjectUploadUrlBody = {
   name: string;
   contentType?: string;
@@ -3522,5 +3710,52 @@ limit?: number;
  * @minimum 0
  */
 offset?: number;
+};
+
+export type SearchPurchaseableDomainsParams = {
+/**
+ * @minLength 2
+ */
+q: string;
+};
+
+export type SetPurchasedDomainAutoRenewBody = {
+  autoRenew: boolean;
+};
+
+export type RenewPurchasedDomainBody = {
+  successUrl?: string;
+  cancelUrl?: string;
+};
+
+export type ConfirmPurchasedDomainRenewalBody = {
+  paymentIntentId?: string;
+  sessionId?: string;
+};
+
+export type GetPurchasedDomainAuthCode200 = {
+  hostname: string;
+  /** @nullable */
+  authCode: string | null;
+};
+
+export type ReleasePurchasedDomain200 = {
+  domain: PurchasedDomain;
+  note?: string;
+};
+
+export type AttachPurchasedDomainToProjectBody = {
+  /**
+     * Project to attach to, or null to detach.
+     * @nullable
+     */
+  projectId?: number | null;
+};
+
+export type RefreshPurchasedDomainInfo200NamecheapInfo = { [key: string]: unknown } | null;
+
+export type RefreshPurchasedDomainInfo200 = {
+  domain: PurchasedDomain;
+  namecheapInfo?: RefreshPurchasedDomainInfo200NamecheapInfo;
 };
 

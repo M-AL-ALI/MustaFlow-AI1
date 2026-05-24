@@ -3894,6 +3894,343 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  # ── Purchased domains (Namecheap reseller) ───────────────────────────────────
+
+  /domains/search:
+    get:
+      operationId: searchPurchaseableDomains
+      tags: [domains]
+      summary: Check availability and price for a domain name across top TLDs
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2 }
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainSearchResponse"
+        "400":
+          description: Invalid query
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /domains/purchased:
+    get:
+      operationId: listPurchasedDomains
+      tags: [domains]
+      summary: List all purchased domains for the authenticated user
+      responses:
+        "200":
+          description: Purchased domain list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchasedDomainsResponse"
+
+  /domains/purchase:
+    post:
+      operationId: purchaseDomain
+      tags: [domains]
+      summary: Initiate a domain purchase (returns Stripe Checkout URL or PaymentIntent)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseDomainInput"
+      responses:
+        "200":
+          description: Purchase initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseDomainResponse"
+        "400":
+          description: Invalid hostname
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "409":
+          description: Domain unavailable or already registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /domains/purchase/confirm:
+    post:
+      operationId: confirmDomainPurchase
+      tags: [domains]
+      summary: Finalize a domain purchase after Stripe payment succeeds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmPurchaseInput"
+      responses:
+        "200":
+          description: Domain registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchasedDomainResponse"
+        "402":
+          description: Payment not completed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /domains/transfer-in:
+    post:
+      operationId: initiateDomainTransfer
+      tags: [domains]
+      summary: Initiate an inbound domain transfer (returns Stripe Checkout URL)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferDomainInput"
+      responses:
+        "200":
+          description: Transfer initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferDomainResponse"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "409":
+          description: Domain already in account or not transferable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /domains/transfer-in/confirm:
+    post:
+      operationId: confirmDomainTransfer
+      tags: [domains]
+      summary: Finalize an inbound domain transfer after Stripe payment succeeds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmTransferInput"
+      responses:
+        "201":
+          description: Transfer submitted to Namecheap
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchasedDomainResponse"
+
+  /domains/purchased/{id}:
+    get:
+      operationId: getPurchasedDomain
+      tags: [domains]
+      summary: Get a single purchased domain by ID
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Domain detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchasedDomainResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /domains/purchased/{id}/auto-renew:
+    patch:
+      operationId: setPurchasedDomainAutoRenew
+      tags: [domains]
+      summary: Toggle auto-renew on a purchased domain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [autoRenew]
+              properties:
+                autoRenew: { type: boolean }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchasedDomainResponse"
+
+  /domains/purchased/{id}/whois:
+    patch:
+      operationId: updatePurchasedDomainWhois
+      tags: [domains]
+      summary: Update WHOIS contact information for a purchased domain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WhoisContactUpdate"
+      responses:
+        "200":
+          description: WHOIS updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchasedDomainResponse"
+
+  /domains/purchased/{id}/renew:
+    post:
+      operationId: renewPurchasedDomain
+      tags: [domains]
+      summary: Manually renew a purchased domain (returns Stripe Checkout URL)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                successUrl: { type: string }
+                cancelUrl: { type: string }
+      responses:
+        "200":
+          description: Renewal initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenewDomainResponse"
+
+  /domains/purchased/{id}/renew/confirm:
+    post:
+      operationId: confirmPurchasedDomainRenewal
+      tags: [domains]
+      summary: Finalize a manual renewal after Stripe payment succeeds
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                paymentIntentId: { type: string }
+                sessionId: { type: string }
+      responses:
+        "200":
+          description: Renewal completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchasedDomainResponse"
+
+  /domains/purchased/{id}/auth-code:
+    get:
+      operationId: getPurchasedDomainAuthCode
+      tags: [domains]
+      summary: Retrieve the EPP auth code for transfer-out
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Auth code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [hostname, authCode]
+                properties:
+                  hostname: { type: string }
+                  authCode: { type: ["string", "null"] }
+
+  /domains/purchased/{id}/release:
+    post:
+      operationId: releasePurchasedDomain
+      tags: [domains]
+      summary: Release a purchased domain (unlock registrar lock for transfer-out)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Released
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [domain]
+                properties:
+                  domain: { $ref: "#/components/schemas/PurchasedDomain" }
+                  note: { type: string }
+
+  /domains/purchased/{id}/project:
+    patch:
+      operationId: attachPurchasedDomainToProject
+      tags: [domains]
+      summary: Attach or detach a purchased domain from a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: ["integer", "null"]
+                  description: "Project to attach to, or null to detach."
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchasedDomainResponse"
+
+  /domains/purchased/{id}/info:
+    get:
+      operationId: refreshPurchasedDomainInfo
+      tags: [domains]
+      summary: Refresh domain info from Namecheap (expiry, NS, status)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Refreshed info
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [domain]
+                properties:
+                  domain: { $ref: "#/components/schemas/PurchasedDomain" }
+                  namecheapInfo:
+                    type: object
+                    nullable: true
+                    additionalProperties: true
+
 components:
   schemas:
     HealthStatus:
@@ -6536,3 +6873,185 @@ components:
         cfRecordId: { type: string, nullable: true }
         note: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
+
+    # ── Purchased domains ────────────────────────────────────────────────────
+
+    PurchasedDomain:
+      type: object
+      required:
+        [id, userId, hostname, registrar, autoRenew, whoisPrivacy, status, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        userId: { type: string }
+        hostname: { type: string }
+        registrar: { type: string }
+        registeredAt: { type: ["string", "null"], format: date-time }
+        expiresAt: { type: ["string", "null"], format: date-time }
+        autoRenew: { type: boolean }
+        whoisPrivacy: { type: boolean }
+        status:
+          type: string
+          enum: [active, pending, transfer_pending, expired, cancelled, released]
+        namecheapOrderId: { type: ["string", "null"] }
+        stripePaymentIntentId: { type: ["string", "null"] }
+        projectId: { type: ["integer", "null"] }
+        renewalStripePaymentIntentId: { type: ["string", "null"] }
+        lastRenewalAt: { type: ["string", "null"], format: date-time }
+        renewalFailedAt: { type: ["string", "null"], format: date-time }
+        renewalFailureReason: { type: ["string", "null"] }
+        transferAuthCode: { type: ["string", "null"] }
+        whoisFirstName: { type: ["string", "null"] }
+        whoisLastName: { type: ["string", "null"] }
+        whoisEmail: { type: ["string", "null"] }
+        whoisPhone: { type: ["string", "null"] }
+        whoisAddress: { type: ["string", "null"] }
+        whoisCity: { type: ["string", "null"] }
+        whoisStateProvince: { type: ["string", "null"] }
+        whoisPostalCode: { type: ["string", "null"] }
+        whoisCountry: { type: ["string", "null"] }
+        stripeCustomerId: { type: ["string", "null"] }
+        pricePaidUsd: { type: ["string", "null"] }
+        renewalPriceUsd: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    PurchasedDomainResponse:
+      type: object
+      required: [domain]
+      properties:
+        domain: { $ref: "#/components/schemas/PurchasedDomain" }
+        alreadyRegistered: { type: boolean }
+        note: { type: string }
+
+    PurchasedDomainsResponse:
+      type: object
+      required: [domains]
+      properties:
+        domains:
+          type: array
+          items: { $ref: "#/components/schemas/PurchasedDomain" }
+
+    DomainSearchResult:
+      type: object
+      required: [domain, tld, isPremium]
+      properties:
+        domain: { type: string }
+        tld: { type: string }
+        available: { type: ["boolean", "null"] }
+        isPremium: { type: boolean }
+        price: { type: ["number", "null"] }
+        renewalPrice: { type: ["number", "null"] }
+
+    DomainSearchResponse:
+      type: object
+      required: [results, namecheapEnabled]
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/DomainSearchResult" }
+        namecheapEnabled: { type: boolean }
+
+    WhoisContactInput:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        address: { type: string }
+        city: { type: string }
+        stateProvince: { type: string }
+        postalCode: { type: string }
+        country: { type: string }
+
+    WhoisContactUpdate:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        address: { type: string }
+        city: { type: string }
+        stateProvince: { type: string }
+        postalCode: { type: string }
+        country: { type: string }
+
+    PurchaseDomainInput:
+      type: object
+      required: [hostname]
+      properties:
+        hostname: { type: string }
+        projectId: { type: integer }
+        years: { type: integer, minimum: 1, default: 1 }
+        contact: { $ref: "#/components/schemas/WhoisContactInput" }
+        successUrl: { type: string }
+        cancelUrl: { type: string }
+
+    PurchaseDomainResponse:
+      type: object
+      properties:
+        sessionId: { type: string }
+        checkoutUrl: { type: string }
+        clientSecret: { type: string }
+        paymentIntentId: { type: string }
+        hostname: { type: string }
+        priceUsd: { type: number }
+        years: { type: integer }
+        setupRequired: { type: boolean }
+        message: { type: string }
+
+    ConfirmPurchaseInput:
+      type: object
+      required: [hostname]
+      properties:
+        hostname: { type: string }
+        paymentIntentId: { type: string }
+        sessionId: { type: string }
+        projectId: { type: integer }
+        years: { type: integer }
+        contact: { $ref: "#/components/schemas/WhoisContactInput" }
+
+    TransferDomainInput:
+      type: object
+      required: [hostname, authCode]
+      properties:
+        hostname: { type: string }
+        authCode: { type: string }
+        projectId: { type: integer }
+        contact: { $ref: "#/components/schemas/WhoisContactInput" }
+        successUrl: { type: string }
+        cancelUrl: { type: string }
+
+    TransferDomainResponse:
+      type: object
+      properties:
+        sessionId: { type: string }
+        checkoutUrl: { type: string }
+        clientSecret: { type: string }
+        paymentIntentId: { type: string }
+        hostname: { type: string }
+        priceUsd: { type: number }
+        note: { type: string }
+        setupRequired: { type: boolean }
+        message: { type: string }
+
+    ConfirmTransferInput:
+      type: object
+      required: [hostname]
+      properties:
+        hostname: { type: string }
+        authCode: { type: string }
+        paymentIntentId: { type: string }
+        sessionId: { type: string }
+        projectId: { type: integer }
+        contact: { $ref: "#/components/schemas/WhoisContactInput" }
+
+    RenewDomainResponse:
+      type: object
+      properties:
+        sessionId: { type: string }
+        checkoutUrl: { type: string }
+        clientSecret: { type: string }
+        paymentIntentId: { type: string }
+        priceUsd: { type: number }

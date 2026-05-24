@@ -42,6 +42,7 @@ import type {
   AnalyzePageMapParams,
   ApiError,
   AppTestRun,
+  AttachPurchasedDomainToProjectBody,
   BillingCheckoutInput,
   BillingCheckoutResult,
   BillingCheckoutSessionStatus,
@@ -54,6 +55,9 @@ import type {
   CheckRunTrendsResponse,
   Checkpoint,
   CheckpointRestoreResponse,
+  ConfirmPurchaseInput,
+  ConfirmPurchasedDomainRenewalBody,
+  ConfirmTransferInput,
   ConnectGithub200,
   ContainerExecInput,
   ContainerExecResult,
@@ -86,6 +90,7 @@ import type {
   DisconnectGithub200,
   DnsRecordInput,
   DomainDiagnoseResponse,
+  DomainSearchResponse,
   DomainVerifyResponse,
   DryRunProjectDomainDnsChanges200,
   DryRunProjectDomainDnsChangesBody,
@@ -104,6 +109,7 @@ import type {
   GetProjectDomainDnsHistory200,
   GetProjectDomainDnsHistoryParams,
   GetPublishReadinessParams,
+  GetPurchasedDomainAuthCode200,
   GetSecretAuditLogParams,
   GithubCommitsResult,
   GithubConnectInput,
@@ -175,10 +181,18 @@ import type {
   ProjectsSummary,
   PublishContainer200,
   PublishResult,
+  PurchaseDomainInput,
+  PurchaseDomainResponse,
+  PurchasedDomainResponse,
+  PurchasedDomainsResponse,
   ReadinessResult,
+  RefreshPurchasedDomainInfo200,
   RegisterProjectUploadBody,
+  ReleasePurchasedDomain200,
   RemoveProjectDomain200,
   RemoveProjectDomainCertificate200,
+  RenewDomainResponse,
+  RenewPurchasedDomainBody,
   ReorderBlocksResponse,
   ReorderFileBlocksBody,
   RequestProjectUploadUrl200,
@@ -192,6 +206,7 @@ import type {
   SbomDocument,
   SearchMessagesParams,
   SearchProjectFilesParams,
+  SearchPurchaseableDomainsParams,
   SecretAuditEntry,
   SecretEntry,
   SecretInput,
@@ -204,6 +219,7 @@ import type {
   SetProjectDomainWwwRedirect200,
   SetProjectDomainWwwRedirectBody,
   SetProjectSubdomain400,
+  SetPurchasedDomainAutoRenewBody,
   StopContainer200,
   StripeWebhook200,
   SubdomainInput,
@@ -211,6 +227,8 @@ import type {
   SuggestionAcceptResult,
   TaskEvent,
   TaskFeedbackInput,
+  TransferDomainInput,
+  TransferDomainResponse,
   TriggerChecksInput,
   TriggerChecksResult,
   UnpublishContainer200,
@@ -227,6 +245,7 @@ import type {
   UserPreferences,
   VisualEditInput,
   VisualEditResult,
+  WhoisContactUpdate,
   WorkflowList,
   WorkflowRunResponse,
   Workspace,
@@ -13452,6 +13471,1112 @@ export function useGetAdminAuditLog<TData = Awaited<ReturnType<typeof getAdminAu
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAdminAuditLogQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSearchPurchaseableDomainsUrl = (params: SearchPurchaseableDomainsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/domains/search?${stringifiedParams}` : `/api/domains/search`
+}
+
+/**
+ * @summary Check availability and price for a domain name across top TLDs
+ */
+export const searchPurchaseableDomains = async (params: SearchPurchaseableDomainsParams, options?: RequestInit): Promise<DomainSearchResponse> => {
+
+  return customFetch<DomainSearchResponse>(getSearchPurchaseableDomainsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSearchPurchaseableDomainsQueryKey = (params?: SearchPurchaseableDomainsParams,) => {
+    return [
+    `/api/domains/search`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getSearchPurchaseableDomainsQueryOptions = <TData = Awaited<ReturnType<typeof searchPurchaseableDomains>>, TError = ErrorType<ApiError>>(params: SearchPurchaseableDomainsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchPurchaseableDomains>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSearchPurchaseableDomainsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof searchPurchaseableDomains>>> = ({ signal }) => searchPurchaseableDomains(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof searchPurchaseableDomains>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type SearchPurchaseableDomainsQueryResult = NonNullable<Awaited<ReturnType<typeof searchPurchaseableDomains>>>
+export type SearchPurchaseableDomainsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Check availability and price for a domain name across top TLDs
+ */
+
+export function useSearchPurchaseableDomains<TData = Awaited<ReturnType<typeof searchPurchaseableDomains>>, TError = ErrorType<ApiError>>(
+ params: SearchPurchaseableDomainsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchPurchaseableDomains>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getSearchPurchaseableDomainsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListPurchasedDomainsUrl = () => {
+
+
+
+
+  return `/api/domains/purchased`
+}
+
+/**
+ * @summary List all purchased domains for the authenticated user
+ */
+export const listPurchasedDomains = async ( options?: RequestInit): Promise<PurchasedDomainsResponse> => {
+
+  return customFetch<PurchasedDomainsResponse>(getListPurchasedDomainsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPurchasedDomainsQueryKey = () => {
+    return [
+    `/api/domains/purchased`
+    ] as const;
+    }
+
+
+export const getListPurchasedDomainsQueryOptions = <TData = Awaited<ReturnType<typeof listPurchasedDomains>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPurchasedDomains>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPurchasedDomainsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPurchasedDomains>>> = ({ signal }) => listPurchasedDomains({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPurchasedDomains>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPurchasedDomainsQueryResult = NonNullable<Awaited<ReturnType<typeof listPurchasedDomains>>>
+export type ListPurchasedDomainsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List all purchased domains for the authenticated user
+ */
+
+export function useListPurchasedDomains<TData = Awaited<ReturnType<typeof listPurchasedDomains>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPurchasedDomains>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPurchasedDomainsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getPurchaseDomainUrl = () => {
+
+
+
+
+  return `/api/domains/purchase`
+}
+
+/**
+ * @summary Initiate a domain purchase (returns Stripe Checkout URL or PaymentIntent)
+ */
+export const purchaseDomain = async (purchaseDomainInput: PurchaseDomainInput, options?: RequestInit): Promise<PurchaseDomainResponse> => {
+
+  return customFetch<PurchaseDomainResponse>(getPurchaseDomainUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      purchaseDomainInput,)
+  }
+);}
+
+
+
+
+export const getPurchaseDomainMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof purchaseDomain>>, TError,{data: BodyType<PurchaseDomainInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof purchaseDomain>>, TError,{data: BodyType<PurchaseDomainInput>}, TContext> => {
+
+const mutationKey = ['purchaseDomain'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof purchaseDomain>>, {data: BodyType<PurchaseDomainInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  purchaseDomain(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PurchaseDomainMutationResult = NonNullable<Awaited<ReturnType<typeof purchaseDomain>>>
+    export type PurchaseDomainMutationBody = BodyType<PurchaseDomainInput>
+    export type PurchaseDomainMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Initiate a domain purchase (returns Stripe Checkout URL or PaymentIntent)
+ */
+export const usePurchaseDomain = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof purchaseDomain>>, TError,{data: BodyType<PurchaseDomainInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof purchaseDomain>>,
+        TError,
+        {data: BodyType<PurchaseDomainInput>},
+        TContext
+      > => {
+      return useMutation(getPurchaseDomainMutationOptions(options));
+    }
+
+export const getConfirmDomainPurchaseUrl = () => {
+
+
+
+
+  return `/api/domains/purchase/confirm`
+}
+
+/**
+ * @summary Finalize a domain purchase after Stripe payment succeeds
+ */
+export const confirmDomainPurchase = async (confirmPurchaseInput: ConfirmPurchaseInput, options?: RequestInit): Promise<PurchasedDomainResponse> => {
+
+  return customFetch<PurchasedDomainResponse>(getConfirmDomainPurchaseUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      confirmPurchaseInput,)
+  }
+);}
+
+
+
+
+export const getConfirmDomainPurchaseMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmDomainPurchase>>, TError,{data: BodyType<ConfirmPurchaseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmDomainPurchase>>, TError,{data: BodyType<ConfirmPurchaseInput>}, TContext> => {
+
+const mutationKey = ['confirmDomainPurchase'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmDomainPurchase>>, {data: BodyType<ConfirmPurchaseInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  confirmDomainPurchase(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmDomainPurchaseMutationResult = NonNullable<Awaited<ReturnType<typeof confirmDomainPurchase>>>
+    export type ConfirmDomainPurchaseMutationBody = BodyType<ConfirmPurchaseInput>
+    export type ConfirmDomainPurchaseMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Finalize a domain purchase after Stripe payment succeeds
+ */
+export const useConfirmDomainPurchase = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmDomainPurchase>>, TError,{data: BodyType<ConfirmPurchaseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof confirmDomainPurchase>>,
+        TError,
+        {data: BodyType<ConfirmPurchaseInput>},
+        TContext
+      > => {
+      return useMutation(getConfirmDomainPurchaseMutationOptions(options));
+    }
+
+export const getInitiateDomainTransferUrl = () => {
+
+
+
+
+  return `/api/domains/transfer-in`
+}
+
+/**
+ * @summary Initiate an inbound domain transfer (returns Stripe Checkout URL)
+ */
+export const initiateDomainTransfer = async (transferDomainInput: TransferDomainInput, options?: RequestInit): Promise<TransferDomainResponse> => {
+
+  return customFetch<TransferDomainResponse>(getInitiateDomainTransferUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      transferDomainInput,)
+  }
+);}
+
+
+
+
+export const getInitiateDomainTransferMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof initiateDomainTransfer>>, TError,{data: BodyType<TransferDomainInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof initiateDomainTransfer>>, TError,{data: BodyType<TransferDomainInput>}, TContext> => {
+
+const mutationKey = ['initiateDomainTransfer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof initiateDomainTransfer>>, {data: BodyType<TransferDomainInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  initiateDomainTransfer(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InitiateDomainTransferMutationResult = NonNullable<Awaited<ReturnType<typeof initiateDomainTransfer>>>
+    export type InitiateDomainTransferMutationBody = BodyType<TransferDomainInput>
+    export type InitiateDomainTransferMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Initiate an inbound domain transfer (returns Stripe Checkout URL)
+ */
+export const useInitiateDomainTransfer = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof initiateDomainTransfer>>, TError,{data: BodyType<TransferDomainInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof initiateDomainTransfer>>,
+        TError,
+        {data: BodyType<TransferDomainInput>},
+        TContext
+      > => {
+      return useMutation(getInitiateDomainTransferMutationOptions(options));
+    }
+
+export const getConfirmDomainTransferUrl = () => {
+
+
+
+
+  return `/api/domains/transfer-in/confirm`
+}
+
+/**
+ * @summary Finalize an inbound domain transfer after Stripe payment succeeds
+ */
+export const confirmDomainTransfer = async (confirmTransferInput: ConfirmTransferInput, options?: RequestInit): Promise<PurchasedDomainResponse> => {
+
+  return customFetch<PurchasedDomainResponse>(getConfirmDomainTransferUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      confirmTransferInput,)
+  }
+);}
+
+
+
+
+export const getConfirmDomainTransferMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmDomainTransfer>>, TError,{data: BodyType<ConfirmTransferInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmDomainTransfer>>, TError,{data: BodyType<ConfirmTransferInput>}, TContext> => {
+
+const mutationKey = ['confirmDomainTransfer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmDomainTransfer>>, {data: BodyType<ConfirmTransferInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  confirmDomainTransfer(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmDomainTransferMutationResult = NonNullable<Awaited<ReturnType<typeof confirmDomainTransfer>>>
+    export type ConfirmDomainTransferMutationBody = BodyType<ConfirmTransferInput>
+    export type ConfirmDomainTransferMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Finalize an inbound domain transfer after Stripe payment succeeds
+ */
+export const useConfirmDomainTransfer = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmDomainTransfer>>, TError,{data: BodyType<ConfirmTransferInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof confirmDomainTransfer>>,
+        TError,
+        {data: BodyType<ConfirmTransferInput>},
+        TContext
+      > => {
+      return useMutation(getConfirmDomainTransferMutationOptions(options));
+    }
+
+export const getGetPurchasedDomainUrl = (id: number,) => {
+
+
+
+
+  return `/api/domains/purchased/${id}`
+}
+
+/**
+ * @summary Get a single purchased domain by ID
+ */
+export const getPurchasedDomain = async (id: number, options?: RequestInit): Promise<PurchasedDomainResponse> => {
+
+  return customFetch<PurchasedDomainResponse>(getGetPurchasedDomainUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPurchasedDomainQueryKey = (id: number,) => {
+    return [
+    `/api/domains/purchased/${id}`
+    ] as const;
+    }
+
+
+export const getGetPurchasedDomainQueryOptions = <TData = Awaited<ReturnType<typeof getPurchasedDomain>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPurchasedDomain>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPurchasedDomainQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPurchasedDomain>>> = ({ signal }) => getPurchasedDomain(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPurchasedDomain>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPurchasedDomainQueryResult = NonNullable<Awaited<ReturnType<typeof getPurchasedDomain>>>
+export type GetPurchasedDomainQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get a single purchased domain by ID
+ */
+
+export function useGetPurchasedDomain<TData = Awaited<ReturnType<typeof getPurchasedDomain>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPurchasedDomain>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPurchasedDomainQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSetPurchasedDomainAutoRenewUrl = (id: number,) => {
+
+
+
+
+  return `/api/domains/purchased/${id}/auto-renew`
+}
+
+/**
+ * @summary Toggle auto-renew on a purchased domain
+ */
+export const setPurchasedDomainAutoRenew = async (id: number,
+    setPurchasedDomainAutoRenewBody: SetPurchasedDomainAutoRenewBody, options?: RequestInit): Promise<PurchasedDomainResponse> => {
+
+  return customFetch<PurchasedDomainResponse>(getSetPurchasedDomainAutoRenewUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      setPurchasedDomainAutoRenewBody,)
+  }
+);}
+
+
+
+
+export const getSetPurchasedDomainAutoRenewMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setPurchasedDomainAutoRenew>>, TError,{id: number;data: BodyType<SetPurchasedDomainAutoRenewBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setPurchasedDomainAutoRenew>>, TError,{id: number;data: BodyType<SetPurchasedDomainAutoRenewBody>}, TContext> => {
+
+const mutationKey = ['setPurchasedDomainAutoRenew'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setPurchasedDomainAutoRenew>>, {id: number;data: BodyType<SetPurchasedDomainAutoRenewBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setPurchasedDomainAutoRenew(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetPurchasedDomainAutoRenewMutationResult = NonNullable<Awaited<ReturnType<typeof setPurchasedDomainAutoRenew>>>
+    export type SetPurchasedDomainAutoRenewMutationBody = BodyType<SetPurchasedDomainAutoRenewBody>
+    export type SetPurchasedDomainAutoRenewMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Toggle auto-renew on a purchased domain
+ */
+export const useSetPurchasedDomainAutoRenew = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setPurchasedDomainAutoRenew>>, TError,{id: number;data: BodyType<SetPurchasedDomainAutoRenewBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setPurchasedDomainAutoRenew>>,
+        TError,
+        {id: number;data: BodyType<SetPurchasedDomainAutoRenewBody>},
+        TContext
+      > => {
+      return useMutation(getSetPurchasedDomainAutoRenewMutationOptions(options));
+    }
+
+export const getUpdatePurchasedDomainWhoisUrl = (id: number,) => {
+
+
+
+
+  return `/api/domains/purchased/${id}/whois`
+}
+
+/**
+ * @summary Update WHOIS contact information for a purchased domain
+ */
+export const updatePurchasedDomainWhois = async (id: number,
+    whoisContactUpdate: WhoisContactUpdate, options?: RequestInit): Promise<PurchasedDomainResponse> => {
+
+  return customFetch<PurchasedDomainResponse>(getUpdatePurchasedDomainWhoisUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      whoisContactUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdatePurchasedDomainWhoisMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePurchasedDomainWhois>>, TError,{id: number;data: BodyType<WhoisContactUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePurchasedDomainWhois>>, TError,{id: number;data: BodyType<WhoisContactUpdate>}, TContext> => {
+
+const mutationKey = ['updatePurchasedDomainWhois'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePurchasedDomainWhois>>, {id: number;data: BodyType<WhoisContactUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updatePurchasedDomainWhois(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePurchasedDomainWhoisMutationResult = NonNullable<Awaited<ReturnType<typeof updatePurchasedDomainWhois>>>
+    export type UpdatePurchasedDomainWhoisMutationBody = BodyType<WhoisContactUpdate>
+    export type UpdatePurchasedDomainWhoisMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update WHOIS contact information for a purchased domain
+ */
+export const useUpdatePurchasedDomainWhois = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePurchasedDomainWhois>>, TError,{id: number;data: BodyType<WhoisContactUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updatePurchasedDomainWhois>>,
+        TError,
+        {id: number;data: BodyType<WhoisContactUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdatePurchasedDomainWhoisMutationOptions(options));
+    }
+
+export const getRenewPurchasedDomainUrl = (id: number,) => {
+
+
+
+
+  return `/api/domains/purchased/${id}/renew`
+}
+
+/**
+ * @summary Manually renew a purchased domain (returns Stripe Checkout URL)
+ */
+export const renewPurchasedDomain = async (id: number,
+    renewPurchasedDomainBody: RenewPurchasedDomainBody, options?: RequestInit): Promise<RenewDomainResponse> => {
+
+  return customFetch<RenewDomainResponse>(getRenewPurchasedDomainUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      renewPurchasedDomainBody,)
+  }
+);}
+
+
+
+
+export const getRenewPurchasedDomainMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renewPurchasedDomain>>, TError,{id: number;data: BodyType<RenewPurchasedDomainBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof renewPurchasedDomain>>, TError,{id: number;data: BodyType<RenewPurchasedDomainBody>}, TContext> => {
+
+const mutationKey = ['renewPurchasedDomain'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renewPurchasedDomain>>, {id: number;data: BodyType<RenewPurchasedDomainBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  renewPurchasedDomain(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenewPurchasedDomainMutationResult = NonNullable<Awaited<ReturnType<typeof renewPurchasedDomain>>>
+    export type RenewPurchasedDomainMutationBody = BodyType<RenewPurchasedDomainBody>
+    export type RenewPurchasedDomainMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Manually renew a purchased domain (returns Stripe Checkout URL)
+ */
+export const useRenewPurchasedDomain = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renewPurchasedDomain>>, TError,{id: number;data: BodyType<RenewPurchasedDomainBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof renewPurchasedDomain>>,
+        TError,
+        {id: number;data: BodyType<RenewPurchasedDomainBody>},
+        TContext
+      > => {
+      return useMutation(getRenewPurchasedDomainMutationOptions(options));
+    }
+
+export const getConfirmPurchasedDomainRenewalUrl = (id: number,) => {
+
+
+
+
+  return `/api/domains/purchased/${id}/renew/confirm`
+}
+
+/**
+ * @summary Finalize a manual renewal after Stripe payment succeeds
+ */
+export const confirmPurchasedDomainRenewal = async (id: number,
+    confirmPurchasedDomainRenewalBody: ConfirmPurchasedDomainRenewalBody, options?: RequestInit): Promise<PurchasedDomainResponse> => {
+
+  return customFetch<PurchasedDomainResponse>(getConfirmPurchasedDomainRenewalUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      confirmPurchasedDomainRenewalBody,)
+  }
+);}
+
+
+
+
+export const getConfirmPurchasedDomainRenewalMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmPurchasedDomainRenewal>>, TError,{id: number;data: BodyType<ConfirmPurchasedDomainRenewalBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmPurchasedDomainRenewal>>, TError,{id: number;data: BodyType<ConfirmPurchasedDomainRenewalBody>}, TContext> => {
+
+const mutationKey = ['confirmPurchasedDomainRenewal'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmPurchasedDomainRenewal>>, {id: number;data: BodyType<ConfirmPurchasedDomainRenewalBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  confirmPurchasedDomainRenewal(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmPurchasedDomainRenewalMutationResult = NonNullable<Awaited<ReturnType<typeof confirmPurchasedDomainRenewal>>>
+    export type ConfirmPurchasedDomainRenewalMutationBody = BodyType<ConfirmPurchasedDomainRenewalBody>
+    export type ConfirmPurchasedDomainRenewalMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Finalize a manual renewal after Stripe payment succeeds
+ */
+export const useConfirmPurchasedDomainRenewal = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmPurchasedDomainRenewal>>, TError,{id: number;data: BodyType<ConfirmPurchasedDomainRenewalBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof confirmPurchasedDomainRenewal>>,
+        TError,
+        {id: number;data: BodyType<ConfirmPurchasedDomainRenewalBody>},
+        TContext
+      > => {
+      return useMutation(getConfirmPurchasedDomainRenewalMutationOptions(options));
+    }
+
+export const getGetPurchasedDomainAuthCodeUrl = (id: number,) => {
+
+
+
+
+  return `/api/domains/purchased/${id}/auth-code`
+}
+
+/**
+ * @summary Retrieve the EPP auth code for transfer-out
+ */
+export const getPurchasedDomainAuthCode = async (id: number, options?: RequestInit): Promise<GetPurchasedDomainAuthCode200> => {
+
+  return customFetch<GetPurchasedDomainAuthCode200>(getGetPurchasedDomainAuthCodeUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPurchasedDomainAuthCodeQueryKey = (id: number,) => {
+    return [
+    `/api/domains/purchased/${id}/auth-code`
+    ] as const;
+    }
+
+
+export const getGetPurchasedDomainAuthCodeQueryOptions = <TData = Awaited<ReturnType<typeof getPurchasedDomainAuthCode>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPurchasedDomainAuthCode>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPurchasedDomainAuthCodeQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPurchasedDomainAuthCode>>> = ({ signal }) => getPurchasedDomainAuthCode(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPurchasedDomainAuthCode>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPurchasedDomainAuthCodeQueryResult = NonNullable<Awaited<ReturnType<typeof getPurchasedDomainAuthCode>>>
+export type GetPurchasedDomainAuthCodeQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Retrieve the EPP auth code for transfer-out
+ */
+
+export function useGetPurchasedDomainAuthCode<TData = Awaited<ReturnType<typeof getPurchasedDomainAuthCode>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPurchasedDomainAuthCode>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPurchasedDomainAuthCodeQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getReleasePurchasedDomainUrl = (id: number,) => {
+
+
+
+
+  return `/api/domains/purchased/${id}/release`
+}
+
+/**
+ * @summary Release a purchased domain (unlock registrar lock for transfer-out)
+ */
+export const releasePurchasedDomain = async (id: number, options?: RequestInit): Promise<ReleasePurchasedDomain200> => {
+
+  return customFetch<ReleasePurchasedDomain200>(getReleasePurchasedDomainUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getReleasePurchasedDomainMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releasePurchasedDomain>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof releasePurchasedDomain>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['releasePurchasedDomain'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof releasePurchasedDomain>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  releasePurchasedDomain(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReleasePurchasedDomainMutationResult = NonNullable<Awaited<ReturnType<typeof releasePurchasedDomain>>>
+
+    export type ReleasePurchasedDomainMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Release a purchased domain (unlock registrar lock for transfer-out)
+ */
+export const useReleasePurchasedDomain = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releasePurchasedDomain>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof releasePurchasedDomain>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getReleasePurchasedDomainMutationOptions(options));
+    }
+
+export const getAttachPurchasedDomainToProjectUrl = (id: number,) => {
+
+
+
+
+  return `/api/domains/purchased/${id}/project`
+}
+
+/**
+ * @summary Attach or detach a purchased domain from a project
+ */
+export const attachPurchasedDomainToProject = async (id: number,
+    attachPurchasedDomainToProjectBody: AttachPurchasedDomainToProjectBody, options?: RequestInit): Promise<PurchasedDomainResponse> => {
+
+  return customFetch<PurchasedDomainResponse>(getAttachPurchasedDomainToProjectUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      attachPurchasedDomainToProjectBody,)
+  }
+);}
+
+
+
+
+export const getAttachPurchasedDomainToProjectMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachPurchasedDomainToProject>>, TError,{id: number;data: BodyType<AttachPurchasedDomainToProjectBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof attachPurchasedDomainToProject>>, TError,{id: number;data: BodyType<AttachPurchasedDomainToProjectBody>}, TContext> => {
+
+const mutationKey = ['attachPurchasedDomainToProject'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof attachPurchasedDomainToProject>>, {id: number;data: BodyType<AttachPurchasedDomainToProjectBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  attachPurchasedDomainToProject(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AttachPurchasedDomainToProjectMutationResult = NonNullable<Awaited<ReturnType<typeof attachPurchasedDomainToProject>>>
+    export type AttachPurchasedDomainToProjectMutationBody = BodyType<AttachPurchasedDomainToProjectBody>
+    export type AttachPurchasedDomainToProjectMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Attach or detach a purchased domain from a project
+ */
+export const useAttachPurchasedDomainToProject = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachPurchasedDomainToProject>>, TError,{id: number;data: BodyType<AttachPurchasedDomainToProjectBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof attachPurchasedDomainToProject>>,
+        TError,
+        {id: number;data: BodyType<AttachPurchasedDomainToProjectBody>},
+        TContext
+      > => {
+      return useMutation(getAttachPurchasedDomainToProjectMutationOptions(options));
+    }
+
+export const getRefreshPurchasedDomainInfoUrl = (id: number,) => {
+
+
+
+
+  return `/api/domains/purchased/${id}/info`
+}
+
+/**
+ * @summary Refresh domain info from Namecheap (expiry, NS, status)
+ */
+export const refreshPurchasedDomainInfo = async (id: number, options?: RequestInit): Promise<RefreshPurchasedDomainInfo200> => {
+
+  return customFetch<RefreshPurchasedDomainInfo200>(getRefreshPurchasedDomainInfoUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshPurchasedDomainInfoQueryKey = (id: number,) => {
+    return [
+    `/api/domains/purchased/${id}/info`
+    ] as const;
+    }
+
+
+export const getRefreshPurchasedDomainInfoQueryOptions = <TData = Awaited<ReturnType<typeof refreshPurchasedDomainInfo>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof refreshPurchasedDomainInfo>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getRefreshPurchasedDomainInfoQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof refreshPurchasedDomainInfo>>> = ({ signal }) => refreshPurchasedDomainInfo(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof refreshPurchasedDomainInfo>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type RefreshPurchasedDomainInfoQueryResult = NonNullable<Awaited<ReturnType<typeof refreshPurchasedDomainInfo>>>
+export type RefreshPurchasedDomainInfoQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Refresh domain info from Namecheap (expiry, NS, status)
+ */
+
+export function useRefreshPurchasedDomainInfo<TData = Awaited<ReturnType<typeof refreshPurchasedDomainInfo>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof refreshPurchasedDomainInfo>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getRefreshPurchasedDomainInfoQueryOptions(id,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

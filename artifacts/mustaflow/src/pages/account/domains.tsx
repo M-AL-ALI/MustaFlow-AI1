@@ -24,48 +24,27 @@ import {
   FolderOpen,
   FolderX,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useListPurchasedDomains,
+  getListPurchasedDomainsQueryKey,
+  searchPurchaseableDomains,
+  usePurchaseDomain,
+  useInitiateDomainTransfer,
+  useSetPurchasedDomainAutoRenew,
+  useUpdatePurchasedDomainWhois,
+  useAttachPurchasedDomainToProject,
+  useReleasePurchasedDomain,
+  useRenewPurchasedDomain,
+  getPurchasedDomainAuthCode,
+  confirmDomainPurchase,
+  confirmDomainTransfer,
+  confirmPurchasedDomainRenewal,
+  ApiError,
+  type PurchasedDomain,
+  type DomainSearchResult,
+} from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
-
-interface PurchasedDomain {
-  id: number;
-  userId: string;
-  hostname: string;
-  registrar: string;
-  registeredAt: string | null;
-  expiresAt: string | null;
-  autoRenew: boolean;
-  whoisPrivacy: boolean;
-  status: string;
-  namecheapOrderId: string | null;
-  projectId: number | null;
-  renewalPriceUsd: string | null;
-  pricePaidUsd: string | null;
-  renewalFailedAt: string | null;
-  renewalFailureReason: string | null;
-  whoisFirstName: string | null;
-  whoisLastName: string | null;
-  whoisEmail: string | null;
-  whoisPhone: string | null;
-  createdAt: string;
-}
-
-interface SearchResult {
-  domain: string;
-  tld: string;
-  available: boolean | null;
-  price: number | null;
-  renewalPrice: number | null;
-  isPremium: boolean;
-}
-
-interface SearchResponse {
-  results: SearchResult[];
-  namecheapEnabled: boolean;
-}
-
-interface DomainsResponse {
-  domains: PurchasedDomain[];
-}
 
 type DomainStatus =
   | "active"
@@ -74,6 +53,16 @@ type DomainStatus =
   | "expired"
   | "cancelled"
   | "released";
+
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    const data = err.data as { error?: string } | null;
+    if (data?.error) return data.error;
+    return err.message;
+  }
+  if (err instanceof Error) return err.message;
+  return fallback;
+}
 
 function statusBadge(status: DomainStatus | string) {
   const classes: Record<string, string> = {
@@ -101,13 +90,13 @@ function statusBadge(status: DomainStatus | string) {
   );
 }
 
-function daysUntil(dateStr: string | null): number | null {
+function daysUntil(dateStr: string | null | undefined): number | null {
   if (!dateStr) return null;
   const diff = new Date(dateStr).getTime() - Date.now();
   return Math.ceil(diff / 86_400_000);
 }
 
-function formatDate(dateStr: string | null): string {
+function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "—";
   return new Date(dateStr).toLocaleDateString("en-US", {
     year: "numeric",
@@ -121,18 +110,18 @@ function DomainSearchPanel({ onPurchased }: { onPurchased: () => void }) {
   const { toast } = useToast();
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [results, setResults] = useState<DomainSearchResult[]>([]);
   const [namecheapEnabled, setNamecheapEnabled] = useState(true);
   const [buyingDomain, setBuyingDomain] = useState<string | null>(null);
+
+  const purchaseMutation = usePurchaseDomain();
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
     setSearching(true);
     try {
-      const res = await fetch(`/api/domains/search?q=${encodeURIComponent(query.trim())}`);
-      if (!res.ok) throw new Error("Search failed");
-      const data = (await res.json()) as SearchResponse;
+      const data = await searchPurchaseableDomains({ q: query.trim() });
       setResults(data.results);
       setNamecheapEnabled(data.namecheapEnabled);
     } catch {
@@ -146,38 +135,23 @@ function DomainSearchPanel({ onPurchased }: { onPurchased: () => void }) {
     }
   }
 
-  async function handleBuy(result: SearchResult) {
+  async function handleBuy(result: DomainSearchResult) {
     setBuyingDomain(result.domain);
     try {
       const origin = window.location.origin;
       const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-      const res = await fetch("/api/domains/purchase", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await purchaseMutation.mutateAsync({
+        data: {
           hostname: result.domain,
           // {CHECKOUT_SESSION_ID} is replaced by Stripe; used by the confirm call on return.
           successUrl: `${origin}${base}/account/domains?purchase=success&domain=${encodeURIComponent(result.domain)}&session_id={CHECKOUT_SESSION_ID}`,
           cancelUrl: `${origin}${base}/account/domains?purchase=cancelled`,
-        }),
+        },
       });
-      const data = (await res.json()) as {
-        checkoutUrl?: string;
-        setupRequired?: boolean;
-        error?: string;
-      };
       if (data.setupRequired) {
         toast({
           title: "Payment not configured",
-          description: data.error ?? "Connect Stripe to enable purchases.",
-          variant: "destructive",
-        });
-        return;
-      }
-      if (!res.ok || data.error) {
-        toast({
-          title: "Purchase failed",
-          description: data.error ?? "Unexpected error",
+          description: data.message ?? "Connect Stripe to enable purchases.",
           variant: "destructive",
         });
         return;
@@ -185,10 +159,10 @@ function DomainSearchPanel({ onPurchased }: { onPurchased: () => void }) {
       if (data.checkoutUrl) {
         window.location.href = data.checkoutUrl;
       }
-    } catch {
+    } catch (err) {
       toast({
         title: "Purchase failed",
-        description: "Could not initiate checkout.",
+        description: errorMessage(err, "Could not initiate checkout."),
         variant: "destructive",
       });
     } finally {
@@ -253,7 +227,7 @@ function DomainSearchPanel({ onPurchased }: { onPurchased: () => void }) {
               <div className="flex items-center gap-3 min-w-0">
                 {r.available === true ? (
                   <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
-                ) : r.available === null ? (
+                ) : r.available == null ? (
                   <Clock className="w-3.5 h-3.5 text-neutral-500 flex-shrink-0" />
                 ) : (
                   <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
@@ -266,12 +240,12 @@ function DomainSearchPanel({ onPurchased }: { onPurchased: () => void }) {
                 )}
               </div>
               <div className="flex items-center gap-3 flex-shrink-0">
-                {r.price !== null && (
+                {r.price != null && (
                   <div className="text-right">
                     <div className="text-sm font-medium text-neutral-200">
                       ${r.price.toFixed(2)}/yr
                     </div>
-                    {r.renewalPrice !== null && r.renewalPrice !== r.price && (
+                    {r.renewalPrice != null && r.renewalPrice !== r.price && (
                       <div className="text-xs text-neutral-500">
                         renews ${r.renewalPrice.toFixed(2)}/yr
                       </div>
@@ -304,61 +278,46 @@ function TransferInPanel({ onTransferred }: { onTransferred: () => void }) {
   const { toast } = useToast();
   const [hostname, setHostname] = useState("");
   const [authCode, setAuthCode] = useState("");
-  const [loading, setLoading] = useState(false);
+  const transferMutation = useInitiateDomainTransfer();
 
   async function handleTransfer(e: React.FormEvent) {
     e.preventDefault();
     if (!hostname.trim() || !authCode.trim()) return;
-    setLoading(true);
     try {
       const origin = window.location.origin;
       const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-      const res = await fetch("/api/domains/transfer-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await transferMutation.mutateAsync({
+        data: {
           hostname: hostname.trim().toLowerCase(),
           authCode: authCode.trim(),
           // {CHECKOUT_SESSION_ID} is replaced by Stripe; used by the confirm call on return.
           successUrl: `${origin}${base}/account/domains?transfer=success&domain=${encodeURIComponent(hostname.trim().toLowerCase())}&session_id={CHECKOUT_SESSION_ID}`,
           cancelUrl: `${origin}${base}/account/domains?transfer=cancelled`,
-        }),
+        },
       });
-      const data = (await res.json()) as {
-        checkoutUrl?: string;
-        setupRequired?: boolean;
-        error?: string;
-      };
       if (data.setupRequired) {
         toast({
           title: "Payment not configured",
-          description: data.error ?? "Connect Stripe to enable transfers.",
-          variant: "destructive",
-        });
-        return;
-      }
-      if (!res.ok || data.error) {
-        toast({
-          title: "Transfer failed",
-          description: data.error ?? "Unexpected error",
+          description: data.message ?? "Connect Stripe to enable transfers.",
           variant: "destructive",
         });
         return;
       }
       if (data.checkoutUrl) {
         window.location.href = data.checkoutUrl;
+        return;
       }
-    } catch {
+      onTransferred();
+    } catch (err) {
       toast({
         title: "Transfer failed",
-        description: "Could not initiate transfer.",
+        description: errorMessage(err, "Could not initiate transfer."),
         variant: "destructive",
       });
-    } finally {
-      setLoading(false);
     }
-    void onTransferred;
   }
+
+  const loading = transferMutation.isPending;
 
   return (
     <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-5 space-y-4">
@@ -405,15 +364,11 @@ function TransferInPanel({ onTransferred }: { onTransferred: () => void }) {
 function DomainRow({ domain, onRefresh }: { domain: PurchasedDomain; onRefresh: () => void }) {
   const { toast } = useToast();
   const [expanded, setExpanded] = useState(false);
-  const [toggling, setToggling] = useState(false);
   const [authCode, setAuthCode] = useState<string | null>(null);
   const [loadingAuthCode, setLoadingAuthCode] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [releasing, setReleasing] = useState(false);
-  const [renewing, setRenewing] = useState(false);
   // WHOIS edit state
   const [editingWhois, setEditingWhois] = useState(false);
-  const [whoisSaving, setWhoisSaving] = useState(false);
   const [whoisForm, setWhoisForm] = useState({
     firstName: domain.whoisFirstName ?? "",
     lastName: domain.whoisLastName ?? "",
@@ -425,42 +380,48 @@ function DomainRow({ domain, onRefresh }: { domain: PurchasedDomain; onRefresh: 
   const [projectIdInput, setProjectIdInput] = useState(
     domain.projectId ? String(domain.projectId) : "",
   );
-  const [savingProject, setSavingProject] = useState(false);
+
+  const autoRenewMutation = useSetPurchasedDomainAutoRenew();
+  const releaseMutation = useReleasePurchasedDomain();
+  const whoisMutation = useUpdatePurchasedDomainWhois();
+  const attachMutation = useAttachPurchasedDomainToProject();
+  const renewMutation = useRenewPurchasedDomain();
 
   const days = daysUntil(domain.expiresAt);
   const isExpiringSoon = days !== null && days <= 30 && days > 0;
   const isExpired = days !== null && days <= 0;
 
   async function toggleAutoRenew() {
-    setToggling(true);
     try {
-      const res = await fetch(`/api/domains/purchased/${domain.id}/auto-renew`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ autoRenew: !domain.autoRenew }),
+      await autoRenewMutation.mutateAsync({
+        id: domain.id,
+        data: { autoRenew: !domain.autoRenew },
       });
-      if (!res.ok) throw new Error("Failed");
       toast({
         title: "Auto-renew updated",
         description: `Auto-renew ${!domain.autoRenew ? "enabled" : "disabled"} for ${domain.hostname}`,
       });
       onRefresh();
-    } catch {
-      toast({ title: "Failed to update auto-renew", variant: "destructive" });
-    } finally {
-      setToggling(false);
+    } catch (err) {
+      toast({
+        title: "Failed to update auto-renew",
+        description: errorMessage(err, ""),
+        variant: "destructive",
+      });
     }
   }
 
   async function handleGetAuthCode() {
     setLoadingAuthCode(true);
     try {
-      const res = await fetch(`/api/domains/purchased/${domain.id}/auth-code`);
-      if (!res.ok) throw new Error("Failed");
-      const data = (await res.json()) as { authCode: string | null };
-      setAuthCode(data.authCode);
-    } catch {
-      toast({ title: "Failed to get auth code", variant: "destructive" });
+      const data = await getPurchasedDomainAuthCode(domain.id);
+      setAuthCode(data.authCode ?? null);
+    } catch (err) {
+      toast({
+        title: "Failed to get auth code",
+        description: errorMessage(err, ""),
+        variant: "destructive",
+      });
     } finally {
       setLoadingAuthCode(false);
     }
@@ -480,60 +441,56 @@ function DomainRow({ domain, onRefresh }: { domain: PurchasedDomain; onRefresh: 
       )
     )
       return;
-    setReleasing(true);
     try {
-      const res = await fetch(`/api/domains/purchased/${domain.id}/release`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed");
+      await releaseMutation.mutateAsync({ id: domain.id });
       toast({
         title: "Domain released",
         description: `${domain.hostname} is now unlocked for outbound transfer.`,
       });
       onRefresh();
-    } catch {
-      toast({ title: "Failed to release domain", variant: "destructive" });
-    } finally {
-      setReleasing(false);
+    } catch (err) {
+      toast({
+        title: "Failed to release domain",
+        description: errorMessage(err, ""),
+        variant: "destructive",
+      });
     }
   }
 
   async function handleSaveWhois() {
-    setWhoisSaving(true);
     try {
-      const res = await fetch(`/api/domains/purchased/${domain.id}/whois`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await whoisMutation.mutateAsync({
+        id: domain.id,
+        data: {
           firstName: whoisForm.firstName.trim() || undefined,
           lastName: whoisForm.lastName.trim() || undefined,
           email: whoisForm.email.trim() || undefined,
           phone: whoisForm.phone.trim() || undefined,
-        }),
+        },
       });
-      if (!res.ok) throw new Error("Failed");
       toast({ title: "WHOIS updated", description: `Contact info saved for ${domain.hostname}` });
       setEditingWhois(false);
       onRefresh();
-    } catch {
-      toast({ title: "Failed to update WHOIS", variant: "destructive" });
-    } finally {
-      setWhoisSaving(false);
+    } catch (err) {
+      toast({
+        title: "Failed to update WHOIS",
+        description: errorMessage(err, ""),
+        variant: "destructive",
+      });
     }
   }
 
   async function handleSaveProject() {
-    setSavingProject(true);
     try {
       const newProjectId = projectIdInput.trim() === "" ? null : Number(projectIdInput.trim());
       if (projectIdInput.trim() !== "" && isNaN(newProjectId as number)) {
         toast({ title: "Invalid project ID", variant: "destructive" });
         return;
       }
-      const res = await fetch(`/api/domains/purchased/${domain.id}/project`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: newProjectId }),
+      await attachMutation.mutateAsync({
+        id: domain.id,
+        data: { projectId: newProjectId },
       });
-      if (!res.ok) throw new Error("Failed");
       toast({
         title: newProjectId ? "Project attached" : "Project detached",
         description: newProjectId
@@ -542,39 +499,42 @@ function DomainRow({ domain, onRefresh }: { domain: PurchasedDomain; onRefresh: 
       });
       setEditingProject(false);
       onRefresh();
-    } catch {
-      toast({ title: "Failed to update project link", variant: "destructive" });
-    } finally {
-      setSavingProject(false);
+    } catch (err) {
+      toast({
+        title: "Failed to update project link",
+        description: errorMessage(err, ""),
+        variant: "destructive",
+      });
     }
   }
 
   async function handleManualRenew() {
-    setRenewing(true);
     try {
       const origin = window.location.origin;
       const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-      const res = await fetch(`/api/domains/purchased/${domain.id}/renew`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await renewMutation.mutateAsync({
+        id: domain.id,
+        data: {
           // {CHECKOUT_SESSION_ID} is replaced by Stripe; used by the confirm call on return.
           successUrl: `${origin}${base}/account/domains?renewal=success&domain_id=${domain.id}&session_id={CHECKOUT_SESSION_ID}`,
           cancelUrl: `${origin}${base}/account/domains?renewal=cancelled`,
-        }),
+        },
       });
-      const data = (await res.json()) as { checkoutUrl?: string; error?: string };
-      if (!res.ok || data.error) {
-        toast({ title: "Renewal failed", description: data.error, variant: "destructive" });
-        return;
-      }
       if (data.checkoutUrl) window.location.href = data.checkoutUrl;
-    } catch {
-      toast({ title: "Renewal failed", variant: "destructive" });
-    } finally {
-      setRenewing(false);
+    } catch (err) {
+      toast({
+        title: "Renewal failed",
+        description: errorMessage(err, ""),
+        variant: "destructive",
+      });
     }
   }
+
+  const toggling = autoRenewMutation.isPending;
+  const releasing = releaseMutation.isPending;
+  const whoisSaving = whoisMutation.isPending;
+  const savingProject = attachMutation.isPending;
+  const renewing = renewMutation.isPending;
 
   return (
     <div className="border border-neutral-800 rounded-lg overflow-hidden">
@@ -885,28 +845,18 @@ function DomainRow({ domain, onRefresh }: { domain: PurchasedDomain; onRefresh: 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function MyDomainsPage() {
   const { toast } = useToast();
-  const [domains, setDomains] = useState<PurchasedDomain[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"domains" | "search" | "transfer">("domains");
 
-  const fetchDomains = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/domains/purchased");
-      if (res.ok) {
-        const data = (await res.json()) as DomainsResponse;
-        setDomains(data.domains);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const domainsQuery = useListPurchasedDomains();
+  const domains: PurchasedDomain[] = domainsQuery.data?.domains ?? [];
+  const loading = domainsQuery.isLoading;
+
+  const refreshDomains = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: getListPurchasedDomainsQueryKey() });
+  }, [queryClient]);
 
   useEffect(() => {
-    void fetchDomains();
-
     const params = new URLSearchParams(window.location.search);
     const purchase = params.get("purchase");
     const renewal = params.get("renewal");
@@ -923,26 +873,17 @@ export default function MyDomainsPage() {
 
     if (purchase === "success" && sessionId && domainParam) {
       // Confirm purchase: register domain with Namecheap using the completed session
-      fetch("/api/domains/purchase/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hostname: domainParam, sessionId }),
-      })
-        .then((r) => r.json() as Promise<{ domain?: unknown; error?: string }>)
-        .then((data) => {
-          if (data.error) {
-            toast({
-              title: "Registration issue",
-              description: data.error,
-              variant: "destructive",
-            });
-          } else {
-            toast({ title: "Domain registered", description: `${domainParam} is now active.` });
-            void fetchDomains();
-          }
+      confirmDomainPurchase({ hostname: domainParam, sessionId })
+        .then(() => {
+          toast({ title: "Domain registered", description: `${domainParam} is now active.` });
+          refreshDomains();
         })
-        .catch(() => {
-          toast({ title: "Domain purchased", description: "Your domain has been registered." });
+        .catch((err: unknown) => {
+          toast({
+            title: "Registration issue",
+            description: errorMessage(err, "Your domain has been registered."),
+            variant: "destructive",
+          });
         });
       clearParams("purchase", "domain", "session_id");
     } else if (purchase === "success") {
@@ -959,22 +900,17 @@ export default function MyDomainsPage() {
 
     if (renewal === "success" && sessionId && domainIdParam) {
       // Confirm renewal: call Namecheap renew using the completed session
-      fetch(`/api/domains/purchased/${domainIdParam}/renew/confirm`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
-      })
-        .then((r) => r.json() as Promise<{ domain?: unknown; error?: string }>)
-        .then((data) => {
-          if (data.error) {
-            toast({ title: "Renewal issue", description: data.error, variant: "destructive" });
-          } else {
-            toast({ title: "Domain renewed", description: "Expiry date extended by 1 year." });
-            void fetchDomains();
-          }
+      confirmPurchasedDomainRenewal(Number(domainIdParam), { sessionId })
+        .then(() => {
+          toast({ title: "Domain renewed", description: "Expiry date extended by 1 year." });
+          refreshDomains();
         })
-        .catch(() => {
-          toast({ title: "Renewal successful", description: "Your domain has been renewed." });
+        .catch((err: unknown) => {
+          toast({
+            title: "Renewal issue",
+            description: errorMessage(err, "Your domain has been renewed."),
+            variant: "destructive",
+          });
         });
       clearParams("renewal", "domain_id", "session_id");
     } else if (renewal === "success") {
@@ -984,25 +920,20 @@ export default function MyDomainsPage() {
 
     if (transfer === "success" && sessionId && domainParam) {
       // Confirm transfer-in: submit to Namecheap using the completed session
-      fetch("/api/domains/transfer-in/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hostname: domainParam, sessionId }),
-      })
-        .then((r) => r.json() as Promise<{ domain?: unknown; error?: string }>)
-        .then((data) => {
-          if (data.error) {
-            toast({ title: "Transfer issue", description: data.error, variant: "destructive" });
-          } else {
-            toast({
-              title: "Transfer initiated",
-              description: "Domain transfer is in progress (5–7 days).",
-            });
-            void fetchDomains();
-          }
+      confirmDomainTransfer({ hostname: domainParam, sessionId })
+        .then(() => {
+          toast({
+            title: "Transfer initiated",
+            description: "Domain transfer is in progress (5–7 days).",
+          });
+          refreshDomains();
         })
-        .catch(() => {
-          toast({ title: "Transfer initiated", description: "Domain transfer is in progress." });
+        .catch((err: unknown) => {
+          toast({
+            title: "Transfer issue",
+            description: errorMessage(err, "Domain transfer is in progress."),
+            variant: "destructive",
+          });
         });
       clearParams("transfer", "domain", "session_id");
     } else if (transfer === "success") {
@@ -1012,7 +943,7 @@ export default function MyDomainsPage() {
       });
       clearParams("transfer");
     }
-  }, [fetchDomains, toast]);
+  }, [refreshDomains, toast]);
 
   const activeDomains = domains.filter((d) => d.status === "active");
   const pendingDomains = domains.filter((d) => d.status !== "active" && d.status !== "released");
@@ -1029,7 +960,7 @@ export default function MyDomainsPage() {
           </p>
         </div>
         <button
-          onClick={() => void fetchDomains()}
+          onClick={refreshDomains}
           disabled={loading}
           className="p-2 rounded-md hover:bg-neutral-800 text-neutral-400 transition-colors"
         >
@@ -1056,8 +987,8 @@ export default function MyDomainsPage() {
         ))}
       </div>
 
-      {activeTab === "search" && <DomainSearchPanel onPurchased={() => void fetchDomains()} />}
-      {activeTab === "transfer" && <TransferInPanel onTransferred={() => void fetchDomains()} />}
+      {activeTab === "search" && <DomainSearchPanel onPurchased={refreshDomains} />}
+      {activeTab === "transfer" && <TransferInPanel onTransferred={refreshDomains} />}
 
       {activeTab === "domains" && (
         <div className="space-y-4">
@@ -1088,7 +1019,7 @@ export default function MyDomainsPage() {
                     Active
                   </p>
                   {activeDomains.map((d) => (
-                    <DomainRow key={d.id} domain={d} onRefresh={() => void fetchDomains()} />
+                    <DomainRow key={d.id} domain={d} onRefresh={refreshDomains} />
                   ))}
                 </div>
               )}
@@ -1098,7 +1029,7 @@ export default function MyDomainsPage() {
                     Pending
                   </p>
                   {pendingDomains.map((d) => (
-                    <DomainRow key={d.id} domain={d} onRefresh={() => void fetchDomains()} />
+                    <DomainRow key={d.id} domain={d} onRefresh={refreshDomains} />
                   ))}
                 </div>
               )}
@@ -1108,7 +1039,7 @@ export default function MyDomainsPage() {
                     Released
                   </p>
                   {releasedDomains.map((d) => (
-                    <DomainRow key={d.id} domain={d} onRefresh={() => void fetchDomains()} />
+                    <DomainRow key={d.id} domain={d} onRefresh={refreshDomains} />
                   ))}
                 </div>
               )}

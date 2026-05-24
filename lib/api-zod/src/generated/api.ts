@@ -4354,3 +4354,604 @@ export const GetAdminAuditLogResponse = zod.object({
 })
 
 
+/**
+ * @summary Check availability and price for a domain name across top TLDs
+ */
+export const searchPurchaseableDomainsQueryQMin = 2;
+
+
+
+export const SearchPurchaseableDomainsQueryParams = zod.object({
+  "q": zod.coerce.string().min(searchPurchaseableDomainsQueryQMin)
+})
+
+export const SearchPurchaseableDomainsResponse = zod.object({
+  "results": zod.array(zod.object({
+  "domain": zod.string(),
+  "tld": zod.string(),
+  "available": zod.boolean().nullish(),
+  "isPremium": zod.boolean(),
+  "price": zod.number().nullish(),
+  "renewalPrice": zod.number().nullish()
+})),
+  "namecheapEnabled": zod.boolean()
+})
+
+
+/**
+ * @summary List all purchased domains for the authenticated user
+ */
+export const ListPurchasedDomainsResponse = zod.object({
+  "domains": zod.array(zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "hostname": zod.string(),
+  "registrar": zod.string(),
+  "registeredAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "autoRenew": zod.boolean(),
+  "whoisPrivacy": zod.boolean(),
+  "status": zod.enum(['active', 'pending', 'transfer_pending', 'expired', 'cancelled', 'released']),
+  "namecheapOrderId": zod.string().nullish(),
+  "stripePaymentIntentId": zod.string().nullish(),
+  "projectId": zod.number().nullish(),
+  "renewalStripePaymentIntentId": zod.string().nullish(),
+  "lastRenewalAt": zod.coerce.date().nullish(),
+  "renewalFailedAt": zod.coerce.date().nullish(),
+  "renewalFailureReason": zod.string().nullish(),
+  "transferAuthCode": zod.string().nullish(),
+  "whoisFirstName": zod.string().nullish(),
+  "whoisLastName": zod.string().nullish(),
+  "whoisEmail": zod.string().nullish(),
+  "whoisPhone": zod.string().nullish(),
+  "whoisAddress": zod.string().nullish(),
+  "whoisCity": zod.string().nullish(),
+  "whoisStateProvince": zod.string().nullish(),
+  "whoisPostalCode": zod.string().nullish(),
+  "whoisCountry": zod.string().nullish(),
+  "stripeCustomerId": zod.string().nullish(),
+  "pricePaidUsd": zod.string().nullish(),
+  "renewalPriceUsd": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Initiate a domain purchase (returns Stripe Checkout URL or PaymentIntent)
+ */
+export const purchaseDomainBodyYearsDefault = 1;
+
+
+
+export const PurchaseDomainBody = zod.object({
+  "hostname": zod.string(),
+  "projectId": zod.number().optional(),
+  "years": zod.number().min(1).default(purchaseDomainBodyYearsDefault),
+  "contact": zod.object({
+  "firstName": zod.string().optional(),
+  "lastName": zod.string().optional(),
+  "email": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "address": zod.string().optional(),
+  "city": zod.string().optional(),
+  "stateProvince": zod.string().optional(),
+  "postalCode": zod.string().optional(),
+  "country": zod.string().optional()
+}).optional(),
+  "successUrl": zod.string().optional(),
+  "cancelUrl": zod.string().optional()
+})
+
+export const PurchaseDomainResponse = zod.object({
+  "sessionId": zod.string().optional(),
+  "checkoutUrl": zod.string().optional(),
+  "clientSecret": zod.string().optional(),
+  "paymentIntentId": zod.string().optional(),
+  "hostname": zod.string().optional(),
+  "priceUsd": zod.number().optional(),
+  "years": zod.number().optional(),
+  "setupRequired": zod.boolean().optional(),
+  "message": zod.string().optional()
+})
+
+
+/**
+ * @summary Finalize a domain purchase after Stripe payment succeeds
+ */
+export const ConfirmDomainPurchaseBody = zod.object({
+  "hostname": zod.string(),
+  "paymentIntentId": zod.string().optional(),
+  "sessionId": zod.string().optional(),
+  "projectId": zod.number().optional(),
+  "years": zod.number().optional(),
+  "contact": zod.object({
+  "firstName": zod.string().optional(),
+  "lastName": zod.string().optional(),
+  "email": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "address": zod.string().optional(),
+  "city": zod.string().optional(),
+  "stateProvince": zod.string().optional(),
+  "postalCode": zod.string().optional(),
+  "country": zod.string().optional()
+}).optional()
+})
+
+export const ConfirmDomainPurchaseResponse = zod.object({
+  "domain": zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "hostname": zod.string(),
+  "registrar": zod.string(),
+  "registeredAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "autoRenew": zod.boolean(),
+  "whoisPrivacy": zod.boolean(),
+  "status": zod.enum(['active', 'pending', 'transfer_pending', 'expired', 'cancelled', 'released']),
+  "namecheapOrderId": zod.string().nullish(),
+  "stripePaymentIntentId": zod.string().nullish(),
+  "projectId": zod.number().nullish(),
+  "renewalStripePaymentIntentId": zod.string().nullish(),
+  "lastRenewalAt": zod.coerce.date().nullish(),
+  "renewalFailedAt": zod.coerce.date().nullish(),
+  "renewalFailureReason": zod.string().nullish(),
+  "transferAuthCode": zod.string().nullish(),
+  "whoisFirstName": zod.string().nullish(),
+  "whoisLastName": zod.string().nullish(),
+  "whoisEmail": zod.string().nullish(),
+  "whoisPhone": zod.string().nullish(),
+  "whoisAddress": zod.string().nullish(),
+  "whoisCity": zod.string().nullish(),
+  "whoisStateProvince": zod.string().nullish(),
+  "whoisPostalCode": zod.string().nullish(),
+  "whoisCountry": zod.string().nullish(),
+  "stripeCustomerId": zod.string().nullish(),
+  "pricePaidUsd": zod.string().nullish(),
+  "renewalPriceUsd": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}),
+  "alreadyRegistered": zod.boolean().optional(),
+  "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Initiate an inbound domain transfer (returns Stripe Checkout URL)
+ */
+export const InitiateDomainTransferBody = zod.object({
+  "hostname": zod.string(),
+  "authCode": zod.string(),
+  "projectId": zod.number().optional(),
+  "contact": zod.object({
+  "firstName": zod.string().optional(),
+  "lastName": zod.string().optional(),
+  "email": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "address": zod.string().optional(),
+  "city": zod.string().optional(),
+  "stateProvince": zod.string().optional(),
+  "postalCode": zod.string().optional(),
+  "country": zod.string().optional()
+}).optional(),
+  "successUrl": zod.string().optional(),
+  "cancelUrl": zod.string().optional()
+})
+
+export const InitiateDomainTransferResponse = zod.object({
+  "sessionId": zod.string().optional(),
+  "checkoutUrl": zod.string().optional(),
+  "clientSecret": zod.string().optional(),
+  "paymentIntentId": zod.string().optional(),
+  "hostname": zod.string().optional(),
+  "priceUsd": zod.number().optional(),
+  "note": zod.string().optional(),
+  "setupRequired": zod.boolean().optional(),
+  "message": zod.string().optional()
+})
+
+
+/**
+ * @summary Finalize an inbound domain transfer after Stripe payment succeeds
+ */
+export const ConfirmDomainTransferBody = zod.object({
+  "hostname": zod.string(),
+  "authCode": zod.string().optional(),
+  "paymentIntentId": zod.string().optional(),
+  "sessionId": zod.string().optional(),
+  "projectId": zod.number().optional(),
+  "contact": zod.object({
+  "firstName": zod.string().optional(),
+  "lastName": zod.string().optional(),
+  "email": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "address": zod.string().optional(),
+  "city": zod.string().optional(),
+  "stateProvince": zod.string().optional(),
+  "postalCode": zod.string().optional(),
+  "country": zod.string().optional()
+}).optional()
+})
+
+
+/**
+ * @summary Get a single purchased domain by ID
+ */
+export const GetPurchasedDomainParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetPurchasedDomainResponse = zod.object({
+  "domain": zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "hostname": zod.string(),
+  "registrar": zod.string(),
+  "registeredAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "autoRenew": zod.boolean(),
+  "whoisPrivacy": zod.boolean(),
+  "status": zod.enum(['active', 'pending', 'transfer_pending', 'expired', 'cancelled', 'released']),
+  "namecheapOrderId": zod.string().nullish(),
+  "stripePaymentIntentId": zod.string().nullish(),
+  "projectId": zod.number().nullish(),
+  "renewalStripePaymentIntentId": zod.string().nullish(),
+  "lastRenewalAt": zod.coerce.date().nullish(),
+  "renewalFailedAt": zod.coerce.date().nullish(),
+  "renewalFailureReason": zod.string().nullish(),
+  "transferAuthCode": zod.string().nullish(),
+  "whoisFirstName": zod.string().nullish(),
+  "whoisLastName": zod.string().nullish(),
+  "whoisEmail": zod.string().nullish(),
+  "whoisPhone": zod.string().nullish(),
+  "whoisAddress": zod.string().nullish(),
+  "whoisCity": zod.string().nullish(),
+  "whoisStateProvince": zod.string().nullish(),
+  "whoisPostalCode": zod.string().nullish(),
+  "whoisCountry": zod.string().nullish(),
+  "stripeCustomerId": zod.string().nullish(),
+  "pricePaidUsd": zod.string().nullish(),
+  "renewalPriceUsd": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}),
+  "alreadyRegistered": zod.boolean().optional(),
+  "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Toggle auto-renew on a purchased domain
+ */
+export const SetPurchasedDomainAutoRenewParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SetPurchasedDomainAutoRenewBody = zod.object({
+  "autoRenew": zod.boolean()
+})
+
+export const SetPurchasedDomainAutoRenewResponse = zod.object({
+  "domain": zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "hostname": zod.string(),
+  "registrar": zod.string(),
+  "registeredAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "autoRenew": zod.boolean(),
+  "whoisPrivacy": zod.boolean(),
+  "status": zod.enum(['active', 'pending', 'transfer_pending', 'expired', 'cancelled', 'released']),
+  "namecheapOrderId": zod.string().nullish(),
+  "stripePaymentIntentId": zod.string().nullish(),
+  "projectId": zod.number().nullish(),
+  "renewalStripePaymentIntentId": zod.string().nullish(),
+  "lastRenewalAt": zod.coerce.date().nullish(),
+  "renewalFailedAt": zod.coerce.date().nullish(),
+  "renewalFailureReason": zod.string().nullish(),
+  "transferAuthCode": zod.string().nullish(),
+  "whoisFirstName": zod.string().nullish(),
+  "whoisLastName": zod.string().nullish(),
+  "whoisEmail": zod.string().nullish(),
+  "whoisPhone": zod.string().nullish(),
+  "whoisAddress": zod.string().nullish(),
+  "whoisCity": zod.string().nullish(),
+  "whoisStateProvince": zod.string().nullish(),
+  "whoisPostalCode": zod.string().nullish(),
+  "whoisCountry": zod.string().nullish(),
+  "stripeCustomerId": zod.string().nullish(),
+  "pricePaidUsd": zod.string().nullish(),
+  "renewalPriceUsd": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}),
+  "alreadyRegistered": zod.boolean().optional(),
+  "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Update WHOIS contact information for a purchased domain
+ */
+export const UpdatePurchasedDomainWhoisParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdatePurchasedDomainWhoisBody = zod.object({
+  "firstName": zod.string().optional(),
+  "lastName": zod.string().optional(),
+  "email": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "address": zod.string().optional(),
+  "city": zod.string().optional(),
+  "stateProvince": zod.string().optional(),
+  "postalCode": zod.string().optional(),
+  "country": zod.string().optional()
+})
+
+export const UpdatePurchasedDomainWhoisResponse = zod.object({
+  "domain": zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "hostname": zod.string(),
+  "registrar": zod.string(),
+  "registeredAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "autoRenew": zod.boolean(),
+  "whoisPrivacy": zod.boolean(),
+  "status": zod.enum(['active', 'pending', 'transfer_pending', 'expired', 'cancelled', 'released']),
+  "namecheapOrderId": zod.string().nullish(),
+  "stripePaymentIntentId": zod.string().nullish(),
+  "projectId": zod.number().nullish(),
+  "renewalStripePaymentIntentId": zod.string().nullish(),
+  "lastRenewalAt": zod.coerce.date().nullish(),
+  "renewalFailedAt": zod.coerce.date().nullish(),
+  "renewalFailureReason": zod.string().nullish(),
+  "transferAuthCode": zod.string().nullish(),
+  "whoisFirstName": zod.string().nullish(),
+  "whoisLastName": zod.string().nullish(),
+  "whoisEmail": zod.string().nullish(),
+  "whoisPhone": zod.string().nullish(),
+  "whoisAddress": zod.string().nullish(),
+  "whoisCity": zod.string().nullish(),
+  "whoisStateProvince": zod.string().nullish(),
+  "whoisPostalCode": zod.string().nullish(),
+  "whoisCountry": zod.string().nullish(),
+  "stripeCustomerId": zod.string().nullish(),
+  "pricePaidUsd": zod.string().nullish(),
+  "renewalPriceUsd": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}),
+  "alreadyRegistered": zod.boolean().optional(),
+  "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Manually renew a purchased domain (returns Stripe Checkout URL)
+ */
+export const RenewPurchasedDomainParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RenewPurchasedDomainBody = zod.object({
+  "successUrl": zod.string().optional(),
+  "cancelUrl": zod.string().optional()
+})
+
+export const RenewPurchasedDomainResponse = zod.object({
+  "sessionId": zod.string().optional(),
+  "checkoutUrl": zod.string().optional(),
+  "clientSecret": zod.string().optional(),
+  "paymentIntentId": zod.string().optional(),
+  "priceUsd": zod.number().optional()
+})
+
+
+/**
+ * @summary Finalize a manual renewal after Stripe payment succeeds
+ */
+export const ConfirmPurchasedDomainRenewalParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ConfirmPurchasedDomainRenewalBody = zod.object({
+  "paymentIntentId": zod.string().optional(),
+  "sessionId": zod.string().optional()
+})
+
+export const ConfirmPurchasedDomainRenewalResponse = zod.object({
+  "domain": zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "hostname": zod.string(),
+  "registrar": zod.string(),
+  "registeredAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "autoRenew": zod.boolean(),
+  "whoisPrivacy": zod.boolean(),
+  "status": zod.enum(['active', 'pending', 'transfer_pending', 'expired', 'cancelled', 'released']),
+  "namecheapOrderId": zod.string().nullish(),
+  "stripePaymentIntentId": zod.string().nullish(),
+  "projectId": zod.number().nullish(),
+  "renewalStripePaymentIntentId": zod.string().nullish(),
+  "lastRenewalAt": zod.coerce.date().nullish(),
+  "renewalFailedAt": zod.coerce.date().nullish(),
+  "renewalFailureReason": zod.string().nullish(),
+  "transferAuthCode": zod.string().nullish(),
+  "whoisFirstName": zod.string().nullish(),
+  "whoisLastName": zod.string().nullish(),
+  "whoisEmail": zod.string().nullish(),
+  "whoisPhone": zod.string().nullish(),
+  "whoisAddress": zod.string().nullish(),
+  "whoisCity": zod.string().nullish(),
+  "whoisStateProvince": zod.string().nullish(),
+  "whoisPostalCode": zod.string().nullish(),
+  "whoisCountry": zod.string().nullish(),
+  "stripeCustomerId": zod.string().nullish(),
+  "pricePaidUsd": zod.string().nullish(),
+  "renewalPriceUsd": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}),
+  "alreadyRegistered": zod.boolean().optional(),
+  "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Retrieve the EPP auth code for transfer-out
+ */
+export const GetPurchasedDomainAuthCodeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetPurchasedDomainAuthCodeResponse = zod.object({
+  "hostname": zod.string(),
+  "authCode": zod.string().nullable()
+})
+
+
+/**
+ * @summary Release a purchased domain (unlock registrar lock for transfer-out)
+ */
+export const ReleasePurchasedDomainParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ReleasePurchasedDomainResponse = zod.object({
+  "domain": zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "hostname": zod.string(),
+  "registrar": zod.string(),
+  "registeredAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "autoRenew": zod.boolean(),
+  "whoisPrivacy": zod.boolean(),
+  "status": zod.enum(['active', 'pending', 'transfer_pending', 'expired', 'cancelled', 'released']),
+  "namecheapOrderId": zod.string().nullish(),
+  "stripePaymentIntentId": zod.string().nullish(),
+  "projectId": zod.number().nullish(),
+  "renewalStripePaymentIntentId": zod.string().nullish(),
+  "lastRenewalAt": zod.coerce.date().nullish(),
+  "renewalFailedAt": zod.coerce.date().nullish(),
+  "renewalFailureReason": zod.string().nullish(),
+  "transferAuthCode": zod.string().nullish(),
+  "whoisFirstName": zod.string().nullish(),
+  "whoisLastName": zod.string().nullish(),
+  "whoisEmail": zod.string().nullish(),
+  "whoisPhone": zod.string().nullish(),
+  "whoisAddress": zod.string().nullish(),
+  "whoisCity": zod.string().nullish(),
+  "whoisStateProvince": zod.string().nullish(),
+  "whoisPostalCode": zod.string().nullish(),
+  "whoisCountry": zod.string().nullish(),
+  "stripeCustomerId": zod.string().nullish(),
+  "pricePaidUsd": zod.string().nullish(),
+  "renewalPriceUsd": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}),
+  "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Attach or detach a purchased domain from a project
+ */
+export const AttachPurchasedDomainToProjectParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const AttachPurchasedDomainToProjectBody = zod.object({
+  "projectId": zod.number().nullish().describe('Project to attach to, or null to detach.')
+})
+
+export const AttachPurchasedDomainToProjectResponse = zod.object({
+  "domain": zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "hostname": zod.string(),
+  "registrar": zod.string(),
+  "registeredAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "autoRenew": zod.boolean(),
+  "whoisPrivacy": zod.boolean(),
+  "status": zod.enum(['active', 'pending', 'transfer_pending', 'expired', 'cancelled', 'released']),
+  "namecheapOrderId": zod.string().nullish(),
+  "stripePaymentIntentId": zod.string().nullish(),
+  "projectId": zod.number().nullish(),
+  "renewalStripePaymentIntentId": zod.string().nullish(),
+  "lastRenewalAt": zod.coerce.date().nullish(),
+  "renewalFailedAt": zod.coerce.date().nullish(),
+  "renewalFailureReason": zod.string().nullish(),
+  "transferAuthCode": zod.string().nullish(),
+  "whoisFirstName": zod.string().nullish(),
+  "whoisLastName": zod.string().nullish(),
+  "whoisEmail": zod.string().nullish(),
+  "whoisPhone": zod.string().nullish(),
+  "whoisAddress": zod.string().nullish(),
+  "whoisCity": zod.string().nullish(),
+  "whoisStateProvince": zod.string().nullish(),
+  "whoisPostalCode": zod.string().nullish(),
+  "whoisCountry": zod.string().nullish(),
+  "stripeCustomerId": zod.string().nullish(),
+  "pricePaidUsd": zod.string().nullish(),
+  "renewalPriceUsd": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}),
+  "alreadyRegistered": zod.boolean().optional(),
+  "note": zod.string().optional()
+})
+
+
+/**
+ * @summary Refresh domain info from Namecheap (expiry, NS, status)
+ */
+export const RefreshPurchasedDomainInfoParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RefreshPurchasedDomainInfoResponse = zod.object({
+  "domain": zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "hostname": zod.string(),
+  "registrar": zod.string(),
+  "registeredAt": zod.coerce.date().nullish(),
+  "expiresAt": zod.coerce.date().nullish(),
+  "autoRenew": zod.boolean(),
+  "whoisPrivacy": zod.boolean(),
+  "status": zod.enum(['active', 'pending', 'transfer_pending', 'expired', 'cancelled', 'released']),
+  "namecheapOrderId": zod.string().nullish(),
+  "stripePaymentIntentId": zod.string().nullish(),
+  "projectId": zod.number().nullish(),
+  "renewalStripePaymentIntentId": zod.string().nullish(),
+  "lastRenewalAt": zod.coerce.date().nullish(),
+  "renewalFailedAt": zod.coerce.date().nullish(),
+  "renewalFailureReason": zod.string().nullish(),
+  "transferAuthCode": zod.string().nullish(),
+  "whoisFirstName": zod.string().nullish(),
+  "whoisLastName": zod.string().nullish(),
+  "whoisEmail": zod.string().nullish(),
+  "whoisPhone": zod.string().nullish(),
+  "whoisAddress": zod.string().nullish(),
+  "whoisCity": zod.string().nullish(),
+  "whoisStateProvince": zod.string().nullish(),
+  "whoisPostalCode": zod.string().nullish(),
+  "whoisCountry": zod.string().nullish(),
+  "stripeCustomerId": zod.string().nullish(),
+  "pricePaidUsd": zod.string().nullish(),
+  "renewalPriceUsd": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}),
+  "namecheapInfo": zod.record(zod.string(), zod.unknown()).nullish()
+})
+
+

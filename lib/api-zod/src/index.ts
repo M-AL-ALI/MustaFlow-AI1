@@ -34,3 +34,8 @@ export { DryRunProjectDomainDnsChangesBody } from "./generated/api";
 export { UploadProjectDomainCertificateBody } from "./generated/api";
 export { GetProjectDomainDnsHistoryParams } from "./generated/api";
 export { RollbackProjectDomainDnsChangeBody } from "./generated/api";
+export { AttachPurchasedDomainToProjectBody } from "./generated/api";
+export { ConfirmPurchasedDomainRenewalBody } from "./generated/api";
+export { PurchaseDomainResponse } from "./generated/api";
+export { RenewPurchasedDomainBody } from "./generated/api";
+export { SetPurchasedDomainAutoRenewBody } from "./generated/api";
