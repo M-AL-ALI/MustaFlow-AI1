@@ -575,17 +575,24 @@ function ExportImportPanel({ onImportDone }: { onImportDone: () => void }) {
   const handleExport = async () => {
     setExporting(true);
     try {
-      const res = await fetch("/api/knowledge/export");
-      if (!res.ok) throw new Error("Export failed");
-      const blob = await res.blob();
+      const res = await fetch("/api/knowledge/export", { credentials: "include" });
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const data = await res.json();
+      const count = typeof data?.count === "number" ? data.count : (data?.entries?.length ?? 0);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `knowledge-vault-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch {
-      toast({ title: "Export failed", variant: "destructive" });
+      toast({
+        title: count === 0 ? "Nothing to export" : `Exported ${count} entr${count === 1 ? "y" : "ies"}`,
+        description: count === 0 ? "Your vault is empty — build a project to start recording entries." : "Your download is ready.",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Export failed";
+      toast({ title: "Export failed", description: msg, variant: "destructive" });
     } finally {
       setExporting(false);
     }
@@ -597,21 +604,44 @@ function ExportImportPanel({ onImportDone }: { onImportDone: () => void }) {
     setImporting(true);
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text) as { entries?: unknown[] };
-      const entries = parsed.entries ?? (Array.isArray(parsed) ? parsed : []);
+      const parsed = JSON.parse(text) as { entries?: unknown[] } | unknown[];
+      const entries = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.entries)
+          ? parsed.entries
+          : [];
+      if (entries.length === 0) {
+        toast({
+          title: "Nothing to import",
+          description: "The file has no entries. Expected an exported Knowledge Vault JSON.",
+          variant: "destructive",
+        });
+        return;
+      }
       const res = await fetch("/api/knowledge/import", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entries }),
       });
-      const data = (await res.json()) as { imported: number };
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as { error?: string });
+        throw new Error(errBody?.error ?? `Import failed (${res.status})`);
+      }
+      const data = (await res.json()) as { imported?: number };
+      const imported = typeof data.imported === "number" ? data.imported : 0;
       toast({
-        title: `Imported ${data.imported} entries`,
-        description: "Your Knowledge Vault has been updated.",
+        title: imported === 0 ? "No entries imported" : `Imported ${imported} entr${imported === 1 ? "y" : "ies"}`,
+        description:
+          imported === 0
+            ? "Entries need a title and content to import. Check the file format."
+            : "Your Knowledge Vault has been updated.",
+        variant: imported === 0 ? "destructive" : undefined,
       });
       onImportDone();
-    } catch {
-      toast({ title: "Import failed — check the file format", variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Check the file format";
+      toast({ title: "Import failed", description: msg, variant: "destructive" });
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
