@@ -100,6 +100,14 @@ export interface AgentLoopInput {
   e2eEnabled?: boolean;
   onEvent: AgentLoopEvent;
   signal: AbortSignal;
+  /**
+   * Optional billing hook: invoked when a billable batch of web-sense calls
+   * (web_fetch + web_search + extract_branding) completes (every 5 calls).
+   * Charged in-loop so the user pays for usage even on cancel/failure paths,
+   * not only on successful task completion. Receives the credit cost to
+   * deduct for THIS batch (always 1 in current pricing).
+   */
+  onBillableSenseBatch?: (credits: number, totalWebCalls: number) => void;
 }
 
 export type ToolCallRecord = {
@@ -1717,6 +1725,22 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   ctx.containerState.installed = true;
 }
 
+/**
+ * Charge the billing hook once per 5 combined web-sense calls. Called after
+ * each increment so usage is metered at-time-of-use, not only on success.
+ */
+function maybeChargeSenseBatch(ctx: ToolCtx): void {
+  if (!ctx.input.onBillableSenseBatch) return;
+  const total = ctx.senseCounts.webFetch + ctx.senseCounts.webSearch + ctx.senseCounts.branding;
+  if (total > 0 && total % 5 === 0) {
+    try {
+      ctx.input.onBillableSenseBatch(1, total);
+    } catch {
+      // billing must not break the loop
+    }
+  }
+}
+
 export async function executeTool(
   ctx: ToolCtx,
 ): Promise<{ ok: boolean; observation: string; noTruncate?: boolean }> {
@@ -2296,6 +2320,7 @@ export async function executeTool(
       await safeEvent(input.onEvent, "web_fetch", `Fetching ${url}…`);
       const r = await webFetch({ url, signal: input.signal });
       ctx.senseCounts.webFetch += 1;
+      maybeChargeSenseBatch(ctx);
       if (!r.ok && r.status === 0) {
         return { ok: false, observation: `ERROR: web_fetch failed: ${r.error ?? "request error"}` };
       }
@@ -2325,6 +2350,7 @@ export async function executeTool(
       await safeEvent(input.onEvent, "web_search", `Searching: ${query.slice(0, 80)}`);
       const r = await webSearch({ query, limit, signal: input.signal });
       ctx.senseCounts.webSearch += 1;
+      maybeChargeSenseBatch(ctx);
       if (!r.ok) {
         return {
           ok: false,
@@ -2350,6 +2376,7 @@ export async function executeTool(
       await safeEvent(input.onEvent, "extract_branding", `Extracting brand from ${url}…`);
       const r = await extractBranding({ url, signal: input.signal });
       ctx.senseCounts.branding += 1;
+      maybeChargeSenseBatch(ctx);
       if (!r.ok) {
         return {
           ok: false,

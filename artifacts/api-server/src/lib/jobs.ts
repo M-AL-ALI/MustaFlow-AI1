@@ -1341,6 +1341,16 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 e2eEnabled: project.e2eEnabled ?? true,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
+                onBillableSenseBatch: (credits, total) => {
+                  if (!project.ownerId) return;
+                  void deductCredits(project.ownerId, credits, {
+                    type: "senses",
+                    description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
+                    projectId,
+                  }).catch((err) =>
+                    logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
+                  );
+                },
               });
               return loopResultToBuildResult(loopRes, userPrompt, project.name);
             })()
@@ -1693,6 +1703,16 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 e2eEnabled: project.e2eEnabled ?? true,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
                 signal,
+                onBillableSenseBatch: (credits, total) => {
+                  if (!project.ownerId) return;
+                  void deductCredits(project.ownerId, credits, {
+                    type: "senses",
+                    description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
+                    projectId,
+                  }).catch((err) =>
+                    logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
+                  );
+                },
               });
               return loopResultToRefineResult(loopRes, userPrompt);
             })()
@@ -3045,22 +3065,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }).catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
       }
 
-      // --- Task #529: charge for web sense usage (1 credit per 5 combined calls) ---
-      // Only web_fetch + web_search + extract_branding are billable. Screenshots
-      // and read_diagnostics are free (already gated by their own budgets).
-      const senseCalls = report.agentLoop?.senseCalls;
-      if (project.ownerId && senseCalls) {
-        const webCalls =
-          (senseCalls.webFetch ?? 0) + (senseCalls.webSearch ?? 0) + (senseCalls.branding ?? 0);
-        const senseCost = Math.ceil(webCalls / 5);
-        if (senseCost > 0) {
-          void deductCredits(project.ownerId, senseCost, {
-            type: "senses",
-            description: `Web senses (${webCalls} call${webCalls === 1 ? "" : "s"}) — project ${projectId}`,
-            projectId,
-          }).catch((err) => logger.warn({ err }, "Sense credit deduction failed (non-fatal)"));
-        }
-      }
+      // --- Task #529: web sense credits are now charged in-loop ---
+      // See `onBillableSenseBatch` passed to runAgentLoop above. Each completed
+      // batch of 5 (web_fetch + web_search + extract_branding) deducts 1 credit
+      // at use time so usage is billed even on cancel/failure paths.
 
       // Fire-and-forget: escalate any recurring warnings, then write a success knowledge entry
       void maybeEscalateWarnings(projectId, report.warnings ?? []);
