@@ -3368,6 +3368,7 @@ export default function ProjectWorkspacePage() {
               <LogsTab
                 projectId={projectId}
                 kind={project.kind}
+                builderMode={(project as { builderMode?: string }).builderMode}
                 onTryFix={(text) => {
                   setPrompt(text);
                   setActiveTab("preview");

@@ -25,6 +25,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, projectsTable, secretsTable } from "@workspace/db";
 import { logger } from "./logger";
 import { createContainer } from "./container";
+import { ensureContainerLogTailer } from "./container-logs";
 import { encryptionService } from "./encryption";
 
 const NEON_API_BASE = "https://console.neon.tech/api/v2";
@@ -259,6 +260,13 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
           containerStatus: info.status,
         })
         .where(eq(projectsTable.id, projectId));
+    }
+
+    // Start tailing this machine's stdout/stderr so the workspace Logs tab
+    // can stream live output. Idempotent — re-runs on retry are a no-op
+    // once a tailer is already active for this projectId+machineId.
+    if (containerId) {
+      ensureContainerLogTailer(projectId, containerId);
     }
 
     // Step 2 — Neon Postgres. Idempotency is critical: a partial failure

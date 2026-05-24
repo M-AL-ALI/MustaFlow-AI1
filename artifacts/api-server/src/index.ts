@@ -11,6 +11,7 @@ import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
 import { startCveScheduler } from "./lib/cve-scheduler";
 import { failStuckBackgroundTasksOnBoot } from "./lib/jobs";
 import { resumeStuckProvisioningOnBoot } from "./lib/provisioning";
+import { resumeContainerLogTailersOnBoot } from "./lib/container-logs";
 import { handleLivePreviewUpgrade, matchPreviewPath } from "./lib/livePreviewProxy";
 
 const execFileAsync = promisify(execFile);
@@ -53,6 +54,10 @@ void failStuckBackgroundTasksOnBoot();
 // the server crashed. The provisioning pipeline is idempotent so this just
 // re-runs the steps that didn't get to persist.
 void resumeStuckProvisioningOnBoot();
+// Task #746 — resume Fly machine log tailers for every agentic project that
+// already has a containerId, so the workspace Logs tab gets a live feed
+// across server restarts.
+void resumeContainerLogTailersOnBoot();
 
 // Create an HTTP server so we can attach WebSocket upgrade handlers alongside Express.
 const server = createServer(app);

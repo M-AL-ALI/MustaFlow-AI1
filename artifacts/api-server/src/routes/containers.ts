@@ -27,6 +27,8 @@ import {
   destroyContainer,
   deployProductionContainer,
 } from "../lib/container";
+import { ensureContainerLogTailer, recordContainerLog } from "../lib/container-logs";
+import { subscribeContainerLogs, type ContainerLogPayload } from "../lib/event-bus";
 import { encryptionService } from "../lib/encryption";
 import { logger } from "../lib/logger";
 
@@ -193,6 +195,142 @@ router.get(
       .limit(limit);
 
     res.json(rows.reverse());
+  },
+);
+
+// ── GET /api/projects/:id/container/logs/stream ──────────────────────────────
+// Task #746 — Server-Sent Events stream of live container stdout/stderr.
+// Flow mirrors the task-events stream:
+//   1. Authorize, then subscribe to the in-process bus to buffer live lines.
+//   2. Replay the last N persisted log rows so the client has context.
+//   3. Flush any buffered live lines that arrived after the replay snapshot.
+//   4. Stream future lines until the client disconnects.
+// Lazily starts the Fly log tailer for this project so subscribing alone is
+// enough to get a feed going — no admin call required.
+router.get(
+  "/projects/:id/container/logs/stream",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const project = await loadProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const write = (payload: object): void => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    // Subscribe FIRST so any line arriving during replay is buffered, not
+    // dropped on the floor.
+    const liveBuffer: ContainerLogPayload[] = [];
+    let replayDone = false;
+    let streamClosed = false;
+
+    const unsubscribe = subscribeContainerLogs(projectId, (payload) => {
+      if (streamClosed) return;
+      if (!replayDone) {
+        liveBuffer.push(payload);
+        return;
+      }
+      write(payload);
+    });
+
+    // Replay the most recent 200 persisted log rows.
+    const existing = await db
+      .select({
+        id: containerLogsTable.id,
+        level: containerLogsTable.level,
+        message: containerLogsTable.message,
+        createdAt: containerLogsTable.createdAt,
+      })
+      .from(containerLogsTable)
+      .where(eq(containerLogsTable.projectId, projectId))
+      .orderBy(desc(containerLogsTable.createdAt))
+      .limit(200);
+
+    const ordered = existing.reverse();
+    let lastReplayedId = 0;
+    for (const row of ordered) {
+      write({
+        id: row.id,
+        projectId,
+        level: row.level,
+        message: row.message,
+        createdAt: row.createdAt,
+      });
+      if (row.id > lastReplayedId) lastReplayedId = row.id;
+    }
+
+    replayDone = true;
+    for (const payload of liveBuffer) {
+      if (payload.id <= lastReplayedId) continue;
+      if (streamClosed) break;
+      write(payload);
+    }
+
+    // Lazy-start the tailer. Idempotent — already-running tailers are a
+    // no-op. If the project has no container yet, surface a system line
+    // explaining why so the user isn't staring at an empty pane.
+    if (project.containerId) {
+      ensureContainerLogTailer(projectId, project.containerId);
+    } else {
+      const msg =
+        project.builderMode === "agentic"
+          ? "Container is still provisioning — logs will appear once the machine is up."
+          : "This project doesn't have a container yet. Logs will appear once one is started.";
+      // Don't persist; just hint to the live viewer.
+      write({
+        id: 0,
+        projectId,
+        level: "system",
+        message: msg,
+        createdAt: new Date(),
+      });
+    }
+
+    // Heartbeat every 25s to keep proxies from closing the idle SSE socket.
+    const heartbeat = setInterval(() => {
+      if (streamClosed) return;
+      try {
+        res.write(`: ping\n\n`);
+      } catch {
+        /* connection already closed */
+      }
+    }, 25000);
+
+    req.on("close", () => {
+      streamClosed = true;
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
+  },
+);
+
+// ── POST /api/projects/:id/container/logs/test ───────────────────────────────
+// Diagnostic helper — emits a system log line into the project's container
+// log stream. Used by the workspace Logs tab "Send test line" button so the
+// user can verify the live channel is wired up end-to-end without having to
+// trigger real container activity.
+router.post(
+  "/projects/:id/container/logs/test",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const project = await loadProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    await recordContainerLog(projectId, "system", "Test log line from workspace.");
+    res.json({ ok: true });
   },
 );
 

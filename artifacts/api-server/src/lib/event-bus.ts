@@ -9,6 +9,14 @@ export interface TaskEventPayload {
   createdAt: Date | string;
 }
 
+export interface ContainerLogPayload {
+  id: number;
+  projectId: number;
+  level: "stdout" | "stderr" | "system";
+  message: string;
+  createdAt: Date | string;
+}
+
 export interface DomainEventPayload {
   type: "added" | "removed" | "verified" | "updated";
   hostname: string;
@@ -29,6 +37,19 @@ export function subscribeTaskEvents(
 ): () => void {
   bus.on(`task:${taskId}`, handler);
   return () => bus.off(`task:${taskId}`, handler);
+}
+
+export function publishContainerLog(payload: ContainerLogPayload): void {
+  bus.emit(`container-log:${payload.projectId}`, payload);
+}
+
+export function subscribeContainerLogs(
+  projectId: number,
+  handler: (payload: ContainerLogPayload) => void,
+): () => void {
+  const channel = `container-log:${projectId}`;
+  bus.on(channel, handler);
+  return () => bus.off(channel, handler);
 }
 
 export function publishDomainEvent(payload: DomainEventPayload): void {

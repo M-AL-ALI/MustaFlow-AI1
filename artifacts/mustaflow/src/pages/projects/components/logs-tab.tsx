@@ -25,6 +25,7 @@ import {
   ArrowUpRight,
   Activity,
   Bug,
+  Box,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -876,13 +877,180 @@ function ProdLogsPanel({ projectId }: { projectId: number }) {
   );
 }
 
+// ─── Container logs panel (Task #746) ───────────────────────────────────────
+// Live stdout/stderr/system feed from the project's Fly container, streamed
+// over SSE. Mounts only for agentic projects (where there's actually a
+// container to tail). Auto-scrolls to the bottom on new lines unless the
+// user has scrolled up to read history.
+type ContainerLogLine = {
+  id: number;
+  level: "stdout" | "stderr" | "system";
+  message: string;
+  createdAt: string;
+};
+
+function ContainerLogsPanel({ projectId }: { projectId: number }) {
+  const [open, setOpen] = useState(false);
+  const [lines, setLines] = useState<ContainerLogLine[]>([]);
+  const [connected, setConnected] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const stuckToBottomRef = useRef(true);
+  const seenIdsRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (!open) return;
+    seenIdsRef.current = new Set();
+    setLines([]);
+    setConnected(false);
+    const es = new EventSource(`/api/projects/${projectId}/container/logs/stream`);
+    es.onopen = () => setConnected(true);
+    es.onerror = () => setConnected(false);
+    es.onmessage = (ev) => {
+      try {
+        const payload = JSON.parse(ev.data) as ContainerLogLine;
+        // The server uses id=0 as a transient hint that wasn't persisted;
+        // we keep it but skip de-dupe for those.
+        if (payload.id > 0) {
+          if (seenIdsRef.current.has(payload.id)) return;
+          seenIdsRef.current.add(payload.id);
+        }
+        setLines((prev) => {
+          // Cap to last 500 lines to keep DOM cheap on long-running sessions.
+          const next = [...prev, payload];
+          return next.length > 500 ? next.slice(next.length - 500) : next;
+        });
+      } catch {
+        /* ignore malformed payloads */
+      }
+    };
+    return () => es.close();
+  }, [open, projectId]);
+
+  // Auto-scroll to bottom when new lines arrive, unless the user scrolled up.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !stuckToBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [lines]);
+
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    stuckToBottomRef.current = nearBottom;
+  }, []);
+
+  const sendTestLine = useCallback(() => {
+    void fetch(`/api/projects/${projectId}/container/logs/test`, { method: "POST" }).catch(
+      () => {},
+    );
+  }, [projectId]);
+
+  return (
+    <div className="shrink-0 border-b border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-5 py-2.5 flex items-center gap-2 text-left hover:bg-muted/30 transition-colors"
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+        )}
+        <Box className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-semibold">Container Logs</span>
+        {open && (
+          <span
+            className={cn(
+              "ml-2 inline-flex items-center gap-1 text-[10px]",
+              connected ? "text-green-400" : "text-muted-foreground",
+            )}
+          >
+            <span
+              className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                connected ? "bg-green-400 animate-pulse" : "bg-muted-foreground/40",
+              )}
+            />
+            {connected ? "Live" : "Connecting…"}
+          </span>
+        )}
+        <span className="ml-auto text-[10px] text-muted-foreground">
+          Live stdout/stderr from your container
+        </span>
+      </button>
+      {open && (
+        <div className="px-5 pb-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setLines([]);
+                seenIdsRef.current = new Set();
+              }}
+              className="text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              Clear view
+            </button>
+            <button
+              type="button"
+              onClick={sendTestLine}
+              className="text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              Send test line
+            </button>
+            <span className="ml-auto text-[10px] text-muted-foreground">
+              {lines.length} {lines.length === 1 ? "line" : "lines"}
+            </span>
+          </div>
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            className="bg-black/70 border border-border rounded-lg p-2.5 font-mono text-[11px] leading-relaxed max-h-72 overflow-y-auto whitespace-pre-wrap break-all"
+          >
+            {lines.length === 0 ? (
+              <span className="text-muted-foreground">
+                Waiting for output… Logs appear here when the container produces stdout/stderr.
+              </span>
+            ) : (
+              lines.map((l, idx) => {
+                const colour =
+                  l.level === "stderr"
+                    ? "text-red-400"
+                    : l.level === "system"
+                      ? "text-amber-400"
+                      : "text-green-300";
+                const label = l.level === "stderr" ? "ERR" : l.level === "system" ? "SYS" : "OUT";
+                return (
+                  <div key={`${l.id}-${idx}`} className="flex items-start gap-2 py-0.5">
+                    <span className={cn("shrink-0 text-[10px] font-semibold", colour)}>
+                      {label}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground/70">
+                      {new Date(l.createdAt).toLocaleTimeString()}
+                    </span>
+                    <span className={cn("flex-1", colour)}>{l.message}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function LogsTab({
   projectId,
   kind,
+  builderMode,
   onTryFix,
 }: {
   projectId: number;
   kind?: string;
+  builderMode?: string;
   onTryFix?: (text: string) => void;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
@@ -949,8 +1117,11 @@ export function LogsTab({
     ["queued", "building", "submitting"].includes(b.status),
   ).length;
 
+  const isAgentic = builderMode === "agentic";
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
+      {isAgentic && <ContainerLogsPanel projectId={projectId} />}
       <ProdLogsPanel projectId={projectId} />
       {/* Header */}
       <div className="shrink-0 border-b border-border px-5 py-3 flex items-center gap-4">
