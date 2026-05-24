@@ -2077,8 +2077,8 @@ export default function ProjectWorkspacePage() {
       <div
         ref={splitContainerRef}
         className={cn(
-          "flex-1 flex min-h-0 overflow-hidden select-none relative",
-          isDragging && "cursor-col-resize",
+          "flex-1 flex min-h-0 overflow-hidden relative",
+          isDragging && "cursor-col-resize select-none",
         )}
         onMouseMove={isMobileLayout ? undefined : handleSplitDrag}
         onMouseUp={isMobileLayout ? undefined : stopSplitDrag}
