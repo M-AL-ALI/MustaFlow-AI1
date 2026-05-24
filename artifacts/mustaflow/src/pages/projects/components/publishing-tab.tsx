@@ -50,6 +50,8 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { DnsRecordsPanel, RegistrarGuideSection } from "./dns-records-panel";
 import { EmailSetupWizard } from "./email-setup-wizard";
+import { WebhooksPanel } from "./webhooks-panel";
+import { DomainAnalyticsCard } from "./domain-analytics-card";
 
 // ─── Post-publish health banner (Task #511) ─────────────────────────────────
 function HealthCheckBanner({
@@ -4421,6 +4423,42 @@ export function PublishingTab({
                     )}
                   </div>
                 </div>
+
+                {/* Domain analytics + webhooks */}
+                {domainsData && domainsData.domains.some((d) => d.verificationStatus === "verified") && (
+                  <div className="border border-border rounded-xl p-4 bg-card space-y-4">
+                    <h3 className="font-semibold text-sm flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-muted-foreground" />
+                      Domain Analytics &amp; Webhooks
+                    </h3>
+                    <div className="space-y-3">
+                      {domainsData.domains
+                        .filter((d) => d.verificationStatus === "verified")
+                        .map((d) => (
+                          <DomainAnalyticsCard
+                            key={d.id}
+                            projectId={projectId}
+                            domainId={d.id}
+                            hostname={d.hostname}
+                          />
+                        ))}
+                      <div className="pt-1">
+                        <WebhooksPanel projectId={projectId} />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Manage domain webhooks and traffic analytics.{" "}
+                      <a
+                        href="/help/domains-api"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary hover:underline"
+                      >
+                        API &amp; CLI docs
+                      </a>
+                    </p>
+                  </div>
+                )}
 
                 {/* Site metadata */}
                 <div className="border border-border rounded-xl p-4 bg-card space-y-4">

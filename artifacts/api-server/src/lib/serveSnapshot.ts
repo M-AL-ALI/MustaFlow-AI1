@@ -2,8 +2,15 @@
 // Used by both the /api/p/:slug/ public route and the custom-domain middleware.
 
 import type { Response } from "express";
-import { and, eq, isNull, lt } from "drizzle-orm";
-import { db, projectsTable, projectVersionsTable, previewSnapshotsTable } from "@workspace/db";
+import { and, eq, isNull } from "drizzle-orm";
+import {
+  db,
+  projectsTable,
+  projectVersionsTable,
+  previewSnapshotsTable,
+  domainServeEventsTable,
+  projectDomainsTable,
+} from "@workspace/db";
 import { guessMime } from "./builder";
 import { injectBridge } from "./consoleBridge";
 import { isBinaryMime } from "./binary-mime";
@@ -113,6 +120,33 @@ async function serveSnapshotById(
   }
 }
 
+/** Best-effort: record that a custom domain served a request (sampled at 5%). */
+function recordDomainServeEvent(projectId: number, hostname: string | null): void {
+  if (Math.random() > 0.05) return; // 5% sampling
+  setImmediate(() => {
+    void (async () => {
+      try {
+        let domainId: number | null = null;
+        if (hostname) {
+          const [dom] = await db
+            .select({ id: projectDomainsTable.id })
+            .from(projectDomainsTable)
+            .where(
+              and(
+                eq(projectDomainsTable.projectId, projectId),
+                eq(projectDomainsTable.hostname, hostname),
+              ),
+            );
+          domainId = dom?.id ?? null;
+        }
+        await db.insert(domainServeEventsTable).values({ projectId, domainId, hostname });
+      } catch {
+        /* best-effort, never throws */
+      }
+    })();
+  });
+}
+
 /**
  * Serve a project snapshot identified by projectId + environment.
  * Used by the custom-domain middleware where the projectId is known
@@ -123,6 +157,7 @@ export async function serveSnapshotByProjectEnv(
   projectId: number,
   filePath: string,
   env: "staging" | "production",
+  hostname?: string,
 ): Promise<void> {
   const [project] = await db
     .select({
@@ -154,7 +189,11 @@ export async function serveSnapshotByProjectEnv(
     return;
   }
 
-  // Production
+  // Production — record domain serve event (sampled) when a custom hostname is involved
+  if (hostname) {
+    recordDomainServeEvent(projectId, hostname);
+  }
+
   if (project.status !== "published" || !project.publishedSnapshotId) {
     res.status(404).type("text/html").send(NOT_PUBLISHED_HTML);
     return;

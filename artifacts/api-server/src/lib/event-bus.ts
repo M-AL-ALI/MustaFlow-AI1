@@ -13,6 +13,7 @@ export interface DomainEventPayload {
   type: "added" | "removed" | "verified" | "updated";
   hostname: string;
   projectId: number;
+  domainId?: number;
 }
 
 const bus = new EventEmitter();

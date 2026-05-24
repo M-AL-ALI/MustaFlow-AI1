@@ -57,6 +57,9 @@ import blueprintsRouter from "./blueprints";
 import deploymentConfigRouter from "./deployment-config";
 import artifactsRouter from "./artifacts";
 import agentInboxRouter from "./agent-inbox";
+import webhooksRouter from "./webhooks";
+import domainAnalyticsRouter from "./domain-analytics";
+import v1Router from "./v1/index";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -72,10 +75,12 @@ router.use(analyticsRouter); // POST /p/:slug/analytics/ping (public ping)
 router.use(publicProdLogRouter); // POST /p/:slug/log (public browser error beacon)
 router.use(sslWebhookRouter); // POST /domain/ssl-webhook (Cloudflare → us)
 router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
+router.use(v1Router); // POST/GET /v1/* — PAT-authed public REST API (own auth middleware)
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
 const KNOWN_PREFIXES = [
+  "/v1",
   "/me",
   "/workspaces",
   "/projects",
@@ -190,6 +195,8 @@ router.use(blueprintsRouter);
 router.use(deploymentConfigRouter);
 router.use(artifactsRouter);
 router.use(agentInboxRouter);
+router.use(webhooksRouter);
+router.use(domainAnalyticsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

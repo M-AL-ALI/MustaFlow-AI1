@@ -20,6 +20,7 @@ import SettingsPage from "./pages/settings";
 import TermsPage from "./pages/terms";
 import PrivacyPage from "./pages/privacy";
 import HelpPage from "./pages/help";
+import HelpDomainsApiPage from "./pages/help-domains-api";
 import AdminPage from "./pages/admin";
 import TrashPage from "./pages/trash";
 import BillingPage from "./pages/billing";
@@ -425,6 +426,11 @@ function ClerkProviderWithRoutes() {
               <Route path="/help">
                 <AppLayout>
                   <HelpPage />
+                </AppLayout>
+              </Route>
+              <Route path="/help/domains-api">
+                <AppLayout>
+                  <HelpDomainsApiPage />
                 </AppLayout>
               </Route>
 

@@ -33,3 +33,6 @@ export * from "./blueprints";
 export * from "./deployment-schedules";
 export * from "./project-artifacts";
 export * from "./agent-inbox";
+export * from "./webhooks";
+export * from "./personal-access-tokens";
+export * from "./domain-serve-events";

@@ -21,6 +21,9 @@ import {
   deploymentLogsTable,
   secretAuditLogTable,
   toolAuditTable,
+  domainServeEventsTable,
+  projectDomainsTable,
+  projectWebhooksTable,
 } from "@workspace/db";
 import { and, gte } from "drizzle-orm";
 import { requireAdmin } from "../lib/adminAuth";
@@ -672,6 +675,41 @@ router.post("/admin/skills/drafts/:name/reject", async (req, res): Promise<void>
   } catch (err) {
     res.status(400).json({ error: String((err as Error).message ?? err) });
   }
+});
+
+// ── GET /api/admin/domain-metrics ─────────────────────────────────────────────
+// Top-level domain traffic + webhook delivery stats for the admin dashboard.
+router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void> => {
+  const rawDays = Number(req.query["days"] ?? 7);
+  const days = Math.min(Math.max(1, isNaN(rawDays) ? 7 : rawDays), 90);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const [totalDomainsRow] = await db
+    .select({ total: count() })
+    .from(projectDomainsTable);
+
+  const [verifiedRow] = await db
+    .select({ total: count() })
+    .from(projectDomainsTable)
+    .where(eq(projectDomainsTable.verificationStatus, "verified"));
+
+  const [totalHooksRow] = await db
+    .select({ total: count() })
+    .from(projectWebhooksTable)
+    .where(eq(projectWebhooksTable.active, true));
+
+  const [serveEventsRow] = await db
+    .select({ total: count() })
+    .from(domainServeEventsTable)
+    .where(gte(domainServeEventsTable.ts, since));
+
+  res.json({
+    sinceDays: days,
+    totalDomains: totalDomainsRow?.total ?? 0,
+    verifiedDomains: verifiedRow?.total ?? 0,
+    activeWebhooks: totalHooksRow?.total ?? 0,
+    domainServeRequests: serveEventsRow?.total ?? 0,
+  });
 });
 
 export default router;

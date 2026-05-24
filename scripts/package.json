@@ -41,6 +41,7 @@
     "migrate-agent-inbox": "tsx ./src/migrate-agent-inbox.ts",
     "eval-prompts": "tsx ./src/eval-prompts.ts",
     "migrate-domain-cert-fields": "tsx ./src/migrate-domain-cert-fields.ts",
+    "migrate-webhooks-pat": "tsx ./src/migrate-webhooks-pat.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },
