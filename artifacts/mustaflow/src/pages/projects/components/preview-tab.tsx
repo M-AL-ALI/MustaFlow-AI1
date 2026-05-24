@@ -11,6 +11,7 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   AlertTriangle,
   AlertCircle,
   Terminal,
@@ -162,6 +163,7 @@ export function PreviewTab({
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
   const [readinessDismissed, setReadinessDismissed] = useState(false);
+  const [readinessExpanded, setReadinessExpanded] = useState(false);
   // Secrets — used by the mobile readiness panel to flag missing keys
   const { data: projectSecrets } = useListSecrets(project.id, {
     query: { queryKey: getListSecretsQueryKey(project.id), enabled: !!project.id && isMobile },
@@ -1678,14 +1680,15 @@ export function PreviewTab({
           )}
           {hasFiles && (
             <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 gap-1.5 text-[11px] font-medium"
               asChild
-              title="Open preview in new tab"
+              title="Open preview in a new browser tab"
             >
               <a href={previewSrc} target="_blank" rel="noreferrer">
                 <ExternalLink className="h-3.5 w-3.5" />
+                Open
               </a>
             </Button>
           )}
@@ -1860,11 +1863,31 @@ export function PreviewTab({
       {showMobileReadiness && (
         <div className="shrink-0 border-b border-purple-500/30 bg-purple-500/5 dark:bg-purple-500/8">
           <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
-            <Smartphone className="h-3.5 w-3.5 text-purple-700 dark:text-purple-300 shrink-0" />
-            <span className="flex-1 text-[11px] font-semibold text-purple-700 dark:text-purple-300">
-              Mobile preview readiness — what works here vs. on a real device
-            </span>
             <button
+              type="button"
+              onClick={() => setReadinessExpanded((v) => !v)}
+              className="flex-1 flex items-center gap-2 text-left hover:opacity-80 transition-opacity"
+              aria-expanded={readinessExpanded}
+              title={readinessExpanded ? "Hide details" : "Show details"}
+            >
+              <Smartphone className="h-3.5 w-3.5 text-purple-700 dark:text-purple-300 shrink-0" />
+              <span className="flex-1 text-[11px] font-semibold text-purple-700 dark:text-purple-300">
+                Mobile preview readiness — what works here vs. on a real device
+              </span>
+              {missingSecrets.length > 0 && (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                  {missingSecrets.length} missing
+                </span>
+              )}
+              <ChevronRight
+                className={cn(
+                  "h-3.5 w-3.5 text-purple-700/70 dark:text-purple-300/70 shrink-0 transition-transform",
+                  readinessExpanded && "rotate-90",
+                )}
+              />
+            </button>
+            <button
+              type="button"
               onClick={() => setReadinessDismissed(true)}
               className="shrink-0 text-purple-700/60 hover:text-purple-700 dark:text-purple-300/60 dark:hover:text-purple-300 transition-colors"
               title="Dismiss"
@@ -1872,6 +1895,7 @@ export function PreviewTab({
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
+          {readinessExpanded && (
           <div className="px-3 pb-2 space-y-1.5">
             <div className="flex items-start gap-2 bg-purple-500/10 border border-purple-500/30 rounded-lg px-2.5 py-2">
               <Info className="h-3 w-3 text-purple-700 dark:text-purple-300 shrink-0 mt-0.5" />
@@ -1957,6 +1981,7 @@ export function PreviewTab({
               </div>
             )}
           </div>
+          )}
         </div>
       )}
 
