@@ -335,7 +335,20 @@ The intended user journey is: Login → create project → build app → preview
 - **Publishing tab integration**: `DnsRecordsPanel` + `EmailSetupWizard` shown inline inside expanded verified domain rows in the Domains section. Activated when user clicks the diagnose/expand button on a verified domain.
 - **DB migration**: `pnpm --filter @workspace/scripts run migrate-domain-cert-fields` — adds `ssl_source`, `byo_cert_expires_at`, `byo_cert_subject` columns to `project_domains`. Safe to re-run.
 - **Key files**: `artifacts/api-server/src/lib/cloudflare.ts` (DNS CRUD + BYO cert), `artifacts/api-server/src/routes/dns-records.ts` (all DNS routes), `artifacts/mustaflow/src/pages/projects/components/dns-records-panel.tsx`, `artifacts/mustaflow/src/pages/projects/components/email-setup-wizard.tsx`.
-- Cloudflare zone credentials: `CF_ZONE_ID` + `CF_API_TOKEN`. All DNS/cert operations are graceful no-ops when these are absent.
+- Cloudflare zone credentials: `CF_ZONE_ID` + `CF_API_TOKEN`. All DNS/cert operations are graceful no-op when these are absent.
+
+## Domain Security Phase (Task #560)
+
+- **Per-domain WAF defaults**: `applyDefaultWafRules(hostname, cfHostnameId)` in `cloudflare.ts` applies CF managed ruleset + OWASP rules with a hostname expression on every new custom hostname. No-op when `CF_API_TOKEN` is unset.
+- **Per-domain security config**: `PATCH /api/projects/:id/domains/:domainId/security` — stores `security_config` JSONB (rateLimitRps, geoBlock[], ipAllow[], ipDeny[], wafEnabled, botManagement, mtlsEnabled, mtlsCaCert). Pushes IP-deny/geo-block rules to CF Firewall API best-effort.
+- **mTLS opt-in**: `enableMtls(hostname, caCert)` / `disableMtls(certId)` in `cloudflare.ts` — uploads CA cert to CF Access, associates with hostname. Triggered when `mtlsEnabled=true` + `mtlsCaCert` are set in security config.
+- **Domain suspension**: `suspendedAt` + `suspensionReason` columns on `project_domains`. When set, `customDomainMiddleware.ts` returns HTTP 451 with a static notice page immediately. Admin endpoints: `POST /api/admin/domains/:domainId/suspend`, `POST /api/admin/domains/:domainId/unsuspend`.
+- **Abuse intake**: `POST /api/abuse-reports` (public, no auth) — creates `abuse_reports` row (domainId FK, hostname, category, reason, details, reporterEmail, hashed IP). Rate-limited 5/min per IP. Admin queue at `GET /api/admin/abuse-reports`, with dismiss and resolve actions.
+- **Content safety scan**: `scanContent()` in `artifacts/api-server/src/lib/content-safety.ts` — regex-based phishing + malware scan of all text files at publish time. Blocking violations (eval-fetch-exec, base64-exec-payload, card-skimmer, cryptominer, etc.) return HTTP 422. Admins can bypass with `overrideSafetyCheck: true` in the publish body. Applied only to production publishes.
+- **Takeover protection**: `runTakeoverProtectionSweep()` in `cf-scheduler.ts` — daily sweep finds `project_domains` rows whose project is soft-deleted but domain is not suspended, then auto-suspends them with reason `"project_deleted"`. Runs alongside the existing dangling-CNAME and expiry sweeps.
+- **Admin security dashboard**: `GET /api/admin/security/dashboard` — returns abuse queue stats, suspended domain list, and CF hostname summary.
+- **DB migration**: `pnpm --filter @workspace/scripts run migrate-domain-security` — adds `security_config`, `suspended_at`, `suspension_reason` to `project_domains`; creates `abuse_reports` table. Safe to re-run.
+- **Key files**: `lib/db/src/schema/abuse-reports.ts`, `lib/db/src/schema/domains.ts`, `artifacts/api-server/src/lib/content-safety.ts`, `artifacts/api-server/src/lib/cloudflare.ts`, `artifacts/api-server/src/middlewares/customDomainMiddleware.ts`, `artifacts/api-server/src/routes/abuse.ts`.
 
 ## Gotchas
 

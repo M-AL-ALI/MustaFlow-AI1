@@ -11,7 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { eq, sql, count, desc } from "drizzle-orm";
+import { eq, sql, count, desc, isNotNull } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -21,6 +21,7 @@ import {
   deploymentLogsTable,
   secretAuditLogTable,
   toolAuditTable,
+  abuseReportsTable,
   domainServeEventsTable,
   projectDomainsTable,
   projectWebhooksTable,
@@ -709,6 +710,233 @@ router.get("/admin/domain-metrics", requireAdmin, async (req, res): Promise<void
     verifiedDomains: verifiedRow?.total ?? 0,
     activeWebhooks: totalHooksRow?.total ?? 0,
     domainServeRequests: serveEventsRow?.total ?? 0,
+  });
+});
+
+// ── GET /api/admin/abuse-reports ──────────────────────────────────────────────
+// Returns abuse reports with optional ?status=open|dismissed|resolved filter.
+router.get("/admin/abuse-reports", async (req, res): Promise<void> => {
+  const statusFilter = req.query.status as string | undefined;
+  const limit = Math.min(Number(req.query.limit ?? 100), 500);
+  const offset = Number(req.query.offset ?? 0);
+
+  const rows = await db
+    .select()
+    .from(abuseReportsTable)
+    .where(statusFilter ? eq(abuseReportsTable.status, statusFilter) : undefined)
+    .orderBy(desc(abuseReportsTable.createdAt))
+    .limit(limit)
+    .offset(offset);
+
+  const [totals] = await db
+    .select({
+      open: sql<number>`count(*) filter (where status = 'open')`,
+      dismissed: sql<number>`count(*) filter (where status = 'dismissed')`,
+      resolved: sql<number>`count(*) filter (where status = 'resolved')`,
+    })
+    .from(abuseReportsTable);
+
+  res.json({ reports: rows, totals, limit, offset });
+});
+
+// ── POST /api/admin/abuse-reports/:id/dismiss ────────────────────────────────
+router.post("/admin/abuse-reports/:id/dismiss", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!id) {
+    res.status(400).json({ error: "Invalid report ID" });
+    return;
+  }
+  await db
+    .update(abuseReportsTable)
+    .set({ status: "dismissed", resolvedBy: req.userId ?? "admin", resolvedAt: new Date() })
+    .where(eq(abuseReportsTable.id, id));
+  res.json({ ok: true, id, status: "dismissed" });
+});
+
+// ── POST /api/admin/abuse-reports/:id/resolve ────────────────────────────────
+router.post("/admin/abuse-reports/:id/resolve", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!id) {
+    res.status(400).json({ error: "Invalid report ID" });
+    return;
+  }
+  const body = (req.body ?? {}) as { action?: string };
+  await db
+    .update(abuseReportsTable)
+    .set({ status: "resolved", resolvedBy: req.userId ?? "admin", resolvedAt: new Date() })
+    .where(eq(abuseReportsTable.id, id));
+  res.json({ ok: true, id, status: "resolved", action: body.action ?? "manual" });
+});
+
+// ── POST /api/admin/domains/:domainId/suspend ────────────────────────────────
+// Admin-only: suspend a custom domain. Returns 451 to all visitors until unsuspended.
+router.post("/admin/domains/:domainId/suspend", async (req, res): Promise<void> => {
+  const domainId = Number(req.params.domainId);
+  if (!domainId) {
+    res.status(400).json({ error: "Invalid domain ID" });
+    return;
+  }
+
+  const body = (req.body ?? {}) as { reason?: string };
+  const reason = (body.reason ?? "policy_violation").trim();
+
+  const [domain] = await db
+    .select({
+      id: projectDomainsTable.id,
+      hostname: projectDomainsTable.hostname,
+      suspendedAt: projectDomainsTable.suspendedAt,
+    })
+    .from(projectDomainsTable)
+    .where(eq(projectDomainsTable.id, domainId));
+
+  if (!domain) {
+    res.status(404).json({ error: "Domain not found" });
+    return;
+  }
+  if (domain.suspendedAt) {
+    res.status(409).json({ error: "Domain is already suspended", hostname: domain.hostname });
+    return;
+  }
+
+  await db
+    .update(projectDomainsTable)
+    .set({ suspendedAt: new Date(), suspensionReason: reason, updatedAt: new Date() })
+    .where(eq(projectDomainsTable.id, domainId));
+
+  // Audit via deployment_logs scoped to the domain's project
+  const [suspendDomainProj] = await db
+    .select({ projectId: projectDomainsTable.projectId })
+    .from(projectDomainsTable)
+    .where(eq(projectDomainsTable.id, domainId));
+
+  if (suspendDomainProj) {
+    await db
+      .insert(deploymentLogsTable)
+      .values({
+        projectId: suspendDomainProj.projectId,
+        userId: req.userId ?? "admin",
+        env: "domain",
+        status: "failed",
+        note: JSON.stringify({
+          action: "admin_suspend_domain",
+          domainId,
+          hostname: domain.hostname,
+          reason,
+        }),
+      })
+      .catch(() => {
+        /* best-effort */
+      });
+  }
+
+  res.json({ ok: true, domainId, hostname: domain.hostname, suspended: true, reason });
+});
+
+// ── POST /api/admin/domains/:domainId/unsuspend ──────────────────────────────
+router.post("/admin/domains/:domainId/unsuspend", async (req, res): Promise<void> => {
+  const domainId = Number(req.params.domainId);
+  if (!domainId) {
+    res.status(400).json({ error: "Invalid domain ID" });
+    return;
+  }
+
+  const [domain] = await db
+    .select({
+      id: projectDomainsTable.id,
+      hostname: projectDomainsTable.hostname,
+      suspendedAt: projectDomainsTable.suspendedAt,
+    })
+    .from(projectDomainsTable)
+    .where(eq(projectDomainsTable.id, domainId));
+
+  if (!domain) {
+    res.status(404).json({ error: "Domain not found" });
+    return;
+  }
+
+  await db
+    .update(projectDomainsTable)
+    .set({ suspendedAt: null, suspensionReason: null, updatedAt: new Date() })
+    .where(eq(projectDomainsTable.id, domainId));
+
+  // Audit via deployment_logs scoped to the domain's project
+  const [unsuspendDomainProj] = await db
+    .select({ projectId: projectDomainsTable.projectId })
+    .from(projectDomainsTable)
+    .where(eq(projectDomainsTable.id, domainId));
+
+  if (unsuspendDomainProj) {
+    await db
+      .insert(deploymentLogsTable)
+      .values({
+        projectId: unsuspendDomainProj.projectId,
+        userId: req.userId ?? "admin",
+        env: "domain",
+        status: "unpublished",
+        note: JSON.stringify({
+          action: "admin_unsuspend_domain",
+          domainId,
+          hostname: domain.hostname,
+        }),
+      })
+      .catch(() => {
+        /* best-effort */
+      });
+  }
+
+  res.json({ ok: true, domainId, hostname: domain.hostname, suspended: false });
+});
+
+// ── GET /api/admin/security/dashboard ────────────────────────────────────────
+// Operator security overview: abuse queue, suspended domains, WAF + takeover risks.
+router.get("/admin/security/dashboard", async (_req, res): Promise<void> => {
+  const [abuseStats] = await db
+    .select({
+      open: sql<number>`count(*) filter (where status = 'open')`,
+      total: count(),
+    })
+    .from(abuseReportsTable);
+
+  const suspendedDomains = await db
+    .select({
+      id: projectDomainsTable.id,
+      hostname: projectDomainsTable.hostname,
+      suspendedAt: projectDomainsTable.suspendedAt,
+      suspensionReason: projectDomainsTable.suspensionReason,
+      projectId: projectDomainsTable.projectId,
+    })
+    .from(projectDomainsTable)
+    .where(isNotNull(projectDomainsTable.suspendedAt))
+    .orderBy(desc(projectDomainsTable.suspendedAt))
+    .limit(50);
+
+  const cfSummary = await getCfHostnameSummary().catch(() => ({
+    total: 0,
+    active: 0,
+    pending: 0,
+    failed: 0,
+  }));
+
+  const recentReports = await db
+    .select()
+    .from(abuseReportsTable)
+    .where(eq(abuseReportsTable.status, "open"))
+    .orderBy(desc(abuseReportsTable.createdAt))
+    .limit(10);
+
+  res.json({
+    abuseQueue: {
+      openCount: Number(abuseStats?.open ?? 0),
+      total: Number(abuseStats?.total ?? 0),
+      recentOpen: recentReports,
+    },
+    suspension: {
+      count: suspendedDomains.length,
+      domains: suspendedDomains,
+    },
+    cloudflare: cfSummary,
+  });
+});
   });
 });
 

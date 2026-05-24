@@ -28,9 +28,10 @@ import {
   agentTasksTable,
   chatMessagesTable,
 } from "@workspace/db";
+import type { DomainSecurityConfig } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { activateSslForDomain, activateSslForProject } from "./ssl";
-import { deleteCustomHostname } from "../lib/cloudflare";
+import { deleteCustomHostname, applySecurityConfig, enableMtls } from "../lib/cloudflare";
 import { createLimiterForDomainVerify } from "../lib/rateLimit";
 import { publishDomainEvent } from "../lib/event-bus";
 import { enqueueJob, DOMAIN_REWRITE_SENTINEL } from "../lib/jobs";
@@ -1809,6 +1810,89 @@ router.post(
       reversedActionId: lastAction.id,
       reversedAction: lastAction.status,
       note: inverseNote,
+    });
+  },
+);
+
+// ── PATCH /api/projects/:id/domains/:domainId/security ───────────────────────
+// Update per-domain security config: WAF, rate limits, geo-blocking, IP allow/deny, mTLS.
+// Config is stored in `security_config` JSONB and pushed to Cloudflare best-effort.
+router.patch(
+  "/projects/:id/domains/:domainId/security",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const domainId = Number(req.params.domainId);
+    const userId = (req as { userId?: string }).userId ?? "unknown";
+
+    if (!domainId) {
+      res.status(400).json({ error: "Invalid domain ID" });
+      return;
+    }
+
+    const [domain] = await db
+      .select({
+        id: projectDomainsTable.id,
+        hostname: projectDomainsTable.hostname,
+        projectId: projectDomainsTable.projectId,
+        securityConfig: projectDomainsTable.securityConfig,
+        cfHostnameId: projectDomainsTable.cfHostnameId,
+      })
+      .from(projectDomainsTable)
+      .where(
+        and(eq(projectDomainsTable.id, domainId), eq(projectDomainsTable.projectId, projectId)),
+      );
+
+    if (!domain) {
+      res.status(404).json({ error: "Domain not found or does not belong to this project" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as Partial<DomainSecurityConfig>;
+
+    // Merge with existing config — only update provided keys
+    const merged: DomainSecurityConfig = {
+      ...(domain.securityConfig ?? {}),
+      ...(body.rateLimitRps !== undefined ? { rateLimitRps: body.rateLimitRps } : {}),
+      ...(body.geoBlock !== undefined ? { geoBlock: body.geoBlock } : {}),
+      ...(body.ipAllow !== undefined ? { ipAllow: body.ipAllow } : {}),
+      ...(body.ipDeny !== undefined ? { ipDeny: body.ipDeny } : {}),
+      ...(body.wafEnabled !== undefined ? { wafEnabled: body.wafEnabled } : {}),
+      ...(body.botManagement !== undefined ? { botManagement: body.botManagement } : {}),
+      ...(body.mtlsEnabled !== undefined ? { mtlsEnabled: body.mtlsEnabled } : {}),
+      ...(body.mtlsCaCert !== undefined ? { mtlsCaCert: body.mtlsCaCert } : {}),
+    };
+
+    await db
+      .update(projectDomainsTable)
+      .set({ securityConfig: merged, updatedAt: new Date() })
+      .where(eq(projectDomainsTable.id, domainId));
+
+    // Push config to Cloudflare best-effort (non-fatal)
+    void applySecurityConfig(domain.hostname, merged).catch(() => {
+      /* non-fatal */
+    });
+
+    // If mTLS is being enabled and a CA cert is provided, activate it
+    if (merged.mtlsEnabled && merged.mtlsCaCert) {
+      void enableMtls(domain.hostname, merged.mtlsCaCert).catch(() => {
+        /* non-fatal */
+      });
+    }
+
+    await writeDomainAudit({
+      projectId,
+      userId,
+      action: "domain_security_updated",
+      hostname: domain.hostname,
+      after: { securityConfig: merged },
+    });
+
+    res.json({
+      ok: true,
+      domainId,
+      hostname: domain.hostname,
+      securityConfig: merged,
     });
   },
 );

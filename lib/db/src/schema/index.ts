@@ -36,3 +36,4 @@ export * from "./agent-inbox";
 export * from "./webhooks";
 export * from "./personal-access-tokens";
 export * from "./domain-serve-events";
+export * from "./abuse-reports";

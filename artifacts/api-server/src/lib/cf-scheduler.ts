@@ -17,7 +17,7 @@
  *    Writes an admin alert row to deployment_logs.
  */
 
-import { eq, isNotNull, and, isNull, lte } from "drizzle-orm";
+import { eq, isNotNull, and, isNull, lte, sql } from "drizzle-orm";
 import { db, projectDomainsTable, projectsTable, deploymentLogsTable } from "@workspace/db";
 import {
   cfEnabled,
@@ -270,6 +270,94 @@ export async function runExpiryAlert(): Promise<void> {
   }
 }
 
+// ── Takeover protection sweep — Task #560 ─────────────────────────────────────
+
+/**
+ * Auto-suspend domains that belong to soft-deleted projects.
+ *
+ * When a project is soft-deleted, its custom domains can still point at our
+ * infrastructure via CNAME/A records. If left active, a new project could claim
+ * the same slug/ID and have the DNS serve their content on the old domain.
+ *
+ * This sweep finds project_domains rows whose project has been soft-deleted but
+ * whose domain is still not suspended, and auto-suspends them with reason
+ * "project_deleted". Logged to deployment_logs for auditability.
+ */
+export async function runTakeoverProtectionSweep(): Promise<void> {
+  logger.info("CF scheduler: starting takeover-protection sweep");
+
+  try {
+    // Find domains linked to soft-deleted projects that aren't already suspended.
+    // Cross-table join with deleted_at check via raw SQL fragment.
+    const result = await db.execute<{
+      id: number;
+      hostname: string;
+      project_id: number;
+    }>(
+      sql`
+        SELECT pd.id, pd.hostname, pd.project_id
+        FROM project_domains pd
+        JOIN projects p ON p.id = pd.project_id
+        WHERE p.deleted_at IS NOT NULL
+          AND pd.suspended_at IS NULL
+      `,
+    );
+
+    const rows = result.rows ?? [];
+
+    if (rows.length === 0) {
+      logger.info("CF scheduler: takeover sweep — no dangling domains found");
+      return;
+    }
+
+    logger.warn(
+      { count: rows.length },
+      "CF scheduler: takeover sweep — suspending domains for deleted projects",
+    );
+
+    for (const row of rows) {
+      try {
+        await db
+          .update(projectDomainsTable)
+          .set({
+            suspendedAt: new Date(),
+            suspensionReason: "project_deleted",
+            updatedAt: new Date(),
+          })
+          .where(eq(projectDomainsTable.id, row.id));
+
+        await db.insert(deploymentLogsTable).values({
+          projectId: row.project_id,
+          userId: "system",
+          env: "domain",
+          status: "failed",
+          note: JSON.stringify({
+            action: "takeover_protection_suspend",
+            hostname: row.hostname,
+            domainId: row.id,
+            reason:
+              "Domain suspended automatically: project was soft-deleted but DNS still points here.",
+          }),
+        });
+
+        logger.info(
+          { hostname: row.hostname, domainId: row.id, projectId: row.project_id },
+          "CF scheduler: takeover protection — domain suspended",
+        );
+      } catch (err) {
+        logger.warn(
+          { err, hostname: row.hostname },
+          "CF scheduler: takeover protection — failed to suspend domain",
+        );
+      }
+    }
+
+    logger.info({ suspended: rows.length }, "CF scheduler: takeover protection sweep complete");
+  } catch (err) {
+    logger.error({ err }, "CF scheduler: takeover protection sweep failed");
+  }
+}
+
 // ── Admin summary ─────────────────────────────────────────────────────────────
 
 export interface CfHostnameSummary {
@@ -366,13 +454,15 @@ export function startCfScheduler(): void {
     }, POLL_INTERVAL_MS).unref();
   }, INITIAL_POLL_DELAY_MS).unref();
 
-  // Daily: dangling sweep + expiry alerts
+  // Daily: dangling sweep + expiry alerts + takeover protection
   setTimeout(() => {
     void runDanglingCnameSweep();
     void runExpiryAlert();
+    void runTakeoverProtectionSweep();
     setInterval(() => {
       void runDanglingCnameSweep();
       void runExpiryAlert();
+      void runTakeoverProtectionSweep();
     }, DAILY_INTERVAL_MS).unref();
   }, INITIAL_DAILY_DELAY_MS).unref();
 }

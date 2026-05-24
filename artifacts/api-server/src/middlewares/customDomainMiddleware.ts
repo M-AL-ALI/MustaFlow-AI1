@@ -9,6 +9,7 @@
 //
 // When a request arrives whose Host header matches a project's domain,
 // the middleware short-circuits path routing and serves the content:
+//   - If the domain is suspended (suspendedAt set), return HTTP 451 with a notice page.
 //   - If the project has a running production container (prodContainerStatus=running),
 //     proxy the request to the container URL (Phase E).
 //   - Otherwise, serve the published DB snapshot (legacy behaviour, static-html).
@@ -30,6 +31,9 @@ import { recordHostnameSighting } from "../routes/domains";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
+// Static 451 page returned for suspended domains
+const SUSPENDED_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Content Unavailable</title><style>body{font-family:system-ui,sans-serif;padding:48px;color:#9ca3af;background:#0a0f1c;max-width:600px;margin:0 auto}h1{color:#fff}a{color:#6366f1}</style></head><body><h1>Content Unavailable</h1><p>This site has been suspended for a violation of our <a href="https://mustaflow.app/terms">Terms of Service</a>.</p><p>If you believe this is an error, please contact <a href="mailto:support@mustaflow.app">support@mustaflow.app</a>.</p><p style="font-size:0.8rem;margin-top:2rem;opacity:0.5">HTTP 451 — Unavailable For Legal Reasons</p></body></html>`;
+
 // ── In-memory routing table ──────────────────────────────────────────────────
 // Map from hostname to project row data.
 interface CachedProject {
@@ -38,6 +42,10 @@ interface CachedProject {
   prodContainerStatus: string;
   /** Environment slot this domain is wired to ('production' | 'staging'). */
   environment: string;
+  /** When set, this domain is suspended and requests return 451. */
+  suspendedAt: Date | null;
+  /** Optional reason recorded for the suspension. */
+  suspensionReason: string | null;
 }
 
 let hostnameMap = new Map<string, CachedProject>();
@@ -53,6 +61,8 @@ async function loadRoutingTable(): Promise<void> {
         projectId: projectDomainsTable.projectId,
         verificationStatus: projectDomainsTable.verificationStatus,
         environment: projectDomainsTable.environment,
+        suspendedAt: projectDomainsTable.suspendedAt,
+        suspensionReason: projectDomainsTable.suspensionReason,
       })
       .from(projectDomainsTable);
 
@@ -80,16 +90,20 @@ async function loadRoutingTable(): Promise<void> {
 
     const newMap = new Map<string, CachedProject>();
 
-    // From project_domains (verified entries) — honour per-domain environment slot
+    // From project_domains (verified or suspended entries)
     for (const row of domainRows) {
-      if (row.verificationStatus !== "verified") continue;
+      // Include suspended domains (they need to serve 451) even if not verified
+      const isSuspended = row.suspendedAt != null;
+      if (!isSuspended && row.verificationStatus !== "verified") continue;
       const proj = projectMap.get(row.projectId);
-      if (!proj) continue;
+      // For suspended domains without a project (project deleted), still track
       newMap.set(row.hostname, {
         id: row.projectId,
-        prodContainerUrl: proj.prodContainerUrl,
-        prodContainerStatus: proj.prodContainerStatus,
+        prodContainerUrl: proj?.prodContainerUrl ?? null,
+        prodContainerStatus: proj?.prodContainerStatus ?? "stopped",
         environment: row.environment ?? "production",
+        suspendedAt: row.suspendedAt ?? null,
+        suspensionReason: row.suspensionReason ?? null,
       });
     }
 
@@ -102,6 +116,8 @@ async function loadRoutingTable(): Promise<void> {
         prodContainerUrl: proj.prodContainerUrl,
         prodContainerStatus: proj.prodContainerStatus,
         environment: "production",
+        suspendedAt: null,
+        suspensionReason: null,
       });
     }
 
@@ -136,14 +152,35 @@ async function refreshEntry(hostname: string, projectId: number): Promise<void> 
       .from(projectsTable)
       .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
+    const [domainRow] = await db
+      .select({
+        suspendedAt: projectDomainsTable.suspendedAt,
+        suspensionReason: projectDomainsTable.suspensionReason,
+        environment: projectDomainsTable.environment,
+      })
+      .from(projectDomainsTable)
+      .where(eq(projectDomainsTable.hostname, hostname));
+
     if (proj) {
-      // Preserve the cached environment if one already exists; default to production.
       const existing = hostnameMap.get(hostname);
       hostnameMap.set(hostname, {
         id: proj.id,
         prodContainerUrl: proj.prodContainerUrl,
         prodContainerStatus: proj.prodContainerStatus,
-        environment: existing?.environment ?? "production",
+        environment: domainRow?.environment ?? existing?.environment ?? "production",
+        suspendedAt: domainRow?.suspendedAt ?? null,
+        suspensionReason: domainRow?.suspensionReason ?? null,
+      });
+    } else if (domainRow?.suspendedAt) {
+      // Project deleted but domain suspended — keep for 451 enforcement
+      const existing = hostnameMap.get(hostname);
+      hostnameMap.set(hostname, {
+        id: projectId,
+        prodContainerUrl: null,
+        prodContainerStatus: "stopped",
+        environment: domainRow.environment ?? existing?.environment ?? "production",
+        suspendedAt: domainRow.suspendedAt,
+        suspensionReason: domainRow.suspensionReason ?? null,
       });
     }
   } catch {
@@ -295,6 +332,16 @@ export async function customDomainMiddleware(
   const project = hostnameMap.get(hostname);
   if (!project) {
     next();
+    return;
+  }
+
+  // ── Suspension check — return 451 immediately ─────────────────────────────
+  if (project.suspendedAt) {
+    res
+      .status(451)
+      .type("text/html")
+      .setHeader("X-Suspension-Reason", project.suspensionReason ?? "policy_violation")
+      .send(SUSPENDED_HTML);
     return;
   }
 

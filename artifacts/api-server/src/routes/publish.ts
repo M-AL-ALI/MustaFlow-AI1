@@ -24,6 +24,8 @@ import {
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
+import { scanContent } from "../lib/content-safety";
+import { isAdminUser } from "../lib/adminAuth";
 import { generateOgSvg } from "../lib/ogImage";
 import { deployProductionContainer, destroyContainer } from "../lib/container";
 import { pushSnapshotToCdn, cdnConfigured } from "../lib/cdn";
@@ -99,6 +101,49 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       error: "Cannot publish a project with no generated files. Build the app first.",
     });
     return;
+  }
+
+  // ── Content safety scan — phishing + malware patterns ─────────────────────
+  // Only applied to production publishes (staging is a dev artefact).
+  // Admins can bypass by passing overrideSafetyCheck: true in the request body
+  // — the override is only honoured when the caller is a platform admin.
+  const overrideSafetyRequested =
+    (req.body as Record<string, unknown>)?.overrideSafetyCheck === true;
+  const overrideSafety =
+    overrideSafetyRequested && req.userId ? await isAdminUser(req.userId) : false;
+  if (env === "production" && !overrideSafety) {
+    const scanResult = scanContent(
+      files.map((f) => ({
+        path: f.path,
+        content: f.content ?? "",
+        mimeType: f.mimeType ?? undefined,
+      })),
+    );
+    if (!scanResult.ok) {
+      req.log.warn(
+        { projectId, violations: scanResult.violations },
+        "Content safety scan blocked publish",
+      );
+      res.status(422).json({
+        error: `Publish blocked: content safety scan found ${scanResult.violations.filter((v) => v.severity === "block").length} violation(s). Review or contact support if this is a false positive.`,
+        code: "content_safety_violation",
+        violations: scanResult.violations
+          .filter((v) => v.severity === "block")
+          .map((v) => ({
+            pattern: v.pattern,
+            context: v.context,
+          })),
+      });
+      return;
+    }
+    // Log warnings but don't block
+    const warnViolations = scanResult.violations.filter((v) => v.severity === "warn");
+    if (warnViolations.length > 0) {
+      req.log.warn(
+        { projectId, warnViolations },
+        "Content safety scan found warnings (not blocking)",
+      );
+    }
   }
 
   // Generate slug on first publish; preserve existing slug on republish.

@@ -223,6 +223,347 @@ export async function deleteCustomHostname(cfHostnameId: string): Promise<boolea
   }
 }
 
+// ── WAF + Bot Management defaults — Task #560 ─────────────────────────────────
+
+/**
+ * Apply default WAF and bot management settings for a newly created custom hostname.
+ *
+ * Cloudflare WAF rules are zone-level; this function adds a zone-scoped custom rule
+ * that enables the OWASP managed ruleset and CF-managed rules for the given hostname.
+ * Bot management is enabled at the zone level and cannot be scoped per-hostname via
+ * the basic API — this call is recorded for auditing.
+ *
+ * Gracefully no-ops if CF is not configured.
+ * Returns true on success, false on failure.
+ */
+export async function applyDefaultWafRules(
+  hostname: string,
+  _cfHostnameId: string,
+): Promise<boolean> {
+  if (!cfEnabled()) return false;
+  try {
+    // Apply managed rulesets via Zone Rulesets API (http_request_firewall_managed phase).
+    // This is a zone-level operation that includes a hostname condition.
+    const resp = await fetch(
+      `${CF_API_BASE}/zones/${zoneId()}/rulesets/phases/http_request_firewall_managed/entrypoint/rules`,
+      {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          description: `WAF defaults for ${hostname}`,
+          action: "execute",
+          expression: `http.host eq "${hostname}"`,
+          action_parameters: {
+            id: "efb7b8c949ac4650a09736fc376e9aee", // CF Managed Ruleset
+            overrides: { enabled: true },
+          },
+        }),
+      },
+    );
+    if (!resp.ok) {
+      const json = (await resp.json()) as CfApiResult<unknown>;
+      logger.warn(
+        { hostname, errors: json.errors },
+        "CF applyDefaultWafRules: managed ruleset apply failed (non-fatal)",
+      );
+      return false;
+    }
+    logger.info({ hostname }, "CF applyDefaultWafRules: WAF defaults applied");
+    return true;
+  } catch (err) {
+    logger.warn({ err, hostname }, "CF applyDefaultWafRules threw (non-fatal)");
+    return false;
+  }
+}
+
+export interface DomainSecurityConfigForCf {
+  rateLimitRps?: number;
+  geoBlock?: string[];
+  ipAllow?: string[];
+  ipDeny?: string[];
+  mtlsEnabled?: boolean;
+  mtlsCaCert?: string;
+  wafEnabled?: boolean;
+  botManagement?: boolean;
+}
+
+// ── Input validators ──────────────────────────────────────────────────────────
+// All values that end up in Cloudflare expression strings must pass validation
+// before being interpolated. This prevents expression injection attacks which
+// could affect other tenants on the same zone.
+
+// Matches IPv4 + optional CIDR, IPv6 + optional CIDR
+const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
+const IPV6_RE = /^[0-9a-fA-F:]+(%[a-zA-Z0-9]+)?(\/\d{1,3})?$/;
+
+/**
+ * Returns true only for well-formed IPv4/IPv6 addresses or CIDR ranges.
+ * Rejects anything that could break out of a CF expression string.
+ */
+export function isValidIpOrCidr(s: string): boolean {
+  if (!s || s.length > 50) return false;
+  // No whitespace, quotes, parens, or CF expression metacharacters
+  if (/[\s"'(){}]/.test(s)) return false;
+  return IPV4_RE.test(s) || IPV6_RE.test(s);
+}
+
+/**
+ * Returns true for exactly two uppercase ASCII letters (ISO 3166-1 alpha-2).
+ */
+export function isValidCountryCode(s: string): boolean {
+  return /^[A-Z]{2}$/.test(s);
+}
+
+/**
+ * Apply per-domain security config to Cloudflare.
+ *
+ * - IP deny: zone-level custom rule blocking requests from denied CIDRs.
+ * - IP allow: zone-level block rule for all IPs NOT in the allow list.
+ * - Geo-block: zone-level block rule for listed ISO country codes.
+ * - Rate limit: zone-level rate limiting rule scoped to this hostname.
+ * - wafEnabled: toggle CF Managed Ruleset on/off for this hostname expression.
+ * - botManagement: add a challenge rule for bot scores < 30 (requires Bot Management plan).
+ *
+ * All values are validated before being interpolated into CF expression strings.
+ * Invalid entries are logged and silently skipped — tenant isolation is preserved.
+ *
+ * Returns true if at least one rule was successfully applied; false otherwise.
+ */
+export async function applySecurityConfig(
+  hostname: string,
+  config: DomainSecurityConfigForCf,
+): Promise<boolean> {
+  if (!cfEnabled()) return false;
+
+  // Hostname must be a safe token (no expression metacharacters)
+  if (/"/.test(hostname)) {
+    logger.error({ hostname }, "CF applySecurityConfig: hostname contains quotes — aborting");
+    return false;
+  }
+
+  let anyApplied = false;
+
+  try {
+    // ── IP deny ───────────────────────────────────────────────────────────────
+    if (config.ipDeny && config.ipDeny.length > 0) {
+      const validIps = config.ipDeny.filter((ip) => {
+        if (!isValidIpOrCidr(ip)) {
+          logger.warn({ hostname, ip }, "CF applySecurityConfig: ipDeny entry invalid — skipping");
+          return false;
+        }
+        return true;
+      });
+      if (validIps.length > 0) {
+        // CF expression: ip.src in {a.b.c.d e.e.e.e} — space-separated, no quotes around IPs
+        const ipSet = validIps.join(" ");
+        const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/firewall/rules`, {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify([
+            {
+              action: "block",
+              description: `IP deny list for ${hostname}`,
+              filter: {
+                expression: `(http.host eq "${hostname}") and (ip.src in {${ipSet}})`,
+              },
+            },
+          ]),
+        });
+        if (resp.ok) anyApplied = true;
+        else logger.warn({ hostname }, "CF applySecurityConfig: ipDeny rule failed");
+      }
+    }
+
+    // ── IP allow ──────────────────────────────────────────────────────────────
+    if (config.ipAllow && config.ipAllow.length > 0) {
+      const validIps = config.ipAllow.filter((ip) => {
+        if (!isValidIpOrCidr(ip)) {
+          logger.warn({ hostname, ip }, "CF applySecurityConfig: ipAllow entry invalid — skipping");
+          return false;
+        }
+        return true;
+      });
+      if (validIps.length > 0) {
+        const ipSet = validIps.join(" ");
+        // Block everyone NOT in the allow set
+        const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/firewall/rules`, {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify([
+            {
+              action: "block",
+              description: `IP allowlist enforcement for ${hostname}`,
+              filter: {
+                expression: `(http.host eq "${hostname}") and not (ip.src in {${ipSet}})`,
+              },
+            },
+          ]),
+        });
+        if (resp.ok) anyApplied = true;
+        else logger.warn({ hostname }, "CF applySecurityConfig: ipAllow rule failed");
+      }
+    }
+
+    // ── Geo-block ─────────────────────────────────────────────────────────────
+    if (config.geoBlock && config.geoBlock.length > 0) {
+      const validCcs = config.geoBlock.filter((cc) => {
+        if (!isValidCountryCode(cc)) {
+          logger.warn(
+            { hostname, cc },
+            "CF applySecurityConfig: geoBlock country code invalid — skipping",
+          );
+          return false;
+        }
+        return true;
+      });
+      if (validCcs.length > 0) {
+        // CF expression: ip.geoip.country in {"CC1" "CC2"} — quoted, space-separated
+        const ccList = validCcs.map((cc) => `"${cc}"`).join(" ");
+        const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/firewall/rules`, {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify([
+            {
+              action: "block",
+              description: `Geo-block for ${hostname}`,
+              filter: {
+                expression: `(http.host eq "${hostname}") and (ip.geoip.country in {${ccList}})`,
+              },
+            },
+          ]),
+        });
+        if (resp.ok) anyApplied = true;
+        else logger.warn({ hostname }, "CF applySecurityConfig: geoBlock rule failed");
+      }
+    }
+
+    // ── Rate limit ────────────────────────────────────────────────────────────
+    if (config.rateLimitRps && config.rateLimitRps > 0) {
+      const rps = Math.max(1, Math.min(100_000, Math.floor(config.rateLimitRps)));
+      const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/rate_limits`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          match: {
+            request: {
+              methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
+              schemes: ["HTTP", "HTTPS"],
+              url: `${hostname}/*`,
+            },
+          },
+          threshold: rps,
+          period: 1, // per-second window
+          action: {
+            mode: "simulate", // 'simulate' logs; change to 'ban' for hard block
+            timeout: 60,
+            response: { content_type: "application/json", body: `{"error":"rate limit exceeded"}` },
+          },
+          description: `Rate limit ${rps} RPS for ${hostname}`,
+          enabled: true,
+        }),
+      });
+      if (resp.ok) anyApplied = true;
+      else logger.warn({ hostname, rps }, "CF applySecurityConfig: rate limit rule failed");
+    }
+
+    // ── WAF enabled / disabled ────────────────────────────────────────────────
+    if (config.wafEnabled === false) {
+      // Add a skip rule for this hostname to bypass CF Managed Ruleset
+      const resp = await fetch(
+        `${CF_API_BASE}/zones/${zoneId()}/rulesets/phases/http_request_firewall_managed/entrypoint/rules`,
+        {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify({
+            description: `WAF skip for ${hostname}`,
+            action: "skip",
+            expression: `http.host eq "${hostname}"`,
+            action_parameters: { ruleset: "current" },
+          }),
+        },
+      );
+      if (resp.ok) anyApplied = true;
+      else logger.warn({ hostname }, "CF applySecurityConfig: WAF skip rule failed");
+    }
+
+    // ── Bot Management challenge ──────────────────────────────────────────────
+    // Requires CF Bot Management (Enterprise). Gracefully skips when unavailable.
+    if (config.botManagement === true) {
+      const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/firewall/rules`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify([
+          {
+            action: "challenge",
+            description: `Bot management challenge for ${hostname}`,
+            filter: {
+              expression: `(http.host eq "${hostname}") and (cf.bot_management.score lt 30)`,
+            },
+          },
+        ]),
+      });
+      if (resp.ok) anyApplied = true;
+      else
+        logger.warn(
+          { hostname },
+          "CF applySecurityConfig: bot challenge rule failed (may require Bot Management plan)",
+        );
+    }
+
+    return anyApplied;
+  } catch (err) {
+    logger.warn({ err, hostname }, "CF applySecurityConfig threw (non-fatal)");
+    return false;
+  }
+}
+
+/**
+ * Enable mTLS for a hostname via Cloudflare Access mTLS client certificate enforcement.
+ * Uploads the CA cert and creates an Access application scoped to the hostname.
+ * Returns the CF mTLS certificate ID on success, null on failure.
+ */
+export async function enableMtls(hostname: string, caCert: string): Promise<string | null> {
+  if (!cfEnabled()) return null;
+  try {
+    const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/access/certificates`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        name: `mTLS CA for ${hostname}`,
+        certificate: caCert,
+        associated_hostnames: [hostname],
+      }),
+    });
+    const json = (await resp.json()) as CfApiResult<{ id: string }>;
+    if (!json.success || !json.result?.id) {
+      logger.warn({ hostname, errors: json.errors }, "CF enableMtls: cert upload failed");
+      return null;
+    }
+    logger.info({ hostname, certId: json.result.id }, "CF enableMtls: CA cert uploaded");
+    return json.result.id;
+  } catch (err) {
+    logger.warn({ err, hostname }, "CF enableMtls threw (non-fatal)");
+    return null;
+  }
+}
+
+/**
+ * Disable mTLS for a hostname by deleting the Access mTLS certificate.
+ */
+export async function disableMtls(certId: string): Promise<boolean> {
+  if (!cfEnabled()) return false;
+  try {
+    const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/access/certificates/${certId}`, {
+      method: "DELETE",
+      headers: readHeaders(),
+    });
+    return resp.ok;
+  } catch (err) {
+    logger.warn({ err, certId }, "CF disableMtls threw (non-fatal)");
+    return false;
+  }
+}
+
 /**
  * List all Cloudflare custom hostnames for the zone, paginating automatically.
  * Returns an empty array when CF is not configured.

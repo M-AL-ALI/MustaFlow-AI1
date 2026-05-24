@@ -23,6 +23,7 @@ import {
   createCustomHostname,
   getCustomHostname,
   mapCfSslStatus,
+  applyDefaultWafRules,
 } from "../lib/cloudflare";
 
 // ── Shared activation logic ────────────────────────────────────────────────────
@@ -107,6 +108,11 @@ export async function activateSslForDomain(
           updatedAt: new Date(),
         })
         .where(eq(projectDomainsTable.id, domainId));
+
+      // Apply default WAF + managed ruleset for the new hostname (best-effort, non-fatal)
+      void applyDefaultWafRules(hostname, cfHostnameId).catch(() => {
+        /* non-fatal */
+      });
 
       if (isPrimary) {
         await db
@@ -272,6 +278,12 @@ export async function activateSslForProject(
         .update(projectsTable)
         .set({ cfHostnameId, sslStatus: status, sslError: null, updatedAt: new Date() })
         .where(eq(projectsTable.id, projectId));
+
+      // Apply default WAF + managed ruleset for the new hostname (best-effort, non-fatal)
+      void applyDefaultWafRules(domain, cfHostnameId).catch(() => {
+        /* non-fatal */
+      });
+
       return {
         sslStatus: status,
         cfHostnameId,

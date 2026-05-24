@@ -6,6 +6,7 @@ import {
   boolean,
   timestamp,
   uniqueIndex,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
@@ -51,11 +52,28 @@ export const projectDomainsTable = pgTable(
     sslSource: text("ssl_source").notNull().default("cloudflare"),
     byoCertExpiresAt: timestamp("byo_cert_expires_at", { withTimezone: true }),
     byoCertSubject: text("byo_cert_subject"),
+    // Security config: per-domain WAF, rate limits, geo-blocking, IP allow/deny, mTLS — Task #560.
+    // Shape: { rateLimitRps?: number, geoBlock?: string[], ipAllow?: string[], ipDeny?: string[], mtlsEnabled?: boolean, mtlsCaCert?: string, wafEnabled?: boolean, botManagement?: boolean }
+    securityConfig: jsonb("security_config").$type<DomainSecurityConfig>(),
+    // Suspension: null = active. When set, hostname middleware returns 451.
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    suspensionReason: text("suspension_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("project_domains_hostname_unique").on(t.hostname)],
 );
+
+export interface DomainSecurityConfig {
+  rateLimitRps?: number;
+  geoBlock?: string[];
+  ipAllow?: string[];
+  ipDeny?: string[];
+  mtlsEnabled?: boolean;
+  mtlsCaCert?: string;
+  wafEnabled?: boolean;
+  botManagement?: boolean;
+}
 
 export type ProjectDomain = typeof projectDomainsTable.$inferSelect;
 export type InsertProjectDomain = typeof projectDomainsTable.$inferInsert;
