@@ -1508,26 +1508,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       inboxBlock +
       `\n\nConversation history follows.`,
   });
-  // Mark the surfaced unread items as read deterministically — they have been
-  // delivered to the model context, so they should not reappear in future builds
-  // even if the loop later aborts.
-  if (unreadInboxItems.length > 0) {
-    try {
-      const { db: _db, agentInboxTable } = await import("@workspace/db");
-      const { inArray } = await import("drizzle-orm");
-      await _db
-        .update(agentInboxTable)
-        .set({ status: "read", readAt: new Date() })
-        .where(
-          inArray(
-            agentInboxTable.id,
-            unreadInboxItems.map((it) => it.id),
-          ),
-        );
-    } catch {
-      /* non-fatal */
-    }
-  }
+  // (Task #546) Surfaced unread items are marked read AFTER the first
+  // assistant turn lands — see the `surfacedInboxIds` handling below the
+  // first successful model response. If the first turn fails/aborts before
+  // an assistant message is produced, items remain unread for the next build.
+  const surfacedInboxIds: number[] = unreadInboxItems.map((it) => it.id);
+  let inboxMarkedRead = false;
   for (const turn of (input.conversationHistory ?? []).slice(-6)) {
     messages.push({ role: turn.role, content: turn.content });
   }
@@ -1642,6 +1628,26 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       content: msg.content ?? "",
       tool_calls: toolReqs.length > 0 ? toolReqs : undefined,
     });
+
+    // Task #546: mark surfaced unread inbox items as read exactly once, after
+    // the first assistant turn produces output. Skipping the DB write before
+    // this point ensures unread feedback survives an aborted first turn.
+    if (!inboxMarkedRead && surfacedInboxIds.length > 0) {
+      inboxMarkedRead = true;
+      try {
+        const { db: _db, agentInboxTable } = await import("@workspace/db");
+        const { inArray } = await import("drizzle-orm");
+        await _db
+          .update(agentInboxTable)
+          .set({ status: "read", readAt: new Date() })
+          .where(inArray(agentInboxTable.id, surfacedInboxIds));
+      } catch (err) {
+        logger.warn(
+          { err, projectId: input.projectId, count: surfacedInboxIds.length },
+          "agent-loop: failed to mark surfaced inbox items as read (non-fatal)",
+        );
+      }
+    }
 
     if (toolReqs.length === 0) {
       // Model returned plain text; treat finish_reason=stop as "done without finalize".
