@@ -1237,6 +1237,7 @@ export interface KnowledgeEntry {
   content: string;
   type: string;
   severity: string;
+  scope: string;
   /** @nullable */
   projectId?: number | null;
   /** @nullable */
@@ -1248,6 +1249,10 @@ export interface KnowledgeEntry {
   /** @nullable */
   tags?: string | null;
   approvedForReuse: boolean;
+  isPublic: boolean;
+  thumbsUp: number;
+  thumbsDown: number;
+  usageCount: number;
   /** @nullable */
   diffSummary?: KnowledgeEntryDiffSummary;
   /** @nullable */
@@ -1263,8 +1268,10 @@ export interface KnowledgeInput {
   category: string;
   type?: string;
   severity?: string;
+  scope?: string;
   /** @minLength 1 */
   content: string;
+  projectId?: number;
 }
 
 export interface KnowledgeUpdate {
@@ -1273,11 +1280,13 @@ export interface KnowledgeUpdate {
   category?: string;
   type?: string;
   severity?: string;
+  scope?: string;
   /** @minLength 1 */
   content?: string;
   /** @nullable */
   annotation?: string | null;
   approvedForReuse?: boolean;
+  isPublic?: boolean;
   archived?: boolean;
 }
 
@@ -3569,6 +3578,7 @@ export type ListKnowledgeParams = {
 projectId?: number;
 type?: string;
 severity?: ListKnowledgeSeverity;
+scope?: ListKnowledgeScope;
 approvedOnly?: boolean;
 category?: string;
 archived?: boolean;
@@ -3585,8 +3595,58 @@ export const ListKnowledgeSeverity = {
   error: 'error',
 } as const;
 
+export type ListKnowledgeScope = typeof ListKnowledgeScope[keyof typeof ListKnowledgeScope];
+
+
+export const ListKnowledgeScope = {
+  user: 'user',
+  project: 'project',
+  org: 'org',
+  global: 'global',
+} as const;
+
+export type ExportKnowledge200 = {
+  exportedAt: string;
+  count: number;
+  entries: KnowledgeEntry[];
+};
+
+export type ImportKnowledgeBody = {
+  entries: KnowledgeInput[];
+};
+
+export type ImportKnowledge201 = {
+  imported: number;
+  ids: number[];
+};
+
+export type InferStyleMemory200 = {
+  inferred: number;
+  message: string;
+  ids?: number[];
+};
+
+export type ListPublicKnowledgeParams = {
+type?: string;
+category?: string;
+limit?: number;
+offset?: number;
+};
+
 export type DeleteKnowledge200 = {
   ok: boolean;
+};
+
+export type RateKnowledgeBodyRating = typeof RateKnowledgeBodyRating[keyof typeof RateKnowledgeBodyRating];
+
+
+export const RateKnowledgeBodyRating = {
+  up: 'up',
+  down: 'down',
+} as const;
+
+export type RateKnowledgeBody = {
+  rating: RateKnowledgeBodyRating;
 };
 
 export type ListMobileBuilds200 = {

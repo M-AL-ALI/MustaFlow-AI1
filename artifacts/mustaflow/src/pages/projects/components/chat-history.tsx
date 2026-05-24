@@ -59,7 +59,7 @@ import {
   useRestoreCheckpoint,
 } from "@workspace/api-client-react";
 import { unifiedDiff } from "@/lib/line-diff";
-import { Download, FileBox, GitCompare } from "lucide-react";
+import { Download, FileBox, GitCompare, BookOpen } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 type TaskReport = {
@@ -178,6 +178,8 @@ type TaskReport = {
     mimeType: string;
     description?: string;
   }>;
+  /** Knowledge Vault lessons that were injected into this build's context. */
+  knowledgeApplied?: Array<{ id: number; title: string; type: string }> | null;
 };
 
 type StructuredPlan = {
@@ -1863,18 +1865,35 @@ function MessageRow({
               />
             ) : (
               <>
-                <button
-                  onClick={() => setReportExpanded((v) => !v)}
-                  className="flex items-center gap-1.5 text-[10px] font-medium px-2 py-1 rounded-md bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/15 transition-colors"
-                >
-                  <CheckCircle2 className="h-3 w-3" />
-                  View build report
-                  {reportExpanded ? (
-                    <ChevronDown className="h-3 w-3 ml-0.5" />
-                  ) : (
-                    <ChevronRight className="h-3 w-3 ml-0.5" />
-                  )}
-                </button>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    onClick={() => setReportExpanded((v) => !v)}
+                    className="flex items-center gap-1.5 text-[10px] font-medium px-2 py-1 rounded-md bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/15 transition-colors"
+                  >
+                    <CheckCircle2 className="h-3 w-3" />
+                    View build report
+                    {reportExpanded ? (
+                      <ChevronDown className="h-3 w-3 ml-0.5" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3 ml-0.5" />
+                    )}
+                  </button>
+                  {/* Knowledge provenance chip */}
+                  {(() => {
+                    const ka = (planPayload as { report?: TaskReport }).report?.knowledgeApplied;
+                    if (!ka || ka.length === 0) return null;
+                    return (
+                      <a
+                        href="/knowledge"
+                        className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-primary/8 border border-primary/20 text-primary/70 hover:text-primary hover:bg-primary/12 transition-colors"
+                        title={`Lessons applied: ${ka.map((l) => l.title).join(", ")}`}
+                      >
+                        <BookOpen className="h-2.5 w-2.5" />
+                        {ka.length} Vault lesson{ka.length !== 1 ? "s" : ""} applied
+                      </a>
+                    );
+                  })()}
+                </div>
                 {reportExpanded && (
                   <InlineReportCard
                     report={(planPayload as { kind: "report"; report: TaskReport }).report}

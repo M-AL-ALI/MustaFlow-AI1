@@ -16,6 +16,8 @@ import HomePage from "./pages/home";
 import ProjectsPage from "./pages/projects";
 import ProjectWorkspacePage from "./pages/projects/[id]";
 import KnowledgePage from "./pages/knowledge";
+import MemoryPage from "./pages/memory";
+import LibraryPage from "./pages/library";
 import SettingsPage from "./pages/settings";
 import TermsPage from "./pages/terms";
 import PrivacyPage from "./pages/privacy";
@@ -359,6 +361,18 @@ function ClerkProviderWithRoutes() {
                     <KnowledgePage />
                   </AppLayout>
                 </Protected>
+              </Route>
+              <Route path="/memory">
+                <Protected>
+                  <AppLayout>
+                    <MemoryPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/library">
+                <AppLayout>
+                  <LibraryPage />
+                </AppLayout>
               </Route>
               <Route path="/settings">
                 <Protected>

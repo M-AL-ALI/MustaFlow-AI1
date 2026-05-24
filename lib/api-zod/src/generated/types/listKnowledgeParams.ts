@@ -5,12 +5,14 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListKnowledgeScope } from './listKnowledgeScope';
 import type { ListKnowledgeSeverity } from './listKnowledgeSeverity';
 
 export type ListKnowledgeParams = {
 projectId?: number;
 type?: string;
 severity?: ListKnowledgeSeverity;
+scope?: ListKnowledgeScope;
 approvedOnly?: boolean;
 category?: string;
 archived?: boolean;

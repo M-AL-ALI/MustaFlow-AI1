@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import {
   useListKnowledge,
   useListProjects,
@@ -32,7 +32,14 @@ import {
   FolderOpen,
   SlidersHorizontal,
   BookOpen,
+  Download,
+  Upload,
+  ThumbsUp,
+  ThumbsDown,
+  Library,
+  Loader2,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 function getTypeIcon(type: string) {
   switch (type) {
@@ -177,7 +184,9 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
   const [annotationDraft, setAnnotationDraft] = useState(entry.annotation ?? "");
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [showConfirmPromote, setShowConfirmPromote] = useState(false);
+  const [rating, setRating] = useState<"up" | "down" | null>(null);
   const updateKnowledge = useUpdateKnowledge();
+  const { toast } = useToast();
 
   const TypeIcon = getTypeIcon(entry.type);
   const typeColor = getTypeColor(entry.type, entry.severity);
@@ -223,6 +232,28 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
     );
   };
 
+  const handleTogglePublic = () => {
+    setShowContextMenu(false);
+    updateKnowledge.mutate(
+      { id: entry.id, data: { isPublic: !entry.isPublic } },
+      { onSuccess: onUpdate },
+    );
+  };
+
+  const handleRate = async (direction: "up" | "down") => {
+    if (rating === direction) return;
+    try {
+      await fetch(`/api/knowledge/${entry.id}/rate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: direction }),
+      });
+      setRating(direction);
+    } catch {
+      toast({ title: "Failed to rate lesson", variant: "destructive" });
+    }
+  };
+
   const diffSummary = entry.diffSummary as {
     filesAdded?: string[];
     filesModified?: string[];
@@ -237,6 +268,9 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
       (diffSummary.filesModified?.length ?? 0) +
       (diffSummary.filesRemoved?.length ?? 0) >
       0;
+
+  const upCount = (entry.thumbsUp ?? 0) + (rating === "up" ? 1 : 0);
+  const downCount = (entry.thumbsDown ?? 0) + (rating === "down" ? 1 : 0);
 
   return (
     <div
@@ -264,15 +298,30 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
                 >
                   {getTypeLabel(entry.type)}
                 </span>
+                {entry.scope && entry.scope !== "project" && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border border-blue-500/30 bg-blue-500/10 text-blue-400">
+                    {entry.scope}
+                  </span>
+                )}
                 {entry.approvedForReuse && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border border-yellow-500/30 bg-yellow-500/10 text-yellow-400 flex items-center gap-1">
                     <Star className="h-2.5 w-2.5" /> Global Lesson
+                  </span>
+                )}
+                {entry.isPublic && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border border-green-500/30 bg-green-500/10 text-green-400 flex items-center gap-1">
+                    <Globe className="h-2.5 w-2.5" /> Public
                   </span>
                 )}
                 <span className={cn("flex items-center gap-0.5 text-[10px]", severityColor)}>
                   <SeverityIcon className="h-3 w-3" />
                   {entry.severity}
                 </span>
+                {(entry.usageCount ?? 0) > 0 && (
+                  <span className="text-[10px] text-muted-foreground/50">
+                    used {entry.usageCount}×
+                  </span>
+                )}
                 <span className="text-[10px] text-muted-foreground/50 ml-auto flex items-center gap-1 shrink-0">
                   <Clock className="h-2.5 w-2.5" />
                   {new Date(entry.createdAt).toLocaleDateString(undefined, {
@@ -284,7 +333,34 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
               </div>
             </div>
             {/* Actions */}
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-0.5 shrink-0">
+              {/* Thumbs rating */}
+              <button
+                onClick={() => void handleRate("up")}
+                className={cn(
+                  "flex items-center gap-0.5 px-1.5 py-1 rounded text-[10px] transition-colors",
+                  rating === "up"
+                    ? "text-green-400 bg-green-500/10"
+                    : "text-muted-foreground/50 hover:text-green-400",
+                )}
+                title="Helpful"
+              >
+                <ThumbsUp className="h-3 w-3" />
+                {upCount > 0 && <span>{upCount}</span>}
+              </button>
+              <button
+                onClick={() => void handleRate("down")}
+                className={cn(
+                  "flex items-center gap-0.5 px-1.5 py-1 rounded text-[10px] transition-colors",
+                  rating === "down"
+                    ? "text-red-400 bg-red-500/10"
+                    : "text-muted-foreground/50 hover:text-red-400",
+                )}
+                title="Not helpful"
+              >
+                <ThumbsDown className="h-3 w-3" />
+                {downCount > 0 && <span>{downCount}</span>}
+              </button>
               <button
                 onClick={() => setExpanded((v) => !v)}
                 className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground"
@@ -319,7 +395,7 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
                   <MoreHorizontal className="h-3.5 w-3.5" />
                 </button>
                 {showContextMenu && (
-                  <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[170px]">
+                  <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[190px]">
                     {!showConfirmPromote ? (
                       <button
                         onClick={() =>
@@ -348,6 +424,13 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
                         </div>
                       </div>
                     )}
+                    <button
+                      onClick={handleTogglePublic}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+                    >
+                      <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+                      {entry.isPublic ? "Remove from Public Library" : "Share publicly"}
+                    </button>
                     <button
                       onClick={handleArchive}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted transition-colors"
@@ -479,6 +562,94 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function ExportImportPanel({ onImportDone }: { onImportDone: () => void }) {
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch("/api/knowledge/export");
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `knowledge-vault-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Export failed", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as { entries?: unknown[] };
+      const entries = parsed.entries ?? (Array.isArray(parsed) ? parsed : []);
+      const res = await fetch("/api/knowledge/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries }),
+      });
+      const data = (await res.json()) as { imported: number };
+      toast({
+        title: `Imported ${data.imported} entries`,
+        description: "Your Knowledge Vault has been updated.",
+      });
+      onImportDone();
+    } catch {
+      toast({ title: "Import failed — check the file format", variant: "destructive" });
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => void handleExport()}
+        disabled={exporting}
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50"
+      >
+        {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+        Export
+      </button>
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        disabled={importing}
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50"
+      >
+        {importing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+        Import
+      </button>
+      <a
+        href="/library"
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+      >
+        <Library className="h-3 w-3" />
+        Public Library
+      </a>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        className="hidden"
+        onChange={(e) => void handleImport(e)}
+      />
     </div>
   );
 }
@@ -639,11 +810,14 @@ export default function KnowledgePage() {
   return (
     <div className="p-8 max-w-5xl mx-auto w-full space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Knowledge Vault</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Per-project history, global lessons, and curated learnings for the AI builder.
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Knowledge Vault</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Per-project history, global lessons, and curated learnings for the AI builder.
+          </p>
+        </div>
+        <ExportImportPanel onImportDone={invalidate} />
       </div>
 
       {/* Deep-link banner: shown when arriving from a build card */}

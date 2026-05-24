@@ -3401,6 +3401,7 @@ export const ListKnowledgeQueryParams = zod.object({
   "projectId": zod.coerce.number().optional(),
   "type": zod.coerce.string().optional(),
   "severity": zod.enum(['info', 'warning', 'error']).optional(),
+  "scope": zod.enum(['user', 'project', 'org', 'global']).optional(),
   "approvedOnly": zod.coerce.boolean().optional(),
   "category": zod.coerce.string().optional(),
   "archived": zod.coerce.boolean().optional(),
@@ -3415,12 +3416,17 @@ export const ListKnowledgeResponseItem = zod.object({
   "content": zod.string(),
   "type": zod.string(),
   "severity": zod.string(),
+  "scope": zod.string(),
   "projectId": zod.number().nullish(),
   "userId": zod.string().nullish(),
   "relatedTaskId": zod.number().nullish(),
   "relatedVersionId": zod.number().nullish(),
   "tags": zod.string().nullish(),
   "approvedForReuse": zod.boolean(),
+  "isPublic": zod.boolean(),
+  "thumbsUp": zod.number(),
+  "thumbsDown": zod.number(),
+  "usageCount": zod.number(),
   "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
   "annotation": zod.string().nullish(),
   "archivedAt": zod.coerce.date().nullish(),
@@ -3438,12 +3444,115 @@ export const CreateKnowledgeBody = zod.object({
   "category": zod.string(),
   "type": zod.string().optional(),
   "severity": zod.string().optional(),
-  "content": zod.string().min(1)
+  "scope": zod.string().optional(),
+  "content": zod.string().min(1),
+  "projectId": zod.number().optional()
 })
 
 
 /**
- * @summary Update annotation, approvedForReuse, or archivedAt on a knowledge entry
+ * @summary Export all accessible knowledge entries as JSON
+ */
+export const ExportKnowledgeResponse = zod.object({
+  "exportedAt": zod.coerce.date(),
+  "count": zod.number(),
+  "entries": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "content": zod.string(),
+  "type": zod.string(),
+  "severity": zod.string(),
+  "scope": zod.string(),
+  "projectId": zod.number().nullish(),
+  "userId": zod.string().nullish(),
+  "relatedTaskId": zod.number().nullish(),
+  "relatedVersionId": zod.number().nullish(),
+  "tags": zod.string().nullish(),
+  "approvedForReuse": zod.boolean(),
+  "isPublic": zod.boolean(),
+  "thumbsUp": zod.number(),
+  "thumbsDown": zod.number(),
+  "usageCount": zod.number(),
+  "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
+  "annotation": zod.string().nullish(),
+  "archivedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Import knowledge entries from a JSON export
+ */
+
+
+
+
+export const ImportKnowledgeBody = zod.object({
+  "entries": zod.array(zod.object({
+  "title": zod.string().min(1),
+  "category": zod.string(),
+  "type": zod.string().optional(),
+  "severity": zod.string().optional(),
+  "scope": zod.string().optional(),
+  "content": zod.string().min(1),
+  "projectId": zod.number().optional()
+}))
+})
+
+
+/**
+ * @summary Trigger AI style memory inference from build history
+ */
+export const InferStyleMemoryResponse = zod.object({
+  "inferred": zod.number(),
+  "message": zod.string(),
+  "ids": zod.array(zod.number()).optional()
+})
+
+
+/**
+ * @summary Browse the public community knowledge library (no auth required)
+ */
+export const listPublicKnowledgeQueryLimitDefault = 20;
+export const listPublicKnowledgeQueryOffsetDefault = 0;
+
+export const ListPublicKnowledgeQueryParams = zod.object({
+  "type": zod.coerce.string().optional(),
+  "category": zod.coerce.string().optional(),
+  "limit": zod.coerce.number().default(listPublicKnowledgeQueryLimitDefault),
+  "offset": zod.coerce.number().default(listPublicKnowledgeQueryOffsetDefault)
+})
+
+export const ListPublicKnowledgeResponseItem = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "content": zod.string(),
+  "type": zod.string(),
+  "severity": zod.string(),
+  "scope": zod.string(),
+  "projectId": zod.number().nullish(),
+  "userId": zod.string().nullish(),
+  "relatedTaskId": zod.number().nullish(),
+  "relatedVersionId": zod.number().nullish(),
+  "tags": zod.string().nullish(),
+  "approvedForReuse": zod.boolean(),
+  "isPublic": zod.boolean(),
+  "thumbsUp": zod.number(),
+  "thumbsDown": zod.number(),
+  "usageCount": zod.number(),
+  "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
+  "annotation": zod.string().nullish(),
+  "archivedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+export const ListPublicKnowledgeResponse = zod.array(ListPublicKnowledgeResponseItem)
+
+
+/**
+ * @summary Update annotation, approvedForReuse, title, content, isPublic, scope, or archivedAt
  */
 export const UpdateKnowledgeParams = zod.object({
   "id": zod.coerce.number()
@@ -3458,9 +3567,11 @@ export const UpdateKnowledgeBody = zod.object({
   "category": zod.string().optional(),
   "type": zod.string().optional(),
   "severity": zod.string().optional(),
+  "scope": zod.string().optional(),
   "content": zod.string().min(1).optional(),
   "annotation": zod.string().nullish(),
   "approvedForReuse": zod.boolean().optional(),
+  "isPublic": zod.boolean().optional(),
   "archived": zod.boolean().optional()
 })
 
@@ -3471,12 +3582,17 @@ export const UpdateKnowledgeResponse = zod.object({
   "content": zod.string(),
   "type": zod.string(),
   "severity": zod.string(),
+  "scope": zod.string(),
   "projectId": zod.number().nullish(),
   "userId": zod.string().nullish(),
   "relatedTaskId": zod.number().nullish(),
   "relatedVersionId": zod.number().nullish(),
   "tags": zod.string().nullish(),
   "approvedForReuse": zod.boolean(),
+  "isPublic": zod.boolean(),
+  "thumbsUp": zod.number(),
+  "thumbsDown": zod.number(),
+  "usageCount": zod.number(),
   "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
   "annotation": zod.string().nullish(),
   "archivedAt": zod.coerce.date().nullish(),
@@ -3490,6 +3606,42 @@ export const DeleteKnowledgeParams = zod.object({
 
 export const DeleteKnowledgeResponse = zod.object({
   "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Record explicit thumbs-up or thumbs-down on a knowledge entry
+ */
+export const RateKnowledgeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RateKnowledgeBody = zod.object({
+  "rating": zod.enum(['up', 'down'])
+})
+
+export const RateKnowledgeResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "content": zod.string(),
+  "type": zod.string(),
+  "severity": zod.string(),
+  "scope": zod.string(),
+  "projectId": zod.number().nullish(),
+  "userId": zod.string().nullish(),
+  "relatedTaskId": zod.number().nullish(),
+  "relatedVersionId": zod.number().nullish(),
+  "tags": zod.string().nullish(),
+  "approvedForReuse": zod.boolean(),
+  "isPublic": zod.boolean(),
+  "thumbsUp": zod.number(),
+  "thumbsDown": zod.number(),
+  "usageCount": zod.number(),
+  "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
+  "annotation": zod.string().nullish(),
+  "archivedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
 })
 
 

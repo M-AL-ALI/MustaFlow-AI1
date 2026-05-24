@@ -18,6 +18,8 @@ import {
   FileText,
   Globe,
   CheckCircle2,
+  BookOpen,
+  Star,
 } from "lucide-react";
 import { useState } from "react";
 import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
@@ -297,6 +299,81 @@ export default function HomePage() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Knowledge Vault marketing section */}
+        <div className="border-t border-border bg-muted/10">
+          <div className="max-w-4xl mx-auto px-6 py-20">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-12 items-center">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-primary/10 border border-primary/20 text-primary mb-4">
+                  <BookOpen className="h-3.5 w-3.5" />
+                  Knowledge Vault
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight mb-3">
+                  The AI that gets better with every build
+                </h2>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-5">
+                  Every project teaches MustaFlow something new. Lessons are captured automatically
+                  — what worked, what didn't, your preferences — and injected into every future
+                  build so the AI always improves.
+                </p>
+                <ul className="space-y-2.5">
+                  {[
+                    "Auto-captured after every build and refinement",
+                    "Style Memory learns your colour palettes and conventions",
+                    "Global lessons apply across every project you own",
+                    "Share lessons to the public library for the community",
+                  ].map((item) => (
+                    <li key={item} className="flex items-start gap-2.5 text-sm text-muted-foreground">
+                      <CheckCircle2 className="h-4 w-4 text-primary/60 shrink-0 mt-0.5" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="space-y-3">
+                {[
+                  {
+                    icon: BookOpen,
+                    title: "Project History",
+                    desc: "Every build recorded, searchable, and ready to teach the AI.",
+                    color: "text-primary border-primary/20 bg-primary/8",
+                  },
+                  {
+                    icon: Star,
+                    title: "Global Lessons",
+                    desc: "Promote your best learnings to apply across all projects.",
+                    color: "text-yellow-400 border-yellow-500/20 bg-yellow-500/8",
+                  },
+                  {
+                    icon: Globe,
+                    title: "Public Library",
+                    desc: "Browse community-shared lessons and rate the most useful ones.",
+                    color: "text-blue-400 border-blue-500/20 bg-blue-500/8",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.title}
+                    className="flex items-start gap-3.5 p-4 rounded-xl border border-border bg-card"
+                  >
+                    <div
+                      className={cn(
+                        "w-9 h-9 rounded-lg border flex items-center justify-center shrink-0",
+                        item.color,
+                      )}
+                    >
+                      <item.icon className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground mb-0.5">{item.title}</h3>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

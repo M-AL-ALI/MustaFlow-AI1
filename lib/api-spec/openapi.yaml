@@ -2697,6 +2697,10 @@ paths:
           in: query
           required: false
           schema: { type: string, enum: [info, warning, error] }
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string, enum: [user, project, org, global] }
         - name: approvedOnly
           in: query
           required: false
@@ -2743,11 +2747,115 @@ paths:
               schema:
                 $ref: "#/components/schemas/KnowledgeEntry"
 
+  /knowledge/export:
+    get:
+      operationId: exportKnowledge
+      tags: [knowledge]
+      summary: Export all accessible knowledge entries as JSON
+      responses:
+        "200":
+          description: Exported knowledge vault
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [exportedAt, count, entries]
+                properties:
+                  exportedAt: { type: string, format: date-time }
+                  count: { type: integer }
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/KnowledgeEntry"
+
+  /knowledge/import:
+    post:
+      operationId: importKnowledge
+      tags: [knowledge]
+      summary: Import knowledge entries from a JSON export
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entries]
+              properties:
+                entries:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/KnowledgeInput"
+      responses:
+        "201":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [imported, ids]
+                properties:
+                  imported: { type: integer }
+                  ids:
+                    type: array
+                    items: { type: integer }
+
+  /knowledge/infer-style:
+    post:
+      operationId: inferStyleMemory
+      tags: [knowledge]
+      summary: Trigger AI style memory inference from build history
+      responses:
+        "200":
+          description: Inference result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inferred, message]
+                properties:
+                  inferred: { type: integer }
+                  message: { type: string }
+                  ids:
+                    type: array
+                    items: { type: integer }
+
+  /knowledge/public:
+    get:
+      operationId: listPublicKnowledge
+      tags: [knowledge]
+      summary: Browse the public community knowledge library (no auth required)
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: category
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 20 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Public community lessons
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KnowledgeEntry"
+
   /knowledge/{id}:
     patch:
       operationId: updateKnowledge
       tags: [knowledge]
-      summary: Update annotation, approvedForReuse, or archivedAt on a knowledge entry
+      summary: Update annotation, approvedForReuse, title, content, isPublic, scope, or archivedAt
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:
@@ -2784,6 +2892,38 @@ paths:
                 required: [ok]
                 properties:
                   ok: { type: boolean }
+
+  /knowledge/{id}/rate:
+    post:
+      operationId: rateKnowledge
+      tags: [knowledge]
+      summary: Record explicit thumbs-up or thumbs-down on a knowledge entry
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating:
+                  type: string
+                  enum: [up, down]
+      responses:
+        "200":
+          description: Updated entry with new rating counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeEntry"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /projects/{id}/builds:
     post:
@@ -5094,7 +5234,7 @@ components:
 
     KnowledgeEntry:
       type: object
-      required: [id, title, category, content, type, severity, approvedForReuse, createdAt]
+      required: [id, title, category, content, type, severity, approvedForReuse, scope, thumbsUp, thumbsDown, usageCount, isPublic, createdAt]
       properties:
         id: { type: integer }
         title: { type: string }
@@ -5102,12 +5242,17 @@ components:
         content: { type: string }
         type: { type: string }
         severity: { type: string }
+        scope: { type: string }
         projectId: { type: ["integer", "null"] }
         userId: { type: ["string", "null"] }
         relatedTaskId: { type: ["integer", "null"] }
         relatedVersionId: { type: ["integer", "null"] }
         tags: { type: ["string", "null"] }
         approvedForReuse: { type: boolean }
+        isPublic: { type: boolean }
+        thumbsUp: { type: integer }
+        thumbsDown: { type: integer }
+        usageCount: { type: integer }
         diffSummary:
           type: ["object", "null"]
           additionalProperties: true
@@ -5123,7 +5268,9 @@ components:
         category: { type: string }
         type: { type: string }
         severity: { type: string }
+        scope: { type: string }
         content: { type: string, minLength: 1 }
+        projectId: { type: integer }
 
     KnowledgeUpdate:
       type: object
@@ -5132,9 +5279,11 @@ components:
         category: { type: string }
         type: { type: string }
         severity: { type: string }
+        scope: { type: string }
         content: { type: string, minLength: 1 }
         annotation: { type: ["string", "null"] }
         approvedForReuse: { type: boolean }
+        isPublic: { type: boolean }
         archived: { type: boolean }
 
     ProjectFileSummary:

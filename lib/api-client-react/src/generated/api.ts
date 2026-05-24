@@ -95,6 +95,7 @@ import type {
   DryRunProjectDomainDnsChanges200,
   DryRunProjectDomainDnsChangesBody,
   DuplicateProjectResult,
+  ExportKnowledge200,
   FileBlocksResponse,
   FileSearchResult,
   GenerateImageInput,
@@ -123,6 +124,9 @@ import type {
   GithubSyncStatusResult,
   GrantAdminRole200,
   HealthStatus,
+  ImportKnowledge201,
+  ImportKnowledgeBody,
+  InferStyleMemory200,
   KnowledgeEntry,
   KnowledgeInput,
   KnowledgeUpdate,
@@ -143,6 +147,7 @@ import type {
   ListProjectDomainDnsRecords200,
   ListProjectUploads200,
   ListProjectsParams,
+  ListPublicKnowledgeParams,
   ListSecurityFindingsParams,
   ListSuggestionsParams,
   ListTestRunsParams,
@@ -185,6 +190,7 @@ import type {
   PurchaseDomainResponse,
   PurchasedDomainResponse,
   PurchasedDomainsResponse,
+  RateKnowledgeBody,
   ReadinessResult,
   RefreshPurchasedDomainInfo200,
   RegisterProjectUploadBody,
@@ -9715,6 +9721,308 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       return useMutation(getCreateKnowledgeMutationOptions(options));
     }
 
+export const getExportKnowledgeUrl = () => {
+
+
+
+
+  return `/api/knowledge/export`
+}
+
+/**
+ * @summary Export all accessible knowledge entries as JSON
+ */
+export const exportKnowledge = async ( options?: RequestInit): Promise<ExportKnowledge200> => {
+
+  return customFetch<ExportKnowledge200>(getExportKnowledgeUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportKnowledgeQueryKey = () => {
+    return [
+    `/api/knowledge/export`
+    ] as const;
+    }
+
+
+export const getExportKnowledgeQueryOptions = <TData = Awaited<ReturnType<typeof exportKnowledge>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportKnowledgeQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportKnowledge>>> = ({ signal }) => exportKnowledge({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportKnowledge>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ExportKnowledgeQueryResult = NonNullable<Awaited<ReturnType<typeof exportKnowledge>>>
+export type ExportKnowledgeQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Export all accessible knowledge entries as JSON
+ */
+
+export function useExportKnowledge<TData = Awaited<ReturnType<typeof exportKnowledge>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getExportKnowledgeQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getImportKnowledgeUrl = () => {
+
+
+
+
+  return `/api/knowledge/import`
+}
+
+/**
+ * @summary Import knowledge entries from a JSON export
+ */
+export const importKnowledge = async (importKnowledgeBody: ImportKnowledgeBody, options?: RequestInit): Promise<ImportKnowledge201> => {
+
+  return customFetch<ImportKnowledge201>(getImportKnowledgeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      importKnowledgeBody,)
+  }
+);}
+
+
+
+
+export const getImportKnowledgeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importKnowledge>>, TError,{data: BodyType<ImportKnowledgeBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importKnowledge>>, TError,{data: BodyType<ImportKnowledgeBody>}, TContext> => {
+
+const mutationKey = ['importKnowledge'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importKnowledge>>, {data: BodyType<ImportKnowledgeBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importKnowledge(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportKnowledgeMutationResult = NonNullable<Awaited<ReturnType<typeof importKnowledge>>>
+    export type ImportKnowledgeMutationBody = BodyType<ImportKnowledgeBody>
+    export type ImportKnowledgeMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Import knowledge entries from a JSON export
+ */
+export const useImportKnowledge = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importKnowledge>>, TError,{data: BodyType<ImportKnowledgeBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importKnowledge>>,
+        TError,
+        {data: BodyType<ImportKnowledgeBody>},
+        TContext
+      > => {
+      return useMutation(getImportKnowledgeMutationOptions(options));
+    }
+
+export const getInferStyleMemoryUrl = () => {
+
+
+
+
+  return `/api/knowledge/infer-style`
+}
+
+/**
+ * @summary Trigger AI style memory inference from build history
+ */
+export const inferStyleMemory = async ( options?: RequestInit): Promise<InferStyleMemory200> => {
+
+  return customFetch<InferStyleMemory200>(getInferStyleMemoryUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getInferStyleMemoryMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof inferStyleMemory>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof inferStyleMemory>>, TError,void, TContext> => {
+
+const mutationKey = ['inferStyleMemory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof inferStyleMemory>>, void> = () => {
+
+
+          return  inferStyleMemory(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InferStyleMemoryMutationResult = NonNullable<Awaited<ReturnType<typeof inferStyleMemory>>>
+
+    export type InferStyleMemoryMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Trigger AI style memory inference from build history
+ */
+export const useInferStyleMemory = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof inferStyleMemory>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof inferStyleMemory>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getInferStyleMemoryMutationOptions(options));
+    }
+
+export const getListPublicKnowledgeUrl = (params?: ListPublicKnowledgeParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/knowledge/public?${stringifiedParams}` : `/api/knowledge/public`
+}
+
+/**
+ * @summary Browse the public community knowledge library (no auth required)
+ */
+export const listPublicKnowledge = async (params?: ListPublicKnowledgeParams, options?: RequestInit): Promise<KnowledgeEntry[]> => {
+
+  return customFetch<KnowledgeEntry[]>(getListPublicKnowledgeUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPublicKnowledgeQueryKey = (params?: ListPublicKnowledgeParams,) => {
+    return [
+    `/api/knowledge/public`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListPublicKnowledgeQueryOptions = <TData = Awaited<ReturnType<typeof listPublicKnowledge>>, TError = ErrorType<unknown>>(params?: ListPublicKnowledgeParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPublicKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPublicKnowledgeQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPublicKnowledge>>> = ({ signal }) => listPublicKnowledge(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPublicKnowledge>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPublicKnowledgeQueryResult = NonNullable<Awaited<ReturnType<typeof listPublicKnowledge>>>
+export type ListPublicKnowledgeQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Browse the public community knowledge library (no auth required)
+ */
+
+export function useListPublicKnowledge<TData = Awaited<ReturnType<typeof listPublicKnowledge>>, TError = ErrorType<unknown>>(
+ params?: ListPublicKnowledgeParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPublicKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPublicKnowledgeQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
 export const getUpdateKnowledgeUrl = (id: number,) => {
 
 
@@ -9724,7 +10032,7 @@ export const getUpdateKnowledgeUrl = (id: number,) => {
 }
 
 /**
- * @summary Update annotation, approvedForReuse, or archivedAt on a knowledge entry
+ * @summary Update annotation, approvedForReuse, title, content, isPublic, scope, or archivedAt
  */
 export const updateKnowledge = async (id: number,
     knowledgeUpdate: KnowledgeUpdate, options?: RequestInit): Promise<KnowledgeEntry> => {
@@ -9774,7 +10082,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateKnowledgeMutationError = ErrorType<ApiError>
 
     /**
- * @summary Update annotation, approvedForReuse, or archivedAt on a knowledge entry
+ * @summary Update annotation, approvedForReuse, title, content, isPublic, scope, or archivedAt
  */
 export const useUpdateKnowledge = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateKnowledge>>, TError,{id: number;data: BodyType<KnowledgeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -9849,6 +10157,78 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getDeleteKnowledgeMutationOptions(options));
+    }
+
+export const getRateKnowledgeUrl = (id: number,) => {
+
+
+
+
+  return `/api/knowledge/${id}/rate`
+}
+
+/**
+ * @summary Record explicit thumbs-up or thumbs-down on a knowledge entry
+ */
+export const rateKnowledge = async (id: number,
+    rateKnowledgeBody: RateKnowledgeBody, options?: RequestInit): Promise<KnowledgeEntry> => {
+
+  return customFetch<KnowledgeEntry>(getRateKnowledgeUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      rateKnowledgeBody,)
+  }
+);}
+
+
+
+
+export const getRateKnowledgeMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rateKnowledge>>, TError,{id: number;data: BodyType<RateKnowledgeBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rateKnowledge>>, TError,{id: number;data: BodyType<RateKnowledgeBody>}, TContext> => {
+
+const mutationKey = ['rateKnowledge'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rateKnowledge>>, {id: number;data: BodyType<RateKnowledgeBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  rateKnowledge(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RateKnowledgeMutationResult = NonNullable<Awaited<ReturnType<typeof rateKnowledge>>>
+    export type RateKnowledgeMutationBody = BodyType<RateKnowledgeBody>
+    export type RateKnowledgeMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Record explicit thumbs-up or thumbs-down on a knowledge entry
+ */
+export const useRateKnowledge = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rateKnowledge>>, TError,{id: number;data: BodyType<RateKnowledgeBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rateKnowledge>>,
+        TError,
+        {id: number;data: BodyType<RateKnowledgeBody>},
+        TContext
+      > => {
+      return useMutation(getRateKnowledgeMutationOptions(options));
     }
 
 export const getTriggerMobileBuildUrl = (id: number,) => {

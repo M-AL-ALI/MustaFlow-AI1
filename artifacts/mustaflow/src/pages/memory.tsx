@@ -1,0 +1,313 @@
+import { useState, useCallback } from "react";
+import {
+  useListKnowledge,
+  getListKnowledgeQueryKey,
+} from "@workspace/api-client-react";
+import type { KnowledgeEntry } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { AppLayout } from "@/components/layout/app-layout";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
+  BrainCircuit,
+  Sparkles,
+  RefreshCw,
+  Loader2,
+  ThumbsUp,
+  ThumbsDown,
+  Archive,
+  ChevronDown,
+  ChevronRight,
+  Palette,
+  Code2,
+  LayoutTemplate,
+  Type,
+  Layers,
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+function getStyleIcon(category: string) {
+  switch (category.toLowerCase()) {
+    case "style":
+    case "colour":
+    case "color":
+      return Palette;
+    case "code":
+    case "coding":
+      return Code2;
+    case "layout":
+    case "ui":
+      return LayoutTemplate;
+    case "typography":
+    case "font":
+    case "text":
+      return Type;
+    default:
+      return Layers;
+  }
+}
+
+function StyleMemoryCard({ entry, onRated }: { entry: KnowledgeEntry; onRated: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [rating, setRating] = useState<"up" | "down" | null>(null);
+  const { toast } = useToast();
+
+  const StyleIcon = getStyleIcon(entry.category);
+
+  const handleRate = async (direction: "up" | "down") => {
+    if (rating === direction) return;
+    try {
+      await fetch(`/api/knowledge/${entry.id}/rate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: direction }),
+      });
+      setRating(direction);
+      onRated();
+    } catch {
+      toast({ title: "Failed to rate lesson", variant: "destructive" });
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        "border rounded-lg p-4 bg-card transition-all",
+        entry.archivedAt ? "opacity-40 border-border/40" : "border-border",
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+          <StyleIcon className="h-4 w-4 text-primary" />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start gap-2">
+            <div className="flex-1">
+              <h3 className="text-sm font-medium text-foreground leading-snug">{entry.title}</h3>
+              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border border-primary/30 bg-primary/10 text-primary">
+                  {entry.category}
+                </span>
+                <span className="text-[10px] text-muted-foreground/50">
+                  {new Date(entry.createdAt).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => void handleRate("up")}
+                className={cn(
+                  "flex items-center gap-1 px-1.5 py-1 rounded text-[10px] transition-colors",
+                  rating === "up"
+                    ? "bg-green-500/15 text-green-400 border border-green-500/30"
+                    : "text-muted-foreground hover:text-green-400 hover:bg-green-500/10 border border-transparent",
+                )}
+                title="Helpful"
+              >
+                <ThumbsUp className="h-3 w-3" />
+                <span>{(entry.thumbsUp ?? 0) + (rating === "up" ? 1 : 0)}</span>
+              </button>
+              <button
+                onClick={() => void handleRate("down")}
+                className={cn(
+                  "flex items-center gap-1 px-1.5 py-1 rounded text-[10px] transition-colors",
+                  rating === "down"
+                    ? "bg-red-500/15 text-red-400 border border-red-500/30"
+                    : "text-muted-foreground hover:text-red-400 hover:bg-red-500/10 border border-transparent",
+                )}
+                title="Not helpful"
+              >
+                <ThumbsDown className="h-3 w-3" />
+                <span>{(entry.thumbsDown ?? 0) + (rating === "down" ? 1 : 0)}</span>
+              </button>
+              <button
+                onClick={() => setExpanded((v) => !v)}
+                className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground"
+              >
+                {expanded ? (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {expanded && (
+            <p className="mt-2.5 text-xs text-muted-foreground leading-relaxed border-t border-border/50 pt-2.5">
+              {entry.content}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function MemoryPage() {
+  const [inferring, setInferring] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const params = {
+    scope: "user" as const,
+    archived: false,
+    limit: 100,
+  };
+
+  const { data: entries = [], isLoading, refetch } = useListKnowledge(params, {
+    query: {
+      queryKey: getListKnowledgeQueryKey(params),
+    },
+  });
+
+  const styleEntries = entries.filter((e) => e.type === "style_memory");
+  const otherUserEntries = entries.filter((e) => e.type !== "style_memory");
+
+  const handleInferStyle = useCallback(async () => {
+    setInferring(true);
+    try {
+      const res = await fetch("/api/knowledge/infer-style", { method: "POST" });
+      const data = (await res.json()) as { inferred: number; message: string };
+      toast({
+        title: data.inferred > 0 ? "Style preferences updated" : "No new preferences found",
+        description: data.message,
+      });
+      void refetch();
+      void queryClient.invalidateQueries({ queryKey: getListKnowledgeQueryKey(params) });
+    } catch {
+      toast({ title: "Inference failed", variant: "destructive" });
+    } finally {
+      setInferring(false);
+    }
+  }, [refetch, queryClient, toast]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <AppLayout>
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-6 py-8">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                <BrainCircuit className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-foreground">Style Memory</h1>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Your personal AI preferences, inferred from your builds
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={() => void handleInferStyle()}
+              disabled={inferring}
+              size="sm"
+              className="gap-2"
+            >
+              {inferring ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              {inferring ? "Analysing…" : "Re-analyse style"}
+            </Button>
+          </div>
+
+          {isLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <>
+              {/* Style preferences */}
+              <section className="mb-8">
+                <div className="flex items-center gap-2 mb-4">
+                  <Palette className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="text-sm font-semibold text-foreground">Inferred Preferences</h2>
+                  <span className="text-[10px] text-muted-foreground/60 ml-1">
+                    ({styleEntries.length})
+                  </span>
+                </div>
+
+                {styleEntries.length === 0 ? (
+                  <div className="border border-dashed border-border rounded-xl p-8 text-center">
+                    <BrainCircuit className="h-8 w-8 text-muted-foreground/30 mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground mb-1">No style preferences yet</p>
+                    <p className="text-xs text-muted-foreground/60 max-w-sm mx-auto leading-relaxed mb-4">
+                      Build a few projects first. Then click "Re-analyse style" and the AI will
+                      infer your preferences from your build history.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleInferStyle()}
+                      disabled={inferring}
+                      className="gap-2"
+                    >
+                      {inferring ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5" />
+                      )}
+                      Analyse now
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {styleEntries.map((entry) => (
+                      <StyleMemoryCard key={entry.id} entry={entry} onRated={() => void refetch()} />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Other user-scoped entries */}
+              {otherUserEntries.length > 0 && (
+                <section>
+                  <div className="flex items-center gap-2 mb-4">
+                    <Archive className="h-4 w-4 text-muted-foreground" />
+                    <h2 className="text-sm font-semibold text-foreground">Personal Notes</h2>
+                    <span className="text-[10px] text-muted-foreground/60 ml-1">
+                      ({otherUserEntries.length})
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {otherUserEntries.map((entry) => (
+                      <StyleMemoryCard
+                        key={entry.id}
+                        entry={entry}
+                        onRated={() => void refetch()}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+
+          {/* How it works */}
+          <div className="mt-10 border border-border/50 rounded-xl p-5 bg-muted/20">
+            <div className="flex items-center gap-2 mb-3">
+              <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                How style memory works
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              After every build, MustaFlow analyses your history and infers your style preferences —
+              things like colour palettes, component patterns, and code conventions. These
+              preferences are automatically injected into your next AI build, making every project
+              feel more "you" without manual configuration.
+            </p>
+          </div>
+        </div>
+      </div>
+    </AppLayout>
+  );
+}

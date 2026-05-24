@@ -10,6 +10,8 @@ import {
   Settings,
   GraduationCap,
   BookOpen,
+  Library,
+  BrainCircuit,
   HelpCircle,
   LayoutDashboard,
   LogOut,
@@ -35,7 +37,9 @@ import { BackgroundJobsPanel } from "@/components/background-jobs-panel";
 const NAV_ITEMS = [
   { name: "Home", href: "/", icon: Home },
   { name: "Projects", href: "/projects", icon: FolderKanban },
-  { name: "AI Memory", href: "/knowledge", icon: BookOpen },
+  { name: "Knowledge Vault", href: "/knowledge", icon: BookOpen },
+  { name: "Style Memory", href: "/memory", icon: BrainCircuit },
+  { name: "Public Library", href: "/library", icon: Library },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

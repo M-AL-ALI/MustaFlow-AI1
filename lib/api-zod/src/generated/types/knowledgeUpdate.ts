@@ -12,10 +12,12 @@ export interface KnowledgeUpdate {
   category?: string;
   type?: string;
   severity?: string;
+  scope?: string;
   /** @minLength 1 */
   content?: string;
   /** @nullable */
   annotation?: string | null;
   approvedForReuse?: boolean;
+  isPublic?: boolean;
   archived?: boolean;
 }

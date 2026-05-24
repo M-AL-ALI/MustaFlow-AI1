@@ -22,6 +22,7 @@
     "backfill-knowledge-scores": "tsx ./src/backfill-knowledge-scores.ts",
     "backfill-knowledge-embeddings": "tsx ./src/backfill-knowledge-embeddings.ts",
     "migrate-knowledge-embeddings": "tsx ./src/migrate-knowledge-embeddings.ts",
+    "migrate-knowledge-vault-v2": "tsx ./src/migrate-knowledge-vault-v2.ts",
     "migrate-version-validation-status": "tsx ./src/migrate-version-validation-status.ts",
     "migrate-architect-review": "tsx ./src/migrate-architect-review.ts",
     "migrate-prod-logs": "tsx ./src/migrate-prod-logs.ts",

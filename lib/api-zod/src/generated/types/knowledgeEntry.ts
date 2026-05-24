@@ -14,6 +14,7 @@ export interface KnowledgeEntry {
   content: string;
   type: string;
   severity: string;
+  scope: string;
   /** @nullable */
   projectId?: number | null;
   /** @nullable */
@@ -25,6 +26,10 @@ export interface KnowledgeEntry {
   /** @nullable */
   tags?: string | null;
   approvedForReuse: boolean;
+  isPublic: boolean;
+  thumbsUp: number;
+  thumbsDown: number;
+  usageCount: number;
   /** @nullable */
   diffSummary?: KnowledgeEntryDiffSummary;
   /** @nullable */

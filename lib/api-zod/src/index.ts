@@ -39,3 +39,5 @@ export { ConfirmPurchasedDomainRenewalBody } from "./generated/api";
 export { PurchaseDomainResponse } from "./generated/api";
 export { RenewPurchasedDomainBody } from "./generated/api";
 export { SetPurchasedDomainAutoRenewBody } from "./generated/api";
+export { ImportKnowledgeBody } from "./generated/api";
+export { RateKnowledgeBody } from "./generated/api";

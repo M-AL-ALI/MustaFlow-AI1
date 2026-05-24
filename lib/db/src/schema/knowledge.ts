@@ -26,11 +26,15 @@ export const KNOWLEDGE_TYPES = [
   "manual_edit",
   "note",
   "conversation_summary",
+  "style_memory",
 ] as const;
 export type KnowledgeType = (typeof KNOWLEDGE_TYPES)[number];
 
 export const KNOWLEDGE_SEVERITIES = ["info", "warning", "error"] as const;
 export type KnowledgeSeverity = (typeof KNOWLEDGE_SEVERITIES)[number];
+
+export const KNOWLEDGE_SCOPES = ["user", "project", "org", "global"] as const;
+export type KnowledgeScope = (typeof KNOWLEDGE_SCOPES)[number];
 
 export interface DiffSummary {
   filesAdded: string[];
@@ -51,6 +55,8 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   userId: text("user_id"),
   // Machine-readable type for filtering and display
   type: text("type").notNull().default("note"),
+  // Scope: user (personal preference), project (project-level), org (team), global (cross-user approved)
+  scope: text("scope").notNull().default("project"),
   // Links to the task or version that produced this entry
   relatedTaskId: integer("related_task_id"),
   relatedVersionId: integer("related_version_id"),
@@ -64,6 +70,13 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   diffSummary: jsonb("diff_summary").$type<DiffSummary>(),
   // User-written annotation / note on this entry
   annotation: text("annotation"),
+  // Explicit quality signals from the user (👍/👎)
+  thumbsUp: integer("thumbs_up").notNull().default(0),
+  thumbsDown: integer("thumbs_down").notNull().default(0),
+  // How many times this lesson was applied in a build
+  usageCount: integer("usage_count").notNull().default(0),
+  // Opt-in: share anonymized lesson to the public community pool
+  isPublic: boolean("is_public").notNull().default(false),
   // AI-generated embedding vector for semantic similarity ranking.
   // pgvector column (1536 dims = OpenAI text-embedding-3-small).
   // Null when not yet computed — loadKnowledgeContext falls back to TF-IDF.

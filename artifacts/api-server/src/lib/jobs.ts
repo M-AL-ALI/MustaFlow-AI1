@@ -661,7 +661,16 @@ async function loadKnowledgeContext(
     ].join("\n");
 
     const context = [integrationsNote, knowledgeSection].filter(Boolean).join("\n\n");
-    const applied = selected.map((e) => ({ id: e.id, title: e.title, category: e.category }));
+    const applied = selected.map((e) => ({ id: e.id, title: e.title, type: e.type, category: e.category }));
+
+    // Increment usageCount for all selected entries — best-effort, non-fatal.
+    if (selected.length > 0) {
+      const selectedIds = selected.map((e) => e.id);
+      db.update(knowledgeEntriesTable)
+        .set({ usageCount: sql`${knowledgeEntriesTable.usageCount} + 1` })
+        .where(inArray(knowledgeEntriesTable.id, selectedIds))
+        .catch((err: Error) => logger.warn({ err }, "Failed to increment knowledge usageCount"));
+    }
 
     return { context, applied };
   } catch {

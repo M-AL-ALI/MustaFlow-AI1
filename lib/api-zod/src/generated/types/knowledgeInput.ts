@@ -12,6 +12,8 @@ export interface KnowledgeInput {
   category: string;
   type?: string;
   severity?: string;
+  scope?: string;
   /** @minLength 1 */
   content: string;
+  projectId?: number;
 }
