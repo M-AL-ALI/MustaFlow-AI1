@@ -266,16 +266,16 @@ export function QueueComposer({
         }
         const row = (await regRes.json()) as {
           id: number;
-          name: string;
-          mime: string;
-          size: number;
+          filename: string;
+          mimeType: string;
+          sizeBytes: number;
         };
         return {
           kind: "file",
           uploadId: row.id,
-          name: row.name,
-          mime: row.mime,
-          size: row.size,
+          name: row.filename,
+          mime: row.mimeType,
+          size: row.sizeBytes,
         };
       } catch (err) {
         // eslint-disable-next-line no-console

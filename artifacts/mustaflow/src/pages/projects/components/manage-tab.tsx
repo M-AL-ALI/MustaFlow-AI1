@@ -12,9 +12,8 @@ import {
   Smartphone,
   Upload,
   ShieldCheck,
-  Users,
 } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
+import { CollaborationCard } from "./collaboration-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -258,39 +257,24 @@ export function ManageTab({
         {isMobile && <MobileAppSettingsSection projectId={projectId} />}
 
         {/* Collaboration — multiplayer toggle (Task #540) */}
-        <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold">Collaboration</h3>
-          </div>
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Real-time multiplayer</p>
-              <p className="text-xs text-muted-foreground">
-                Show cursors, active tab, and live edits from other people viewing this project.
-                Opt-in per project — disabled by default.
-              </p>
-            </div>
-            <Switch
-              checked={project?.multiplayerEnabled ?? false}
-              onCheckedChange={async (checked) => {
-                try {
-                  await updateProject.mutateAsync({
-                    id: projectId,
-                    data: { multiplayerEnabled: checked },
-                  });
-                  await queryClient.invalidateQueries({
-                    queryKey: getGetProjectQueryKey(projectId),
-                  });
-                } catch {
-                  // surfaced by mutation state; non-fatal
-                }
-              }}
-              disabled={updateProject.isPending}
-              aria-label="Toggle real-time multiplayer"
-            />
-          </div>
-        </div>
+        <CollaborationCard
+          projectId={projectId}
+          enabled={project?.multiplayerEnabled ?? false}
+          isPending={updateProject.isPending}
+          onToggle={async (checked) => {
+            try {
+              await updateProject.mutateAsync({
+                id: projectId,
+                data: { multiplayerEnabled: checked },
+              });
+              await queryClient.invalidateQueries({
+                queryKey: getGetProjectQueryKey(projectId),
+              });
+            } catch {
+              // surfaced by mutation state; non-fatal
+            }
+          }}
+        />
 
         {/* Export */}
         <div className="bg-card border border-border rounded-xl p-5 space-y-3">
