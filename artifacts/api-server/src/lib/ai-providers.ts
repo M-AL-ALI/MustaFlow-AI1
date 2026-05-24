@@ -247,23 +247,41 @@ export interface CreateChatCompletionParams {
 export async function createChatCompletion(
   params: CreateChatCompletionParams,
 ): Promise<ChatCompletion> {
-  if (params.provider === "openai") {
-    return openai.chat.completions.create(
-      {
-        model: params.model,
-        messages: params.messages,
-        tools: params.tools,
-        tool_choice: params.tool_choice,
-        response_format: params.response_format,
-        max_completion_tokens: params.max_completion_tokens,
+  // Wrap all AI provider calls with the openai circuit breaker + retry.
+  // The circuit breaker is shared across all providers (it tracks upstream AI
+  // availability regardless of which backend is active).
+  const { openaiCircuit, withRetry, isTransientError } = await import("./resilience");
+
+  return openaiCircuit.call(() =>
+    withRetry(
+      () => {
+        if (params.provider === "openai") {
+          return openai.chat.completions.create(
+            {
+              model: params.model,
+              messages: params.messages,
+              tools: params.tools,
+              tool_choice: params.tool_choice,
+              response_format: params.response_format,
+              max_completion_tokens: params.max_completion_tokens,
+            },
+            { signal: params.signal },
+          );
+        }
+        if (params.provider === "anthropic") {
+          return callAnthropic(params);
+        }
+        return callGemini(params);
       },
-      { signal: params.signal },
-    );
-  }
-  if (params.provider === "anthropic") {
-    return callAnthropic(params);
-  }
-  return callGemini(params);
+      {
+        maxAttempts: 2,
+        baseDelayMs: 1000,
+        shouldRetry: isTransientError,
+        label: `ai-completion:${params.provider}:${params.model}`,
+        signal: params.signal,
+      },
+    ),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -15,6 +15,13 @@ import { startProdLogRetentionWorker } from "./lib/prodLogs";
 import "./lib/preview-purge";
 import { startCfScheduler } from "./lib/cf-scheduler";
 import { startDeploymentScheduler } from "./lib/deployment-scheduler";
+import { initSentry, captureError, Sentry } from "./lib/sentry";
+import { httpRequestDuration, httpRequestsTotal } from "./lib/metrics";
+import { startDurableQueue, stopDurableQueue } from "./lib/durable-queue";
+import { runJob } from "./lib/jobs";
+
+// Initialise Sentry before anything else so uncaught exceptions are captured.
+initSentry();
 
 // Kick off the prod-log retention sweeper (Task #511). Hourly, best-effort.
 startProdLogRetentionWorker();
@@ -28,7 +35,30 @@ startCfScheduler();
 // Sweeps due schedules every minute + runs synthetic uptime probes every 5 min.
 startDeploymentScheduler();
 
+// Start durable job queue (pg-boss). No-ops when DATABASE_URL is missing or
+// DURABLE_QUEUE_ENABLED=false. Falls back to in-memory enqueueJob silently.
+void startDurableQueue(async (payload) => {
+  await runJob(payload as unknown as Parameters<typeof runJob>[0]);
+});
+
 const app: Express = express();
+
+// Prometheus HTTP latency tracking middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    const route = req.route?.path ?? req.path.replace(/\/\d+/g, "/:id");
+    const labels = {
+      method: req.method,
+      route: route.slice(0, 120),
+      status_code: String(res.statusCode),
+    };
+    const durationSec = (Date.now() - start) / 1000;
+    httpRequestDuration.observe(labels, durationSec);
+    httpRequestsTotal.inc(labels);
+  });
+  next();
+});
 
 app.use(
   pinoHttp({
@@ -95,14 +125,26 @@ app.use(customDomainMiddleware);
 
 app.use("/api", router);
 
+// Sentry error handler — must come AFTER routes, BEFORE the generic error handler.
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
+
 // Centralized JSON error handler. Keeps API responses contract-shaped even
 // when a handler throws unexpectedly.
 app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   req.log.error({ err }, "Unhandled request error");
+  captureError(err, { url: req.url, method: req.method });
   if (res.headersSent) {
     return;
   }
   res.status(500).json({ error: "Internal server error" });
+});
+
+// Graceful shutdown — drain pg-boss before the process exits.
+process.on("SIGTERM", () => {
+  logger.info("SIGTERM received — stopping durable queue");
+  void stopDurableQueue().then(() => process.exit(0));
 });
 
 export default app;

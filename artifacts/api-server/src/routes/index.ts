@@ -61,6 +61,9 @@ import webhooksRouter from "./webhooks";
 import domainAnalyticsRouter from "./domain-analytics";
 import v1Router from "./v1/index";
 import abuseRouter from "./abuse";
+import metricsRouter from "./metrics";
+import statusRouter from "./status";
+import healthProjectRouter from "./health-project";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -71,6 +74,8 @@ router.use(generalLimiter);
 
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 router.use(healthRouter);
+router.use(statusRouter); // GET /status — public component-level status
+router.use(metricsRouter); // GET /metrics — Prometheus scrape endpoint (token-protected)
 router.use(publicRouter);
 router.use(analyticsRouter); // POST /p/:slug/analytics/ping (public ping)
 router.use(publicProdLogRouter); // POST /p/:slug/log (public browser error beacon)
@@ -84,6 +89,8 @@ router.use(abuseRouter); // POST /abuse-reports (public intake, no auth)
 const KNOWN_PREFIXES = [
   "/v1",
   "/me",
+  "/status",
+  "/metrics",
   "/abuse-reports",
   "/workspaces",
   "/projects",
@@ -200,6 +207,7 @@ router.use(artifactsRouter);
 router.use(agentInboxRouter);
 router.use(webhooksRouter);
 router.use(domainAnalyticsRouter);
+router.use(healthProjectRouter); // GET /projects/:id/health — per-project metrics
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

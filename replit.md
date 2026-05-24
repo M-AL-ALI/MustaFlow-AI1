@@ -420,3 +420,48 @@ The intended user journey is: Login → create project → build app → preview
   - **Multi-region probes**: probes run from this server's region only; true 3-region 1-minute probes need fan-out workers or a third-party (UptimeRobot/Checkly), tracked as future work.
   - **Always-on background worker lifecycle**: `reserved_vm` keeps the app container always-on (`min_machines_running:1`), but a _separate_ persistent worker process model (think `worker.ts` next to `app.ts`) is not yet defined.
 - **Env vars (optional)**: `CDN_PROVIDER` (`r2|bunny|none`, default `none`), `CDN_PUBLIC_BASE` (e.g. `https://cdn.mustaflow.app`), `CDN_API_TOKEN` (reserved for follow-up). Without these, CDN is disabled and the toggle is locked off in the UI.
+
+## Task #623 — Reliability & Production Hardening
+
+### New infrastructure
+
+- **Resilience utilities** (`artifacts/api-server/src/lib/resilience.ts`): `withRetry` (exponential back-off, jitter, configurable `shouldRetry` predicate) + `CircuitBreaker` class (closed/half-open/open state machine, configurable thresholds). Shared instances: `openaiCircuit`, `containerCircuit`, `stripeCircuit`, all in `ALL_BREAKERS`.
+- **Sentry error tracking** (`artifacts/api-server/src/lib/sentry.ts`): `initSentry()` (no-ops when `SENTRY_DSN` unset) + `captureError(err, ctx)` helper (always writes structured log; Sentry only when DSN present). Wired in `app.ts` at startup and in the catch-all error handler. `Sentry.setupExpressErrorHandler(app)` registered after routes when DSN is set.
+- **Prometheus metrics** (`artifacts/api-server/src/lib/metrics.ts` + `artifacts/api-server/src/routes/metrics.ts`): HTTP request duration/count histograms; AI call duration/count; agentic loop step counters; job queue depth gauge; job duration histogram; circuit breaker state gauges; credits deducted counter; SLO violation counter. Served at `GET /api/metrics` (bearer-token protected via `METRICS_TOKEN`).
+- **Durable job queue** (`artifacts/api-server/src/lib/durable-queue.ts`): pg-boss backed by Postgres. `startDurableQueue(onJob)` starts workers; `durableEnqueue(kind, payload)` sends jobs; `stopDurableQueue()` drains on SIGTERM. Graceful no-op when `DATABASE_URL` missing or `DURABLE_QUEUE_ENABLED=false`.
+- **Per-project Health tab** (`artifacts/api-server/src/routes/health-project.ts` + `artifacts/mustaflow/src/pages/projects/components/health-tab.tsx`): `GET /api/projects/:id/health` returns build success rates, task counts, latency percentiles (p50/p95/p99), and deployment counts over 24h/7d/30d windows. Reads from `agent_tasks` + `deployment_logs` — no new tables. Health tab available under the "More" tab drawer.
+- **Public status page** (`artifacts/api-server/src/routes/status.ts` + `artifacts/mustaflow/src/pages/status.tsx`): `GET /api/status` (public, no auth) returns component-level health for API, Database, AI Builder, Containers, Payments, Queue, Auth — driven by live circuit-breaker state + lightweight DB probe. Frontend at `/status` auto-refreshes every 60 s.
+- **Agentic loop promoted to default**: `AGENTIC_BUILDER_ENABLED` now defaults to `true` — the opt-out is `AGENTIC_BUILDER_ENABLED=false`. Every build and refine logs which pipeline was selected at INFO level.
+- **HTTP metrics middleware** in `app.ts`: every response records route + status into `httpRequestDuration` and `httpRequestsTotal`.
+- **Graceful SIGTERM**: `app.ts` registers a SIGTERM handler that drains pg-boss before `process.exit(0)`.
+- **pg-boss migration helper**: `pnpm --filter @workspace/scripts run migrate-pg-boss` pre-creates the `pgboss.*` schema. pg-boss also auto-creates on first start.
+
+### New optional env vars
+
+| Var                     | Default | Purpose                                                 |
+| ----------------------- | ------- | ------------------------------------------------------- |
+| `SENTRY_DSN`            | —       | Activates Sentry error tracking                         |
+| `METRICS_TOKEN`         | —       | Bearer token protecting `/api/metrics`                  |
+| `DURABLE_QUEUE_ENABLED` | `true`  | Set `false` to skip pg-boss and stay on in-memory queue |
+
+### SLO targets
+
+| SLO                       | Target                        | Metric                                    |
+| ------------------------- | ----------------------------- | ----------------------------------------- |
+| API availability          | ≥ 99.5%                       | `/api/status` overall component states    |
+| AI job failure rate       | < 1%                          | `jobs_total{status="error"} / jobs_total` |
+| p95 build latency         | < 5 s (chat to first token)   | `job_duration_seconds` histogram          |
+| Circuit-breaker open time | < 30 s cooldown               | `circuit_breaker_state` gauge             |
+| Durable queue job loss    | 0% (pg-boss retries up to 2×) | `pgboss.archive` failed count             |
+
+### Error budget policy
+
+- **1-hour window**: if `jobs_total{status="error"} / jobs_total > 5%` for any 1-hour window, alert via Sentry.
+- **24-hour window**: if API availability drops below 99.5% over 24 h, page on-call.
+- **Circuit opens**: any circuit opening triggers a Sentry `captureError` with context tags.
+
+### Known limitations (Phase 1)
+
+- Prometheus alerts / alerting rules are not yet wired to a real Alertmanager — `slo_violations_total` counter is instrumented but no alert route is configured.
+- pg-boss dead-letter (archived failed jobs) is not surfaced in the admin dashboard.
+- Circuit breakers are not yet wrapped around the actual OpenAI/Fly/Stripe call sites in `builder.ts` / `container.ts` — the utility is in place and available for follow-up.

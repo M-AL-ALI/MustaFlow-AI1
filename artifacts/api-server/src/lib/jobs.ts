@@ -1396,7 +1396,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           signal,
         };
 
-        const USE_AGENT_LOOP_BUILD = process.env.AGENTIC_BUILDER_ENABLED === "true";
+        const USE_AGENT_LOOP_BUILD = process.env.AGENTIC_BUILDER_ENABLED !== "false";
+        logger.info(
+          { taskId, projectId, pipeline: USE_AGENT_LOOP_BUILD ? "agentic" : "legacy" },
+          "Builder pipeline selected",
+        );
         let result:
           | Awaited<ReturnType<typeof runBuildPipeline>>
           | Awaited<ReturnType<typeof runMobileBuildPipeline>> = USE_AGENT_LOOP_BUILD
@@ -1770,7 +1774,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           signal,
         };
 
-        const USE_AGENT_LOOP_REFINE = process.env.AGENTIC_BUILDER_ENABLED === "true";
+        const USE_AGENT_LOOP_REFINE = process.env.AGENTIC_BUILDER_ENABLED !== "false";
+        logger.info(
+          { taskId, projectId, pipeline: USE_AGENT_LOOP_REFINE ? "agentic" : "legacy" },
+          "Refine pipeline selected",
+        );
         let refineResult: Awaited<ReturnType<typeof runRefinePipeline>> = USE_AGENT_LOOP_REFINE
           ? await (async () => {
               const { runAgentLoop, loopResultToRefineResult } = await import("./agent-loop");
@@ -3935,16 +3943,70 @@ function _drainJobs(): void {
   }
 }
 
+/**
+ * Serialise a JobInput to a plain JSON-safe record for the durable queue.
+ * AbortSignals and functions are excluded — they are recreated by runJob.
+ */
+function serializeJobInput(input: JobInput): Record<string, unknown> {
+  return {
+    taskId: input.taskId,
+    projectId: input.projectId,
+    kind: input.kind,
+    userPrompt: input.userPrompt,
+    agentMode: input.agentMode,
+    agentIdentity: input.agentIdentity ?? null,
+    planContext: input.planContext ?? null,
+    conversationHistory: input.conversationHistory ?? null,
+    imageAttachments: input.imageAttachments ?? null,
+    queueBatchId: input.queueBatchId ?? null,
+    queueIndex: input.queueIndex ?? null,
+    queueTotalCount: input.queueTotalCount ?? null,
+    runMode: input.runMode ?? null,
+    wallClockCapMs: input.wallClockCapMs ?? null,
+  };
+}
+
+/**
+ * Attempt to enqueue the job into the durable (pg-boss) queue.
+ * Returns true if the job was accepted by pg-boss, false if it should fall
+ * back to the in-memory path.
+ */
+async function tryDurableEnqueue(input: JobInput): Promise<boolean> {
+  const { durableEnqueue, isDurableQueueReady } = await import("./durable-queue");
+  if (!isDurableQueueReady()) return false;
+  const kind = input.kind === "build" ? "build" : "refine";
+  const id = await durableEnqueue(kind, serializeJobInput(input));
+  return id !== null;
+}
+
 export function enqueueJob(input: JobInput): void {
-  if (_activeJobs < JOB_CONCURRENCY) {
-    _activeJobs++;
-    void runJob(input).finally(() => {
-      _activeJobs--;
-      _drainJobs();
+  // Try durable queue first; fall back to in-memory if unavailable.
+  void tryDurableEnqueue(input)
+    .then((accepted) => {
+      if (accepted) return; // pg-boss will call runJob via worker
+      // In-memory fallback path
+      if (_activeJobs < JOB_CONCURRENCY) {
+        _activeJobs++;
+        void runJob(input).finally(() => {
+          _activeJobs--;
+          _drainJobs();
+        });
+      } else {
+        _pendingJobs.push(input);
+      }
+    })
+    .catch(() => {
+      // If tryDurableEnqueue itself throws (import error etc.), fall through
+      if (_activeJobs < JOB_CONCURRENCY) {
+        _activeJobs++;
+        void runJob(input).finally(() => {
+          _activeJobs--;
+          _drainJobs();
+        });
+      } else {
+        _pendingJobs.push(input);
+      }
     });
-  } else {
-    _pendingJobs.push(input);
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

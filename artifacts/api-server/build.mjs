@@ -69,7 +69,6 @@ async function buildAll() {
       "eslint-plugin-react-hooks",
       "@aws-sdk/*",
       "@azure/*",
-      "@opentelemetry/*",
       "@google-cloud/*",
       "@google/*",
       "googleapis",

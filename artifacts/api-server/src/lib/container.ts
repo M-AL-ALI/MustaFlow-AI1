@@ -82,13 +82,42 @@ function flyHeaders(): Record<string, string> {
   };
 }
 
+/**
+ * HTTP statuses from Fly.io that are transient and worth retrying.
+ * 429 = rate-limited, 502/503/504 = Fly infra blip.
+ */
+const FLY_RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+
 async function flyFetch(path: string, init?: RequestInit): Promise<Response> {
-  const url = `${FLY_API_BASE}${path}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: { ...flyHeaders(), ...(init?.headers ?? {}) },
-  });
-  return res;
+  const { containerCircuit, withRetry, isTransientError } = await import("./resilience");
+  return containerCircuit.call(() =>
+    withRetry(
+      async () => {
+        const url = `${FLY_API_BASE}${path}`;
+        const res = await fetch(url, {
+          ...init,
+          headers: { ...flyHeaders(), ...(init?.headers ?? {}) },
+        });
+        // Throw on retryable HTTP error statuses so withRetry can back off
+        // and retry — fetch() itself only throws on network failure, not on
+        // application-level error codes.
+        if (FLY_RETRYABLE_STATUSES.has(res.status)) {
+          throw Object.assign(
+            new Error(`Fly.io ${res.status} on ${init?.method ?? "GET"} ${path}`),
+            { status: res.status, retryable: true },
+          );
+        }
+        return res;
+      },
+      {
+        maxAttempts: 3,
+        baseDelayMs: 500,
+        shouldRetry: (err: unknown) =>
+          isTransientError(err) || (typeof err === "object" && err !== null && "retryable" in err),
+        label: `fly:${path}`,
+      },
+    ),
+  );
 }
 
 /**

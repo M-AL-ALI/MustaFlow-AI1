@@ -357,6 +357,7 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
   }
 
   try {
+    const { stripeCircuit, withRetry, isTransientError } = await import("../lib/resilience");
     // Prefer pre-created Stripe Price IDs (set via `pnpm --filter @workspace/scripts
     // run seed:stripe`, then stored as STRIPE_PRICE_STARTER/BUILDER/POWER secrets).
     // Falls back to inline price_data so dev/test still works without seeding.
@@ -385,23 +386,33 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
       },
     };
 
-    const session =
-      mode === "embedded"
-        ? await stripe.checkout.sessions.create({
-            ...baseParams,
-            ui_mode: "embedded",
-            // When no return_url is provided, configure the session so the
-            // embedded form stays in place after payment and the client polls
-            // (via session status / webhook + credit refetch) for completion.
-            ...(returnUrl
-              ? { return_url: returnUrl }
-              : { redirect_on_completion: "never" as const }),
-          })
-        : await stripe.checkout.sessions.create({
-            ...baseParams,
-            success_url: successUrl!,
-            cancel_url: cancelUrl!,
-          });
+    const session = await stripeCircuit.call(() =>
+      withRetry(
+        () =>
+          mode === "embedded"
+            ? stripe.checkout.sessions.create({
+                ...baseParams,
+                ui_mode: "embedded",
+                // When no return_url is provided, configure the session so the
+                // embedded form stays in place after payment and the client polls
+                // (via session status / webhook + credit refetch) for completion.
+                ...(returnUrl
+                  ? { return_url: returnUrl }
+                  : { redirect_on_completion: "never" as const }),
+              })
+            : stripe.checkout.sessions.create({
+                ...baseParams,
+                success_url: successUrl!,
+                cancel_url: cancelUrl!,
+              }),
+        {
+          maxAttempts: 2,
+          baseDelayMs: 1_000,
+          shouldRetry: isTransientError,
+          label: "stripe:checkout.sessions.create",
+        },
+      ),
+    );
 
     res.json({
       sessionId: session.id,

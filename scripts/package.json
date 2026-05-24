@@ -47,12 +47,14 @@
     "migrate-webhooks-pat": "tsx ./src/migrate-webhooks-pat.ts",
     "migrate-domain-security": "tsx ./src/migrate-domain-security.ts",
     "migrate-dns-records": "tsx ./src/migrate-dns-records.ts",
+    "migrate-pg-boss": "tsx ./src/migrate-pg-boss.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },
   "dependencies": {
     "@workspace/db": "workspace:*",
     "openai": "^6.38.0",
+    "pg-boss": "^12.18.2",
     "stripe": "20.0.0"
   },
   "devDependencies": {
