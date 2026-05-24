@@ -53,7 +53,6 @@ const SECONDARY_NAV_ITEMS = [
   { name: "Published", href: "/published", icon: Globe },
   { name: "My Domains", href: "/account/domains", icon: ShoppingCart },
   { name: "Integrations", href: "/integrations", icon: Blocks },
-  { name: "Billing", href: "/billing", icon: CreditCard },
   { name: "Organizations", href: "/orgs/new", icon: Building2 },
 ];
 

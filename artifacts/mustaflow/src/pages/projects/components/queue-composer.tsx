@@ -1232,8 +1232,7 @@ export function QueueComposer({
                       { mode: "pro", label: "Pro", desc: "10 credits · most capable" },
                     ] as const
                   ).map(({ mode, label, desc }) => {
-                    const locked =
-                      subscriptionTier === "free" && (mode === "power" || mode === "pro");
+                    const locked = false;
                     const title = locked
                       ? `Upgrade to unlock — ${label} mode is included with the Pro and Team plans`
                       : desc;

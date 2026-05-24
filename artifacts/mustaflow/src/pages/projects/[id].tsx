@@ -25,6 +25,7 @@ import {
 } from "@workspace/api-client-react";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { CreditBalancePill } from "@/components/credit-balance-pill";
+import { BILLING_ENABLED } from "@/lib/billing-flag";
 import { CodeEditorTab } from "./components/code-editor-tab";
 import { CommandPalette, pushRecentFile } from "./components/command-palette";
 import { KeyboardShortcuts } from "./components/keyboard-shortcuts";
@@ -512,7 +513,7 @@ function ErrorCard({
         <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
         <span className="text-destructive/90 leading-relaxed">{message}</span>
       </div>
-      {isInsufficientCredits && (
+      {isInsufficientCredits && BILLING_ENABLED && (
         <div className="border-t border-destructive/20 pt-2 flex items-center gap-2 flex-wrap">
           <button
             onClick={onBuyCredits}
@@ -568,6 +569,8 @@ function LowCreditsBanner({
   projectId: number;
   onBuyCredits: () => void;
 }) {
+  if (!BILLING_ENABLED) return null;
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const { data, isLoading } = useGetUserCredits({
     query: {
       queryKey: getGetUserCreditsQueryKey(),

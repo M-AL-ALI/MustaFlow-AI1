@@ -6279,20 +6279,7 @@ export function PublishingTab({
                     signingStatus={signingStatus}
                     onSaved={() => void fetchSigningStatus()}
                   />
-                  {creditBalance !== null && creditBalance < EAS_BUILD_COST && (
-                    <div className="flex items-center gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2.5">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      <span className="flex-1">
-                        Not enough credits ({creditBalance} / {EAS_BUILD_COST} needed).
-                      </span>
-                      <Link
-                        href="/billing"
-                        className="font-semibold underline underline-offset-2 hover:opacity-80 shrink-0"
-                      >
-                        Buy credits
-                      </Link>
-                    </div>
-                  )}
+                  {/* Credit gate intentionally disabled while billing is free/unlimited. */}
 
                   {!configuredSecrets.has("EAS_ACCESS_TOKEN") ? (
                     <div className="space-y-2">
@@ -6702,20 +6689,7 @@ export function PublishingTab({
                     signingStatus={signingStatus}
                     onSaved={() => void fetchSigningStatus()}
                   />
-                  {creditBalance !== null && creditBalance < EAS_BUILD_COST && (
-                    <div className="flex items-center gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2.5">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      <span className="flex-1">
-                        Not enough credits ({creditBalance} / {EAS_BUILD_COST} needed).
-                      </span>
-                      <Link
-                        href="/billing"
-                        className="font-semibold underline underline-offset-2 hover:opacity-80 shrink-0"
-                      >
-                        Buy credits
-                      </Link>
-                    </div>
-                  )}
+                  {/* Credit gate intentionally disabled while billing is free/unlimited. */}
 
                   {!configuredSecrets.has("EAS_ACCESS_TOKEN") ? (
                     <div className="space-y-2">

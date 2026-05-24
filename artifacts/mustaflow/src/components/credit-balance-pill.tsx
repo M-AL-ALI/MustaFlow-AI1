@@ -2,10 +2,13 @@ import { useState, useEffect, useCallback } from "react";
 import { Zap, AlertTriangle } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
+import { BILLING_ENABLED } from "@/lib/billing-flag";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
 export function CreditBalancePill() {
+  if (!BILLING_ENABLED) return null;
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const [balance, setBalance] = useState<number | null>(null);
 
   const fetchBalance = useCallback(async () => {
