@@ -30,6 +30,7 @@ import BillingPage from "./pages/billing";
 import PublishedPage from "./pages/published";
 import IntegrationsPage from "./pages/integrations";
 import SecurityPage from "./pages/security";
+import LearnPage from "./pages/learn";
 import PricingPage from "./pages/pricing";
 import WorkspaceUsagePage from "./pages/workspace-usage";
 import WorkspaceAuditPage from "./pages/workspace-audit";
@@ -427,6 +428,13 @@ function ClerkProviderWithRoutes() {
                 <Protected>
                   <AppLayout>
                     <SecurityPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/learn">
+                <Protected>
+                  <AppLayout>
+                    <LearnPage />
                   </AppLayout>
                 </Protected>
               </Route>
