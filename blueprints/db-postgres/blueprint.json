@@ -1,0 +1,37 @@
+{
+  "id": "db-postgres",
+  "name": "Built-in Postgres (Drizzle)",
+  "category": "database",
+  "description": "Replit-managed Postgres with Drizzle ORM. Schema-first, typed queries, easy migrations.",
+  "version": "1.0.0",
+  "url": "https://orm.drizzle.team/docs",
+  "requiredSecrets": [
+    {
+      "name": "DATABASE_URL",
+      "category": "database",
+      "reason": "Postgres connection string (Replit provisions this automatically when you add a Postgres database).",
+      "helpUrl": "https://docs.replit.com/cloud-services/storage-and-databases/postgresql-on-replit"
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "drizzle-orm", "version": "^0.36.0" },
+    { "runtime": "node", "name": "pg", "version": "^8.13.0" },
+    { "runtime": "node", "name": "@types/pg", "version": "^8.11.0", "dev": true },
+    { "runtime": "node", "name": "drizzle-kit", "version": "^0.28.0", "dev": true }
+  ],
+  "files": [
+    {
+      "path": "src/db/client.ts",
+      "content": "import { drizzle } from \"drizzle-orm/node-postgres\";\nimport pg from \"pg\";\nimport * as schema from \"./schema\";\n\nconst { Pool } = pg;\n\nexport const pool = new Pool({\n  connectionString: process.env.DATABASE_URL,\n  ssl: process.env.NODE_ENV === \"production\" ? { rejectUnauthorized: false } : undefined,\n});\n\nexport const db = drizzle(pool, { schema });\n"
+    },
+    {
+      "path": "src/db/schema.ts",
+      "content": "import { pgTable, serial, text, timestamp } from \"drizzle-orm/pg-core\";\n\nexport const usersTable = pgTable(\"users\", {\n  id: serial(\"id\").primaryKey(),\n  email: text(\"email\").notNull().unique(),\n  name: text(\"name\"),\n  createdAt: timestamp(\"created_at\", { withTimezone: true }).notNull().defaultNow(),\n});\n\nexport type User = typeof usersTable.$inferSelect;\nexport type InsertUser = typeof usersTable.$inferInsert;\n"
+    },
+    {
+      "path": "drizzle.config.ts",
+      "content": "import type { Config } from \"drizzle-kit\";\n\nexport default {\n  schema: \"./src/db/schema.ts\",\n  out: \"./drizzle\",\n  dialect: \"postgresql\",\n  dbCredentials: { url: process.env.DATABASE_URL! },\n} satisfies Config;\n"
+    }
+  ],
+  "postInstallNotes": "1. Run `npx drizzle-kit push` to sync the schema to your Postgres database.\n2. Import `db` from `./src/db/client` and query with `db.select().from(usersTable)`.\n3. Add columns to `schema.ts` then re-run `drizzle-kit push`."
+}

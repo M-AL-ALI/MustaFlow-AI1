@@ -1,0 +1,31 @@
+{
+  "id": "payments-revenuecat",
+  "name": "RevenueCat (mobile)",
+  "category": "payments",
+  "description": "In-app purchases and subscriptions for iOS + Android. Handles receipt validation, entitlements, and analytics.",
+  "version": "1.0.0",
+  "url": "https://www.revenuecat.com/docs",
+  "mobileOnly": true,
+  "requiredSecrets": [
+    {
+      "name": "REVENUECAT_IOS_API_KEY",
+      "category": "payment",
+      "reason": "Public iOS SDK key",
+      "helpUrl": "https://app.revenuecat.com/projects"
+    },
+    {
+      "name": "REVENUECAT_ANDROID_API_KEY",
+      "category": "payment",
+      "reason": "Public Android SDK key",
+      "helpUrl": "https://app.revenuecat.com/projects"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "react-native-purchases", "version": "^8.0.0" }],
+  "files": [
+    {
+      "path": "lib/revenuecat.ts",
+      "content": "import Purchases, { LOG_LEVEL } from \"react-native-purchases\";\nimport { Platform } from \"react-native\";\n\nlet configured = false;\n\nexport async function configureRevenueCat(userId?: string) {\n  if (configured) return;\n  const apiKey =\n    Platform.OS === \"ios\"\n      ? process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY!\n      : process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY!;\n  if (!apiKey) {\n    console.warn(\"RevenueCat API key missing — skipping configure\");\n    return;\n  }\n  Purchases.setLogLevel(LOG_LEVEL.WARN);\n  await Purchases.configure({ apiKey, appUserID: userId ?? null });\n  configured = true;\n}\n\nexport async function getOfferings() {\n  return Purchases.getOfferings();\n}\n\nexport async function purchasePackage(pkg: import(\"react-native-purchases\").PurchasesPackage) {\n  return Purchases.purchasePackage(pkg);\n}\n\nexport async function hasEntitlement(id: string): Promise<boolean> {\n  const info = await Purchases.getCustomerInfo();\n  return info.entitlements.active[id] !== undefined;\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Call `configureRevenueCat(user.id)` once at app start (e.g. in `_layout.tsx`).\n2. Expose the iOS + Android keys to Expo as `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` and `EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY` in your `app.json` `extra` block or `.env`.\n3. Configure products and entitlements in the RevenueCat dashboard before testing."
+}

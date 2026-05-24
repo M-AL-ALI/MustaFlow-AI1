@@ -66,6 +66,7 @@ import {
   Map,
   Square,
   Github,
+  Plug,
 } from "lucide-react";
 import { SuggestionChips } from "./components/suggestion-chips";
 import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
@@ -82,6 +83,7 @@ import { PublishingTab } from "./components/publishing-tab";
 import { LogsTab } from "./components/logs-tab";
 import { AnalyticsTab } from "./components/analytics-tab";
 import { ResourcesTab } from "./components/resources-tab";
+import IntegrationsTab from "./components/integrations-tab";
 import { ManageTab } from "./components/manage-tab";
 import { KnowledgeTab } from "./components/knowledge-tab";
 import { HistoryTab } from "./components/history-tab";
@@ -519,6 +521,7 @@ const ADVANCED_TABS = [
   { label: "Canvas", value: "canvas", icon: Paintbrush2 },
   { label: "Page Map", value: "page-map", icon: Globe },
   { label: "Tools & Files", value: "tools-files", icon: Blocks },
+  { label: "Integrations", value: "integrations", icon: Plug },
   { label: "Checks", value: "checks", icon: ScanSearch },
   { label: "Security", value: "security", icon: ShieldCheck },
   { label: "AI Memory", value: "knowledge", icon: BrainCircuit },
@@ -2970,6 +2973,7 @@ export default function ProjectWorkspacePage() {
             {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
             {activeTab === "analytics" && <AnalyticsTab project={project} />}
             {activeTab === "resources" && <ResourcesTab />}
+            {activeTab === "integrations" && <IntegrationsTab projectId={projectId} />}
             {activeTab === "manage" && (
               <ManageTab
                 projectId={projectId}

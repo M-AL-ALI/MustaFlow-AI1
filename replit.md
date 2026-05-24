@@ -340,3 +340,26 @@ The intended user journey is: Login → create project → build app → preview
 - See the `pnpm-workspace` skill for monorepo structure, TS references, and codegen
 - See the `ai-integrations-openai` skill for AI integration details
 - See the `clerk-auth` skill for Clerk wiring details
+
+## Task #542 — Integrations marketplace + one-click blueprints
+
+- **DB**: `project_blueprints` (project_id, blueprint_id, version, installed_by, installed_at, result jsonb) + `mcp_servers` (name, description, endpoint, auth_header, enabled, cached_tools, cached_at, created_by). Apply with `pnpm --filter @workspace/scripts run migrate-blueprints` (idempotent, uses `IF NOT EXISTS`).
+- **Blueprint format**: JSON-only manifests at `blueprints/<id>/blueprint.json` — declarative (id, name, category, description, version, url, requiredSecrets, packages, files, postInstallNotes). No executable `scaffold.ts` so the loader works identically from the HTTP route and the agent loop.
+- **7 first-party blueprints**: `auth-replit`, `auth-clerk-managed`, `payments-stripe`, `payments-revenuecat`, `db-postgres`, `storage-object` (S3-compatible), `ai-providers` (OpenAI/Anthropic/Gemini wrapper).
+- **Loader/installer**: `artifacts/api-server/src/lib/blueprints.ts` — caches manifests at startup, idempotent file upsert into `project_files` (skip existing unless `overwrite=true`), upsert into `project_blueprints`. Packages/secrets are delegated callbacks so the HTTP path doesn't install packages (next build's container `npm install` picks them up) but the agent-loop path could.
+- **API routes** (`artifacts/api-server/src/routes/blueprints.ts`):
+  - `GET /api/blueprints` — public catalog (auth-walled but no project ownership)
+  - `GET /api/blueprints/:id` — single blueprint details
+  - `GET /api/projects/:id/blueprints` — installed blueprints for a project
+  - `POST /api/projects/:id/blueprints/install` — install (`requireProjectOwnership`)
+  - `DELETE /api/projects/:id/blueprints/:bid` — uninstall
+  - `GET/POST/PATCH/DELETE /api/admin/mcp-servers` + `POST /api/admin/mcp-servers/:id/refresh-tools` (admin-only, `requireAdmin`)
+- **Agent tool**: `install_blueprint` (+ `list_blueprints`) added to the agentic builder loop tool catalog. Serial tool (writes files, mutates DB). Dispatch in `executeTool` calls `installBlueprint` with `actor=null` (agent ≠ user). Returns `requiredSecrets` array so the model knows what to request via `request_secret` next.
+- **MCP bridge**: `artifacts/api-server/src/lib/mcp.ts` — JSON-RPC 2.0 client (`tools/list`, `tools/call`) with cached fallback when a server is offline. Admin CRUD is in place; agent-loop tool registration of dynamic MCP tools is intentionally deferred (see follow-up) — the infrastructure is there but the loop doesn't yet inject `mcp__*` tools into the per-turn `tools` array.
+- **UI**: `artifacts/mustaflow/src/pages/projects/components/integrations-tab.tsx` — new "Integrations" advanced tab. Lists blueprints grouped by category (auth / payments / database / storage / ai / mcp) with install/reinstall/remove buttons and a results banner showing files written + required secrets. No emojis, lucide-react icons only (`Plug`, `ShieldCheck`, `CreditCard`, etc.).
+- **Drift**: Blueprint + MCP routes are NOT in `lib/api-spec/openapi.yaml`; the frontend uses raw `fetch()` (same posture as the canvas / visual-edit / verify-secret routes). Adding Orval hooks is a clean follow-up once the contract stabilises.
+- **Known limitations**:
+  - MCP servers are admin-registered and tool catalogs are cached, but the agent loop doesn't yet expose discovered MCP tools to the model as callable tools.
+  - HTTP install doesn't run `npm install` server-side — the next build's container provision step does. Static-html projects ignore the `packages` array entirely.
+  - Blueprint files don't yet warn the user if they conflict with framework-generated code (e.g. installing `db-postgres` over a project that already has `lib/db.ts`).
+- Env vars: none new.

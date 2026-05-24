@@ -1,0 +1,37 @@
+{
+  "id": "auth-clerk-managed",
+  "name": "Clerk Auth (managed)",
+  "category": "auth",
+  "description": "Drop-in user authentication with email, OAuth, and social logins. Hosted sign-in pages and pre-built React components.",
+  "version": "1.0.0",
+  "url": "https://clerk.com/docs",
+  "requiredSecrets": [
+    {
+      "name": "CLERK_PUBLISHABLE_KEY",
+      "category": "auth",
+      "reason": "Used by the frontend Clerk provider",
+      "helpUrl": "https://dashboard.clerk.com/last-active?path=api-keys"
+    },
+    {
+      "name": "CLERK_SECRET_KEY",
+      "category": "auth",
+      "reason": "Used by the backend to verify session JWTs",
+      "helpUrl": "https://dashboard.clerk.com/last-active?path=api-keys"
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "@clerk/clerk-sdk-node", "version": "^5.1.0" },
+    { "runtime": "node", "name": "@clerk/clerk-react", "version": "^5.2.0" }
+  ],
+  "files": [
+    {
+      "path": "src/lib/clerk.ts",
+      "content": "import { clerkClient, clerkMiddleware, requireAuth, getAuth } from \"@clerk/clerk-sdk-node\";\nimport type { RequestHandler } from \"express\";\n\nexport { clerkClient, clerkMiddleware, requireAuth, getAuth };\n\nexport const requireUser: RequestHandler = (req, res, next) => {\n  const { userId } = getAuth(req);\n  if (!userId) {\n    res.status(401).json({ error: \"Not signed in\" });\n    return;\n  }\n  next();\n};\n"
+    },
+    {
+      "path": "src/lib/ClerkProviderWrapper.tsx",
+      "content": "import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton } from \"@clerk/clerk-react\";\nimport type { ReactNode } from \"react\";\n\nconst publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string;\n\nexport function ClerkProviderWrapper({ children }: { children: ReactNode }) {\n  if (!publishableKey) {\n    return <div className=\"p-4 text-sm text-red-600\">Set VITE_CLERK_PUBLISHABLE_KEY to enable auth.</div>;\n  }\n  return <ClerkProvider publishableKey={publishableKey}>{children}</ClerkProvider>;\n}\n\nexport function AuthHeader() {\n  return (\n    <div className=\"flex items-center gap-3\">\n      <SignedOut>\n        <SignInButton mode=\"modal\" />\n      </SignedOut>\n      <SignedIn>\n        <UserButton afterSignOutUrl=\"/\" />\n      </SignedIn>\n    </div>\n  );\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Mount `clerkMiddleware()` before your protected routes in Express.\n2. Wrap your React tree with `<ClerkProviderWrapper>` and place `<AuthHeader />` in your navbar.\n3. Add `VITE_CLERK_PUBLISHABLE_KEY` to the frontend env (same value as `CLERK_PUBLISHABLE_KEY`)."
+}

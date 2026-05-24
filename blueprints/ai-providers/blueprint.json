@@ -1,0 +1,43 @@
+{
+  "id": "ai-providers",
+  "name": "AI Providers (OpenAI / Anthropic / Gemini)",
+  "category": "ai",
+  "description": "Unified client for OpenAI, Anthropic, and Gemini with a single chat-completion wrapper that routes by provider.",
+  "version": "1.0.0",
+  "url": "https://platform.openai.com/docs",
+  "requiredSecrets": [
+    {
+      "name": "OPENAI_API_KEY",
+      "category": "ai",
+      "reason": "OpenAI Chat Completions API",
+      "helpUrl": "https://platform.openai.com/api-keys",
+      "optional": true
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "category": "ai",
+      "reason": "Anthropic Claude API",
+      "helpUrl": "https://console.anthropic.com/settings/keys",
+      "optional": true
+    },
+    {
+      "name": "GEMINI_API_KEY",
+      "category": "ai",
+      "reason": "Google Gemini API",
+      "helpUrl": "https://aistudio.google.com/app/apikey",
+      "optional": true
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "openai", "version": "^4.70.0" },
+    { "runtime": "node", "name": "@anthropic-ai/sdk", "version": "^0.32.0" },
+    { "runtime": "node", "name": "@google/generative-ai", "version": "^0.21.0" }
+  ],
+  "files": [
+    {
+      "path": "src/lib/ai.ts",
+      "content": "import OpenAI from \"openai\";\nimport Anthropic from \"@anthropic-ai/sdk\";\nimport { GoogleGenerativeAI } from \"@google/generative-ai\";\n\nexport type Provider = \"openai\" | \"anthropic\" | \"gemini\";\n\nexport interface ChatMessage {\n  role: \"system\" | \"user\" | \"assistant\";\n  content: string;\n}\n\nexport interface ChatOptions {\n  provider: Provider;\n  model?: string;\n  messages: ChatMessage[];\n  temperature?: number;\n}\n\nconst openai = process.env.OPENAI_API_KEY\n  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })\n  : null;\nconst anthropic = process.env.ANTHROPIC_API_KEY\n  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })\n  : null;\nconst gemini = process.env.GEMINI_API_KEY\n  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)\n  : null;\n\nexport async function chat(opts: ChatOptions): Promise<string> {\n  if (opts.provider === \"openai\") {\n    if (!openai) throw new Error(\"OPENAI_API_KEY not set\");\n    const r = await openai.chat.completions.create({\n      model: opts.model ?? \"gpt-4o-mini\",\n      messages: opts.messages,\n      temperature: opts.temperature,\n    });\n    return r.choices[0]?.message?.content ?? \"\";\n  }\n  if (opts.provider === \"anthropic\") {\n    if (!anthropic) throw new Error(\"ANTHROPIC_API_KEY not set\");\n    const system = opts.messages.find((m) => m.role === \"system\")?.content;\n    const rest = opts.messages.filter((m) => m.role !== \"system\");\n    const r = await anthropic.messages.create({\n      model: opts.model ?? \"claude-3-5-sonnet-20241022\",\n      system,\n      max_tokens: 4096,\n      messages: rest.map((m) => ({ role: m.role as \"user\" | \"assistant\", content: m.content })),\n      temperature: opts.temperature,\n    });\n    const block = r.content[0];\n    return block && block.type === \"text\" ? block.text : \"\";\n  }\n  if (opts.provider === \"gemini\") {\n    if (!gemini) throw new Error(\"GEMINI_API_KEY not set\");\n    const model = gemini.getGenerativeModel({ model: opts.model ?? \"gemini-1.5-flash\" });\n    const prompt = opts.messages.map((m) => `${m.role}: ${m.content}`).join(\"\\n\\n\");\n    const r = await model.generateContent(prompt);\n    return r.response.text();\n  }\n  throw new Error(`Unknown provider: ${opts.provider as string}`);\n}\n"
+    }
+  ],
+  "postInstallNotes": "Set whichever API keys you plan to use — the wrapper will throw at call time if the chosen provider's key is missing.\n\n```ts\nimport { chat } from \"./lib/ai\";\nconst answer = await chat({ provider: \"openai\", messages: [{ role: \"user\", content: \"Hello\" }] });\n```"
+}

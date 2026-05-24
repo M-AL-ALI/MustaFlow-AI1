@@ -1022,6 +1022,40 @@ export const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "install_blueprint",
+      description:
+        "Task #542 — install a first-party integration blueprint (auth, payments, db, storage, ai). Idempotent: re-running for an already-installed blueprint is a no-op unless overwrite=true. Writes scaffold files into project_files, queues required secrets via request_secret style prompts (the user fills them in), and records the install in project_blueprints. Use this instead of hand-writing OAuth/Stripe/Postgres boilerplate. Use list_blueprints first to discover available ids.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description:
+              "Blueprint id, e.g. 'auth-clerk-managed', 'payments-stripe', 'db-postgres'.",
+          },
+          overwrite: {
+            type: "boolean",
+            description:
+              "Overwrite existing project files that conflict with blueprint files. Default false (skip conflicts).",
+          },
+        },
+        required: ["id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_blueprints",
+      description:
+        "List all available integration blueprints (id, name, category, description, required secrets). Use before install_blueprint to discover what's available.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "suggest_deploy",
       description:
         "After a successful build, present the user with a one-click 'Publish now' chip in chat. Does NOT pause the build — fire-and-forget. Use only when checks have passed and the preview is verified. The card triggers the existing publish flow (snapshot → public URL).",
@@ -1518,6 +1552,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       "user_query",
       "request_secret",
       "install_package",
+      // Task #542: writes project_files + queues secret prompts, must be serial.
+      "install_blueprint",
     ]);
 
     // Parse a tool call's arguments once.
@@ -3818,6 +3854,78 @@ export async function executeTool(ctx: ToolCtx): Promise<{
     }
     case "finalize": {
       return { ok: true, observation: "finalized" };
+    }
+    case "list_blueprints": {
+      const { loadBlueprints } = await import("./blueprints");
+      const manifests = await loadBlueprints();
+      return {
+        ok: true,
+        observation: JSON.stringify(
+          manifests.map((b) => ({
+            id: b.id,
+            name: b.name,
+            category: b.category,
+            description: b.description,
+            requiredSecrets: b.requiredSecrets.map((s) => s.name),
+            packageCount: b.packages.length,
+            fileCount: b.files.length,
+          })),
+        ),
+      };
+    }
+    case "install_blueprint": {
+      const { findBlueprint, installBlueprint } = await import("./blueprints");
+      const id = typeof args.id === "string" ? args.id : "";
+      const overwrite = args.overwrite === true;
+      if (!id) return { ok: false, observation: "ERROR: id is required" };
+      const bp = await findBlueprint(id);
+      if (!bp) return { ok: false, observation: `ERROR: blueprint '${id}' not found` };
+      const { db: agentDb, projectsTable: agentProjectsTable } = await import("@workspace/db");
+      const { eq: agentEq } = await import("drizzle-orm");
+      const [proj] = await agentDb
+        .select({ projectFormat: agentProjectsTable.projectFormat })
+        .from(agentProjectsTable)
+        .where(agentEq(agentProjectsTable.id, input.projectId));
+      if (bp.mobileOnly && proj?.projectFormat !== "mobile-cross") {
+        return {
+          ok: false,
+          observation: `ERROR: blueprint '${bp.id}' is mobile-only; this project is '${proj?.projectFormat ?? "unknown"}'`,
+        };
+      }
+      if (bp.webOnly && proj?.projectFormat === "mobile-cross") {
+        return {
+          ok: false,
+          observation: `ERROR: blueprint '${bp.id}' is web-only; cannot install into a mobile project`,
+        };
+      }
+      try {
+        const result = await installBlueprint(bp, {
+          projectId: input.projectId,
+          actor: null,
+          overwrite,
+        });
+        return {
+          ok: true,
+          observation: JSON.stringify({
+            installed: true,
+            id: bp.id,
+            filesWritten: result.filesWritten,
+            filesSkipped: result.filesSkipped,
+            requiredSecrets: bp.requiredSecrets.map((s) => ({
+              name: s.name,
+              category: s.category,
+              optional: !!s.optional,
+            })),
+            packages: bp.packages,
+            postInstallNotes: bp.postInstallNotes ?? null,
+          }),
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          observation: `ERROR: install_blueprint failed — ${(err as Error).message}`,
+        };
+      }
     }
     case "dispatch_subagent": {
       const { dispatchSubagentFromTool } = await import("./subagent");

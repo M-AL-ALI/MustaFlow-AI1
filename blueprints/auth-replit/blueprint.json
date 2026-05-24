@@ -1,0 +1,40 @@
+{
+  "id": "auth-replit",
+  "name": "Replit Auth (OIDC)",
+  "category": "auth",
+  "description": "Sign-in with Replit using OpenID Connect + PKCE. Cookie-based sessions, zero-config in the Replit environment.",
+  "version": "1.0.0",
+  "url": "https://docs.replit.com/replit-auth",
+  "webOnly": true,
+  "requiredSecrets": [
+    {
+      "name": "REPL_AUTH_CLIENT_ID",
+      "category": "auth",
+      "reason": "OIDC client id issued by Replit",
+      "helpUrl": "https://replit.com/account#auth"
+    },
+    {
+      "name": "REPL_AUTH_CLIENT_SECRET",
+      "category": "auth",
+      "reason": "OIDC client secret",
+      "helpUrl": "https://replit.com/account#auth"
+    },
+    {
+      "name": "SESSION_SECRET",
+      "category": "auth",
+      "reason": "Random 32+ char string used to sign session cookies"
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "openid-client", "version": "^5.7.0" },
+    { "runtime": "node", "name": "express-session", "version": "^1.18.0" },
+    { "runtime": "node", "name": "@types/express-session", "version": "^1.18.0", "dev": true }
+  ],
+  "files": [
+    {
+      "path": "src/lib/repl-auth.ts",
+      "content": "import { Issuer, generators, type Client } from \"openid-client\";\nimport type { RequestHandler } from \"express\";\n\nlet cachedClient: Client | null = null;\n\nasync function getClient(): Promise<Client> {\n  if (cachedClient) return cachedClient;\n  const issuer = await Issuer.discover(\"https://replit.com/oidc\");\n  cachedClient = new issuer.Client({\n    client_id: process.env.REPL_AUTH_CLIENT_ID!,\n    client_secret: process.env.REPL_AUTH_CLIENT_SECRET!,\n    redirect_uris: [`${process.env.PUBLIC_URL ?? \"\"}/auth/callback`],\n    response_types: [\"code\"],\n  });\n  return cachedClient;\n}\n\nexport const loginHandler: RequestHandler = async (req, res) => {\n  const client = await getClient();\n  const codeVerifier = generators.codeVerifier();\n  const codeChallenge = generators.codeChallenge(codeVerifier);\n  (req.session as unknown as { codeVerifier?: string }).codeVerifier = codeVerifier;\n  res.redirect(\n    client.authorizationUrl({\n      scope: \"openid profile email\",\n      code_challenge: codeChallenge,\n      code_challenge_method: \"S256\",\n    }),\n  );\n};\n\nexport const callbackHandler: RequestHandler = async (req, res) => {\n  const client = await getClient();\n  const params = client.callbackParams(req);\n  const codeVerifier = (req.session as unknown as { codeVerifier?: string }).codeVerifier;\n  const tokenSet = await client.callback(\n    `${process.env.PUBLIC_URL ?? \"\"}/auth/callback`,\n    params,\n    { code_verifier: codeVerifier },\n  );\n  const userInfo = await client.userinfo(tokenSet.access_token!);\n  (req.session as unknown as { user?: unknown }).user = userInfo;\n  res.redirect(\"/\");\n};\n\nexport const requireAuth: RequestHandler = (req, res, next) => {\n  const user = (req.session as unknown as { user?: unknown }).user;\n  if (!user) {\n    res.status(401).json({ error: \"Not authenticated\" });\n    return;\n  }\n  next();\n};\n"
+    }
+  ],
+  "postInstallNotes": "Mount the auth routes in your Express app:\n\n```ts\nimport session from \"express-session\";\nimport { loginHandler, callbackHandler } from \"./lib/repl-auth\";\n\napp.use(session({\n  secret: process.env.SESSION_SECRET!,\n  resave: false,\n  saveUninitialized: false,\n  cookie: { secure: true, httpOnly: true, sameSite: \"lax\" },\n}));\napp.get(\"/auth/login\", loginHandler);\napp.get(\"/auth/callback\", callbackHandler);\n```\n\nThen protect routes with `requireAuth`."
+}

@@ -52,6 +52,7 @@ import previewSnapshotsRouter from "./preview-snapshots";
 import uploadsRouter from "./uploads";
 import transcribeRouter from "./transcribe";
 import canvasRouter from "./canvas";
+import blueprintsRouter from "./blueprints";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -101,6 +102,7 @@ const KNOWN_PREFIXES = [
   "/test-runs",
   "/background-jobs",
   "/transcribe",
+  "/blueprints",
 ];
 
 router.use((req, res, next) => {
@@ -179,6 +181,7 @@ router.use(previewSnapshotsRouter);
 router.use(uploadsRouter);
 router.use(transcribeRouter);
 router.use(canvasRouter);
+router.use(blueprintsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

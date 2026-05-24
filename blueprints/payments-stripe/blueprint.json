@@ -1,0 +1,43 @@
+{
+  "id": "payments-stripe",
+  "name": "Stripe Payments",
+  "category": "payments",
+  "description": "Accept one-time payments and subscriptions with Stripe Checkout + a webhook handler for billing events.",
+  "version": "1.0.0",
+  "url": "https://stripe.com/docs",
+  "requiredSecrets": [
+    {
+      "name": "STRIPE_SECRET_KEY",
+      "category": "payment",
+      "reason": "Server-side Stripe API key",
+      "helpUrl": "https://dashboard.stripe.com/apikeys"
+    },
+    {
+      "name": "STRIPE_WEBHOOK_SECRET",
+      "category": "payment",
+      "reason": "Verifies authenticity of incoming webhooks",
+      "helpUrl": "https://dashboard.stripe.com/webhooks"
+    },
+    {
+      "name": "STRIPE_PUBLISHABLE_KEY",
+      "category": "payment",
+      "reason": "Used by the frontend Stripe.js client",
+      "helpUrl": "https://dashboard.stripe.com/apikeys"
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "stripe", "version": "^17.0.0" },
+    { "runtime": "node", "name": "@stripe/stripe-js", "version": "^4.10.0" }
+  ],
+  "files": [
+    {
+      "path": "src/lib/stripe.ts",
+      "content": "import Stripe from \"stripe\";\n\nexport const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {\n  apiVersion: \"2024-10-28.acacia\",\n});\n\nexport interface CheckoutInput {\n  priceId: string;\n  successUrl: string;\n  cancelUrl: string;\n  customerEmail?: string;\n  mode?: \"payment\" | \"subscription\";\n}\n\nexport async function createCheckoutSession(input: CheckoutInput) {\n  return stripe.checkout.sessions.create({\n    mode: input.mode ?? \"payment\",\n    line_items: [{ price: input.priceId, quantity: 1 }],\n    success_url: input.successUrl,\n    cancel_url: input.cancelUrl,\n    customer_email: input.customerEmail,\n  });\n}\n"
+    },
+    {
+      "path": "src/routes/stripe-webhook.ts",
+      "content": "import { Router, type IRouter, raw } from \"express\";\nimport { stripe } from \"../lib/stripe\";\n\nconst router: IRouter = Router();\n\n// IMPORTANT: mount this BEFORE any JSON body parser — Stripe needs the raw body.\nrouter.post(\"/stripe/webhook\", raw({ type: \"application/json\" }), (req, res) => {\n  const sig = req.headers[\"stripe-signature\"] as string | undefined;\n  if (!sig) {\n    res.status(400).send(\"Missing signature\");\n    return;\n  }\n  let event;\n  try {\n    event = stripe.webhooks.constructEvent(\n      req.body as Buffer,\n      sig,\n      process.env.STRIPE_WEBHOOK_SECRET!,\n    );\n  } catch (err) {\n    res.status(400).send(`Invalid signature: ${(err as Error).message}`);\n    return;\n  }\n  switch (event.type) {\n    case \"checkout.session.completed\":\n      // TODO: fulfil the order — set user as paid, send receipt, etc.\n      break;\n    case \"customer.subscription.deleted\":\n      // TODO: revoke subscription access.\n      break;\n  }\n  res.json({ received: true });\n});\n\nexport default router;\n"
+    }
+  ],
+  "postInstallNotes": "1. Mount the webhook router BEFORE `express.json()` so the raw body is preserved.\n2. Add a Stripe webhook endpoint in the Dashboard pointing at `/stripe/webhook` and copy the signing secret into `STRIPE_WEBHOOK_SECRET`.\n3. Create products + prices in Stripe and pass the `price_…` id into `createCheckoutSession`."
+}

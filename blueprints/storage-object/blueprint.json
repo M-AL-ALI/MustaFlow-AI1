@@ -1,0 +1,47 @@
+{
+  "id": "storage-object",
+  "name": "Object Storage (S3-compatible)",
+  "category": "storage",
+  "description": "Upload, download, and serve files via S3-compatible object storage. Works with Replit App Storage, AWS S3, or Cloudflare R2.",
+  "version": "1.0.0",
+  "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html",
+  "requiredSecrets": [
+    {
+      "name": "S3_BUCKET",
+      "category": "storage",
+      "reason": "Bucket name (e.g. my-app-uploads)"
+    },
+    {
+      "name": "S3_REGION",
+      "category": "storage",
+      "reason": "Bucket region (e.g. us-east-1)"
+    },
+    {
+      "name": "S3_ACCESS_KEY_ID",
+      "category": "storage",
+      "reason": "Access key with read/write to the bucket"
+    },
+    {
+      "name": "S3_SECRET_ACCESS_KEY",
+      "category": "storage",
+      "reason": "Secret key paired with the access key"
+    },
+    {
+      "name": "S3_ENDPOINT",
+      "category": "storage",
+      "reason": "Optional — only needed for non-AWS S3-compatible providers (R2, MinIO, etc.)",
+      "optional": true
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "@aws-sdk/client-s3", "version": "^3.700.0" },
+    { "runtime": "node", "name": "@aws-sdk/s3-request-presigner", "version": "^3.700.0" }
+  ],
+  "files": [
+    {
+      "path": "src/lib/storage.ts",
+      "content": "import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from \"@aws-sdk/client-s3\";\nimport { getSignedUrl } from \"@aws-sdk/s3-request-presigner\";\n\nexport const s3 = new S3Client({\n  region: process.env.S3_REGION!,\n  endpoint: process.env.S3_ENDPOINT,\n  forcePathStyle: !!process.env.S3_ENDPOINT,\n  credentials: {\n    accessKeyId: process.env.S3_ACCESS_KEY_ID!,\n    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,\n  },\n});\n\nconst BUCKET = process.env.S3_BUCKET!;\n\nexport async function presignUpload(key: string, contentType: string, expiresIn = 600) {\n  const cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: contentType });\n  return getSignedUrl(s3, cmd, { expiresIn });\n}\n\nexport async function presignDownload(key: string, expiresIn = 3600) {\n  const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key });\n  return getSignedUrl(s3, cmd, { expiresIn });\n}\n\nexport async function uploadBuffer(key: string, body: Buffer, contentType: string) {\n  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType }));\n}\n\nexport async function deleteObject(key: string) {\n  await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));\n}\n"
+    }
+  ],
+  "postInstallNotes": "Browser uploads should request a presigned PUT URL from your server, then `fetch(url, { method: 'PUT', body: file })`. Never expose `S3_SECRET_ACCESS_KEY` to the browser."
+}
