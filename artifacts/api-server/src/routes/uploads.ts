@@ -46,6 +46,27 @@ function isTextlike(mime: string): boolean {
   return mime.startsWith("text/");
 }
 
+function isPdf(mime: string, filename: string): boolean {
+  return mime === "application/pdf" || filename.toLowerCase().endsWith(".pdf");
+}
+
+async function extractPdfPreview(buf: Buffer): Promise<string | null> {
+  try {
+    // pdf-parse ships as CommonJS — use a dynamic import to avoid bundling
+    // its self-test "test/data/05-versions-space.pdf" path that runs at module
+    // import time when called via require.main.
+    const mod = (await import("pdf-parse")) as unknown as {
+      default: (data: Buffer, opts?: { max?: number }) => Promise<{ text: string }>;
+    };
+    const parsed = await mod.default(buf, { max: 5 }); // first 5 pages
+    const text = parsed.text?.trim() ?? "";
+    if (!text) return null;
+    return text.slice(0, TEXT_PREVIEW_BYTES);
+  } catch {
+    return null;
+  }
+}
+
 // POST /projects/:id/uploads/request-url — get a presigned PUT URL
 router.post(
   "/projects/:id/uploads/request-url",
@@ -118,7 +139,8 @@ router.post(
       return;
     }
 
-    // Best-effort text preview for textlike MIME types.
+    // Best-effort text preview: UTF-8 slice for textlike files,
+    // pdf-parse for PDFs.
     let textPreview: string | null = null;
     if (isTextlike(mime)) {
       try {
@@ -126,6 +148,13 @@ router.post(
         textPreview = buf.toString("utf8");
       } catch (err) {
         req.log.warn({ err, objectPath: body.objectPath }, "uploads: preview fetch failed");
+      }
+    } else if (isPdf(mime, body.name)) {
+      try {
+        const [buf] = await file.download();
+        textPreview = await extractPdfPreview(buf);
+      } catch (err) {
+        req.log.warn({ err, objectPath: body.objectPath }, "uploads: pdf parse failed");
       }
     }
 

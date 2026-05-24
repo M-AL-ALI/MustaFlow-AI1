@@ -308,7 +308,107 @@ export function QueueComposer({
   const voiceSessionIdRef = useRef<number>(0);
   const voiceBaseTextRef = useRef<string>("");
   const voiceTargetRowIdRef = useRef<string | null>(null);
-  const voiceSupported = useMemo(() => getSpeechRecognitionCtor() !== null, []);
+  const mediaRecorderSupported = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      typeof window.MediaRecorder !== "undefined" &&
+      typeof navigator !== "undefined" &&
+      !!navigator.mediaDevices?.getUserMedia,
+    [],
+  );
+  const voiceSupported = useMemo(
+    () => getSpeechRecognitionCtor() !== null || mediaRecorderSupported,
+    [mediaRecorderSupported],
+  );
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
+
+  const stopWhisperRecording = useCallback(() => {
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== "inactive") {
+      try {
+        mr.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    const stream = mediaStreamRef.current;
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+    }
+    mediaRecorderRef.current = null;
+    mediaStreamRef.current = null;
+  }, []);
+
+  const startWhisperRecording = useCallback(async () => {
+    setVoiceError(null);
+    const targetRow = rows[0];
+    if (!targetRow) return;
+    voiceTargetRowIdRef.current = targetRow.id;
+    voiceBaseTextRef.current = targetRow.text;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setVoiceError(
+        "Microphone access blocked. Allow microphone access in your browser to dictate.",
+      );
+      return;
+    }
+    mediaStreamRef.current = stream;
+    const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    mediaChunksRef.current = [];
+    mr.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) mediaChunksRef.current.push(e.data);
+    };
+    mr.onstop = async () => {
+      const blob = new Blob(mediaChunksRef.current, { type: "audio/webm" });
+      mediaChunksRef.current = [];
+      setIsListening(false);
+      if (blob.size === 0) return;
+      try {
+        const res = await fetch("/api/transcribe?format=webm", {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: blob,
+          credentials: "include",
+        });
+        if (!res.ok) {
+          const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+          setVoiceError(errBody.error ?? `Transcription failed (HTTP ${res.status})`);
+          return;
+        }
+        const { text } = (await res.json()) as { text?: string };
+        if (!text) return;
+        const base = voiceBaseTextRef.current;
+        const combined = (base ? base + (base.endsWith(" ") ? "" : " ") : "") + text;
+        const rowId = voiceTargetRowIdRef.current;
+        if (!rowId) return;
+        let isSingleRow = false;
+        setRows((prev) => {
+          isSingleRow = prev.length === 1;
+          return prev.map((r) => (r.id === rowId ? { ...r, text: combined } : r));
+        });
+        if (isSingleRow) {
+          if (onPromptValueChange) onPromptValueChange(combined);
+          onPromptForRouting(combined);
+        }
+      } catch (err) {
+        setVoiceError(`Transcription failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+    mediaRecorderRef.current = mr;
+    try {
+      mr.start();
+      setIsListening(true);
+    } catch (err) {
+      setVoiceError(
+        `Could not start microphone: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      stopWhisperRecording();
+    }
+  }, [rows, onPromptValueChange, onPromptForRouting, stopWhisperRecording]);
 
   const isMultiRow = rows.length > 1;
 
@@ -407,19 +507,27 @@ export function QueueComposer({
     }
     recognitionRef.current = null;
     voiceTargetRowIdRef.current = null;
+    // Also tear down any MediaRecorder/Whisper fallback session so both
+    // voice paths stop in every exit flow (send, clear, remove row, unmount).
+    stopWhisperRecording();
     setIsListening(false);
-  }, []);
+  }, [stopWhisperRecording]);
 
   const startVoiceDictation = useCallback(() => {
+    if (isListening) {
+      stopVoiceDictation();
+      return;
+    }
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) {
+      // Fallback path: MediaRecorder → /api/transcribe (Whisper).
+      if (mediaRecorderSupported) {
+        void startWhisperRecording();
+        return;
+      }
       setVoiceError(
         "Voice input isn't supported in this browser — try Chrome, Edge, or Safari on desktop.",
       );
-      return;
-    }
-    if (isListening) {
-      stopVoiceDictation();
       return;
     }
     // Tear down any lingering instance before starting a fresh session.
@@ -521,7 +629,15 @@ export function QueueComposer({
       );
       setIsListening(false);
     }
-  }, [isListening, rows, stopVoiceDictation, onPromptValueChange, onPromptForRouting]);
+  }, [
+    isListening,
+    rows,
+    stopVoiceDictation,
+    mediaRecorderSupported,
+    startWhisperRecording,
+    onPromptValueChange,
+    onPromptForRouting,
+  ]);
 
   // Cleanup recognition on unmount
   useEffect(() => {
