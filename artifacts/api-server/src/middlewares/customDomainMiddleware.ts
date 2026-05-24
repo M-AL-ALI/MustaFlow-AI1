@@ -14,6 +14,11 @@
 //     proxy the request to the container URL (Phase E).
 //   - Otherwise, serve the published DB snapshot (legacy behaviour, static-html).
 //
+// EDGE_SERVING_ENABLED=true: The Cloudflare Worker is the primary serving path.
+//   Requests that reach the API server (custom domains or *.mustaflow.app) are
+//   served as normal from the DB snapshot but tagged with
+//   X-Mustaflow-Origin: api-fallback so edge-outage monitoring can detect them.
+//
 // Requests that start with /api/ or /__clerk are always skipped.
 
 import type { Request, Response, NextFunction } from "express";
@@ -25,6 +30,7 @@ import {
   servePreviewSnapshot,
   serveSnapshotByProjectEnv,
 } from "../lib/serveSnapshot";
+import { r2GetObject } from "../lib/cloudflare";
 import { logger } from "../lib/logger";
 import { subscribeDomainEvents } from "../lib/event-bus";
 import { recordHostnameSighting } from "../routes/domains";
@@ -46,6 +52,8 @@ interface CachedProject {
   suspendedAt: Date | null;
   /** Optional reason recorded for the suspension. */
   suspensionReason: string | null;
+  /** Published snapshot ID used for R2 origin-tier serving when EDGE_SERVING_ENABLED=true. */
+  publishedSnapshotId: number | null;
 }
 
 let hostnameMap = new Map<string, CachedProject>();
@@ -73,18 +81,24 @@ async function loadRoutingTable(): Promise<void> {
         customDomain: projectsTable.customDomain,
         prodContainerUrl: projectsTable.prodContainerUrl,
         prodContainerStatus: projectsTable.prodContainerStatus,
+        publishedSnapshotId: projectsTable.publishedSnapshotId,
       })
       .from(projectsTable)
       .where(isNull(projectsTable.deletedAt));
 
     const projectMap = new Map<
       number,
-      { prodContainerUrl: string | null; prodContainerStatus: string }
+      {
+        prodContainerUrl: string | null;
+        prodContainerStatus: string;
+        publishedSnapshotId: number | null;
+      }
     >();
     for (const p of projectRows) {
       projectMap.set(p.id, {
         prodContainerUrl: p.prodContainerUrl,
         prodContainerStatus: p.prodContainerStatus,
+        publishedSnapshotId: p.publishedSnapshotId ?? null,
       });
     }
 
@@ -104,6 +118,7 @@ async function loadRoutingTable(): Promise<void> {
         environment: row.environment ?? "production",
         suspendedAt: row.suspendedAt ?? null,
         suspensionReason: row.suspensionReason ?? null,
+        publishedSnapshotId: proj?.publishedSnapshotId ?? null,
       });
     }
 
@@ -118,6 +133,7 @@ async function loadRoutingTable(): Promise<void> {
         environment: "production",
         suspendedAt: null,
         suspensionReason: null,
+        publishedSnapshotId: proj.publishedSnapshotId ?? null,
       });
     }
 
@@ -148,6 +164,7 @@ async function refreshEntry(hostname: string, projectId: number): Promise<void> 
         id: projectsTable.id,
         prodContainerUrl: projectsTable.prodContainerUrl,
         prodContainerStatus: projectsTable.prodContainerStatus,
+        publishedSnapshotId: projectsTable.publishedSnapshotId,
       })
       .from(projectsTable)
       .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
@@ -170,6 +187,7 @@ async function refreshEntry(hostname: string, projectId: number): Promise<void> 
         environment: domainRow?.environment ?? existing?.environment ?? "production",
         suspendedAt: domainRow?.suspendedAt ?? null,
         suspensionReason: domainRow?.suspensionReason ?? null,
+        publishedSnapshotId: proj.publishedSnapshotId ?? null,
       });
     } else if (domainRow?.suspendedAt) {
       // Project deleted but domain suspended — keep for 451 enforcement
@@ -181,6 +199,7 @@ async function refreshEntry(hostname: string, projectId: number): Promise<void> 
         environment: domainRow.environment ?? existing?.environment ?? "production",
         suspendedAt: domainRow.suspendedAt,
         suspensionReason: domainRow.suspensionReason ?? null,
+        publishedSnapshotId: null,
       });
     }
   } catch {
@@ -362,6 +381,40 @@ export async function customDomainMiddleware(
   // Applied to every response served for a verified custom domain so browsers
   // remember to always use HTTPS without a redirect round-trip.
   res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+
+  // When edge serving is enabled, the Cloudflare Worker is the primary path.
+  // Requests that reach the API server are either a Worker outage or cache miss.
+  // We tag every response with X-Mustaflow-Origin: api-fallback so edge-outage
+  // monitoring can detect them, then attempt to serve the file directly from R2
+  // (same source the Worker uses) before falling back to the DB snapshot.
+  if (process.env.EDGE_SERVING_ENABLED === "true") {
+    // Every request that reaches this middleware when EDGE_SERVING_ENABLED=true
+    // means the Cloudflare Worker failed to intercept it (Worker down, PoP miss,
+    // or cold-start race). Log at warn level so outage monitoring can alert on
+    // API-fallback hit-rate spikes.
+    res.setHeader("X-Mustaflow-Origin", "api-fallback");
+    logger.warn(
+      { hostname, projectId: project.id, path: req.path, method: req.method },
+      "EDGE_SERVING_ENABLED: API fallback hit on custom domain — Worker may be down or had cache miss",
+    );
+    const rawPathEdge = req.path === "/" ? "index.html" : req.path.replace(/^\//, "");
+    if (project.publishedSnapshotId && project.environment !== "staging") {
+      const r2Key = `${project.id}/${project.publishedSnapshotId}/${rawPathEdge}`;
+      const r2Result = await r2GetObject(r2Key);
+      if (r2Result) {
+        res.setHeader("Content-Type", r2Result.contentType);
+        if (r2Result.etag) res.setHeader("ETag", r2Result.etag);
+        res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=600");
+        res.setHeader("X-Served-By", "mustaflow-r2-origin");
+        res.status(200).end(r2Result.body);
+        return;
+      }
+      logger.debug(
+        { hostname, projectId: project.id, rawPathEdge },
+        "EDGE_SERVING_ENABLED: R2 miss — falling back to DB snapshot",
+      );
+    }
+  }
 
   // Phase E: proxy to production container if running (only for production-env domains)
   if (

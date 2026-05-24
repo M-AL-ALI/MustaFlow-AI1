@@ -1,0 +1,17 @@
+{
+  "name": "@workspace/snapshot-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that serves MustaFlow published project snapshots from R2",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:production": "wrangler deploy --env production",
+    "typecheck": "tsc --noEmit",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "wrangler": "^3.114.17"
+  }
+}

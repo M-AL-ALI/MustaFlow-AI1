@@ -20,6 +20,7 @@ import {
   projectFilesTable,
   projectVersionsTable,
   deploymentLogsTable,
+  projectDomainsTable,
   secretsTable,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
@@ -32,6 +33,15 @@ import { pushSnapshotToCdn, cdnConfigured } from "../lib/cdn";
 import { encryptionService } from "../lib/encryption";
 import { getUnresolvedCriticalFindings } from "./readiness";
 import { runPostPublishHealthCheck, recordHealthCheck, getDeclaredRoutes } from "../lib/prodLogs";
+import {
+  r2Enabled,
+  uploadSnapshotToR2,
+  syncAllHostnamesKV,
+  purgeCacheForProject,
+  uploadMaintenancePage,
+  setProjectMaintenanceMode,
+  type SnapshotFile,
+} from "../lib/cloudflare";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
@@ -196,6 +206,52 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       })
       .where(eq(projectsTable.id, projectId));
 
+    // ── Edge CDN: upload to R2 + sync KV (staging subdomain) ─────────────────
+    if (deploymentVersion?.id) {
+      const snapshotFiles: SnapshotFile[] = files.map((f) => ({
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+      }));
+      // Edge CDN ordering — order matters for consistency:
+      //   1. Upload snapshot to R2 FIRST. Only when files exist in R2 is it safe
+      //      to advance the Worker's KV routing to the new versionId. Updating KV
+      //      before upload would direct edge traffic to a non-existent key → 404s.
+      //   2. Update KV routing (awaited, with 5 s bound). Errors are logged but
+      //      don't fail publish — DB snapshot fallback keeps the site accessible.
+      //   3. Purge CF edge cache async/best-effort (stale HTML is served briefly
+      //      if this fails; hashed assets are immutable and don't need purging).
+      const maintenanceFile = files.find((f) => f.path === "maintenance.html");
+      void uploadMaintenancePage(projectId, maintenanceFile?.content).catch(() => {
+        /* best-effort — doesn't affect routing */
+      });
+      const r2Ok = await uploadSnapshotToR2(projectId, deploymentVersion.id, snapshotFiles);
+      if (r2Enabled() && !r2Ok) {
+        req.log.warn(
+          { projectId, versionId: deploymentVersion.id },
+          "R2 upload failed for staging snapshot; skipping KV routing update to prevent edge 404s",
+        );
+      } else {
+        try {
+          await Promise.race([
+            syncAllHostnamesKV({
+              projectId,
+              publicSlug: `${slug}-staging`,
+              versionId: deploymentVersion.id,
+              customDomains: [],
+              preferredRegion: project.preferredRegion ?? null,
+            }),
+            new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+          ]);
+        } catch (err) {
+          req.log.warn(
+            { err, projectId },
+            "KV sync failed for staging publish; edge routing may be stale until TTL expires",
+          );
+        }
+      }
+    }
+
     void writeKnowledge({
       title: `Staged: project ${projectId}`,
       content: `Project id:${projectId} published to staging by ${req.userId ?? "unknown"}. Slug: ${slug}. Staging URL: ${stagingUrl}`,
@@ -314,6 +370,69 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       updatedAt: new Date(),
     })
     .where(eq(projectsTable.id, projectId));
+
+  // ── Edge CDN: upload to R2, sync KV, purge cache ──────────────────────────
+  if (deploymentVersion?.id) {
+    const snapshotId = deploymentVersion.id;
+    const snapshotFiles: SnapshotFile[] = files.map((f) => ({
+      path: f.path,
+      content: f.content,
+      mimeType: f.mimeType,
+    }));
+
+    // Fetch custom domains for this project (verified only)
+    const customDomainRows = await db
+      .select({ hostname: projectDomainsTable.hostname })
+      .from(projectDomainsTable)
+      .where(
+        and(
+          eq(projectDomainsTable.projectId, projectId),
+          eq(projectDomainsTable.verificationStatus, "verified"),
+        ),
+      )
+      .catch(() => [] as { hostname: string }[]);
+    const customDomains = customDomainRows.map((r) => r.hostname);
+
+    // Edge CDN ordering — order matters for consistency:
+    //   1. Upload snapshot to R2 FIRST (gate KV on success when R2 is configured).
+    //   2. Update KV routing (awaited, 5 s bound, explicit failure logging).
+    //   3. Purge CF edge cache async/best-effort after routing is live.
+    const maintenanceFile = files.find((f) => f.path === "maintenance.html");
+    void uploadMaintenancePage(projectId, maintenanceFile?.content).catch(() => {
+      /* best-effort — doesn't affect routing */
+    });
+    const r2Ok = await uploadSnapshotToR2(projectId, snapshotId, snapshotFiles);
+    if (r2Enabled() && !r2Ok) {
+      req.log.warn(
+        { projectId, snapshotId },
+        "R2 upload failed for production snapshot; skipping KV routing update to prevent edge 404s",
+      );
+    } else {
+      try {
+        await Promise.race([
+          syncAllHostnamesKV({
+            projectId,
+            publicSlug: slug,
+            versionId: snapshotId,
+            customDomains,
+            preferredRegion: project.preferredRegion ?? null,
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+        ]);
+      } catch (err) {
+        req.log.warn(
+          { err, projectId },
+          "KV sync failed for production publish; edge routing may be stale until TTL expires",
+        );
+      }
+      // Purge after KV is updated so CDN cache is cleared only when routing is live.
+      setImmediate(() => {
+        void purgeCacheForProject({ publicSlug: slug, customDomains }).catch(() => {
+          /* best-effort */
+        });
+      });
+    }
+  }
 
   void writeKnowledge({
     title: `Published: project ${projectId}`,
@@ -533,6 +652,34 @@ router.post("/projects/:id/promote", requireProjectOwnership, async (req, res): 
     .set({ environment: "production" })
     .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
 
+  // ── Edge CDN: sync KV + purge cache for promoted version ──────────────────
+  setImmediate(() => {
+    void (async () => {
+      try {
+        const customDomainRows = await db
+          .select({ hostname: projectDomainsTable.hostname })
+          .from(projectDomainsTable)
+          .where(
+            and(
+              eq(projectDomainsTable.projectId, projectId),
+              eq(projectDomainsTable.verificationStatus, "verified"),
+            ),
+          );
+        const customDomains = customDomainRows.map((r) => r.hostname);
+        await syncAllHostnamesKV({
+          projectId,
+          publicSlug: slug,
+          versionId: project.stagingPublishedSnapshotId!,
+          customDomains,
+          preferredRegion: project.preferredRegion ?? null,
+        });
+        await purgeCacheForProject({ publicSlug: slug, customDomains });
+      } catch {
+        /* best-effort */
+      }
+    })();
+  });
+
   void writeKnowledge({
     title: `Promoted: project ${projectId}`,
     content: `Staging snapshot ${project.stagingPublishedSnapshotId} promoted to production for project ${projectId} by ${req.userId ?? "unknown"}. Slug: ${slug}.`,
@@ -641,6 +788,35 @@ router.post("/projects/:id/unpublish", requireProjectOwnership, async (req, res)
     .set({ status: "testing", publishedSnapshotId: null, updatedAt: sql`now()` })
     .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
+  // ── Edge CDN: clear KV entries + purge cache on unpublish ─────────────────
+  setImmediate(() => {
+    void (async () => {
+      try {
+        const slug = current?.publicSlug ?? null;
+        const customDomainRows = await db
+          .select({ hostname: projectDomainsTable.hostname })
+          .from(projectDomainsTable)
+          .where(
+            and(
+              eq(projectDomainsTable.projectId, projectId),
+              eq(projectDomainsTable.verificationStatus, "verified"),
+            ),
+          );
+        const customDomains = customDomainRows.map((r) => r.hostname);
+        // Clear KV entries (pass versionId=null to trigger deletion)
+        await syncAllHostnamesKV({
+          projectId,
+          publicSlug: slug,
+          versionId: null,
+          customDomains,
+        });
+        await purgeCacheForProject({ publicSlug: slug, customDomains });
+      } catch {
+        /* best-effort */
+      }
+    })();
+  });
+
   void writeKnowledge({
     title: `Unpublished: project ${projectId}`,
     content: `Project id:${projectId} unpublished by ${req.userId ?? "unknown"}. Public URL is now inactive. Slug preserved for next publish.`,
@@ -675,5 +851,58 @@ router.post("/projects/:id/unpublish", requireProjectOwnership, async (req, res)
     publicUrlDisabled: true,
   });
 });
+
+// ── POST /api/projects/:id/maintenance ───────────────────────────────────────
+// Toggle the Cloudflare edge CDN maintenance mode for a project.
+// When enabled=true the Worker serves the maintenance page for all hostnames.
+// Requires the project to already be published (KV entries must exist).
+router.post(
+  "/projects/:id/maintenance",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const { enabled } = req.body as { enabled?: unknown };
+    if (typeof enabled !== "boolean") {
+      res.status(400).json({ error: "`enabled` must be a boolean" });
+      return;
+    }
+
+    const [project] = await db
+      .select({
+        publicSlug: projectsTable.publicSlug,
+      })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    // Collect all hostnames for this project (platform subdomain + custom domains)
+    const customDomainRows = await db
+      .select({ hostname: projectDomainsTable.hostname })
+      .from(projectDomainsTable)
+      .where(
+        and(
+          eq(projectDomainsTable.projectId, projectId),
+          eq(projectDomainsTable.verificationStatus, "verified"),
+        ),
+      )
+      .catch(() => [] as { hostname: string }[]);
+
+    const hostnames: string[] = customDomainRows.map((r) => r.hostname);
+    if (project.publicSlug) {
+      hostnames.push(`${project.publicSlug}.${PLATFORM_DOMAIN}`);
+    }
+
+    // Update KV entries best-effort (no-op when CF_KV_NAMESPACE_ID is not set)
+    void setProjectMaintenanceMode(hostnames, enabled).catch(() => {
+      /* best-effort */
+    });
+
+    res.json({ ok: true, projectId, maintenanceEnabled: enabled, hostnamesUpdated: hostnames });
+  },
+);
 
 export default router;

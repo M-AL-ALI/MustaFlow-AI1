@@ -26,6 +26,7 @@ import {
   projectFilesTable,
   projectVersionsTable,
   deploymentLogsTable,
+  projectDomainsTable,
   secretsTable,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
@@ -34,6 +35,14 @@ import { generateOgSvg } from "../lib/ogImage";
 import { deployProductionContainer } from "../lib/container";
 import { encryptionService } from "../lib/encryption";
 import { logger } from "../lib/logger";
+import {
+  r2Enabled,
+  uploadSnapshotToR2,
+  syncAllHostnamesKV,
+  purgeCacheForProject,
+  uploadMaintenancePage,
+  type SnapshotFile,
+} from "../lib/cloudflare";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
@@ -204,6 +213,65 @@ router.post("/projects/:id/deploy", requireProjectOwnership, async (req, res): P
       updatedAt: new Date(),
     })
     .where(eq(projectsTable.id, projectId));
+
+  // ── 6b. Edge CDN: upload to R2, sync KV, purge cache ─────────────────────
+  if (snapshotVersionId) {
+    const snapshotFiles: SnapshotFile[] = files.map((f) => ({
+      path: f.path,
+      content: f.content,
+      mimeType: f.mimeType,
+    }));
+    const customDomainRows = await db
+      .select({ hostname: projectDomainsTable.hostname })
+      .from(projectDomainsTable)
+      .where(
+        and(
+          eq(projectDomainsTable.projectId, projectId),
+          eq(projectDomainsTable.verificationStatus, "verified"),
+        ),
+      )
+      .catch(() => [] as { hostname: string }[]);
+    const customDomains = customDomainRows.map((r) => r.hostname);
+
+    // Edge CDN ordering — order matters for consistency:
+    //   1. Upload snapshot to R2 FIRST (gate KV on success when R2 is configured).
+    //   2. Update KV routing (awaited, 5 s bound, explicit failure logging).
+    //   3. Purge CF edge cache async/best-effort after routing is live.
+    const maintenanceFile = files.find((f) => f.path === "maintenance.html");
+    void uploadMaintenancePage(projectId, maintenanceFile?.content).catch(() => {
+      /* best-effort — doesn't affect routing */
+    });
+    const r2Ok = await uploadSnapshotToR2(projectId, snapshotVersionId, snapshotFiles);
+    if (r2Enabled() && !r2Ok) {
+      logger.warn(
+        { projectId, snapshotVersionId },
+        "R2 upload failed for deploy snapshot; skipping KV routing update to prevent edge 404s",
+      );
+    } else {
+      try {
+        await Promise.race([
+          syncAllHostnamesKV({
+            projectId,
+            publicSlug: slug,
+            versionId: snapshotVersionId,
+            customDomains,
+            preferredRegion: project.preferredRegion ?? null,
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+        ]);
+      } catch (err) {
+        logger.warn(
+          { err, projectId },
+          "KV sync failed for deploy; edge routing may be stale until TTL expires",
+        );
+      }
+      setImmediate(() => {
+        void purgeCacheForProject({ publicSlug: slug, customDomains }).catch(() => {
+          /* best-effort */
+        });
+      });
+    }
+  }
 
   // ── 7. Record deployment log ───────────────────────────────────────────────
   void db

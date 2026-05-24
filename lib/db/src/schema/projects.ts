@@ -154,6 +154,10 @@ export const projectsTable = pgTable("projects", {
   healthCheckPath: text("health_check_path").notNull().default("/"),
   // uptimeAlertEmail: address that receives consecutive-failure alerts. Null = no email alerts.
   uptimeAlertEmail: text("uptime_alert_email"),
+  // preferredRegion: optional Cloudflare regional routing hint for the edge Worker.
+  // Null = no preference (Cloudflare picks the closest PoP).
+  // Example values: "weur" (Western Europe), "enam" (Eastern North America), "apac" (Asia Pacific).
+  preferredRegion: text("preferred_region"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

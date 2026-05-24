@@ -31,7 +31,14 @@ import {
 import type { DomainSecurityConfig } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { activateSslForDomain, activateSslForProject } from "./ssl";
-import { deleteCustomHostname, applySecurityConfig, enableMtls } from "../lib/cloudflare";
+import {
+  deleteCustomHostname,
+  applySecurityConfig,
+  enableMtls,
+  writeHostnameKV,
+  deleteHostnameKV,
+  syncHostnameKVAfterPublish,
+} from "../lib/cloudflare";
 import { createLimiterForDomainVerify } from "../lib/rateLimit";
 import { publishDomainEvent } from "../lib/event-bus";
 import { enqueueJob, DOMAIN_REWRITE_SENTINEL } from "../lib/jobs";
@@ -584,6 +591,11 @@ router.delete(
       });
     }
 
+    // ── Edge CDN: remove this hostname from Worker KV ─────────────────────────
+    void deleteHostnameKV(domain.hostname).catch(() => {
+      /* best-effort */
+    });
+
     // Emit event to hot-reload routing table
     publishDomainEvent({ type: "removed", hostname: domain.hostname, projectId });
 
@@ -912,6 +924,31 @@ router.post(
         }
 
         publishDomainEvent({ type: "verified", hostname, projectId });
+
+        // ── Edge CDN: sync this hostname into the Worker KV ───────────────────
+        // Look up the project's current published snapshot to populate KV.
+        setImmediate(() => {
+          void (async () => {
+            try {
+              const [proj] = await db
+                .select({
+                  publishedSnapshotId: projectsTable.publishedSnapshotId,
+                })
+                .from(projectsTable)
+                .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+              if (proj?.publishedSnapshotId) {
+                await syncHostnameKVAfterPublish({
+                  hostname,
+                  projectId,
+                  versionId: proj.publishedSnapshotId,
+                  preferredRegion: null,
+                });
+              }
+            } catch {
+              /* best-effort */
+            }
+          })();
+        });
 
         await writeDomainAudit({
           projectId,

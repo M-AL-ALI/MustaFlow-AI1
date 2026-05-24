@@ -39,6 +39,7 @@
     "migrate-project-artifacts": "tsx ./src/migrate-project-artifacts.ts",
     "migrate-security-scanners": "tsx ./src/migrate-security-scanners.ts",
     "migrate-agent-inbox": "tsx ./src/migrate-agent-inbox.ts",
+    "migrate-preferred-region": "tsx ./src/migrate-preferred-region.ts",
     "eval-prompts": "tsx ./src/eval-prompts.ts",
     "migrate-domain-cert-fields": "tsx ./src/migrate-domain-cert-fields.ts",
     "migrate-webhooks-pat": "tsx ./src/migrate-webhooks-pat.ts",

@@ -1,0 +1,54 @@
+name = "mustaflow-snapshot-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# ── R2 bucket binding ─────────────────────────────────────────────────────────
+# Stores published project snapshot files.
+# Create with: wrangler r2 bucket create mustaflow-snapshots
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "mustaflow-snapshots"
+
+# ── KV namespace binding ──────────────────────────────────────────────────────
+# Maps hostnames to project routing data (projectId, versionId, etc.).
+# Create with: wrangler kv:namespace create "ROUTING"
+# Then paste the returned id below.
+[[kv_namespaces]]
+binding = "ROUTING"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_KV_NAMESPACE_PREVIEW_ID"
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+# Bind to the platform domain and all custom hostnames via SSL for SaaS.
+# The zone_name here is the Cloudflare zone that manages mustaflow.app.
+# Custom domains are handled via Cloudflare for SaaS custom hostnames —
+# they resolve here automatically once the CNAME/A record points to us.
+#
+# Uncomment and configure when deploying:
+# [[routes]]
+# pattern = "*.mustaflow.app/*"
+# zone_name = "mustaflow.app"
+
+# ── Smart Placement ───────────────────────────────────────────────────────────
+# Cloudflare Smart Placement automatically co-locates the Worker with the R2
+# replica closest to the project's `preferredRegion` hint, minimising R2 read
+# latency without requiring hard-affinity Durable Objects or Regional Services.
+[placement]
+mode = "smart"
+
+# ── Environment variables ─────────────────────────────────────────────────────
+[vars]
+# API_ORIGIN is the fallback API origin for internal use.
+# API_ORIGIN = "https://api.mustaflow.app"
+
+# ── Production environment ───────────────────────────────────────────────────
+[env.production]
+name = "mustaflow-snapshot-worker"
+
+[[env.production.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "mustaflow-snapshots"
+
+[[env.production.kv_namespaces]]
+binding = "ROUTING"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
