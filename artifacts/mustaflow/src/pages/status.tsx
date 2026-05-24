@@ -7,7 +7,6 @@ import {
   Activity,
   Shield,
   Server,
-  Cpu,
   Boxes,
   CreditCard,
   Database,
@@ -15,6 +14,7 @@ import {
   Rocket,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AgentIcon } from "@/components/agent-icon";
 
 type ComponentStatus = "operational" | "degraded" | "outage" | "unknown";
 
@@ -53,7 +53,7 @@ const STATUS_COLORS: Record<ComponentStatus, string> = {
 const COMPONENT_ICONS: Record<string, React.ElementType> = {
   API: Server,
   Database: Database,
-  "AI Builder": Cpu,
+  "AI Builder": Server,
   Containers: Boxes,
   Payments: CreditCard,
   Queue: Activity,
@@ -171,13 +171,18 @@ export default function StatusPage() {
                 {data.components.map((comp) => {
                   const Icon = COMPONENT_ICONS[comp.name] ?? Server;
                   const StatusIcon = STATUS_ICONS[comp.status] ?? AlertTriangle;
+                  const isAgent = comp.name === "AI Builder";
                   return (
                     <div
                       key={comp.name}
                       className="flex items-center justify-between px-4 py-3 bg-card"
                     >
                       <div className="flex items-center gap-3">
-                        <Icon className="h-4 w-4 text-muted-foreground" />
+                        {isAgent ? (
+                          <AgentIcon size={16} state="static" className="text-muted-foreground" />
+                        ) : (
+                          <Icon className="h-4 w-4 text-muted-foreground" />
+                        )}
                         <div>
                           <p className="text-sm font-medium text-foreground">{comp.name}</p>
                           {comp.message && (

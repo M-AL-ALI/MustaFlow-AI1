@@ -2122,13 +2122,13 @@ export default function ProjectWorkspacePage() {
           <div className="shrink-0 flex border-b border-border bg-card/60">
             {(["chat", "files", "history", "saved"] as const).map((t) => {
               const Icon =
-                t === "chat"
-                  ? MessageSquare
-                  : t === "files"
-                    ? FileCode2
-                    : t === "history"
-                      ? History
-                      : Bookmark;
+                t === "files"
+                  ? FileCode2
+                  : t === "history"
+                    ? History
+                    : t === "saved"
+                      ? Bookmark
+                      : null;
               const badge =
                 t === "files" && files.length > 0
                   ? files.length
@@ -2146,7 +2146,11 @@ export default function ProjectWorkspacePage() {
                       : "border-transparent text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <Icon className="h-3 w-3" />
+                  {t === "chat" ? (
+                    <AgentIcon size={12} state={isBusy ? "active" : "idle"} />
+                  ) : Icon ? (
+                    <Icon className="h-3 w-3" />
+                  ) : null}
                   {t === "chat"
                     ? "Chat"
                     : t === "files"
