@@ -14,9 +14,14 @@ import {
   Navigation,
   Cpu,
   Zap,
+  LayoutTemplate,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGetAgentRouting, useUpdateProject } from "@workspace/api-client-react";
+import { PlanTemplatesPicker } from "./plan-templates-picker";
+import { PlanHistoryPanel } from "./plan-history";
+import type { StructuredPlan } from "./plan-card";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 type AgentType = "planning" | "task" | "main";
@@ -192,6 +197,8 @@ export function QueueComposer({
   const [imagePrompt, setImagePrompt] = useState("");
   const [imagePanelOpen, setImagePanelOpen] = useState(false);
   const [generatingImage, setGeneratingImage] = useState(false);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [showPlanHistory, setShowPlanHistory] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const uploadFile = useCallback(
@@ -1317,12 +1324,57 @@ export function QueueComposer({
             <Layers2 className="h-3 w-3" /> 2 Variants
           </button>
 
+          {/* Template picker + plan history — shown in Planning mode */}
+          {agentType === "planning" && (
+            <>
+              <button
+                onClick={() => setShowTemplatePicker(true)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border text-muted-foreground border-border hover:text-foreground"
+                title="Start from a pre-built plan template"
+              >
+                <LayoutTemplate className="h-3 w-3" /> Templates
+              </button>
+              <button
+                onClick={() => setShowPlanHistory(true)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border text-muted-foreground border-border hover:text-foreground"
+                title="View and restore previous plan versions"
+              >
+                <Clock className="h-3 w-3" /> Plan history
+              </button>
+            </>
+          )}
+
           {!isMultiRow && (
             <span className="ml-auto text-[9px] text-muted-foreground/40">
               ⌘↩ send · Shift+↩ add task
             </span>
           )}
         </div>
+      )}
+
+      {/* Template picker modal */}
+      {showTemplatePicker && (
+        <PlanTemplatesPicker
+          projectId={projectId}
+          onSelect={(plan: StructuredPlan, name: string) => {
+            // Inject template plan into the composer as a pre-built prompt
+            const templatePrompt = `Apply this plan template "${name}" to build the app:\n\nGoal: ${plan.goal ?? ""}\n${plan.approach ? `Approach: ${plan.approach}\n` : ""}${(plan.sitemap ?? []).length > 0 ? `Pages: ${(plan.sitemap ?? []).map((p) => `${p.name} (${p.route})`).join(", ")}\n` : ""}${(plan.integrations ?? []).length > 0 ? `Integrations: ${plan.integrations!.join(", ")}\n` : ""}`;
+            setRows([{ id: crypto.randomUUID(), text: templatePrompt }]);
+          }}
+          onClose={() => setShowTemplatePicker(false)}
+        />
+      )}
+
+      {/* Plan history modal */}
+      {showPlanHistory && (
+        <PlanHistoryPanel
+          projectId={projectId}
+          onRestorePlan={(plan: StructuredPlan) => {
+            const restoredPrompt = `Restore this plan and rebuild the app:\n\nGoal: ${plan.goal ?? ""}\n${plan.approach ? `Approach: ${plan.approach}\n` : ""}${(plan.sitemap ?? []).length > 0 ? `Pages: ${(plan.sitemap ?? []).map((p) => `${p.name} (${p.route})`).join(", ")}\n` : ""}`;
+            setRows([{ id: crypto.randomUUID(), text: restoredPrompt }]);
+          }}
+          onClose={() => setShowPlanHistory(false)}
+        />
       )}
     </div>
   );

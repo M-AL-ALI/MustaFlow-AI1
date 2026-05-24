@@ -7953,6 +7953,186 @@ export function normalizePath(p: string): string {
   return clean;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Plan Mode Leadership — Task #635
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type PlanBuildStep = {
+  stepNumber: number;
+  title: string;
+  description: string;
+  prompt: string;
+  files: string[];
+  dependsOn: number[];
+  estimatedSeconds: number;
+};
+
+export type PlanDecomposeResult = {
+  steps: PlanBuildStep[];
+  totalEstimatedSeconds: number;
+  summary: string;
+};
+
+const PLAN_DECOMPOSE_SYSTEM_PROMPT = `You are the MustaFlow AI Planner decomposing a high-level app plan into a sequence of discrete, ordered build steps.
+
+Each step should be self-contained enough that an AI builder can execute it independently in sequence. Steps must be ordered so that each step builds on top of the previous.
+
+OUTPUT STRICT JSON:
+{
+  "steps": [
+    {
+      "stepNumber": integer (1-based),
+      "title": string (short title, e.g. "Set up project scaffold and routing"),
+      "description": string (what gets built in this step, 1-2 sentences),
+      "prompt": string (the exact build prompt to send for this step — specific, actionable, imperative),
+      "files": string[] (list of key files this step creates or modifies),
+      "dependsOn": integer[] (step numbers this step depends on, empty for step 1),
+      "estimatedSeconds": integer (realistic estimate for this step alone)
+    }
+  ],
+  "totalEstimatedSeconds": integer,
+  "summary": string (1 sentence describing the decomposition strategy)
+}
+
+Rules:
+- Produce 3-6 steps total. Never more than 8.
+- Step 1 must always be the project scaffold / foundation (routing, layout, base styles).
+- Steps must be ordered — no circular dependencies.
+- Each "prompt" must be a standalone instruction the builder can execute (imperative, specific).
+- Steps should be roughly equal in size — avoid one huge step followed by trivial ones.
+- Do NOT plan for deployment, testing infrastructure, or CI/CD — focus on the app itself.
+- Output ONLY valid JSON — no prose, no code fences.`;
+
+export async function runPlanDecomposePipeline(args: {
+  projectName: string;
+  projectKind: string;
+  plan: Record<string, unknown>;
+  agentMode: AgentMode;
+}): Promise<PlanDecomposeResult> {
+  const { projectName, projectKind, plan, agentMode } = args;
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: PLAN_DECOMPOSE_SYSTEM_PROMPT },
+    {
+      role: "system",
+      content: `Project: "${projectName}" (kind: ${projectKind}).`,
+    },
+    {
+      role: "user",
+      content: `Decompose this app plan into ordered build steps:\n\n${JSON.stringify(plan, null, 2)}`,
+    },
+  ];
+
+  try {
+    const result = await callWithRetry(
+      messages,
+      modelFor(agentMode),
+      4000,
+      "plan-decompose",
+      undefined,
+      "plan",
+      agentMode,
+    );
+
+    const steps = Array.isArray(result.steps) ? (result.steps as PlanBuildStep[]) : [];
+    const totalEstimatedSeconds =
+      typeof result.totalEstimatedSeconds === "number"
+        ? result.totalEstimatedSeconds
+        : steps.reduce((sum, s) => sum + (s.estimatedSeconds ?? 0), 0);
+    const summary =
+      typeof result.summary === "string"
+        ? result.summary
+        : `Decomposed into ${steps.length} build steps.`;
+
+    return { steps, totalEstimatedSeconds, summary };
+  } catch (err) {
+    logger.error({ err, projectName }, "Plan decompose pipeline failed");
+    throw err;
+  }
+}
+
+const GUIDED_REFINEMENT_SYSTEM_PROMPT = `You are a friendly product manager helping a non-technical user clarify their app idea. 
+Your job is to ask targeted, focused clarifying questions when a user's app description is too vague to plan well.
+
+OUTPUT STRICT JSON:
+{
+  "needsClarification": boolean,
+  "questions": [
+    {
+      "id": string (short unique key, e.g. "target_users"),
+      "question": string (plain-language question, friendly tone, no jargon),
+      "hint": string (optional example answer to guide the user, e.g. "e.g. freelancers, small businesses"),
+      "required": boolean
+    }
+  ],
+  "clarificationReason": string (why clarification is needed — 1 sentence, or empty string if not needed)
+}
+
+Rules:
+- If the description is specific enough to generate a good plan (mentions app type, key features, or audience), set needsClarification=false and questions=[].
+- If the description is very vague (under 30 words OR missing the core use case OR could mean 10 different things), set needsClarification=true and provide 2-4 targeted questions.
+- Questions must be plain English, short, and friendly. No technical jargon.
+- Order questions from most important to least important.
+- Never ask about technical choices (stack, hosting, database) — focus on what the app does and who it's for.
+- Output ONLY valid JSON.`;
+
+export type ClarifyingQuestion = {
+  id: string;
+  question: string;
+  hint?: string;
+  required: boolean;
+};
+
+export type GuidedRefinementResult = {
+  needsClarification: boolean;
+  questions: ClarifyingQuestion[];
+  clarificationReason: string;
+};
+
+export async function runGuidedRefinementPipeline(args: {
+  projectName: string;
+  projectKind: string;
+  userPrompt: string;
+  agentMode: AgentMode;
+}): Promise<GuidedRefinementResult> {
+  const { projectName, projectKind, userPrompt, agentMode } = args;
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: GUIDED_REFINEMENT_SYSTEM_PROMPT },
+    {
+      role: "system",
+      content: `Project: "${projectName}" (kind: ${projectKind}).`,
+    },
+    {
+      role: "user",
+      content: `The user wants to plan an app. Their description: "${userPrompt}"`,
+    },
+  ];
+
+  try {
+    const result = await callWithRetry(
+      messages,
+      modelFor(agentMode),
+      2000,
+      "guided-refinement",
+      undefined,
+      "plan",
+      agentMode,
+    );
+
+    return {
+      needsClarification: Boolean(result.needsClarification),
+      questions: Array.isArray(result.questions) ? (result.questions as ClarifyingQuestion[]) : [],
+      clarificationReason:
+        typeof result.clarificationReason === "string" ? result.clarificationReason : "",
+    };
+  } catch (err) {
+    logger.error({ err, projectName }, "Guided refinement pipeline failed");
+    // Graceful degradation: if the check fails, don't block the user
+    return { needsClarification: false, questions: [], clarificationReason: "" };
+  }
+}
+
 export function guessMime(path: string): string {
   const lower = path.toLowerCase();
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html";

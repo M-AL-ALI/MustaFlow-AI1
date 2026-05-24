@@ -23,7 +23,11 @@ import {
   Check,
   Zap,
   FileText,
+  ListChecks,
+  Clock,
 } from "lucide-react";
+import { PlanDecomposeView } from "./plan-decompose";
+import { PlanHistoryPanel } from "./plan-history";
 import { cn } from "@/lib/utils";
 import { useListSecrets, getListSecretsQueryKey } from "@workspace/api-client-react";
 
@@ -478,6 +482,7 @@ export function PlanCard({
   disabled,
   readOnly = false,
   messageId,
+  onRestorePlan,
 }: {
   plan: StructuredPlan | null;
   projectId: number;
@@ -487,6 +492,7 @@ export function PlanCard({
   disabled: boolean;
   readOnly?: boolean;
   messageId?: string | number;
+  onRestorePlan?: (plan: StructuredPlan) => void;
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("structure");
   const [localMode, setLocalMode] = useState<AgentMode>(
@@ -550,6 +556,8 @@ export function PlanCard({
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [editingUxKey, setEditingUxKey] = useState<string | null>(null);
   const [editingUxValue, setEditingUxValue] = useState("");
+  const [showDecompose, setShowDecompose] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const { data: secrets = [] } = useListSecrets(projectId, {
     query: { queryKey: getListSecretsQueryKey(projectId), enabled: !!projectId },
@@ -1405,7 +1413,55 @@ export function PlanCard({
               <ServerCog className="h-3 w-3 mr-1" /> Background
             </Button>
           </div>
+
+          {/* Secondary actions — plan decompose + history */}
+          <div className="flex items-center gap-2 pt-0.5">
+            <button
+              onClick={() => setShowDecompose(true)}
+              disabled={disabled}
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              title="Break this plan into ordered build steps"
+            >
+              <ListChecks className="h-3 w-3" />
+              Build in steps
+            </button>
+            <span className="text-muted-foreground/30 text-[10px]">·</span>
+            <button
+              onClick={() => setShowHistory(true)}
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              title="See previous plan versions and restore any earlier version"
+            >
+              <Clock className="h-3 w-3" />
+              Plan history
+            </button>
+          </div>
         </div>
+      )}
+
+      {/* Plan decompose modal */}
+      {showDecompose && plan && (
+        <PlanDecomposeView
+          projectId={projectId}
+          plan={plan as unknown as Record<string, unknown>}
+          agentMode={localMode}
+          onBuildStep={(prompt, mode, background) => {
+            setShowDecompose(false);
+            cancelAndClear();
+            onBuild(prompt, mode as AgentMode, background);
+          }}
+          onClose={() => setShowDecompose(false)}
+        />
+      )}
+
+      {/* Plan history modal */}
+      {showHistory && (
+        <PlanHistoryPanel
+          projectId={projectId}
+          onRestorePlan={(restoredPlan) => {
+            onRestorePlan?.(restoredPlan);
+          }}
+          onClose={() => setShowHistory(false)}
+        />
       )}
     </div>
   );

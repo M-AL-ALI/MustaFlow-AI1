@@ -55,6 +55,7 @@ import uploadsRouter from "./uploads";
 import transcribeRouter from "./transcribe";
 import canvasRouter from "./canvas";
 import blueprintsRouter from "./blueprints";
+import plansRouter from "./plans";
 import deploymentConfigRouter from "./deployment-config";
 import artifactsRouter from "./artifacts";
 import agentInboxRouter from "./agent-inbox";
@@ -125,6 +126,7 @@ const KNOWN_PREFIXES = [
   "/transcribe",
   "/blueprints",
   "/account",
+  "/plan-templates",
 ];
 
 router.use((req, res, next) => {
@@ -206,6 +208,7 @@ router.use(uploadsRouter);
 router.use(transcribeRouter);
 router.use(canvasRouter);
 router.use(blueprintsRouter);
+router.use(plansRouter);
 router.use(deploymentConfigRouter);
 router.use(artifactsRouter);
 router.use(agentInboxRouter);

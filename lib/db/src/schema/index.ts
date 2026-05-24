@@ -43,3 +43,4 @@ export * from "./workspace-domain-roles";
 export * from "./workspace-usage-daily";
 export * from "./purchased-domains";
 export * from "./workspace-subscriptions";
+export * from "./plan-templates";

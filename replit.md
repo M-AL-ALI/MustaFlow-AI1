@@ -515,3 +515,18 @@ The intended user journey is: Login → create project → build app → preview
 - **Domain suggestions enriched**: `routes/domains.ts` suggest-domains endpoint now filters AI-generated suggestions through Namecheap availability check (best-effort; falls back to full list on error).
 - **Migration**: `pnpm --filter @workspace/scripts run migrate-purchased-domains`
 - **Pricing**: `DOMAIN_MARKUP_PERCENT` (default `20`) adds a margin on top of Namecheap wholesale cost for each TLD.
+
+## Plan Mode Leadership (Task #635)
+
+- **Plan templates**: 10 seeded system templates (SaaS Dashboard, Marketing Site, E-commerce, Blog, Internal Tool, Project Management, Booking, Portfolio, AI Tool, Social Community). `GET /api/plan-templates` returns them ordered by `sort_order`. Migration: `pnpm --filter @workspace/scripts run migrate-plan-templates` (idempotent upsert).
+- **DB schema**: `plan_templates` table — `id`, `slug`, `category`, `name`, `description`, `platform`, `plan` (jsonb), `is_system`, `sort_order`, `created_at`. Schema: `lib/db/src/schema/plan-templates.ts`.
+- **Plan history**: `GET /api/projects/:id/plan-history` — returns all assistant messages that carry a `plan` jsonb (newest first). Displayed in the PlanHistoryPanel modal; each entry shows the plan goal, diff vs. the previous version, and a "Restore this plan" button.
+- **Plan decomposition**: `POST /api/projects/:id/plans/decompose` — calls `runPlanDecomposePipeline` in `builder.ts`; returns 3–6 ordered build steps with title, description, prompt, files, dependsOn, estimatedSeconds. Frontend: `PlanDecomposeView` modal with per-step Build/Background buttons and dependency gating.
+- **Guided refinement**: `POST /api/projects/:id/plans/clarify` — calls `runGuidedRefinementPipeline` in `builder.ts`; returns `needsClarification` + up to 4 targeted questions. Frontend: `GuidedRefinementLoader` (auto-calls on mount) + `GuidedRefinementCard` (paginated question wizard). Returns the original prompt unchanged if no clarification is needed.
+- **Plan diff**: `PlanDiffView` computes field-level diffs between two `StructuredPlan` objects and renders a before/after grid. `PlanDiffBadge` shows a clickable "N changes from previous" badge on any plan that changed. Exposed from `PlanHistoryPanel` per history entry.
+- **Template picker**: `PlanTemplatesPicker` modal — searchable + category-filterable grid, preview mode (shows goal, pages, integrations, complexity), "Use this template" injects a build prompt into the composer. Accessible via a "Templates" button that appears in the composer toolbar when Planning agent is active.
+- **Plan history button**: Accessible from two entry points — the "Plan history" button in the plan card footer (below "Build in steps"), and the "Plan history" button in the composer toolbar (Planning mode only).
+- **API routes file**: `artifacts/api-server/src/routes/plans.ts` — registered in `routes/index.ts` as `plansRouter`; `/plan-templates` added to `KNOWN_PREFIXES`.
+- **Builder pipelines**: `runPlanDecomposePipeline` and `runGuidedRefinementPipeline` appended to `artifacts/api-server/src/lib/builder.ts` (after `guessMime`). Both use `callWithRetry` with stage=`"plan"` for correct model routing.
+- **Key new frontend files**: `plan-templates-picker.tsx`, `plan-history.tsx`, `plan-decompose.tsx`, `guided-refinement.tsx`.
+- **Plan card updates**: `PlanCard` now accepts `onRestorePlan?` prop; footer has "Build in steps" and "Plan history" secondary action links.
