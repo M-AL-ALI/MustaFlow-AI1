@@ -183,6 +183,18 @@ export type AgentLoopReport = {
     audio: number;
     bgRemoval: number;
   };
+  /**
+   * Task #531: assets the agent surfaced via `present_asset`. Lifted from the
+   * loop's `presentedAssets` accumulator and forwarded into `TaskReport.assets`
+   * by the build/refine adapters.
+   */
+  assets?: Array<{
+    path: string;
+    name: string;
+    sizeBytes: number;
+    mimeType: string;
+    description?: string;
+  }>;
 };
 
 export type AgentLoopResult = {
@@ -760,6 +772,35 @@ const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "present_asset",
+      description:
+        "Mark an already-written project file as a downloadable asset for the user. Surfaces an inline asset card in the chat with a direct download link. Use for finished artifacts the user will want to grab (PDFs, ZIPs, generated images, exported data files, READMEs). The file must already exist in the workspace — call write_file first.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description:
+              "Sandboxed project path to the asset (e.g. 'export/report.pdf', 'assets/poster.png').",
+          },
+          name: {
+            type: "string",
+            description:
+              "Human-friendly title shown on the asset card. Falls back to the basename of `path` when omitted.",
+          },
+          description: {
+            type: "string",
+            description: "Optional one-line caption shown under the title.",
+          },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "finalize",
       description:
         "Signal that the build is complete. Provide a 1-3 sentence summary for the user. Call this only after all required checks pass.",
@@ -949,6 +990,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // Task #530: per-task creative-pack budget (5 calls total across all 4 tools).
   const creativeBudget = { remaining: 5 };
   const creativeCounts = { image: 0, video: 0, audio: 0, bgRemoval: 0 };
+  // Task #531: assets the agent has surfaced via present_asset. Threaded through
+  // ToolCtx so the present_asset executeTool case can append to it.
+  const presentedAssets: Array<{
+    path: string;
+    name: string;
+    sizeBytes: number;
+    mimeType: string;
+    description?: string;
+  }> = [];
   let totalTokens = 0;
 
   const startedAt = Date.now();
@@ -1062,15 +1112,194 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
     let stepFinalized = false;
     let mutatedThisTurn = false;
-    for (const call of toolReqs) {
+
+    // Task #531: tools that mutate container/workspace state, run shell
+    // commands, hit credit-metered async budgets, or must terminate the loop
+    // run SERIALLY. Pure reads (read_file/list_files/search), narration
+    // (report_progress), asset surfacing (present_asset), network senses
+    // (web_fetch/web_search/take_screenshot/extract_branding) and skill
+    // loading are safe to parallelize.
+    //
+    // File mutation tools stay serial because each one performs an async
+    // container sync (writeFileToContainer / rm via exec). Two parallel writes
+    // to the same path would race on container disk even though the in-memory
+    // workspace is deterministic — leading to a stale subsequent check run.
+    // Creative tools (generate_image/video/audio/remove_image_background)
+    // stay serial because their budget reservation is checked-then-decremented
+    // across an await, which is not atomic under Promise.all.
+    const SERIAL_TOOLS = new Set([
+      "run_command",
+      "pkg_install",
+      "read_diagnostics",
+      "fetch_prod_logs",
+      "run_e2e",
+      "finalize",
+      "write_file",
+      "apply_patch",
+      "delete_file",
+      "generate_image",
+      "generate_video",
+      "generate_audio",
+      "remove_image_background",
+    ]);
+
+    // Parse a tool call's arguments once.
+    const parseArgs = (call: ChatCompletionMessageToolCall): Record<string, unknown> => {
+      if (call.type !== "function") return {};
+      try {
+        return call.function.arguments ? JSON.parse(call.function.arguments) : {};
+      } catch {
+        return {};
+      }
+    };
+
+    // Process a single tool result against the shared turn state. Returns
+    // true if the loop should terminate (step-cap, finalize success). The
+    // outer caller still handles finalize-specific block detection.
+    const handleToolResult = async (
+      call: ChatCompletionMessageToolCall,
+      parsed: Record<string, unknown>,
+      result: { ok: boolean; observation: string | unknown; noTruncate?: boolean },
+      durationMs: number,
+    ): Promise<{ terminate: boolean; observation: string }> => {
+      const callName = call.type === "function" ? call.function.name : "";
+      const TRUNCATE_CAP = result.noTruncate ? 7_000_000 : MAX_OBSERVATION_CHARS;
+      const observation =
+        typeof result.observation === "string"
+          ? result.observation.slice(0, TRUNCATE_CAP)
+          : JSON.stringify(result.observation).slice(0, TRUNCATE_CAP);
+
+      toolCalls.push({
+        step,
+        tool: callName,
+        args: redactArgs(parsed),
+        ok: result.ok,
+        durationMs,
+        preview: observation.slice(0, 400),
+      });
+
+      if (result.ok) {
+        consecutiveErrors = 0;
+      } else {
+        if (lastError === observation) consecutiveErrors++;
+        else consecutiveErrors = 1;
+        lastError = observation;
+      }
+
+      if (callName === "report_progress") {
+        await safeEvent(input.onEvent, "narration", String(parsed.message ?? "").slice(0, 220));
+      } else if (
+        callName === "write_file" ||
+        callName === "apply_patch" ||
+        callName === "delete_file"
+      ) {
+        mutatedThisTurn = true;
+        await safeEvent(
+          input.onEvent,
+          "generating_code",
+          `${callName.replace("_", " ")} → ${String(parsed.path ?? "")}`.slice(0, 220),
+        );
+      } else if (callName === "run_command") {
+        await safeEvent(
+          input.onEvent,
+          "narration",
+          `Running: ${(parsed.argv as string[] | undefined)?.slice(-1)[0] ?? "command"}`.slice(
+            0,
+            220,
+          ),
+        );
+      }
+
+      messages.push({ role: "tool", tool_call_id: call.id, content: observation });
+
+      if (toolCalls.length >= STEP_CAP && callName !== "finalize") {
+        terminationReason = "step-cap";
+        return { terminate: true, observation };
+      }
+      return { terminate: false, observation };
+    };
+
+    // Greedy batching: consecutive parallel-safe calls run via Promise.all.
+    // Order is preserved when pushing tool-result messages so OpenAI's
+    // tool_call_id pairing stays predictable across the conversation log.
+    let callIdx = 0;
+    while (callIdx < toolReqs.length) {
+      if (input.signal.aborted) {
+        terminationReason = "aborted";
+        stepFinalized = true;
+        break;
+      }
+
+      // Collect a batch of consecutive parallel-safe calls (function-type only).
+      const batch: Array<Extract<ChatCompletionMessageToolCall, { type: "function" }>> = [];
+      while (callIdx < toolReqs.length) {
+        const c = toolReqs[callIdx]!;
+        if (c.type !== "function") {
+          callIdx++;
+          continue;
+        }
+        if (SERIAL_TOOLS.has(c.function.name)) break;
+        batch.push(c);
+        callIdx++;
+      }
+
+      if (batch.length > 0) {
+        const parsedBatch = batch.map((c) => parseArgs(c));
+        const tBatchStart = Date.now();
+        const settled = await Promise.all(
+          batch.map((c, idx) =>
+            executeTool({
+              name: c.function.name,
+              args: parsedBatch[idx]!,
+              workspace,
+              stack,
+              profile,
+              input,
+              commandsRun,
+              step,
+              containerState,
+              loadedSkills,
+              e2eResults,
+              screenshotBudget,
+              fetchBudget,
+              senseCounts,
+              creativeBudget,
+              creativeCounts,
+              presentedAssets,
+            })
+              .then((r) => ({ ok: r.ok, observation: r.observation, noTruncate: r.noTruncate }))
+              .catch((err) => ({
+                ok: false as const,
+                observation: `ERROR: ${String((err as Error).message ?? err)}`,
+                noTruncate: false,
+              })),
+          ),
+        );
+        const batchDuration = Date.now() - tBatchStart;
+        // Use the wall-clock duration of the whole batch as the per-call
+        // durationMs (parallel calls share the same window) — keeps the
+        // run report's per-call timing honest.
+        for (let k = 0; k < batch.length; k++) {
+          const res = await handleToolResult(
+            batch[k]!,
+            parsedBatch[k]!,
+            settled[k]!,
+            batchDuration,
+          );
+          if (res.terminate) {
+            stepFinalized = true;
+            break;
+          }
+        }
+        if (stepFinalized) break;
+        continue;
+      }
+
+      // Serial call (run_command / finalize / pkg_install / etc.)
+      const call = toolReqs[callIdx++]!;
       if (call.type !== "function") continue;
       const name = call.function.name;
-      let parsed: Record<string, unknown> = {};
-      try {
-        parsed = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-      } catch {
-        parsed = {};
-      }
+      const parsed = parseArgs(call);
       const tStart = Date.now();
       const result = await executeTool({
         name,
@@ -1089,6 +1318,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         senseCounts,
         creativeBudget,
         creativeCounts,
+        presentedAssets,
       });
       const durationMs = Date.now() - tStart;
 
@@ -1273,6 +1503,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         e2eResults: e2eResults[e2eResults.length - 1] ?? null,
         senseCalls: { ...senseCounts },
         creativeCalls: { ...creativeCounts },
+        assets: presentedAssets.slice(),
       },
     };
   }
@@ -1418,6 +1649,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               senseCounts,
               creativeBudget,
               creativeCounts,
+              presentedAssets,
             });
             toolCalls.push({
               step: step + 1,
@@ -1507,6 +1739,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       e2eResults: lastE2e,
       senseCalls: { ...senseCounts },
       creativeCalls: { ...creativeCounts },
+      assets: presentedAssets.slice(),
     },
   };
 }
@@ -1667,6 +1900,14 @@ export interface ToolCtx {
     audio: number;
     bgRemoval: number;
   };
+  /** Task #531: assets the agent surfaced via `present_asset`. */
+  presentedAssets: Array<{
+    path: string;
+    name: string;
+    sizeBytes: number;
+    mimeType: string;
+    description?: string;
+  }>;
 }
 
 /**
@@ -2587,6 +2828,37 @@ export async function executeTool(
     case "generate_audio":
     case "remove_image_background":
       return executeCreativeTool(ctx);
+    case "present_asset": {
+      const path = sanitizePath(args.path);
+      if (!path) return { ok: false, observation: "ERROR: invalid path" };
+      const f = workspace.read(path);
+      if (!f) {
+        return {
+          ok: false,
+          observation: `ERROR: file not found: ${path} — write the asset first with write_file`,
+        };
+      }
+      const baseName = path.split("/").pop() || path;
+      const rawName =
+        typeof args.name === "string" && args.name.trim() ? args.name.trim() : baseName;
+      const name = rawName.slice(0, 120);
+      const description =
+        typeof args.description === "string" && args.description.trim()
+          ? args.description.trim().slice(0, 280)
+          : undefined;
+      const sizeBytes = Buffer.byteLength(f.content, "utf8");
+      const mimeType = f.mimeType || guessMime(path);
+      // Dedup by path — re-presenting an asset updates metadata instead of duplicating the card.
+      const existingIdx = ctx.presentedAssets.findIndex((a) => a.path === path);
+      const entry = { path, name, sizeBytes, mimeType, description };
+      if (existingIdx >= 0) ctx.presentedAssets[existingIdx] = entry;
+      else ctx.presentedAssets.push(entry);
+      await safeEvent(input.onEvent, "narration", `Asset ready → ${name}`);
+      return {
+        ok: true,
+        observation: `presented asset "${name}" (${path}, ${sizeBytes} bytes, ${mimeType})`,
+      };
+    }
     case "finalize": {
       return { ok: true, observation: "finalized" };
     }
@@ -3019,5 +3291,9 @@ function buildTaskReport(result: AgentLoopResult, userRequest: string): TaskRepo
     },
     agentLoop: result.loopReport,
     e2eResults: result.loopReport.e2eResults ?? null,
+    assets:
+      result.loopReport.assets && result.loopReport.assets.length > 0
+        ? result.loopReport.assets
+        : undefined,
   };
 }

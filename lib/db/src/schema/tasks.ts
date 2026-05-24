@@ -107,6 +107,18 @@ export type TaskReport = {
    * Structured record of the structural/per-file validation cycle.
    * Populated for every build or refine that triggered validation.
    */
+  /**
+   * Downloadable assets the agent explicitly presented to the user via the
+   * `present_asset` tool. Rendered as inline asset cards in the chat with
+   * direct-download links to the preview/raw file route.
+   */
+  assets?: Array<{
+    path: string;
+    name: string;
+    sizeBytes: number;
+    mimeType: string;
+    description?: string;
+  }>;
   validationReport?: {
     /** Critical errors found in the initial pass (before any fix-up) */
     initialIssues: string[];

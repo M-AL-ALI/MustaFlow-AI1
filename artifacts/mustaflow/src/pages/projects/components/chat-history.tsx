@@ -49,7 +49,11 @@ import {
   useListTasks,
   useListTestRuns,
   getListTestRunsQueryKey,
+  useListProjectFiles,
+  useGetProjectFile,
 } from "@workspace/api-client-react";
+import { unifiedDiff } from "@/lib/line-diff";
+import { Download, FileBox, GitCompare } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 type TaskReport = {
@@ -160,6 +164,14 @@ type TaskReport = {
   agentLoop?: {
     skillsLoaded?: string[];
   } | null;
+  /** Downloadable assets the agent explicitly presented to the user (Task #531). */
+  assets?: Array<{
+    path: string;
+    name: string;
+    sizeBytes: number;
+    mimeType: string;
+    description?: string;
+  }>;
 };
 
 type StructuredPlan = {
@@ -281,12 +293,156 @@ function extractCodeText(node: React.ReactNode): string {
   return "";
 }
 
+// Task #531: detects `path/to/file.ext` or `path/to/file.ext:42` inside an
+// inline <code> block so we can render it as a clickable deep-link into the
+// Code tab. Requires a slash to avoid matching ordinary inline code like
+// `useState` or `npm install` — only path-shaped strings should turn into
+// links.
+const FILE_PATH_REF_RE = /^([\w.-]+(?:\/[\w.-]+)+)(?::(\d+))?$/;
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * Task #531: per-file diff row in the Task Agent staging review. Lazy-fetches
+ * the current file content from the project (the "before" side) and diffs it
+ * against the staged content (the "after" side) when the user expands it.
+ * Net-new files render as add-only; deleted files as del-only.
+ */
+function StagingFileDiffRow({
+  projectId,
+  path,
+  stagingContent,
+  status,
+  onViewFile,
+}: {
+  projectId: number;
+  path: string;
+  stagingContent: string | null;
+  status: "created" | "modified" | "deleted";
+  onViewFile?: (path: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const { data: filesList } = useListProjectFiles(projectId, {
+    query: {
+      enabled: open && status !== "created",
+      queryKey: getListProjectFilesQueryKey(projectId),
+    },
+  });
+  const fileId = (filesList ?? []).find((f: { id: number; path: string }) => f.path === path)?.id;
+  const {
+    data: currentFile,
+    isLoading: loadingCurrent,
+    isError: errorLoadingCurrent,
+  } = useGetProjectFile(projectId, fileId ?? 0, {
+    query: {
+      enabled: open && status !== "created" && !!fileId,
+      queryKey: ["getProjectFile", projectId, fileId ?? 0] as const,
+    },
+  });
+
+  // Distinguishes "couldn't fetch the before-side content" from a true empty
+  // diff so the reviewer isn't shown a false "no changes" message.
+  const beforeUnavailable =
+    open &&
+    status !== "created" &&
+    !loadingCurrent &&
+    (!fileId || errorLoadingCurrent || !currentFile);
+
+  const colorClass =
+    status === "created"
+      ? "text-green-400 border-green-500/20 bg-green-500/10 hover:bg-green-500/20"
+      : status === "modified"
+        ? "text-yellow-400 border-yellow-500/20 bg-yellow-500/10 hover:bg-yellow-500/20"
+        : "text-red-400 border-red-500/20 bg-red-500/10 hover:bg-red-500/20";
+
+  const before = status === "created" ? "" : (currentFile?.content ?? "");
+  const after = status === "deleted" ? "" : (stagingContent ?? "");
+  const hunks =
+    open && !beforeUnavailable && (status === "created" || currentFile || status === "deleted")
+      ? unifiedDiff(before, after, 2)
+      : [];
+
+  return (
+    <div className="border border-border/50 rounded overflow-hidden">
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className={cn(
+            "flex-1 flex items-center gap-1 text-[10px] px-1.5 py-1 font-mono rounded-l border-r-0 transition-colors",
+            colorClass,
+          )}
+        >
+          {open ? (
+            <ChevronDown className="h-2.5 w-2.5" />
+          ) : (
+            <ChevronRight className="h-2.5 w-2.5" />
+          )}
+          <GitCompare className="h-2.5 w-2.5 shrink-0" />
+          <span className="truncate text-left flex-1">{path}</span>
+        </button>
+        {onViewFile && status !== "deleted" && (
+          <button
+            type="button"
+            onClick={() => onViewFile(path)}
+            className="text-[9px] px-1.5 py-1 text-muted-foreground hover:text-foreground border border-border/50 rounded-r transition-colors"
+            title="Open in Code tab"
+          >
+            <ExternalLink className="h-2.5 w-2.5" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="bg-background/60 px-1 py-1 max-h-64 overflow-auto font-mono text-[10px] leading-snug">
+          {status !== "created" && loadingCurrent ? (
+            <div className="text-muted-foreground italic px-2 py-1">Loading current contents…</div>
+          ) : beforeUnavailable ? (
+            <div className="text-amber-400/80 italic px-2 py-1">
+              Unable to load current file contents — diff preview unavailable.
+            </div>
+          ) : hunks.length === 0 ? (
+            <div className="text-muted-foreground italic px-2 py-1">No textual changes.</div>
+          ) : (
+            hunks.map((h, hi) => (
+              <div key={hi} className="mb-1">
+                <div className="text-muted-foreground/60 text-[9px] px-1">
+                  @@ -{h.oldStart} +{h.newStart} @@
+                </div>
+                {h.lines.map((l, li) => (
+                  <div
+                    key={li}
+                    className={cn(
+                      "px-1 whitespace-pre",
+                      l.type === "add" && "bg-green-500/10 text-green-300",
+                      l.type === "del" && "bg-red-500/10 text-red-300",
+                      l.type === "context" && "text-muted-foreground/80",
+                    )}
+                  >
+                    {l.type === "add" ? "+" : l.type === "del" ? "-" : " "}
+                    {l.text}
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MarkdownMessage({
   content,
   onApply,
+  onViewFile,
 }: {
   content: string;
   onApply?: (code: string) => void;
+  onViewFile?: (path: string, line?: number) => void;
 }) {
   return (
     <div
@@ -310,10 +466,10 @@ export function MarkdownMessage({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
-        components={
-          onApply
+        components={{
+          ...(onApply
             ? {
-                pre({ children, ...props }) {
+                pre({ children, ...props }: { children?: React.ReactNode }) {
                   return (
                     <div>
                       <pre {...props}>{children}</pre>
@@ -331,8 +487,40 @@ export function MarkdownMessage({
                   );
                 },
               }
-            : undefined
-        }
+            : {}),
+          // Task #531: inline file-path references render as a clickable
+          // deep-link button. Only inline code (no className set by
+          // rehype-highlight, which adds language-* to fenced blocks) is
+          // considered; multi-line/fenced code is left alone.
+          code(props: { inline?: boolean; className?: string; children?: React.ReactNode }) {
+            const { inline, className, children } = props;
+            // Only treat true inline code as a candidate for path-link rendering.
+            // Fenced code blocks (with or without highlight class) must be left
+            // alone so we don't convert a path that happens to appear inside a
+            // larger code snippet into a clickable button.
+            if (onViewFile && inline === true) {
+              const text = extractCodeText(children).trim();
+              const m = text.match(FILE_PATH_REF_RE);
+              if (m) {
+                const path = m[1]!;
+                const line = m[2] ? parseInt(m[2], 10) : undefined;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onViewFile(path, line)}
+                    className="inline-flex items-center gap-1 align-baseline text-[11px] font-mono px-1 py-0.5 rounded border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 hover:border-primary/50 transition-colors"
+                    title={`Open ${path}${line ? `:${line}` : ""} in Code tab`}
+                  >
+                    <FileCode className="h-2.5 w-2.5 shrink-0" />
+                    {path}
+                    {line ? <span className="opacity-70">:{line}</span> : null}
+                  </button>
+                );
+              }
+            }
+            return <code className={className}>{children}</code>;
+          },
+        }}
       >
         {content}
       </ReactMarkdown>
@@ -387,11 +575,13 @@ export function StreamingText({
   messageId,
   animate = false,
   onApply,
+  onViewFile,
 }: {
   content: string;
   messageId: number;
   animate?: boolean;
   onApply?: (code: string) => void;
+  onViewFile?: (path: string, line?: number) => void;
 }) {
   const words = content.split(" ");
   const shouldAnimate = animate && !completedAnimations.has(messageId);
@@ -416,7 +606,7 @@ export function StreamingText({
   const isDone = count >= words.length;
 
   if (isDone) {
-    return <MarkdownMessage content={content} onApply={onApply} />;
+    return <MarkdownMessage content={content} onApply={onApply} onViewFile={onViewFile} />;
   }
 
   return (
@@ -1279,6 +1469,37 @@ function InlineReportCard({
             </div>
           );
         })()}
+      {report.assets && report.assets.length > 0 && projectId != null && (
+        <div className="pt-1.5 border-t border-border space-y-1">
+          <div className="text-[10px] uppercase text-muted-foreground/60 font-semibold flex items-center gap-1">
+            <FileBox className="h-3 w-3" /> Downloads
+          </div>
+          {report.assets.map((asset) => (
+            <a
+              key={asset.path}
+              href={`/api/projects/${projectId}/preview/${asset.path}`}
+              download={asset.name}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-muted/50 border border-border/60 hover:border-primary/40 hover:bg-muted transition-colors group"
+            >
+              <FileCode className="h-3.5 w-3.5 text-primary/80 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-medium text-foreground truncate">{asset.name}</div>
+                {asset.description && (
+                  <div className="text-[10px] text-muted-foreground truncate">
+                    {asset.description}
+                  </div>
+                )}
+                <div className="text-[9px] text-muted-foreground/60 font-mono truncate">
+                  {asset.path} · {formatBytes(asset.sizeBytes)} · {asset.mimeType}
+                </div>
+              </div>
+              <Download className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary shrink-0" />
+            </a>
+          ))}
+        </div>
+      )}
       {report.nextRecommendation && (
         <div className="pt-1.5 border-t border-border text-muted-foreground italic text-[10px]">
           {report.nextRecommendation}
@@ -1443,9 +1664,14 @@ function MessageRow({
         )}
       >
         {isConverse || isClarifying ? (
-          <StreamingText content={msg.content} messageId={msg.id} onApply={onApply} />
+          <StreamingText
+            content={msg.content}
+            messageId={msg.id}
+            onApply={onApply}
+            onViewFile={onViewFile}
+          />
         ) : msg.role === "assistant" && !isReport && !isError && !isPlanCard && !isTaskQueued ? (
-          <MarkdownMessage content={msg.content} onApply={onApply} />
+          <MarkdownMessage content={msg.content} onApply={onApply} onViewFile={onViewFile} />
         ) : (
           <div className="whitespace-pre-wrap leading-relaxed">
             {highlightText(msg.content, searchQuery)}
@@ -1613,6 +1839,16 @@ function TaskReviewCard({
   const [discarded, setDiscarded] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
 
+  // Pull the live task to access stagingSnapshot for per-file diffs (Task #531).
+  const { data: tasks } = useListTasks(projectId, {
+    query: { queryKey: getListTasksQueryKey(projectId) },
+  });
+  const liveTask = tasks?.find((t: { id: number }) => t.id === taskId) as
+    | { stagingSnapshot?: Array<{ path: string; content: string; mimeType: string }> | null }
+    | undefined;
+  const staging = liveTask?.stagingSnapshot ?? null;
+  const stagingByPath = new Map<string, string>((staging ?? []).map((f) => [f.path, f.content]));
+
   const allChanged = [
     ...(report.filesCreated ?? []),
     ...(report.filesModified ?? []),
@@ -1644,57 +1880,60 @@ function TaskReviewCard({
         <span className="font-semibold text-amber-400 flex-1">Task Agent — Review Required</span>
         <span className="text-[9px] text-amber-400/60 font-medium">Staged · not applied</span>
       </div>
-      {/* File summary */}
-      <div className="px-2.5 py-2 space-y-1">
+      {/* File summary — Task #531: each file is an expandable per-file diff. */}
+      <div className="px-2.5 py-2 space-y-1.5">
         {(report.filesCreated ?? []).length > 0 && (
-          <div>
+          <div className="space-y-1">
             <span className="text-[9px] font-semibold text-muted-foreground/60 uppercase tracking-wide">
-              Created
+              Created · {(report.filesCreated ?? []).length}
             </span>
-            <div className="flex flex-wrap gap-1 mt-0.5">
+            <div className="space-y-1">
               {(report.filesCreated ?? []).map((f) => (
-                <button
+                <StagingFileDiffRow
                   key={f}
-                  onClick={() => onViewFile?.(f)}
-                  className="text-[9px] px-1.5 py-0.5 bg-green-500/10 border border-green-500/20 rounded font-mono text-green-400 hover:bg-green-500/20 transition-colors"
-                >
-                  {f}
-                </button>
+                  projectId={projectId}
+                  path={f}
+                  stagingContent={stagingByPath.get(f) ?? ""}
+                  status="created"
+                  onViewFile={onViewFile}
+                />
               ))}
             </div>
           </div>
         )}
         {(report.filesModified ?? []).length > 0 && (
-          <div>
+          <div className="space-y-1">
             <span className="text-[9px] font-semibold text-muted-foreground/60 uppercase tracking-wide">
-              Modified
+              Modified · {(report.filesModified ?? []).length}
             </span>
-            <div className="flex flex-wrap gap-1 mt-0.5">
+            <div className="space-y-1">
               {(report.filesModified ?? []).map((f) => (
-                <button
+                <StagingFileDiffRow
                   key={f}
-                  onClick={() => onViewFile?.(f)}
-                  className="text-[9px] px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded font-mono text-yellow-400 hover:bg-yellow-500/20 transition-colors"
-                >
-                  {f}
-                </button>
+                  projectId={projectId}
+                  path={f}
+                  stagingContent={stagingByPath.get(f) ?? null}
+                  status="modified"
+                  onViewFile={onViewFile}
+                />
               ))}
             </div>
           </div>
         )}
         {(report.filesDeleted ?? []).length > 0 && (
-          <div>
+          <div className="space-y-1">
             <span className="text-[9px] font-semibold text-muted-foreground/60 uppercase tracking-wide">
-              Deleted
+              Deleted · {(report.filesDeleted ?? []).length}
             </span>
-            <div className="flex flex-wrap gap-1 mt-0.5">
+            <div className="space-y-1">
               {(report.filesDeleted ?? []).map((f) => (
-                <span
+                <StagingFileDiffRow
                   key={f}
-                  className="text-[9px] px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 rounded font-mono text-red-400 line-through"
-                >
-                  {f}
-                </span>
+                  projectId={projectId}
+                  path={f}
+                  stagingContent={null}
+                  status="deleted"
+                />
               ))}
             </div>
           </div>

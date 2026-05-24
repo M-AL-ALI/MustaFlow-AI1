@@ -68,6 +68,7 @@ function makeCtx(
     senseCounts: { screenshot: 0, webFetch: 0, webSearch: 0, branding: 0, diagnostics: 0 },
     creativeBudget: { remaining: 5 },
     creativeCounts: { image: 0, video: 0, audio: 0, bgRemoval: 0 },
+    presentedAssets: [],
   };
   return base;
 }
