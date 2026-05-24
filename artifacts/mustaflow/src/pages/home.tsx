@@ -198,16 +198,28 @@ export default function HomePage() {
               </span>
             </a>
             <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
-              <button onClick={() => setLocation("/pricing")} className="hover:text-foreground transition-colors">
+              <button
+                onClick={() => setLocation("/pricing")}
+                className="hover:text-foreground transition-colors"
+              >
                 Pricing
               </button>
-              <button onClick={() => setLocation("/integrations")} className="hover:text-foreground transition-colors">
+              <button
+                onClick={() => setLocation("/integrations")}
+                className="hover:text-foreground transition-colors"
+              >
                 Integrations
               </button>
-              <button onClick={() => setLocation("/security")} className="hover:text-foreground transition-colors">
+              <button
+                onClick={() => setLocation("/security")}
+                className="hover:text-foreground transition-colors"
+              >
                 Security
               </button>
-              <button onClick={() => setLocation("/help")} className="hover:text-foreground transition-colors">
+              <button
+                onClick={() => setLocation("/help")}
+                className="hover:text-foreground transition-colors"
+              >
                 Help
               </button>
             </nav>
@@ -309,7 +321,10 @@ export default function HomePage() {
               <Input
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder={INDUSTRY_PERSONAS[activePersona]?.demoPrompt ?? "e.g. A marketplace app for local artists to sell prints..."}
+                placeholder={
+                  INDUSTRY_PERSONAS[activePersona]?.demoPrompt ??
+                  "e.g. A marketplace app for local artists to sell prints..."
+                }
                 className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-lg h-14 bg-transparent shadow-none"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleBuild();
@@ -437,8 +452,8 @@ export default function HomePage() {
                     Design freely. Refine visually.
                   </h3>
                   <p className="text-sm text-muted-foreground max-w-md leading-relaxed mb-6">
-                    Generate variations side-by-side, tweak with the visual editor, and graduate
-                    the winner straight into your app. No design tools required.
+                    Generate variations side-by-side, tweak with the visual editor, and graduate the
+                    winner straight into your app. No design tools required.
                   </p>
                   <Button
                     size="sm"
@@ -488,8 +503,8 @@ export default function HomePage() {
                   </p>
                   <h3 className="text-2xl font-bold tracking-tight mb-2">Move faster</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    Run multiple agents in parallel — one drafts, one reviews, one tests. Builds
-                    in seconds, not minutes.
+                    Run multiple agents in parallel — one drafts, one reviews, one tests. Builds in
+                    seconds, not minutes.
                   </p>
                   <Zap className="absolute -bottom-4 -right-4 h-32 w-32 text-primary/10" />
                 </div>
@@ -517,8 +532,8 @@ export default function HomePage() {
                 Everything you need, nothing you don't
               </h2>
               <p className="text-muted-foreground max-w-xl mx-auto text-sm">
-                From the first prompt to a published, secured, scaled app — MustaFlow handles
-                the whole stack.
+                From the first prompt to a published, secured, scaled app — MustaFlow handles the
+                whole stack.
               </p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -615,7 +630,9 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setActivePersona((p) => (p - 1 + INDUSTRY_PERSONAS.length) % INDUSTRY_PERSONAS.length)
+                      setActivePersona(
+                        (p) => (p - 1 + INDUSTRY_PERSONAS.length) % INDUSTRY_PERSONAS.length,
+                      )
                     }
                     className="w-7 h-7 rounded-full border border-border bg-background flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                   >
@@ -623,9 +640,7 @@ export default function HomePage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() =>
-                      setActivePersona((p) => (p + 1) % INDUSTRY_PERSONAS.length)
-                    }
+                    onClick={() => setActivePersona((p) => (p + 1) % INDUSTRY_PERSONAS.length)}
                     className="w-7 h-7 rounded-full border border-border bg-background flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
@@ -755,7 +770,10 @@ export default function HomePage() {
                     "Global lessons apply across every project you own",
                     "Share lessons to the public library for the community",
                   ].map((item) => (
-                    <li key={item} className="flex items-start gap-2.5 text-sm text-muted-foreground">
+                    <li
+                      key={item}
+                      className="flex items-start gap-2.5 text-sm text-muted-foreground"
+                    >
                       <CheckCircle2 className="h-4 w-4 text-primary/60 shrink-0 mt-0.5" />
                       {item}
                     </li>

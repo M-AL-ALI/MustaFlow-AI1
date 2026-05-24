@@ -17,6 +17,9 @@ import {
   X,
   Receipt,
   Loader2,
+  Download,
+  Shield,
+  Trash2,
 } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
@@ -59,6 +62,7 @@ interface PackagesResponse {
 const TABS = [
   { id: "account", label: "Account", icon: User },
   { id: "credits", label: "Credits & Billing", icon: CreditCard },
+  { id: "privacy", label: "Privacy & Data", icon: Bell },
 ];
 
 export default function SettingsPage() {
@@ -122,6 +126,7 @@ export default function SettingsPage() {
         <div className="flex-1 min-w-0">
           {activeTab === "account" && <AccountTab />}
           {activeTab === "credits" && <CreditsTab />}
+          {activeTab === "privacy" && <PrivacyTab />}
         </div>
       </div>
     </div>
@@ -949,6 +954,183 @@ function PackageCard({
           </>
         )}
       </button>
+    </div>
+  );
+}
+
+function PrivacyTab() {
+  const { toast } = useToast();
+  const [exporting, setExporting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch("/api/me/export");
+      if (!res.ok) {
+        toast({
+          title: "Export failed",
+          description: "Please try again later.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `mustaflow-data-export-${Date.now()}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Export ready", description: "Your data has been downloaded." });
+    } catch {
+      toast({
+        title: "Export failed",
+        description: "Please try again later.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (deleteConfirm !== "DELETE") return;
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/me", { method: "DELETE" });
+      if (res.ok) {
+        toast({
+          title: "Deletion requested",
+          description: "Your project data has been scheduled for deletion.",
+        });
+        setDeleteConfirm("");
+      } else {
+        toast({
+          title: "Deletion failed",
+          description: "Please contact support.",
+          variant: "destructive",
+        });
+      }
+    } catch {
+      toast({
+        title: "Deletion failed",
+        description: "Please contact support.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Data Export */}
+      <div className="border border-border rounded-xl bg-card p-6 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Download className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-base font-semibold">Export Your Data</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Download a ZIP archive of everything MustaFlow AI has stored for your account — projects,
+          generated files, AI chat history, and knowledge vault entries. Secret values are never
+          included.
+        </p>
+        <button
+          onClick={() => void handleExport()}
+          disabled={exporting}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {exporting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Download className="h-3.5 w-3.5" />
+          )}
+          {exporting ? "Preparing export…" : "Download my data"}
+        </button>
+      </div>
+
+      {/* Privacy links */}
+      <div className="border border-border rounded-xl bg-card p-6 space-y-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-base font-semibold">Privacy &amp; Compliance</h2>
+        </div>
+        <div className="flex flex-col gap-2">
+          <a
+            href="/privacy"
+            className="text-sm text-primary hover:underline flex items-center gap-1.5"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Privacy Policy
+          </a>
+          <a
+            href="/trust"
+            className="text-sm text-primary hover:underline flex items-center gap-1.5"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Trust &amp; Security page (sub-processors, certifications, disclosure)
+          </a>
+          <a
+            href="mailto:privacy@mustaflow.app"
+            className="text-sm text-primary hover:underline flex items-center gap-1.5"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Request a Data Processing Agreement (DPA)
+          </a>
+        </div>
+      </div>
+
+      {/* Account deletion */}
+      <div className="border border-destructive/30 rounded-xl bg-destructive/5 p-6 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Trash2 className="h-4 w-4 text-destructive" />
+          <h2 className="text-base font-semibold text-destructive">Delete Account Data</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          This will immediately soft-delete all your projects and queue permanent removal. Your
+          Clerk account (email + login) must be deleted separately from{" "}
+          <button
+            className="text-primary hover:underline"
+            onClick={() => {
+              try {
+                // @ts-expect-error - Clerk global
+                window.Clerk?.openUserProfile();
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            Account Settings
+          </button>
+          .
+        </p>
+        <div className="space-y-2">
+          <label className="text-sm font-medium">
+            Type <code className="font-mono bg-muted px-1 rounded text-xs">DELETE</code> to confirm
+          </label>
+          <input
+            type="text"
+            value={deleteConfirm}
+            onChange={(e) => setDeleteConfirm(e.target.value)}
+            className="w-full max-w-xs px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-destructive/50"
+            placeholder="DELETE"
+          />
+        </div>
+        <button
+          onClick={() => void handleDelete()}
+          disabled={deleting || deleteConfirm !== "DELETE"}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {deleting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Trash2 className="h-3.5 w-3.5" />
+          )}
+          {deleting ? "Deleting…" : "Delete my data"}
+        </button>
+      </div>
     </div>
   );
 }

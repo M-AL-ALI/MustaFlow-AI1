@@ -222,7 +222,10 @@ export function PlanTemplatesPicker({
                   autoFocus
                 />
                 {search && (
-                  <button onClick={() => setSearch("")} className="text-muted-foreground hover:text-foreground">
+                  <button
+                    onClick={() => setSearch("")}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
                     <X className="h-3 w-3" />
                   </button>
                 )}

@@ -27,10 +27,7 @@ import {
   projectsTable,
   userSubscriptionsTable,
 } from "@workspace/db";
-import {
-  TIER_MONTHLY_CREDITS,
-  TIER_PRICE_USD,
-} from "@workspace/db";
+import { TIER_MONTHLY_CREDITS, TIER_PRICE_USD } from "@workspace/db";
 import { getOrCreateCredits, grantCredits } from "./credits";
 import {
   stripeAvailable,
@@ -147,7 +144,10 @@ async function getOrCreateSubscription(userId: string) {
   return created!;
 }
 
-async function ensureStripeCustomer(userId: string, stripe: NonNullable<Awaited<ReturnType<typeof getUncachableStripeClient>>>): Promise<string> {
+async function ensureStripeCustomer(
+  userId: string,
+  stripe: NonNullable<Awaited<ReturnType<typeof getUncachableStripeClient>>>,
+): Promise<string> {
   const sub = await getOrCreateSubscription(userId);
   if (sub.stripeCustomerId) return sub.stripeCustomerId;
   const customer = await stripe.customers.create({
@@ -169,7 +169,10 @@ async function maybeGrantMonthlyCredits(userId: string, periodEnd: Date): Promis
   if (monthlyAmount <= 0) return;
 
   // Check if already granted for this period
-  if (sub.lastMonthlyGrantAt && sub.lastMonthlyGrantAt >= new Date(periodEnd.getTime() - 35 * 24 * 60 * 60 * 1000)) {
+  if (
+    sub.lastMonthlyGrantAt &&
+    sub.lastMonthlyGrantAt >= new Date(periodEnd.getTime() - 35 * 24 * 60 * 60 * 1000)
+  ) {
     logger.info({ userId, tier }, "Monthly credit grant already issued — skipping");
     return;
   }
@@ -456,7 +459,10 @@ async function handleStripeWebhook(
       const hostname = session?.metadata?.hostname;
 
       if (!domainUserId || !hostname) {
-        logger.warn({ eventId: event.id, sessionType }, "Domain webhook: missing userId or hostname in metadata");
+        logger.warn(
+          { eventId: event.id, sessionType },
+          "Domain webhook: missing userId or hostname in metadata",
+        );
         res.status(400).json({ error: "Missing userId or hostname in session metadata" });
         return;
       }
@@ -548,7 +554,10 @@ async function handleStripeWebhook(
     res.json({ ok: true, type: event.type });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
-    logger.error({ err: msg, eventId: event.id, type: event.type }, "Stripe webhook handler threw — Stripe will retry");
+    logger.error(
+      { err: msg, eventId: event.id, type: event.type },
+      "Stripe webhook handler threw — Stripe will retry",
+    );
     // Roll back idempotency mark so retry can reprocess
     await db
       .delete(stripeProcessedEventsTable)
@@ -571,12 +580,17 @@ async function handleCheckoutCompleted(
     const customerId = session.customer as string | null;
     const subscriptionId = session.subscription as string | null;
     if (!userId || !customerId || !subscriptionId) {
-      logger.warn({ eventId: event.id }, "Subscription checkout missing userId/customerId/subscriptionId");
+      logger.warn(
+        { eventId: event.id },
+        "Subscription checkout missing userId/customerId/subscriptionId",
+      );
       return;
     }
     // Fetch current period from Stripe
     const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
-    const currentPeriodEnd = new Date((stripeSub as unknown as { current_period_end: number }).current_period_end * 1000);
+    const currentPeriodEnd = new Date(
+      (stripeSub as unknown as { current_period_end: number }).current_period_end * 1000,
+    );
 
     await db
       .update(userSubscriptionsTable)
@@ -614,10 +628,14 @@ async function handleCheckoutCompleted(
   const paymentIntentId = session.payment_intent as string | null;
   if (paymentIntentId) {
     try {
-      const pi = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ["latest_charge"] });
+      const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+        expand: ["latest_charge"],
+      });
       const charge = (pi as unknown as { latest_charge?: { receipt_url?: string } }).latest_charge;
       if (charge?.receipt_url) receiptUrl = charge.receipt_url;
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
   }
 
   await getOrCreateCredits(userId);
@@ -640,7 +658,10 @@ async function handleCheckoutCompleted(
   logger.info({ userId, credits, packageId }, "One-time credits granted via checkout");
 }
 
-async function handleInvoicePaid(event: { id: string; data: { object: Record<string, unknown> } }): Promise<void> {
+async function handleInvoicePaid(event: {
+  id: string;
+  data: { object: Record<string, unknown> };
+}): Promise<void> {
   const invoice = event.data.object;
   const customerId = invoice.customer as string | null;
   const subscriptionId = invoice.subscription as string | null;
@@ -655,7 +676,9 @@ async function handleInvoicePaid(event: { id: string; data: { object: Record<str
   if (!sub) return;
 
   // Update subscription to active
-  const currentPeriodEnd = periodEnd ? new Date(periodEnd * 1000) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const currentPeriodEnd = periodEnd
+    ? new Date(periodEnd * 1000)
+    : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   await db
     .update(userSubscriptionsTable)
     .set({ status: "active", currentPeriodEnd, gracePeriodEnd: null, updatedAt: sql`now()` })
@@ -663,10 +686,16 @@ async function handleInvoicePaid(event: { id: string; data: { object: Record<str
 
   // Grant monthly credits
   await maybeGrantMonthlyCredits(sub.userId, currentPeriodEnd);
-  logger.info({ userId: sub.userId, customerId }, "invoice.paid: subscription renewed, credits granted");
+  logger.info(
+    { userId: sub.userId, customerId },
+    "invoice.paid: subscription renewed, credits granted",
+  );
 }
 
-async function handleInvoicePaymentFailed(event: { id: string; data: { object: Record<string, unknown> } }): Promise<void> {
+async function handleInvoicePaymentFailed(event: {
+  id: string;
+  data: { object: Record<string, unknown> };
+}): Promise<void> {
   const invoice = event.data.object;
   const customerId = invoice.customer as string | null;
   const attemptCount = (invoice.attempt_count as number | null) ?? 1;
@@ -693,17 +722,26 @@ async function handleInvoicePaymentFailed(event: { id: string; data: { object: R
         updatedAt: sql`now()`,
       })
       .where(eq(userSubscriptionsTable.userId, sub.userId));
-    logger.warn({ userId: sub.userId, attemptCount }, "invoice.payment_failed: max retries hit — downgraded to free");
+    logger.warn(
+      { userId: sub.userId, attemptCount },
+      "invoice.payment_failed: max retries hit — downgraded to free",
+    );
   } else {
     await db
       .update(userSubscriptionsTable)
       .set({ status: "grace_period", gracePeriodEnd, updatedAt: sql`now()` })
       .where(eq(userSubscriptionsTable.userId, sub.userId));
-    logger.warn({ userId: sub.userId, attemptCount, gracePeriodEnd }, "invoice.payment_failed: grace period started");
+    logger.warn(
+      { userId: sub.userId, attemptCount, gracePeriodEnd },
+      "invoice.payment_failed: grace period started",
+    );
   }
 }
 
-async function handleSubscriptionUpdated(event: { id: string; data: { object: Record<string, unknown> } }): Promise<void> {
+async function handleSubscriptionUpdated(event: {
+  id: string;
+  data: { object: Record<string, unknown> };
+}): Promise<void> {
   const stripeSub = event.data.object;
   const subscriptionId = stripeSub.id as string;
   const status = stripeSub.status as string;
@@ -719,11 +757,15 @@ async function handleSubscriptionUpdated(event: { id: string; data: { object: Re
   if (!sub) return;
 
   const mappedStatus =
-    status === "active" ? "active" :
-    status === "trialing" ? "trialing" :
-    status === "past_due" ? "past_due" :
-    status === "canceled" ? "canceled" :
-    "grace_period";
+    status === "active"
+      ? "active"
+      : status === "trialing"
+        ? "trialing"
+        : status === "past_due"
+          ? "past_due"
+          : status === "canceled"
+            ? "canceled"
+            : "grace_period";
 
   await db
     .update(userSubscriptionsTable)
@@ -734,10 +776,16 @@ async function handleSubscriptionUpdated(event: { id: string; data: { object: Re
       updatedAt: sql`now()`,
     })
     .where(eq(userSubscriptionsTable.userId, sub.userId));
-  logger.info({ userId: sub.userId, status: mappedStatus, cancelAtPeriodEnd }, "Subscription updated");
+  logger.info(
+    { userId: sub.userId, status: mappedStatus, cancelAtPeriodEnd },
+    "Subscription updated",
+  );
 }
 
-async function handleSubscriptionDeleted(event: { id: string; data: { object: Record<string, unknown> } }): Promise<void> {
+async function handleSubscriptionDeleted(event: {
+  id: string;
+  data: { object: Record<string, unknown> };
+}): Promise<void> {
   const stripeSub = event.data.object;
   const subscriptionId = stripeSub.id as string;
 
@@ -770,7 +818,10 @@ const router: IRouter = Router();
 // GET /api/billing/credits — current credit balance
 router.get("/billing/credits", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const credits = await getOrCreateCredits(userId);
   res.json({ userId: credits.userId, balance: credits.balance, updatedAt: credits.updatedAt });
 });
@@ -778,7 +829,10 @@ router.get("/billing/credits", async (req, res): Promise<void> => {
 // GET /api/billing/transactions — transaction history
 router.get("/billing/transactions", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const rows = await db
     .select()
     .from(creditTransactionsTable)
@@ -809,20 +863,30 @@ router.get("/billing/packages", async (_req, res): Promise<void> => {
 // GET /api/billing/checkout/:sessionId — backup signal for slow webhooks.
 router.get("/billing/checkout/:sessionId", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
 
   const sessionId = req.params.sessionId;
   if (!sessionId || typeof sessionId !== "string") {
-    res.status(400).json({ error: "Missing sessionId" }); return;
+    res.status(400).json({ error: "Missing sessionId" });
+    return;
   }
 
   const stripe = await getUncachableStripeClient();
-  if (!stripe) { res.json({ sessionId, status: "unknown", error: "Stripe not configured" }); return; }
+  if (!stripe) {
+    res.json({ sessionId, status: "unknown", error: "Stripe not configured" });
+    return;
+  }
 
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     const sessionUserId = session.metadata?.userId;
-    if (sessionUserId !== userId) { res.status(403).json({ error: "Session belongs to a different user" }); return; }
+    if (sessionUserId !== userId) {
+      res.status(403).json({ error: "Session belongs to a different user" });
+      return;
+    }
 
     let creditsGranted = false;
     const createdAtMs = (session.created ?? 0) * 1000;
@@ -842,7 +906,12 @@ router.get("/billing/checkout/:sessionId", async (req, res): Promise<void> => {
         .limit(1);
       creditsGranted = recent.length > 0;
     }
-    res.json({ sessionId: session.id, status: session.status ?? "unknown", paymentStatus: session.payment_status ?? undefined, creditsGranted });
+    res.json({
+      sessionId: session.id,
+      status: session.status ?? "unknown",
+      paymentStatus: session.payment_status ?? undefined,
+      creditsGranted,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
     if (/api key|authentication|invalid_api_key/i.test(msg)) invalidateStripeCredentialCache();
@@ -853,9 +922,13 @@ router.get("/billing/checkout/:sessionId", async (req, res): Promise<void> => {
 // GET /api/billing/subscription — current tier + status
 router.get("/billing/subscription", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const sub = await getOrCreateSubscription(userId);
-  const tierMeta = SUBSCRIPTION_TIERS_META.find((t) => t.id === sub.tier) ?? SUBSCRIPTION_TIERS_META[0];
+  const tierMeta =
+    SUBSCRIPTION_TIERS_META.find((t) => t.id === sub.tier) ?? SUBSCRIPTION_TIERS_META[0];
   const configured = await stripeAvailable();
   const publishableKey = configured ? ((await getStripePublishableKey()) ?? "") : "";
   res.json({
@@ -884,7 +957,10 @@ router.get("/billing/subscription", async (req, res): Promise<void> => {
 // POST /api/billing/subscribe — start or upgrade subscription
 router.post("/billing/subscribe", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
 
   const stripe = await getUncachableStripeClient();
   if (!stripe) {
@@ -915,7 +991,9 @@ router.post("/billing/subscribe", async (req, res): Promise<void> => {
 
   try {
     const customerId = await ensureStripeCustomer(userId, stripe);
-    const platformBase = process.env.PLATFORM_DOMAIN ? `https://${process.env.PLATFORM_DOMAIN}` : "";
+    const platformBase = process.env.PLATFORM_DOMAIN
+      ? `https://${process.env.PLATFORM_DOMAIN}`
+      : "";
     const successUrlFinal: string = successUrl ?? `${platformBase}/billing?subscribed=1`;
     const cancelUrlFinal: string = cancelUrl ?? `${platformBase}/billing`;
     const session = await stripe.checkout.sessions.create({
@@ -939,10 +1017,16 @@ router.post("/billing/subscribe", async (req, res): Promise<void> => {
 // POST /api/billing/cancel-subscription
 router.post("/billing/cancel-subscription", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
 
   const stripe = await getUncachableStripeClient();
-  if (!stripe) { res.status(503).json({ error: "Stripe not configured" }); return; }
+  if (!stripe) {
+    res.status(503).json({ error: "Stripe not configured" });
+    return;
+  }
 
   const sub = await getOrCreateSubscription(userId);
   if (!sub.stripeSubscriptionId) {
@@ -968,10 +1052,16 @@ router.post("/billing/cancel-subscription", async (req, res): Promise<void> => {
 // POST /api/billing/portal — Stripe Customer Portal
 router.post("/billing/portal", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
 
   const stripe = await getUncachableStripeClient();
-  if (!stripe) { res.json({ setupRequired: true }); return; }
+  if (!stripe) {
+    res.json({ setupRequired: true });
+    return;
+  }
 
   const sub = await getOrCreateSubscription(userId);
   if (!sub.stripeCustomerId) {
@@ -983,7 +1073,11 @@ router.post("/billing/portal", async (req, res): Promise<void> => {
   try {
     const session = await stripe.billingPortal.sessions.create({
       customer: sub.stripeCustomerId,
-      return_url: returnUrl ?? (process.env.PLATFORM_DOMAIN ? `https://${process.env.PLATFORM_DOMAIN}/billing` : "/billing"),
+      return_url:
+        returnUrl ??
+        (process.env.PLATFORM_DOMAIN
+          ? `https://${process.env.PLATFORM_DOMAIN}/billing`
+          : "/billing"),
     });
     res.json({ url: session.url });
   } catch (err) {
@@ -995,13 +1089,22 @@ router.post("/billing/portal", async (req, res): Promise<void> => {
 // GET /api/billing/invoices — list Stripe invoices
 router.get("/billing/invoices", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
 
   const stripe = await getUncachableStripeClient();
-  if (!stripe) { res.json({ invoices: [] }); return; }
+  if (!stripe) {
+    res.json({ invoices: [] });
+    return;
+  }
 
   const sub = await getOrCreateSubscription(userId);
-  if (!sub.stripeCustomerId) { res.json({ invoices: [] }); return; }
+  if (!sub.stripeCustomerId) {
+    res.json({ invoices: [] });
+    return;
+  }
 
   try {
     const list = await stripe.invoices.list({
@@ -1030,7 +1133,10 @@ router.get("/billing/invoices", async (req, res): Promise<void> => {
 // GET /api/billing/usage — per-user usage analytics
 router.get("/billing/usage", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
 
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
@@ -1042,12 +1148,7 @@ router.get("/billing/usage", async (req, res): Promise<void> => {
       buildCount: sql<number>`count(*)::int`,
     })
     .from(buildAnalyticsTable)
-    .where(
-      and(
-        eq(buildAnalyticsTable.userId, userId),
-        gte(buildAnalyticsTable.createdAt, since),
-      ),
-    )
+    .where(and(eq(buildAnalyticsTable.userId, userId), gte(buildAnalyticsTable.createdAt, since)))
     .groupBy(buildAnalyticsTable.agentMode, buildAnalyticsTable.model);
 
   // Builds per day (last 30 days)
@@ -1121,13 +1222,17 @@ router.get("/billing/usage", async (req, res): Promise<void> => {
 // POST /api/billing/checkout — one-time credit pack
 router.post("/billing/checkout", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
 
   const stripe = await getUncachableStripeClient();
   if (!stripe) {
     res.json({
       setupRequired: true,
-      message: "Stripe is not configured. Connect the Stripe integration to enable credit purchases.",
+      message:
+        "Stripe is not configured. Connect the Stripe integration to enable credit purchases.",
       packages: CREDIT_PACKAGES,
     });
     return;
@@ -1143,7 +1248,9 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
 
   const pkg = CREDIT_PACKAGES.find((p) => p.id === packageId);
   if (!pkg) {
-    res.status(400).json({ error: `Unknown package. Valid options: ${CREDIT_PACKAGES.map((p) => p.id).join(", ")}` });
+    res.status(400).json({
+      error: `Unknown package. Valid options: ${CREDIT_PACKAGES.map((p) => p.id).join(", ")}`,
+    });
     return;
   }
 

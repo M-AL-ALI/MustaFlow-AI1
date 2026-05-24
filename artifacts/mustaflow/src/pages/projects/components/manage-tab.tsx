@@ -411,12 +411,7 @@ export function ManageTab({
               Already in your template library
             </div>
           ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSaveAsTemplate}
-              disabled={!project}
-            >
+            <Button variant="outline" size="sm" onClick={handleSaveAsTemplate} disabled={!project}>
               <BookmarkPlus className="h-3.5 w-3.5 mr-1.5" />
               Save as Template
             </Button>

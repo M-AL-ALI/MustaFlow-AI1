@@ -5204,6 +5204,10 @@ components:
         verificationStatus: { type: string }
         category: { type: ["string", "null"] }
         envWarning: { type: ["string", "null"] }
+        minRole:
+          type: string
+          enum: [viewer, member, admin, owner]
+          description: Minimum org role required to view the decrypted secret value
         createdAt: { type: string, format: date-time }
 
     SecretAuditEntry:

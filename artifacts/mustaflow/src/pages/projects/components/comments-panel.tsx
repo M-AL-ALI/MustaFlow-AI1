@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   MessageSquare,
-  Plus,
   Check,
   CheckCheck,
   Loader2,
@@ -128,7 +127,9 @@ function CommentThread({
                 {comment.lineStart != null ? `:${comment.lineStart}` : ""}
               </span>
             )}
-            <span className="ml-auto text-[10px] text-muted-foreground">{timeAgo(comment.createdAt)}</span>
+            <span className="ml-auto text-[10px] text-muted-foreground">
+              {timeAgo(comment.createdAt)}
+            </span>
           </div>
           {comment.resolved && (
             <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600">
@@ -148,14 +149,27 @@ function CommentThread({
             autoFocus
           />
           <div className="flex gap-1.5">
-            <Button size="sm" className="h-6 text-xs" onClick={() => void saveEdit()}>Save</Button>
-            <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditing(false)}>Cancel</Button>
+            <Button size="sm" className="h-6 text-xs" onClick={() => void saveEdit()}>
+              Save
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-xs"
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </Button>
           </div>
         </div>
       ) : (
-        <p className={cn("text-sm whitespace-pre-wrap", comment.resolved && "text-muted-foreground")}>
+        <p
+          className={cn("text-sm whitespace-pre-wrap", comment.resolved && "text-muted-foreground")}
+        >
           {comment.body}
-          {comment.editedAt && <span className="ml-1 text-[10px] text-muted-foreground">(edited)</span>}
+          {comment.editedAt && (
+            <span className="ml-1 text-[10px] text-muted-foreground">(edited)</span>
+          )}
         </p>
       )}
 
@@ -177,7 +191,10 @@ function CommentThread({
           <>
             <button
               className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={() => { setEditing(true); setEditBody(comment.body); }}
+              onClick={() => {
+                setEditing(true);
+                setEditBody(comment.body);
+              }}
             >
               <Pencil className="h-3 w-3" /> Edit
             </button>
@@ -210,7 +227,9 @@ function CommentThread({
                   {(reply.authorName ?? "?").charAt(0).toUpperCase()}
                 </div>
                 <span className="text-xs font-semibold">{reply.authorName ?? "Unknown"}</span>
-                <span className="text-[10px] text-muted-foreground">{timeAgo(reply.createdAt)}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {timeAgo(reply.createdAt)}
+                </span>
               </div>
               <p className="text-sm pl-6.5 whitespace-pre-wrap">{reply.body}</p>
             </div>
@@ -238,7 +257,11 @@ function CommentThread({
               onClick={() => void submitReply()}
               disabled={submitting || !replyBody.trim()}
             >
-              {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              {submitting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
             </Button>
             <Button
               size="icon"
@@ -270,7 +293,7 @@ export function CommentsPanel({ projectId, filePath }: CommentsPanelProps) {
         ? `/api/projects/${projectId}/comments?filePath=${encodeURIComponent(filePath)}`
         : `/api/projects/${projectId}/comments`;
       const r = await fetch(url);
-      if (r.ok) setComments(await r.json() as Comment[]);
+      if (r.ok) setComments((await r.json()) as Comment[]);
     } finally {
       setLoading(false);
     }
@@ -325,7 +348,11 @@ export function CommentsPanel({ projectId, filePath }: CommentsPanelProps) {
             onClick={() => void submitComment()}
             disabled={submitting || !newBody.trim()}
           >
-            {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+            {submitting ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Send className="h-3 w-3" />
+            )}
             Comment
           </Button>
         </div>

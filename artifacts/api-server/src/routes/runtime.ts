@@ -97,108 +97,96 @@ export async function recordUsageEvent(
 // ─── Managed Add-ons ─────────────────────────────────────────────────────────
 
 // GET /api/projects/:id/addons
-router.get(
-  "/projects/:id/addons",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    const rows = await db
-      .select()
-      .from(managedAddonsTable)
-      .where(
-        and(eq(managedAddonsTable.projectId, projectId), isNull(managedAddonsTable.removedAt)),
-      )
-      .orderBy(managedAddonsTable.createdAt);
-    res.json({ addons: rows });
-  },
-);
+router.get("/projects/:id/addons", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  const rows = await db
+    .select()
+    .from(managedAddonsTable)
+    .where(and(eq(managedAddonsTable.projectId, projectId), isNull(managedAddonsTable.removedAt)))
+    .orderBy(managedAddonsTable.createdAt);
+  res.json({ addons: rows });
+});
 
 // POST /api/projects/:id/addons
-router.post(
-  "/projects/:id/addons",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    const body = (req.body ?? {}) as Record<string, unknown>;
+router.post("/projects/:id/addons", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  const body = (req.body ?? {}) as Record<string, unknown>;
 
-    if (!isAddonKind(body.kind)) {
-      res
-        .status(400)
-        .json({ error: `kind must be one of: ${ADDON_KINDS.join(", ")}` });
-      return;
-    }
+  if (!isAddonKind(body.kind)) {
+    res.status(400).json({ error: `kind must be one of: ${ADDON_KINDS.join(", ")}` });
+    return;
+  }
 
-    const kind = body.kind;
+  const kind = body.kind;
 
-    // Check for existing active add-on of same kind
-    const [existing] = await db
-      .select({ id: managedAddonsTable.id, status: managedAddonsTable.status })
-      .from(managedAddonsTable)
-      .where(
-        and(
-          eq(managedAddonsTable.projectId, projectId),
-          eq(managedAddonsTable.kind, kind),
-          isNull(managedAddonsTable.removedAt),
-        ),
-      );
+  // Check for existing active add-on of same kind
+  const [existing] = await db
+    .select({ id: managedAddonsTable.id, status: managedAddonsTable.status })
+    .from(managedAddonsTable)
+    .where(
+      and(
+        eq(managedAddonsTable.projectId, projectId),
+        eq(managedAddonsTable.kind, kind),
+        isNull(managedAddonsTable.removedAt),
+      ),
+    );
 
-    if (existing) {
-      res.status(409).json({ error: `An active ${kind} add-on already exists for this project` });
-      return;
-    }
+  if (existing) {
+    res.status(409).json({ error: `An active ${kind} add-on already exists for this project` });
+    return;
+  }
 
-    // Provision the add-on (gracefully degraded — real provisioning requires external credentials)
-    const provisionResult = await provisionAddon(projectId, kind, req.userId ?? "unknown");
+  // Provision the add-on (gracefully degraded — real provisioning requires external credentials)
+  const provisionResult = await provisionAddon(projectId, kind, req.userId ?? "unknown");
 
-    const [addon] = await db
-      .insert(managedAddonsTable)
-      .values({
-        projectId,
-        kind,
-        status: provisionResult.status,
-        externalId: provisionResult.externalId ?? null,
-        connectionInfo: provisionResult.connectionInfo ?? null,
-        injectedEnvKeys: provisionResult.injectedEnvKeys,
-        plan: "free",
-        createdBy: req.userId ?? null,
-      })
-      .returning();
+  const [addon] = await db
+    .insert(managedAddonsTable)
+    .values({
+      projectId,
+      kind,
+      status: provisionResult.status,
+      externalId: provisionResult.externalId ?? null,
+      connectionInfo: provisionResult.connectionInfo ?? null,
+      injectedEnvKeys: provisionResult.injectedEnvKeys,
+      plan: "free",
+      createdBy: req.userId ?? null,
+    })
+    .returning();
 
-    // Inject env vars as project secrets
-    if (provisionResult.secretsToInject && req.userId) {
-      for (const [name, value] of Object.entries(provisionResult.secretsToInject)) {
-        try {
-          const encrypted = encryptionService.encrypt(value);
-          await db
-            .insert(secretsTable)
-            .values({
-              projectId,
-              name,
-              valueEncrypted: encrypted,
-              category: "other",
-            })
-            .onConflictDoUpdate({
-              target: [secretsTable.projectId, secretsTable.name],
-              set: { valueEncrypted: encrypted, updatedAt: new Date() },
-            });
-        } catch (err) {
-          logger.warn({ err, projectId, name }, "Failed to inject addon secret");
-        }
+  // Inject env vars as project secrets
+  if (provisionResult.secretsToInject && req.userId) {
+    for (const [name, value] of Object.entries(provisionResult.secretsToInject)) {
+      try {
+        const encrypted = encryptionService.encrypt(value);
+        await db
+          .insert(secretsTable)
+          .values({
+            projectId,
+            name,
+            valueEncrypted: encrypted,
+            category: "other",
+          })
+          .onConflictDoUpdate({
+            target: [secretsTable.projectId, secretsTable.name],
+            set: { valueEncrypted: encrypted, updatedAt: new Date() },
+          });
+      } catch (err) {
+        logger.warn({ err, projectId, name }, "Failed to inject addon secret");
       }
     }
+  }
 
-    // Record usage event
-    if (req.userId) {
-      await recordUsageEvent(projectId, req.userId, `addon_provision`, 1, {
-        resourceType: kind,
-        resourceId: String(addon.id),
-        unit: "provisions",
-      });
-    }
+  // Record usage event
+  if (req.userId) {
+    await recordUsageEvent(projectId, req.userId, `addon_provision`, 1, {
+      resourceType: kind,
+      resourceId: String(addon.id),
+      unit: "provisions",
+    });
+  }
 
-    res.status(201).json({ addon });
-  },
-);
+  res.status(201).json({ addon });
+});
 
 // DELETE /api/projects/:id/addons/:addonId
 router.delete(
@@ -211,12 +199,7 @@ router.delete(
     const [addon] = await db
       .select()
       .from(managedAddonsTable)
-      .where(
-        and(
-          eq(managedAddonsTable.id, addonId),
-          eq(managedAddonsTable.projectId, projectId),
-        ),
-      );
+      .where(and(eq(managedAddonsTable.id, addonId), eq(managedAddonsTable.projectId, projectId)));
 
     if (!addon) {
       res.status(404).json({ error: "Add-on not found" });
@@ -234,9 +217,7 @@ router.delete(
       for (const key of addon.injectedEnvKeys) {
         await db
           .delete(secretsTable)
-          .where(
-            and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, key)),
-          );
+          .where(and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, key)));
       }
     }
 
@@ -419,9 +400,7 @@ router.delete(
       return;
     }
 
-    await db
-      .delete(projectEnvironmentsTable)
-      .where(eq(projectEnvironmentsTable.id, envId));
+    await db.delete(projectEnvironmentsTable).where(eq(projectEnvironmentsTable.id, envId));
 
     res.json({ ok: true });
   },
@@ -546,37 +525,33 @@ router.post(
 // ─── Usage / Metering ─────────────────────────────────────────────────────────
 
 // GET /api/projects/:id/usage
-router.get(
-  "/projects/:id/usage",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    const since =
-      typeof req.query.since === "string"
-        ? new Date(req.query.since)
-        : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+router.get("/projects/:id/usage", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  const since =
+    typeof req.query.since === "string"
+      ? new Date(req.query.since)
+      : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-    const rows = await db
-      .select()
-      .from(usageEventsTable)
-      .where(eq(usageEventsTable.projectId, projectId))
-      .orderBy(desc(usageEventsTable.recordedAt))
-      .limit(500);
+  const rows = await db
+    .select()
+    .from(usageEventsTable)
+    .where(eq(usageEventsTable.projectId, projectId))
+    .orderBy(desc(usageEventsTable.recordedAt))
+    .limit(500);
 
-    // Group by kind
-    const summary: Record<string, { total: number; unit: string; eventCount: number }> = {};
-    for (const row of rows) {
-      const k = row.kind;
-      if (!summary[k]) {
-        summary[k] = { total: 0, unit: row.unit, eventCount: 0 };
-      }
-      summary[k].total += Number(row.quantity);
-      summary[k].eventCount += 1;
+  // Group by kind
+  const summary: Record<string, { total: number; unit: string; eventCount: number }> = {};
+  for (const row of rows) {
+    const k = row.kind;
+    if (!summary[k]) {
+      summary[k] = { total: 0, unit: row.unit, eventCount: 0 };
     }
+    summary[k].total += Number(row.quantity);
+    summary[k].eventCount += 1;
+  }
 
-    res.json({ projectId, since: since.toISOString(), summary, recent: rows.slice(0, 50) });
-  },
-);
+  res.json({ projectId, since: since.toISOString(), summary, recent: rows.slice(0, 50) });
+});
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -594,7 +569,10 @@ async function executeScheduledJob(
 
   try {
     const [project] = await db
-      .select({ containerId: projectsTable.containerId, containerStatus: projectsTable.containerStatus })
+      .select({
+        containerId: projectsTable.containerId,
+        containerStatus: projectsTable.containerStatus,
+      })
       .from(projectsTable)
       .where(eq(projectsTable.id, projectId));
 
@@ -688,7 +666,10 @@ async function provisionAddon(
       return {
         status: "active",
         externalId: baseId,
-        connectionInfo: { provider: "simulated", note: "Set UPSTASH_REDIS_REST_URL to enable real Redis" },
+        connectionInfo: {
+          provider: "simulated",
+          note: "Set UPSTASH_REDIS_REST_URL to enable real Redis",
+        },
         injectedEnvKeys: ["REDIS_URL"],
         secretsToInject: { REDIS_URL: simulatedUrl },
       };

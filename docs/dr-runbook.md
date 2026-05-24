@@ -7,6 +7,7 @@ This runbook documents how to recover from edge CDN failures, repopulate R2, and
 ## Overview
 
 Published sites are served through two independent layers:
+
 1. **Primary path** — Cloudflare Worker reads from R2 object storage (sub-100ms TTFB globally).
 2. **Fallback path** — API server (`/api/p/:slug/`) reads from the Postgres DB snapshot (higher latency but always available).
 
@@ -21,6 +22,7 @@ The fallback path is always active. If the edge layer is down, users continue re
 **Symptoms**: `5xx` errors or timeouts on `slug.mustaflow.app` from multiple regions; `/api/p/:slug/` continues to work.
 
 **Response**:
+
 1. Verify the fallback is healthy: `curl -I https://<host>/api/p/<slug>/`
 2. No code changes needed — the API server is the automatic fallback.
 3. Open a Cloudflare status page incident if widespread (https://www.cloudflarestatus.com).
@@ -63,12 +65,14 @@ WHERE p.public_slug = '<slug>';
 ```
 
 Then use the admin API to trigger a re-publish:
+
 ```bash
 curl -X POST https://api.mustaflow.app/api/admin/projects/<id>/repopulate-r2 \
   -H "Authorization: Bearer <admin_token>"
 ```
 
 **Recovery validation**:
+
 ```bash
 # Verify R2 has the file
 curl -I "https://<account_id>.r2.cloudflarestorage.com/mustaflow-snapshots/<projectId>/<versionId>/index.html"
@@ -85,6 +89,7 @@ curl -I "https://<slug>.mustaflow.app/"
 **Symptoms**: Worker returns `404` for a published project even though R2 objects exist.
 
 **Diagnosis**:
+
 ```bash
 # Check the KV entry for a hostname
 curl -X GET "https://api.cloudflare.com/client/v4/accounts/<account_id>/storage/kv/namespaces/<namespace_id>/values/<slug>.mustaflow.app" \
@@ -92,6 +97,7 @@ curl -X GET "https://api.cloudflare.com/client/v4/accounts/<account_id>/storage/
 ```
 
 **Fix**: Trigger a re-publish from the MustaFlow admin panel or via the API:
+
 ```bash
 curl -X POST https://<host>/api/admin/projects/<id>/resync-kv \
   -H "Authorization: Bearer <admin_token>"
@@ -108,6 +114,7 @@ This re-runs `syncAllHostnamesKV` with the current `publishedSnapshotId`.
 **Symptoms**: Users see stale content after republishing; KV routing was updated correctly.
 
 **Manual cache purge**:
+
 ```bash
 curl -X POST "https://api.cloudflare.com/client/v4/zones/<CF_ZONE_ID>/purge_cache" \
   -H "Authorization: Bearer <CF_API_TOKEN>" \
@@ -116,6 +123,7 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/<CF_ZONE_ID>/purge_cach
 ```
 
 **Purge everything for a zone** (use sparingly — affects all tenants):
+
 ```bash
 curl -X POST "https://api.cloudflare.com/client/v4/zones/<CF_ZONE_ID>/purge_cache" \
   -H "Authorization: Bearer <CF_API_TOKEN>" \
@@ -132,11 +140,13 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/<CF_ZONE_ID>/purge_cach
 **Symptoms**: Published site starts returning `429 Too Many Requests` from origin when the project exceeds its monthly bandwidth allowance.
 
 **Response**:
+
 1. The API fallback continues to serve the site (no CDN is involved).
 2. Soft-cap (80%) — a warning banner appears in the Publishing tab for the project owner.
 3. Hard-cap (100%) — the API serves with `X-Mustaflow-Cap: hard-cap` header (informational only; serving continues for now — actual hard-stop is a future billing milestone).
 
 **To reset bandwidth for a project** (admin only):
+
 ```sql
 UPDATE project_bandwidth SET bytes_served = 0, request_count = 0
 WHERE project_id = <id> AND month = '<YYYY-MM>';

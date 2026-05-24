@@ -352,10 +352,7 @@ function SidebarInner({
       {/* Org switcher — visible when signed in */}
       {isSignedIn && (
         <div className="px-3 pb-1">
-          <OrgSwitcher
-            currentOrgId={currentOrgId}
-            onOrgChange={(id) => setCurrentOrgId(id)}
-          />
+          <OrgSwitcher currentOrgId={currentOrgId} onOrgChange={(id) => setCurrentOrgId(id)} />
         </div>
       )}
 
@@ -390,13 +387,17 @@ function SidebarInner({
       {/* Resources + user */}
       <div className="mt-auto">
         <NavGroup items={TERTIARY_NAV_ITEMS} title="Resources" />
-        <div className="px-6 py-2 flex items-center gap-3 text-[10px] text-muted-foreground/60">
+        <div className="px-6 py-2 flex items-center flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground/60">
           <a href="/terms" className="hover:text-muted-foreground transition-colors">
             Terms
           </a>
           <span>·</span>
           <a href="/privacy" className="hover:text-muted-foreground transition-colors">
             Privacy
+          </a>
+          <span>·</span>
+          <a href="/trust" className="hover:text-muted-foreground transition-colors">
+            Trust
           </a>
           <span>·</span>
           <a href="/pricing" className="hover:text-muted-foreground transition-colors">

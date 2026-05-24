@@ -46,7 +46,7 @@ export function NotificationsBell() {
     setLoading(true);
     try {
       const resp = await fetch("/api/notifications?limit=20");
-      if (resp.ok) setData(await resp.json() as NotificationsResponse);
+      if (resp.ok) setData((await resp.json()) as NotificationsResponse);
     } finally {
       setLoading(false);
     }
@@ -64,9 +64,7 @@ export function NotificationsBell() {
       prev
         ? {
             ...prev,
-            notifications: prev.notifications.map((n) =>
-              n.id === id ? { ...n, read: true } : n,
-            ),
+            notifications: prev.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
             unreadCount: Math.max(0, prev.unreadCount - 1),
           }
         : prev,
@@ -182,9 +180,13 @@ export function NotificationsBell() {
                     <div className="min-w-0 flex-1">
                       <p className={cn("text-sm", !n.read && "font-medium")}>{n.title}</p>
                       {n.body && (
-                        <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{n.body}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
+                          {n.body}
+                        </p>
                       )}
-                      <p className="mt-1 text-[11px] text-muted-foreground">{timeAgo(n.createdAt)}</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {timeAgo(n.createdAt)}
+                      </p>
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-1">
                       {!n.read && (

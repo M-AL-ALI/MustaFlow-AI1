@@ -44,28 +44,32 @@ async function emitRollbackEvent(
   }
 }
 
-router.get("/projects/:id/versions", requireProjectAccess("viewer"), async (req, res): Promise<void> => {
-  const params = ListVersionsParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const rows = await db
-    .select({
-      id: projectVersionsTable.id,
-      projectId: projectVersionsTable.projectId,
-      label: projectVersionsTable.label,
-      note: projectVersionsTable.note,
-      changelogEntry: projectVersionsTable.changelogEntry,
-      filesCount: sql<number>`COALESCE(jsonb_array_length(${projectVersionsTable.filesSnapshot}), 0)`,
-      createdAt: projectVersionsTable.createdAt,
-      planSnapshot: projectVersionsTable.planSnapshot,
-    })
-    .from(projectVersionsTable)
-    .where(eq(projectVersionsTable.projectId, params.data.id))
-    .orderBy(desc(projectVersionsTable.createdAt));
-  res.json(ListVersionsResponse.parse(rows));
-});
+router.get(
+  "/projects/:id/versions",
+  requireProjectAccess("viewer"),
+  async (req, res): Promise<void> => {
+    const params = ListVersionsParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    const rows = await db
+      .select({
+        id: projectVersionsTable.id,
+        projectId: projectVersionsTable.projectId,
+        label: projectVersionsTable.label,
+        note: projectVersionsTable.note,
+        changelogEntry: projectVersionsTable.changelogEntry,
+        filesCount: sql<number>`COALESCE(jsonb_array_length(${projectVersionsTable.filesSnapshot}), 0)`,
+        createdAt: projectVersionsTable.createdAt,
+        planSnapshot: projectVersionsTable.planSnapshot,
+      })
+      .from(projectVersionsTable)
+      .where(eq(projectVersionsTable.projectId, params.data.id))
+      .orderBy(desc(projectVersionsTable.createdAt));
+    res.json(ListVersionsResponse.parse(rows));
+  },
+);
 
 router.patch(
   "/projects/:id/versions/:versionId",
@@ -119,45 +123,49 @@ router.patch(
   },
 );
 
-router.post("/projects/:id/versions", requireProjectAccess("member"), async (req, res): Promise<void> => {
-  const params = CreateVersionParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const parsed = CreateVersionBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-  const projectId = params.data.id;
+router.post(
+  "/projects/:id/versions",
+  requireProjectAccess("member"),
+  async (req, res): Promise<void> => {
+    const params = CreateVersionParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    const parsed = CreateVersionBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const projectId = params.data.id;
 
-  const fileRows = await db
-    .select()
-    .from(projectFilesTable)
-    .where(eq(projectFilesTable.projectId, projectId));
+    const fileRows = await db
+      .select()
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId));
 
-  const [v] = await db
-    .insert(projectVersionsTable)
-    .values({
+    const [v] = await db
+      .insert(projectVersionsTable)
+      .values({
+        projectId,
+        label: parsed.data.label,
+        note: parsed.data.note ?? null,
+        filesSnapshot: fileRows.map((r) => ({
+          path: r.path,
+          content: r.content,
+          mimeType: r.mimeType,
+        })),
+      })
+      .returning();
+    res.status(201).json({
+      id: v?.id,
       projectId,
       label: parsed.data.label,
       note: parsed.data.note ?? null,
-      filesSnapshot: fileRows.map((r) => ({
-        path: r.path,
-        content: r.content,
-        mimeType: r.mimeType,
-      })),
-    })
-    .returning();
-  res.status(201).json({
-    id: v?.id,
-    projectId,
-    label: parsed.data.label,
-    note: parsed.data.note ?? null,
-    createdAt: v?.createdAt,
-  });
-});
+      createdAt: v?.createdAt,
+    });
+  },
+);
 
 router.get(
   "/projects/:id/versions/:versionId",

@@ -4516,17 +4516,19 @@ export function PublishingTab({
                                   key={d.day}
                                   title={`${d.day}: ${d.views} views`}
                                   className="flex-1 bg-primary/70 rounded-sm hover:bg-primary transition-colors min-w-0"
-                                  style={{ height: `${Math.max(4, (d.views / maxViews) * 100)}%` }}
+                                  style={{
+                                    height: `${Math.max(4, (d.views / maxViews) * 100)}%`,
+                                  }}
                                 />
                               ));
                             })()}
                           </div>
                           <div className="flex justify-between text-[10px] text-muted-foreground">
+                            <span>{trafficData.dailyBreakdown[0]?.day?.slice(5) ?? ""}</span>
                             <span>
-                              {trafficData.dailyBreakdown[0]?.day?.slice(5) ?? ""}
-                            </span>
-                            <span>
-                              {trafficData.dailyBreakdown[trafficData.dailyBreakdown.length - 1]?.day?.slice(5) ?? ""}
+                              {trafficData.dailyBreakdown[
+                                trafficData.dailyBreakdown.length - 1
+                              ]?.day?.slice(5) ?? ""}
                             </span>
                           </div>
                         </div>
@@ -5047,47 +5049,49 @@ export function PublishingTab({
                       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         Custom Domains
                       </p>
-                      {domainQuota && domainQuota.maxCustomDomains !== Infinity && (() => {
-                        const used = domainQuota.customDomainsUsed;
-                        const max = domainQuota.maxCustomDomains;
-                        const pct = domainQuota.domainsPercentUsed ?? 0;
-                        const atCap = used >= max;
-                        const nearCap = !atCap && pct > 80;
-                        const planLabel =
-                          domainQuota.plan.charAt(0).toUpperCase() + domainQuota.plan.slice(1);
-                        const recommended =
-                          domainQuota.plan === "free"
-                            ? "starter"
-                            : domainQuota.plan === "starter"
-                              ? "pro"
-                              : "enterprise";
-                        const showUpgrade = atCap || nearCap || domainQuota.plan === "free";
-                        return (
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={cn(
-                                "text-xs px-2 py-1 rounded-md border",
-                                atCap
-                                  ? "border-destructive/40 bg-destructive/10 text-destructive"
-                                  : nearCap
-                                    ? "border-amber-500/40 bg-amber-500/10 text-amber-400"
-                                    : "border-border bg-muted/40 text-muted-foreground",
-                              )}
-                            >
-                              {used} of {max} used
-                              <span className="ml-1.5 opacity-70">({planLabel} plan)</span>
-                            </span>
-                            {showUpgrade && domainQuota.plan !== "enterprise" && (
-                              <Link
-                                href={`/billing?tier=${recommended}`}
-                                className="text-xs px-2 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                      {domainQuota &&
+                        domainQuota.maxCustomDomains !== Infinity &&
+                        (() => {
+                          const used = domainQuota.customDomainsUsed;
+                          const max = domainQuota.maxCustomDomains;
+                          const pct = domainQuota.domainsPercentUsed ?? 0;
+                          const atCap = used >= max;
+                          const nearCap = !atCap && pct > 80;
+                          const planLabel =
+                            domainQuota.plan.charAt(0).toUpperCase() + domainQuota.plan.slice(1);
+                          const recommended =
+                            domainQuota.plan === "free"
+                              ? "starter"
+                              : domainQuota.plan === "starter"
+                                ? "pro"
+                                : "enterprise";
+                          const showUpgrade = atCap || nearCap || domainQuota.plan === "free";
+                          return (
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={cn(
+                                  "text-xs px-2 py-1 rounded-md border",
+                                  atCap
+                                    ? "border-destructive/40 bg-destructive/10 text-destructive"
+                                    : nearCap
+                                      ? "border-amber-500/40 bg-amber-500/10 text-amber-400"
+                                      : "border-border bg-muted/40 text-muted-foreground",
+                                )}
                               >
-                                Upgrade
-                              </Link>
-                            )}
-                          </div>
-                        );
-                      })()}
+                                {used} of {max} used
+                                <span className="ml-1.5 opacity-70">({planLabel} plan)</span>
+                              </span>
+                              {showUpgrade && domainQuota.plan !== "enterprise" && (
+                                <Link
+                                  href={`/billing?tier=${recommended}`}
+                                  className="text-xs px-2 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                                >
+                                  Upgrade
+                                </Link>
+                              )}
+                            </div>
+                          );
+                        })()}
                     </div>
 
                     {/* Add domain input */}

@@ -15,7 +15,9 @@ export function CreditBalancePill() {
         const data = (await res.json()) as { balance: number };
         setBalance(data.balance);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   useEffect(() => {

@@ -1151,6 +1151,19 @@ export const SecretEntryEnvironment = {
   production: 'production',
 } as const;
 
+/**
+ * Minimum org role required to view the decrypted secret value
+ */
+export type SecretEntryMinRole = typeof SecretEntryMinRole[keyof typeof SecretEntryMinRole];
+
+
+export const SecretEntryMinRole = {
+  viewer: 'viewer',
+  member: 'member',
+  admin: 'admin',
+  owner: 'owner',
+} as const;
+
 export interface SecretEntry {
   id: number;
   projectId: number;
@@ -1162,6 +1175,8 @@ export interface SecretEntry {
   category?: string | null;
   /** @nullable */
   envWarning?: string | null;
+  /** Minimum org role required to view the decrypted secret value */
+  minRole?: SecretEntryMinRole;
   createdAt: string;
 }
 

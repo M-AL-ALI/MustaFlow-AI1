@@ -21,40 +21,44 @@ import { readDiagnostics } from "../lib/agent-senses";
 
 const router: IRouter = Router();
 
-router.get("/projects/:id/files", requireProjectAccess("viewer"), async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-  // Optional artifactId filter (Task #544). Omitted = return every file in the
-  // project regardless of artifact, preserving legacy single-artifact behaviour.
-  const artifactIdRaw = typeof req.query.artifactId === "string" ? req.query.artifactId : "";
-  const artifactIdFilter = artifactIdRaw ? Number(artifactIdRaw) : null;
-  const conds = [eq(projectFilesTable.projectId, projectId)];
-  if (artifactIdFilter && Number.isFinite(artifactIdFilter)) {
-    conds.push(eq(projectFilesTable.artifactId, artifactIdFilter));
-  }
-  const rows = await db
-    .select({
-      id: projectFilesTable.id,
-      path: projectFilesTable.path,
-      mimeType: projectFilesTable.mimeType,
-      size: projectFilesTable.content,
-      artifactId: projectFilesTable.artifactId,
-      updatedAt: projectFilesTable.updatedAt,
-    })
-    .from(projectFilesTable)
-    .where(and(...conds))
-    .orderBy(asc(projectFilesTable.path));
+router.get(
+  "/projects/:id/files",
+  requireProjectAccess("viewer"),
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    // Optional artifactId filter (Task #544). Omitted = return every file in the
+    // project regardless of artifact, preserving legacy single-artifact behaviour.
+    const artifactIdRaw = typeof req.query.artifactId === "string" ? req.query.artifactId : "";
+    const artifactIdFilter = artifactIdRaw ? Number(artifactIdRaw) : null;
+    const conds = [eq(projectFilesTable.projectId, projectId)];
+    if (artifactIdFilter && Number.isFinite(artifactIdFilter)) {
+      conds.push(eq(projectFilesTable.artifactId, artifactIdFilter));
+    }
+    const rows = await db
+      .select({
+        id: projectFilesTable.id,
+        path: projectFilesTable.path,
+        mimeType: projectFilesTable.mimeType,
+        size: projectFilesTable.content,
+        artifactId: projectFilesTable.artifactId,
+        updatedAt: projectFilesTable.updatedAt,
+      })
+      .from(projectFilesTable)
+      .where(and(...conds))
+      .orderBy(asc(projectFilesTable.path));
 
-  res.json(
-    rows.map((r) => ({
-      id: r.id,
-      path: r.path,
-      mimeType: r.mimeType,
-      size: r.size.length,
-      artifactId: r.artifactId,
-      updatedAt: r.updatedAt,
-    })),
-  );
-});
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        path: r.path,
+        mimeType: r.mimeType,
+        size: r.size.length,
+        artifactId: r.artifactId,
+        updatedAt: r.updatedAt,
+      })),
+    );
+  },
+);
 
 // Returns all project files with their full content in a single request.
 // Used by the WebContainer boot sequence to populate the virtual FS efficiently.
@@ -127,78 +131,82 @@ router.get(
   },
 );
 
-router.post("/projects/:id/files", requireProjectAccess("member"), async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-  const { path: filePath, content = "" } = req.body as {
-    path?: unknown;
-    content?: unknown;
-  };
+router.post(
+  "/projects/:id/files",
+  requireProjectAccess("member"),
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const { path: filePath, content = "" } = req.body as {
+      path?: unknown;
+      content?: unknown;
+    };
 
-  if (typeof filePath !== "string" || filePath.trim() === "") {
-    res.status(400).json({ error: "path must be a non-empty string" });
-    return;
-  }
-  if (typeof content !== "string") {
-    res.status(400).json({ error: "content must be a string" });
-    return;
-  }
+    if (typeof filePath !== "string" || filePath.trim() === "") {
+      res.status(400).json({ error: "path must be a non-empty string" });
+      return;
+    }
+    if (typeof content !== "string") {
+      res.status(400).json({ error: "content must be a string" });
+      return;
+    }
 
-  const normalizedPath = filePath.trim();
+    const normalizedPath = filePath.trim();
 
-  // Resolve artifactId first (Task #544) so the conflict check is scoped per
-  // artifact — two artifacts in the same project may each own a `package.json`.
-  const { resolveArtifactId } = await import("../lib/artifacts");
-  const artifactIdRaw = typeof req.query.artifactId === "string" ? req.query.artifactId : "";
-  const hint = artifactIdRaw ? Number(artifactIdRaw) : null;
-  const resolvedArtifactId = await resolveArtifactId(projectId, hint);
+    // Resolve artifactId first (Task #544) so the conflict check is scoped per
+    // artifact — two artifacts in the same project may each own a `package.json`.
+    const { resolveArtifactId } = await import("../lib/artifacts");
+    const artifactIdRaw = typeof req.query.artifactId === "string" ? req.query.artifactId : "";
+    const hint = artifactIdRaw ? Number(artifactIdRaw) : null;
+    const resolvedArtifactId = await resolveArtifactId(projectId, hint);
 
-  const conflictConds = [
-    eq(projectFilesTable.projectId, projectId),
-    eq(projectFilesTable.path, normalizedPath),
-  ];
-  if (resolvedArtifactId !== null) {
-    conflictConds.push(eq(projectFilesTable.artifactId, resolvedArtifactId));
-  }
-  const existing = await db
-    .select({ id: projectFilesTable.id })
-    .from(projectFilesTable)
-    .where(and(...conflictConds));
+    const conflictConds = [
+      eq(projectFilesTable.projectId, projectId),
+      eq(projectFilesTable.path, normalizedPath),
+    ];
+    if (resolvedArtifactId !== null) {
+      conflictConds.push(eq(projectFilesTable.artifactId, resolvedArtifactId));
+    }
+    const existing = await db
+      .select({ id: projectFilesTable.id })
+      .from(projectFilesTable)
+      .where(and(...conflictConds));
 
-  if (existing.length > 0) {
-    res.status(409).json({ error: "A file with that path already exists" });
-    return;
-  }
+    if (existing.length > 0) {
+      res.status(409).json({ error: "A file with that path already exists" });
+      return;
+    }
 
-  const mimeType = guessMime(normalizedPath);
-  const [created] = await db
-    .insert(projectFilesTable)
-    .values({
-      projectId,
-      artifactId: resolvedArtifactId,
-      path: normalizedPath,
-      content,
-      mimeType,
-    })
-    .returning();
+    const mimeType = guessMime(normalizedPath);
+    const [created] = await db
+      .insert(projectFilesTable)
+      .values({
+        projectId,
+        artifactId: resolvedArtifactId,
+        path: normalizedPath,
+        content,
+        mimeType,
+      })
+      .returning();
 
-  res.status(201).json({
-    id: created.id,
-    path: created.path,
-    mimeType: created.mimeType,
-    content: created.content,
-    updatedAt: created.updatedAt,
-  });
-
-  const isHtml =
-    created.mimeType === "text/html" ||
-    created.path.toLowerCase().endsWith(".html") ||
-    created.path.toLowerCase().endsWith(".htm");
-  if (isHtml) {
-    extractPageMap(projectId).catch((err: unknown) => {
-      logger.warn({ err, projectId }, "page map re-extraction failed after new file created");
+    res.status(201).json({
+      id: created.id,
+      path: created.path,
+      mimeType: created.mimeType,
+      content: created.content,
+      updatedAt: created.updatedAt,
     });
-  }
-});
+
+    const isHtml =
+      created.mimeType === "text/html" ||
+      created.path.toLowerCase().endsWith(".html") ||
+      created.path.toLowerCase().endsWith(".htm");
+    if (isHtml) {
+      extractPageMap(projectId).catch((err: unknown) => {
+        logger.warn({ err, projectId }, "page map re-extraction failed after new file created");
+      });
+    }
+  },
+);
 
 router.get(
   "/projects/:id/files/:fileId",

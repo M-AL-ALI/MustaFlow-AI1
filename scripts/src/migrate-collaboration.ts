@@ -62,9 +62,7 @@ async function main(): Promise<void> {
         UNIQUE (organization_id, user_id)
       )
     `);
-    await client.query(
-      `CREATE INDEX IF NOT EXISTS org_members_user_idx ON org_members(user_id)`,
-    );
+    await client.query(`CREATE INDEX IF NOT EXISTS org_members_user_idx ON org_members(user_id)`);
     await client.query(
       `CREATE INDEX IF NOT EXISTS org_members_org_idx ON org_members(organization_id)`,
     );
@@ -88,9 +86,7 @@ async function main(): Promise<void> {
     await client.query(
       `CREATE INDEX IF NOT EXISTS org_invites_org_idx ON org_invites(organization_id)`,
     );
-    await client.query(
-      `CREATE INDEX IF NOT EXISTS org_invites_email_idx ON org_invites(email)`,
-    );
+    await client.query(`CREATE INDEX IF NOT EXISTS org_invites_email_idx ON org_invites(email)`);
 
     // ── project_comments ──────────────────────────────────────────────────────
     await client.query(`
@@ -194,18 +190,14 @@ async function main(): Promise<void> {
     await client.query(
       `CREATE INDEX IF NOT EXISTS share_links_project_idx ON share_links(project_id)`,
     );
-    await client.query(
-      `CREATE INDEX IF NOT EXISTS share_links_token_idx ON share_links(token)`,
-    );
+    await client.query(`CREATE INDEX IF NOT EXISTS share_links_token_idx ON share_links(token)`);
 
     // ── organization_id column on projects ────────────────────────────────────
     await client.query(`
       ALTER TABLE projects
         ADD COLUMN IF NOT EXISTS organization_id integer REFERENCES organizations(id)
     `);
-    await client.query(
-      `CREATE INDEX IF NOT EXISTS projects_org_idx ON projects(organization_id)`,
-    );
+    await client.query(`CREATE INDEX IF NOT EXISTS projects_org_idx ON projects(organization_id)`);
 
     // ── Backfill: personal orgs + org membership ──────────────────────────────
     // 1. Find every distinct owner in projects who doesn't yet have a personal org.
@@ -223,28 +215,42 @@ async function main(): Promise<void> {
 
     for (const { owner_id } of owners) {
       const safeName = `personal-${owner_id.slice(0, 20)}`;
-      const slug = `personal-${owner_id.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 30)}`;
+      const slug = `personal-${owner_id
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "-")
+        .slice(0, 30)}`;
 
-      const { rows: [org] } = await client.query<{ id: number }>(`
+      const {
+        rows: [org],
+      } = await client.query<{ id: number }>(
+        `
         INSERT INTO organizations (name, slug, type, created_by_user_id)
         VALUES ($1, $2, 'personal', $3)
         ON CONFLICT (slug) DO UPDATE SET updated_at = now()
         RETURNING id
-      `, [safeName, slug, owner_id]);
+      `,
+        [safeName, slug, owner_id],
+      );
 
       if (!org) continue;
 
-      await client.query(`
+      await client.query(
+        `
         INSERT INTO org_members (organization_id, user_id, role)
         VALUES ($1, $2, 'owner')
         ON CONFLICT (organization_id, user_id) DO NOTHING
-      `, [org.id, owner_id]);
+      `,
+        [org.id, owner_id],
+      );
 
-      await client.query(`
+      await client.query(
+        `
         UPDATE projects
         SET organization_id = $1
         WHERE owner_id = $2 AND organization_id IS NULL
-      `, [org.id, owner_id]);
+      `,
+        [org.id, owner_id],
+      );
     }
 
     await client.query("COMMIT");

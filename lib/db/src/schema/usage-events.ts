@@ -1,12 +1,4 @@
-import {
-  pgTable,
-  serial,
-  integer,
-  text,
-  timestamp,
-  numeric,
-  index,
-} from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, numeric, index } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export const USAGE_EVENT_KINDS = [

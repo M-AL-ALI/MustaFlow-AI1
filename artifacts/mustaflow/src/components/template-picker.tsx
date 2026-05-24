@@ -151,9 +151,8 @@ export function TemplatePicker({
   const [search, setSearch] = useState("");
   const [tabView, setTabView] = useState<TabView>("all");
   const [previewTemplate, setPreviewTemplate] = useState<TemplateDefinition | null>(null);
-  const [personalTemplates, setPersonalTemplates] = useState<PersonalTemplate[]>(
-    getPersonalTemplates,
-  );
+  const [personalTemplates, setPersonalTemplates] =
+    useState<PersonalTemplate[]>(getPersonalTemplates);
 
   const recentIds = getRecentTemplateIds();
   const recentTemplates = recentIds
@@ -319,38 +318,35 @@ export function TemplatePicker({
         )}
 
         {/* Recent templates (shown when not searching and not in "my" tab) */}
-        {tabView === "all" &&
-          !search &&
-          activeCategory === "All" &&
-          recentTemplates.length > 0 && (
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                Recently used
-              </p>
-              <div className="flex gap-2 flex-wrap">
-                {recentTemplates.map((t) => {
-                  const Icon = ICON_MAP[t.icon] ?? Rocket;
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => handleSelect(t)}
-                      className={cn(
-                        "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors",
-                        selectedId === t.id
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted",
-                      )}
-                    >
-                      <Icon className="h-3 w-3 shrink-0" />
-                      {t.title}
-                    </button>
-                  );
-                })}
-              </div>
+        {tabView === "all" && !search && activeCategory === "All" && recentTemplates.length > 0 && (
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              Recently used
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              {recentTemplates.map((t) => {
+                const Icon = ICON_MAP[t.icon] ?? Rocket;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => handleSelect(t)}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+                      selectedId === t.id
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted",
+                    )}
+                  >
+                    <Icon className="h-3 w-3 shrink-0" />
+                    {t.title}
+                  </button>
+                );
+              })}
             </div>
-          )}
+          </div>
+        )}
 
         {/* Template grid */}
         {tabView === "all" && filtered.length === 0 && (
@@ -534,12 +530,7 @@ function TemplatePreviewPanel({
 
       {/* CTA */}
       <div className="p-3 pt-0">
-        <Button
-          type="button"
-          size="sm"
-          className="w-full gap-1.5"
-          onClick={onUse}
-        >
+        <Button type="button" size="sm" className="w-full gap-1.5" onClick={onUse}>
           {isSelected ? "Template selected" : "Use this template"}
           {!isSelected && <ArrowRight className="h-3.5 w-3.5" />}
         </Button>

@@ -839,9 +839,7 @@ router.get("/workspaces/:id/usage", requireWorkspaceMember, async (req, res): Pr
       .select({ id: projectDomainsTable.id })
       .from(projectDomainsTable)
       .innerJoin(projectsTable, eq(projectDomainsTable.projectId, projectsTable.id))
-      .where(
-        and(eq(projectsTable.workspaceId, workspaceId), isNull(projectsTable.deletedAt)),
-      );
+      .where(and(eq(projectsTable.workspaceId, workspaceId), isNull(projectsTable.deletedAt)));
     customDomainsUsed = domainRows.length;
   } catch (err) {
     logger.warn({ err, workspaceId }, "Custom domain count failed (non-fatal)");
@@ -874,7 +872,9 @@ router.get("/workspaces/:id/usage", requireWorkspaceMember, async (req, res): Pr
       maxCustomDomains,
       customDomainsUsed,
       customDomainsRemaining:
-        maxCustomDomains === Infinity ? Infinity : Math.max(0, maxCustomDomains - customDomainsUsed),
+        maxCustomDomains === Infinity
+          ? Infinity
+          : Math.max(0, maxCustomDomains - customDomainsUsed),
       domainsPercentUsed,
     },
     byDomain: Object.entries(byDomain).map(([hostname, data]) => ({

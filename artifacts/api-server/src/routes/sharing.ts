@@ -22,55 +22,53 @@ const CreateShareLinkBody = z.object({
   expiresInDays: z.number().int().min(1).max(365).optional(),
 });
 
-router.post(
-  "/projects/:id/share",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = parseInt(pstr(req.params.id), 10);
-    const userId = req.userId!;
+router.post("/projects/:id/share", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = parseInt(pstr(req.params.id), 10);
+  const userId = req.userId!;
 
-    const parsed = CreateShareLinkBody.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const parsed = CreateShareLinkBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
 
-    const token = randomBytes(32).toString("base64url");
-    const expiresAt = parsed.data.expiresInDays
-      ? new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000)
-      : null;
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = parsed.data.expiresInDays
+    ? new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000)
+    : null;
 
-    const [link] = await db
-      .insert(shareLinksTable)
-      .values({
-        projectId,
-        token,
-        label: parsed.data.label ?? null,
-        createdByUserId: userId,
-        scope: parsed.data.scope,
-        snapshotVersionId: parsed.data.snapshotVersionId ?? null,
-        expiresAt,
-      })
-      .returning();
+  const [link] = await db
+    .insert(shareLinksTable)
+    .values({
+      projectId,
+      token,
+      label: parsed.data.label ?? null,
+      createdByUserId: userId,
+      scope: parsed.data.scope,
+      snapshotVersionId: parsed.data.snapshotVersionId ?? null,
+      expiresAt,
+    })
+    .returning();
 
-    if (!link) { res.status(500).json({ error: "Failed to create share link" }); return; }
-    res.status(201).json(link);
-  },
-);
+  if (!link) {
+    res.status(500).json({ error: "Failed to create share link" });
+    return;
+  }
+  res.status(201).json(link);
+});
 
 // ── List share links for a project ───────────────────────────────────────────
-router.get(
-  "/projects/:id/share",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = parseInt(pstr(req.params.id), 10);
+router.get("/projects/:id/share", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = parseInt(pstr(req.params.id), 10);
 
-    const links = await db
-      .select()
-      .from(shareLinksTable)
-      .where(and(eq(shareLinksTable.projectId, projectId)))
-      .orderBy(desc(shareLinksTable.createdAt));
+  const links = await db
+    .select()
+    .from(shareLinksTable)
+    .where(and(eq(shareLinksTable.projectId, projectId)))
+    .orderBy(desc(shareLinksTable.createdAt));
 
-    res.json(links);
-  },
-);
+  res.json(links);
+});
 
 // ── Revoke share link ─────────────────────────────────────────────────────────
 router.delete(
@@ -80,14 +78,20 @@ router.delete(
     const projectId = parseInt(pstr(req.params.id), 10);
     const linkId = parseInt(pstr(req.params.linkId), 10);
 
-    if (!Number.isFinite(linkId)) { res.status(400).json({ error: "Invalid link id" }); return; }
+    if (!Number.isFinite(linkId)) {
+      res.status(400).json({ error: "Invalid link id" });
+      return;
+    }
 
     const [link] = await db
       .select()
       .from(shareLinksTable)
       .where(and(eq(shareLinksTable.id, linkId), eq(shareLinksTable.projectId, projectId)));
 
-    if (!link) { res.status(404).json({ error: "Share link not found" }); return; }
+    if (!link) {
+      res.status(404).json({ error: "Share link not found" });
+      return;
+    }
 
     await db
       .update(shareLinksTable)
@@ -101,15 +105,19 @@ router.delete(
 // ── Public share link viewer (no auth required) — mounted on publicShareRouter ─
 publicShareRouter.get("/share/:token", async (req, res): Promise<void> => {
   const { token } = req.params;
-  const [link] = await db
-    .select()
-    .from(shareLinksTable)
-    .where(eq(shareLinksTable.token, token));
+  const [link] = await db.select().from(shareLinksTable).where(eq(shareLinksTable.token, token));
 
-  if (!link) { res.status(404).json({ error: "Share link not found" }); return; }
-  if (link.revoked) { res.status(410).json({ error: "This share link has been revoked" }); return; }
+  if (!link) {
+    res.status(404).json({ error: "Share link not found" });
+    return;
+  }
+  if (link.revoked) {
+    res.status(410).json({ error: "This share link has been revoked" });
+    return;
+  }
   if (link.expiresAt && link.expiresAt < new Date()) {
-    res.status(410).json({ error: "This share link has expired" }); return;
+    res.status(410).json({ error: "This share link has expired" });
+    return;
   }
 
   // Bump view count (best-effort, non-fatal)

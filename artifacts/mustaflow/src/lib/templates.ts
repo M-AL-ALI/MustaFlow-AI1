@@ -65,8 +65,7 @@ export const STARTER_PACKS: TemplateDefinition[] = [
   {
     id: "sp-restaurant",
     title: "Restaurant & Dining",
-    description:
-      "Full restaurant site with digital menu, online reservations, hours, and location",
+    description: "Full restaurant site with digital menu, online reservations, hours, and location",
     category: "Starter Packs",
     icon: "UtensilsCrossed",
     projectKind: "web",
@@ -456,10 +455,25 @@ export const INDUSTRY_PERSONAS = [
 
 export const ONBOARDING_INDUSTRIES = [
   { id: "business", label: "Small Business", icon: "Briefcase", templateId: "sp-local-services" },
-  { id: "restaurant", label: "Restaurant / Food", icon: "UtensilsCrossed", templateId: "sp-restaurant" },
+  {
+    id: "restaurant",
+    label: "Restaurant / Food",
+    icon: "UtensilsCrossed",
+    templateId: "sp-restaurant",
+  },
   { id: "real-estate", label: "Real Estate", icon: "Building2", templateId: "sp-real-estate" },
-  { id: "creator", label: "Creative / Portfolio", icon: "Palette", templateId: "sp-portfolio-creator" },
-  { id: "education", label: "Education / Course", icon: "GraduationCap", templateId: "sp-online-course" },
+  {
+    id: "creator",
+    label: "Creative / Portfolio",
+    icon: "Palette",
+    templateId: "sp-portfolio-creator",
+  },
+  {
+    id: "education",
+    label: "Education / Course",
+    icon: "GraduationCap",
+    templateId: "sp-online-course",
+  },
   { id: "nonprofit", label: "Nonprofit / Charity", icon: "Heart", templateId: "sp-nonprofit" },
   { id: "event", label: "Event / Conference", icon: "CalendarCheck", templateId: "sp-event" },
   { id: "wedding", label: "Wedding / Personal", icon: "Heart", templateId: "sp-wedding" },

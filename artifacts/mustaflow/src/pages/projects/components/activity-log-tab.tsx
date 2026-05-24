@@ -75,7 +75,7 @@ export function ActivityLogTab({ projectId }: ActivityLogTabProps) {
           ? `/api/projects/${projectId}/activity-log?limit=100`
           : `/api/projects/${projectId}/activity-log?limit=100&eventType=${filter}`;
       const r = await fetch(url);
-      if (r.ok) setEntries(await r.json() as ActivityEntry[]);
+      if (r.ok) setEntries((await r.json()) as ActivityEntry[]);
     } finally {
       setLoading(false);
     }
@@ -173,7 +173,10 @@ export function ActivityLogTab({ projectId }: ActivityLogTabProps) {
                 };
                 const Icon = meta.icon;
                 return (
-                  <div key={entry.id} className="flex items-start gap-3 px-4 py-3 hover:bg-accent/30 transition-colors">
+                  <div
+                    key={entry.id}
+                    className="flex items-start gap-3 px-4 py-3 hover:bg-accent/30 transition-colors"
+                  >
                     <div
                       className={cn(
                         "mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-card border border-border",

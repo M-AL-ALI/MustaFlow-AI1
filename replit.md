@@ -18,6 +18,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/db run push` — push DB schema (dev). Custom migration scripts live in `scripts/src/migrate-*.ts` and are registered in `scripts/package.json`.
 - `pnpm --filter @workspace/scripts run seed` — seed sample projects (no-op if any exist)
 
+
 ### Required env
 `DATABASE_URL`, `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `SESSION_SECRET`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `ENCRYPTION_KEY`
 
@@ -30,6 +31,11 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **Containers (Fly.io)**: `FLY_API_TOKEN`, `FLY_APP_NAME`, `FLY_ORG_SLUG`, `FLY_REGION`
 - **Platform domain**: `PLATFORM_DOMAIN` (default `mustaflow.app`), `PLATFORM_CNAME_TARGET` (default `hosted.mustaflow.app`)
 - **Admin bootstrap**: `ADMIN_USER_IDS` (comma-separated Clerk user IDs)
+
+### Migrations
+- `pnpm --filter @workspace/scripts run migrate-preferred-region` — adds `preferred_region` to `projects` (edge CDN geo-routing)
+- `pnpm --filter @workspace/scripts run migrate-runtime-breadth` — creates `scheduled_job_runs`, `managed_addons`, `project_environments`, `environment_promotions`, `usage_events` tables (Task #628)
+- `pnpm --filter @workspace/scripts run migrate-secret-scoping` — adds `min_role` column + check constraint to `project_secrets` (Task #632; run before deploy)
 
 ## Stack
 
@@ -92,6 +98,17 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **Landing page**: sidebar-free for visitors; sidebar appears only after login.
 - **Dark mode is default**; light mode is an opt-in toggle.
 - **Web-first**: do not surface mobile generation in the UI unless explicitly approved.
+
+## Theme J — Enterprise, Compliance & Polish (Task #632)
+
+- **GDPR data export**: `GET /api/me/export` — authenticated user downloads a ZIP of all their projects, generated files, AI chat history, and knowledge vault entries. Secret values are never included. `DELETE /api/me` — soft-deletes all user-owned projects (Clerk account deletion handled separately via Clerk UI).
+- **Per-secret min_role scoping**: `project_secrets.min_role` column (`viewer|member|admin|owner`, default `viewer`). The Secrets tab shows an "Access Role" dropdown per secret; PATCH /api/projects/:id/secrets/:secretId accepts `minRole`. DB migration: `migrate-secret-scoping`. OpenAPI `SecretEntry` schema updated; codegen re-run.
+- **Org audit log API**: `GET /api/orgs/:orgId/activity` — paginated activity feed across all org projects (filtered by membership). `?format=csv` exports as CSV (admin/owner only). Activity tab added to org-settings page.
+- **Trust & Security page**: `/trust` — public page documenting certifications (SOC 2 in progress, GDPR ready, HIPAA enterprise tier), encryption posture, sub-processors, vulnerability disclosure, and compliance contacts. Route registered in App.tsx; sidebar footer link added.
+- **Onboarding tour**: `OnboardingTour` component — 5-step guided overlay for first-time users (localStorage flag `mustaflow_tour_seen`). Shown after 1.2s delay on first authenticated visit. Automatically skipped for returning users.
+- **Offline indicator**: `OfflineIndicator` component — mounts globally; listens to `online/offline` browser events; shows a dismissible banner when the browser loses connectivity.
+- **Privacy & Data settings tab**: New "Privacy & Data" tab in Settings — GDPR data export button, Privacy Policy + Trust page + DPA request links, account data deletion form (requires typing "DELETE" to confirm).
+- **Key files**: `artifacts/api-server/src/routes/gdpr.ts`, `scripts/src/migrate-secret-scoping.ts`, `artifacts/mustaflow/src/pages/trust.tsx`, `artifacts/mustaflow/src/components/onboarding-tour.tsx`, `artifacts/mustaflow/src/components/offline-indicator.tsx`.
 
 ## Known limitations (honest status)
 

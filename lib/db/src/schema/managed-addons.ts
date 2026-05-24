@@ -14,7 +14,13 @@ import { projectsTable } from "./projects";
 export const ADDON_KINDS = ["redis_kv", "vector_db", "object_storage"] as const;
 export type AddonKind = (typeof ADDON_KINDS)[number];
 
-export const ADDON_STATUSES = ["provisioning", "active", "error", "deprovisioning", "removed"] as const;
+export const ADDON_STATUSES = [
+  "provisioning",
+  "active",
+  "error",
+  "deprovisioning",
+  "removed",
+] as const;
 export type AddonStatus = (typeof ADDON_STATUSES)[number];
 
 /**

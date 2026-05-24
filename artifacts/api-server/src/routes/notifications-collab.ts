@@ -42,7 +42,10 @@ router.get("/notifications", async (req, res): Promise<void> => {
 router.post("/notifications/:notifId/read", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const notifId = parseInt(req.params.notifId, 10);
-  if (!Number.isFinite(notifId)) { res.status(400).json({ error: "Invalid id" }); return; }
+  if (!Number.isFinite(notifId)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
 
   await db
     .update(notificationsTable)
@@ -68,7 +71,10 @@ router.post("/notifications/read-all", async (req, res): Promise<void> => {
 router.delete("/notifications/:notifId", async (req, res): Promise<void> => {
   const userId = req.userId!;
   const notifId = parseInt(req.params.notifId, 10);
-  if (!Number.isFinite(notifId)) { res.status(400).json({ error: "Invalid id" }); return; }
+  if (!Number.isFinite(notifId)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
 
   await db
     .delete(notificationsTable)

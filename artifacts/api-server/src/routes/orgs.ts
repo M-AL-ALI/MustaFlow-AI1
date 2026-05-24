@@ -1,11 +1,12 @@
 import { Router, type IRouter } from "express";
-import { and, eq, isNull, desc } from "drizzle-orm";
+import { and, eq, isNull, desc, inArray, sql as sqlFn } from "drizzle-orm";
 import {
   db,
   organizationsTable,
   orgMembersTable,
   orgInvitesTable,
   projectsTable,
+  projectActivityTable,
 } from "@workspace/db";
 import { z } from "zod";
 import { randomBytes } from "crypto";
@@ -493,6 +494,85 @@ router.get("/orgs/:orgId/projects", async (req, res): Promise<void> => {
     .orderBy(desc(projectsTable.updatedAt));
 
   res.json(projects);
+});
+
+// ── GET /api/orgs/:orgId/activity ─────────────────────────────────────────────
+// User-facing audit log filtered to all projects belonging to this org.
+// Admins and owners can also export the log as CSV via ?format=csv.
+router.get("/orgs/:orgId/activity", async (req, res): Promise<void> => {
+  const userId = req.userId!;
+  const orgId = parseInt(req.params.orgId, 10);
+  if (!Number.isFinite(orgId)) {
+    res.status(400).json({ error: "Invalid org id" });
+    return;
+  }
+
+  const role = await getUserOrgRole(userId, orgId);
+  if (!role) {
+    res.status(403).json({ error: "Not a member" });
+    return;
+  }
+
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+
+  // Resolve all project IDs belonging to this org
+  const orgProjects = await db
+    .select({ id: projectsTable.id, name: projectsTable.name })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.organizationId, orgId), isNull(projectsTable.deletedAt)));
+
+  if (orgProjects.length === 0) {
+    res.json({ items: [], total: 0, limit, offset });
+    return;
+  }
+
+  const projectIds = orgProjects.map((p) => p.id);
+  const projectNameMap = Object.fromEntries(orgProjects.map((p) => [p.id, p.name]));
+
+  const [{ total }] = await db
+    .select({ total: sqlFn<number>`count(*)::int` })
+    .from(projectActivityTable)
+    .where(inArray(projectActivityTable.projectId, projectIds));
+
+  const rows = await db
+    .select()
+    .from(projectActivityTable)
+    .where(inArray(projectActivityTable.projectId, projectIds))
+    .orderBy(desc(projectActivityTable.createdAt))
+    .limit(limit)
+    .offset(offset);
+
+  const items = rows.map((r) => ({
+    ...r,
+    projectName: projectNameMap[r.projectId] ?? `Project ${r.projectId}`,
+  }));
+
+  // CSV export for admins/owners
+  if (req.query.format === "csv" && hasMinRole(role, "admin")) {
+    const header = "id,projectId,projectName,actorId,actorName,eventType,summary,createdAt";
+    const lines = items.map((r) =>
+      [
+        r.id,
+        r.projectId,
+        JSON.stringify(r.projectName),
+        r.actorId ?? "",
+        JSON.stringify(r.actorName ?? ""),
+        r.eventType,
+        JSON.stringify(r.summary),
+        r.createdAt.toISOString(),
+      ].join(","),
+    );
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="org-${orgId}-activity-${Date.now()}.csv"`,
+    );
+    res.send([header, ...lines].join("\n"));
+    return;
+  }
+
+  res.json({ items, total: Number(total), limit, offset });
 });
 
 export default router;

@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Server,
   Database,
@@ -12,7 +11,6 @@ import {
   ChevronDown,
   ChevronRight,
   ArrowRight,
-  RefreshCw,
   Cpu,
   Layers,
   GitBranch,
@@ -88,7 +86,12 @@ interface JobRun {
 
 const ADDON_META: Record<
   string,
-  { label: string; description: string; icon: React.ComponentType<{ className?: string }>; envVars: string[] }
+  {
+    label: string;
+    description: string;
+    icon: React.ComponentType<{ className?: string }>;
+    envVars: string[];
+  }
 > = {
   redis_kv: {
     label: "Redis / KV",
@@ -98,7 +101,8 @@ const ADDON_META: Record<
   },
   vector_db: {
     label: "Vector DB",
-    description: "pgvector extension for AI embeddings and similarity search. VECTOR_DB_URL injected.",
+    description:
+      "pgvector extension for AI embeddings and similarity search. VECTOR_DB_URL injected.",
     icon: Database,
     envVars: ["VECTOR_DB_URL"],
   },
@@ -115,22 +119,39 @@ const ADDON_META: Record<
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; className: string }> = {
     active: { label: "Active", className: "bg-green-500/20 text-green-400 border-green-500/30" },
-    provisioning: { label: "Provisioning", className: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" },
-    deprovisioning: { label: "Removing", className: "bg-orange-500/20 text-orange-400 border-orange-500/30" },
+    provisioning: {
+      label: "Provisioning",
+      className: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+    },
+    deprovisioning: {
+      label: "Removing",
+      className: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+    },
     error: { label: "Error", className: "bg-red-500/20 text-red-400 border-red-500/30" },
     removed: { label: "Removed", className: "bg-muted text-muted-foreground border-border" },
-    deployed: { label: "Deployed", className: "bg-green-500/20 text-green-400 border-green-500/30" },
+    deployed: {
+      label: "Deployed",
+      className: "bg-green-500/20 text-green-400 border-green-500/30",
+    },
     deploying: { label: "Deploying", className: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
     idle: { label: "Idle", className: "bg-muted text-muted-foreground border-border" },
     failed: { label: "Failed", className: "bg-red-500/20 text-red-400 border-red-500/30" },
     success: { label: "Success", className: "bg-green-500/20 text-green-400 border-green-500/30" },
     running: { label: "Running", className: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
-    in_progress: { label: "In Progress", className: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
-    succeeded: { label: "Succeeded", className: "bg-green-500/20 text-green-400 border-green-500/30" },
+    in_progress: {
+      label: "In Progress",
+      className: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+    },
+    succeeded: {
+      label: "Succeeded",
+      className: "bg-green-500/20 text-green-400 border-green-500/30",
+    },
   };
   const s = map[status] ?? { label: status, className: "bg-muted text-muted-foreground" };
   return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${s.className}`}>
+    <span
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${s.className}`}
+    >
       {s.label}
     </span>
   );
@@ -139,7 +160,12 @@ function StatusBadge({ status }: { status: string }) {
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   } catch {
     return iso;
   }
@@ -255,7 +281,9 @@ function AddonsSection({ projectId }: { projectId: number }) {
       {/* Active add-ons */}
       {activeAddons.length > 0 && (
         <div className="space-y-2">
-          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Active</div>
+          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Active
+          </div>
           {activeAddons.map((addon) => {
             const meta = ADDON_META[addon.kind];
             const Icon = meta?.icon ?? Server;
@@ -271,7 +299,9 @@ function AddonsSection({ projectId }: { projectId: number }) {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground">{meta?.label ?? addon.kind}</span>
+                      <span className="text-sm font-medium text-foreground">
+                        {meta?.label ?? addon.kind}
+                      </span>
                       <StatusBadge status={addon.status} />
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
@@ -285,7 +315,10 @@ function AddonsSection({ projectId }: { projectId: number }) {
                       variant="ghost"
                       size="sm"
                       className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                      onClick={(e) => { e.stopPropagation(); deprovision(addon.id); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deprovision(addon.id);
+                      }}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -327,7 +360,7 @@ function AddonsSection({ projectId }: { projectId: number }) {
         <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           {activeAddons.length === 0 ? "Available Add-ons" : "Add More"}
         </div>
-        {(Object.entries(ADDON_META) as [ManagedAddon["kind"], typeof ADDON_META[string]][]).map(
+        {(Object.entries(ADDON_META) as [ManagedAddon["kind"], (typeof ADDON_META)[string]][]).map(
           ([kind, meta]) => {
             const Icon = meta.icon;
             const alreadyActive = activeKinds.has(kind);
@@ -349,7 +382,10 @@ function AddonsSection({ projectId }: { projectId: number }) {
                   </div>
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {meta.envVars.map((v) => (
-                      <code key={v} className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                      <code
+                        key={v}
+                        className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground"
+                      >
                         {v}
                       </code>
                     ))}
@@ -401,10 +437,11 @@ function JobsSection({ projectId }: { projectId: number }) {
   const [newCron, setNewCron] = useState("0 * * * *");
   const [newNote, setNewNote] = useState("");
 
-  const load = useCallback(async () => {
+  const _load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/projects/${projectId}/deployment-config/schedules`
-        .replace("/deployment-config", ""));
+      const r = await fetch(
+        `/api/projects/${projectId}/deployment-config/schedules`.replace("/deployment-config", ""),
+      );
       if (r.ok) setSchedules((await r.json()).schedules ?? []);
     } catch {
       // ignore
@@ -480,7 +517,12 @@ function JobsSection({ projectId }: { projectId: number }) {
     await fetch(`/api/projects/${projectId}/schedules`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cronExpr: newCron, note: newNote || null, kind: "task_run", enabled: true }),
+      body: JSON.stringify({
+        cronExpr: newCron,
+        note: newNote || null,
+        kind: "task_run",
+        enabled: true,
+      }),
     });
     setNewCron("0 * * * *");
     setNewNote("");
@@ -492,9 +534,15 @@ function JobsSection({ projectId }: { projectId: number }) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="text-xs text-muted-foreground">
-          Scheduled jobs run commands in your container on a cron schedule. Enable the container first.
+          Scheduled jobs run commands in your container on a cron schedule. Enable the container
+          first.
         </div>
-        <Button size="sm" variant="outline" className="h-7 text-xs shrink-0" onClick={() => setCreating(true)}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs shrink-0"
+          onClick={() => setCreating(true)}
+        >
           <Plus className="h-3 w-3 mr-1" />
           New Job
         </Button>
@@ -523,8 +571,17 @@ function JobsSection({ projectId }: { projectId: number }) {
             />
           </div>
           <div className="flex gap-2 pt-1">
-            <Button size="sm" className="h-7 text-xs" onClick={createSchedule}>Create</Button>
-            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setCreating(false)}>Cancel</Button>
+            <Button size="sm" className="h-7 text-xs" onClick={createSchedule}>
+              Create
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              onClick={() => setCreating(false)}
+            >
+              Cancel
+            </Button>
           </div>
         </div>
       )}
@@ -556,19 +613,21 @@ function JobsSection({ projectId }: { projectId: number }) {
                     <code className="text-xs font-mono text-foreground bg-muted px-1.5 py-0.5 rounded">
                       {schedule.cronExpr}
                     </code>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
-                      schedule.enabled
-                        ? "bg-green-500/20 text-green-400 border-green-500/30"
-                        : "bg-muted text-muted-foreground border-border"
-                    }`}>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+                        schedule.enabled
+                          ? "bg-green-500/20 text-green-400 border-green-500/30"
+                          : "bg-muted text-muted-foreground border-border"
+                      }`}
+                    >
                       {schedule.enabled ? "Enabled" : "Disabled"}
                     </span>
-                    {schedule.lastRunStatus && (
-                      <StatusBadge status={schedule.lastRunStatus} />
-                    )}
+                    {schedule.lastRunStatus && <StatusBadge status={schedule.lastRunStatus} />}
                   </div>
                   {schedule.note && (
-                    <div className="text-xs text-muted-foreground mt-0.5 truncate">{schedule.note}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                      {schedule.note}
+                    </div>
                   )}
                   <div className="text-[10px] text-muted-foreground mt-0.5">
                     Next: {fmtDate(schedule.nextRunAt)} · Last: {fmtDate(schedule.lastRunAt)}
@@ -652,7 +711,9 @@ function JobsSection({ projectId }: { projectId: number }) {
                               </pre>
                             )}
                             {run.errorMessage && (
-                              <div className="mt-1 text-red-400 text-[10px]">{run.errorMessage}</div>
+                              <div className="mt-1 text-red-400 text-[10px]">
+                                {run.errorMessage}
+                              </div>
                             )}
                           </div>
                         </div>
@@ -677,9 +738,21 @@ function JobsSection({ projectId }: { projectId: number }) {
         </div>
         <div className="grid grid-cols-1 gap-1.5">
           {[
-            { kind: "static", label: "Static CDN", desc: "Snapshot served from edge. No container." },
-            { kind: "autoscale", label: "Autoscale", desc: "Container scales to zero when idle. Fastest iteration." },
-            { kind: "reserved_vm", label: "Reserved VM", desc: "Always-on container. No cold starts. Best for background workers." },
+            {
+              kind: "static",
+              label: "Static CDN",
+              desc: "Snapshot served from edge. No container.",
+            },
+            {
+              kind: "autoscale",
+              label: "Autoscale",
+              desc: "Container scales to zero when idle. Fastest iteration.",
+            },
+            {
+              kind: "reserved_vm",
+              label: "Reserved VM",
+              desc: "Always-on container. No cold starts. Best for background workers.",
+            },
           ].map((d) => (
             <div key={d.kind} className="flex items-start gap-2">
               <Server className="h-3 w-3 text-muted-foreground mt-0.5 shrink-0" />
@@ -703,7 +776,9 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
   const [loading, setLoading] = useState(true);
   const [promoting, setPromoting] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
-  const [newEnvName, setNewEnvName] = useState<"development" | "staging" | "production">("development");
+  const [newEnvName, setNewEnvName] = useState<"development" | "staging" | "production">(
+    "development",
+  );
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -711,10 +786,12 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
       const r = await fetch(`/api/projects/${projectId}/environments`);
       if (r.ok) {
         const data = await r.json();
-        setEnvironments((data.environments ?? []).sort(
-          (a: ProjectEnvironment, b: ProjectEnvironment) =>
-            (ENV_ORDER[a.name] ?? 99) - (ENV_ORDER[b.name] ?? 99),
-        ));
+        setEnvironments(
+          (data.environments ?? []).sort(
+            (a: ProjectEnvironment, b: ProjectEnvironment) =>
+              (ENV_ORDER[a.name] ?? 99) - (ENV_ORDER[b.name] ?? 99),
+          ),
+        );
         setPromotions(data.promotions ?? []);
       }
     } catch {
@@ -778,10 +855,16 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="text-xs text-muted-foreground">
-          Isolate secrets and snapshots per environment. Promote changes from dev → staging → production.
+          Isolate secrets and snapshots per environment. Promote changes from dev → staging →
+          production.
         </div>
         {availableToCreate.length > 0 && (
-          <Button size="sm" variant="outline" className="h-7 text-xs shrink-0" onClick={() => setCreating(true)}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs shrink-0"
+            onClick={() => setCreating(true)}
+          >
             <Plus className="h-3 w-3 mr-1" />
             Add Env
           </Button>
@@ -819,7 +902,12 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
             <Button size="sm" className="h-7 text-xs" onClick={createEnv}>
               Create
             </Button>
-            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setCreating(false)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              onClick={() => setCreating(false)}
+            >
               Cancel
             </Button>
           </div>
@@ -856,9 +944,7 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
                           : "border-border bg-muted"
                     }`}
                   >
-                    <span className={ENV_COLORS[env.name] ?? "text-foreground"}>
-                      {env.name}
-                    </span>
+                    <span className={ENV_COLORS[env.name] ?? "text-foreground"}>{env.name}</span>
                   </div>
                   {i < environments.length - 1 && (
                     <ArrowRight className="h-3 w-3 text-muted-foreground" />
@@ -879,7 +965,9 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-sm font-medium capitalize ${ENV_COLORS[env.name] ?? "text-foreground"}`}>
+                      <span
+                        className={`text-sm font-medium capitalize ${ENV_COLORS[env.name] ?? "text-foreground"}`}
+                      >
                         {env.name}
                       </span>
                       <StatusBadge status={env.status} />
@@ -947,7 +1035,9 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
       {/* Recent promotions */}
       {promotions.length > 0 && (
         <div className="space-y-2">
-          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Recent Promotions</div>
+          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Recent Promotions
+          </div>
           <div className="space-y-1">
             {promotions.slice(0, 5).map((p) => (
               <div key={p.id} className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -968,8 +1058,14 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
           <GitBranch className="h-3.5 w-3.5" />
           Environment isolation
         </div>
-        <div>Each environment can have its own project secrets. Add secrets scoped to an environment in the Secrets tab (coming soon).</div>
-        <div>Promotion copies the current environment snapshot to the next tier. Production promotions update the public publish URL.</div>
+        <div>
+          Each environment can have its own project secrets. Add secrets scoped to an environment in
+          the Secrets tab (coming soon).
+        </div>
+        <div>
+          Promotion copies the current environment snapshot to the next tier. Production promotions
+          update the public publish URL.
+        </div>
       </div>
     </div>
   );

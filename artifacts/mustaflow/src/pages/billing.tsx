@@ -119,7 +119,7 @@ type BillingTab = "overview" | "subscription" | "usage" | "invoices";
 export default function BillingPage() {
   const { toast } = useToast();
   const { currentWorkspace } = useWorkspace();
-  const workspaceId = currentWorkspace?.id;
+  const _workspaceId = currentWorkspace?.id;
   const [activeTab, setActiveTab] = useState<BillingTab>("overview");
   const [balance, setBalance] = useState<CreditsBalance | null>(null);
   const [packages, setPackages] = useState<PackagesResponse | null>(null);
@@ -130,7 +130,7 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
-  const [planCheckoutLoading, setPlanCheckoutLoading] = useState<string | null>(null);
+  const [_planCheckoutLoading, _setPlanCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
 
   // Recommended tier passed as ?tier= from inline upgrade CTAs (Task #660).
@@ -204,7 +204,7 @@ export default function BillingPage() {
     void fetchData();
   }, [fetchData]);
 
-  async function handleManageSubscription() {
+  async function _handleManageSubscription() {
     setPortalLoading(true);
     try {
       const res = await fetch("/api/billing/subscription/portal", {

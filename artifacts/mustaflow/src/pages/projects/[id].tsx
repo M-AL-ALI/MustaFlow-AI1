@@ -814,7 +814,9 @@ export default function ProjectWorkspacePage() {
         if (t === "free" && (agentMode === "power" || agentMode === "pro")) {
           setAgentMode("eco");
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     })();
     return () => {
       cancelled = true;

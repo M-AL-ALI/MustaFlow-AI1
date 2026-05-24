@@ -21,7 +21,7 @@ interface OrgSwitcherProps {
 export function OrgSwitcher({ onOrgChange, currentOrgId }: OrgSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [orgs, setOrgs] = useState<Org[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [, setLocation] = useLocation();
 
   useEffect(() => {

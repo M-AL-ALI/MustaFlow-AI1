@@ -1,11 +1,5 @@
 import { useState, useEffect } from "react";
-import {
-  HelpCircle,
-  ChevronRight,
-  Loader2,
-  Send,
-  X,
-} from "lucide-react";
+import { HelpCircle, ChevronRight, Loader2, Send, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type ClarifyingQuestion = {
@@ -214,7 +208,11 @@ export function GuidedRefinementLoader({
           clarificationReason: string;
         };
         if (data.needsClarification && data.questions.length > 0) {
-          setState({ phase: "questions", questions: data.questions, reason: data.clarificationReason });
+          setState({
+            phase: "questions",
+            questions: data.questions,
+            reason: data.clarificationReason,
+          });
         } else {
           setState({ phase: "clear" });
         }
@@ -223,7 +221,7 @@ export function GuidedRefinementLoader({
       }
     };
     void check();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (state.phase === "checking") {
@@ -231,7 +229,10 @@ export function GuidedRefinementLoader({
       <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-[11px] text-muted-foreground bg-background">
         <Loader2 className="h-3 w-3 animate-spin shrink-0" />
         Checking if I need any details before planning…
-        <button onClick={onSkip} className="ml-auto text-muted-foreground/50 hover:text-muted-foreground">
+        <button
+          onClick={onSkip}
+          className="ml-auto text-muted-foreground/50 hover:text-muted-foreground"
+        >
           <X className="h-3 w-3" />
         </button>
       </div>

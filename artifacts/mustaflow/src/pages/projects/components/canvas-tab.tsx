@@ -129,11 +129,25 @@ function BrandPreview({ projectId, iframeKey }: { projectId: number; iframeKey: 
       <div className="shrink-0 grid grid-cols-2 gap-2 pt-2">
         <div className="border border-border rounded-lg p-2 bg-background flex flex-col items-center gap-1">
           <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Logo</div>
-          <img src={logoUrl} alt="Logo" className="h-8 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <img
+            src={logoUrl}
+            alt="Logo"
+            className="h-8 object-contain"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
+          />
         </div>
         <div className="border border-border rounded-lg p-2 bg-zinc-900 flex flex-col items-center gap-1">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wide">Dark bg</div>
-          <img src={iconUrl} alt="Icon" className="h-8 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <img
+            src={iconUrl}
+            alt="Icon"
+            className="h-8 object-contain"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
+          />
         </div>
       </div>
     </div>
@@ -149,7 +163,8 @@ function BrandEmptyState() {
       <div>
         <h3 className="text-sm font-semibold text-foreground mb-1">No brand kit yet</h3>
         <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
-          Fill in your brand details and click Generate to create a professional logo, icon, color palette, and typography system.
+          Fill in your brand details and click Generate to create a professional logo, icon, color
+          palette, and typography system.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground w-full max-w-xs">
@@ -218,7 +233,9 @@ function VariantTile({
     const el = containerRef.current;
     if (!el) return;
     const obs = new IntersectionObserver(
-      (entries) => { for (const entry of entries) setVisible(entry.isIntersecting); },
+      (entries) => {
+        for (const entry of entries) setVisible(entry.isIntersecting);
+      },
       { threshold: 0.05 },
     );
     obs.observe(el);
@@ -262,7 +279,9 @@ function VariantTile({
             </span>
           )}
           {variant.source === "extract" && (
-            <span className="text-[10px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 uppercase tracking-wide shrink-0">extract</span>
+            <span className="text-[10px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 uppercase tracking-wide shrink-0">
+              extract
+            </span>
           )}
           {variant.savedToLibrary && (
             <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 shrink-0 flex items-center gap-0.5">
@@ -308,21 +327,30 @@ function VariantTile({
               >
                 <button
                   className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted flex items-center gap-2"
-                  onClick={() => { onFork(variant); setMenuOpen(false); }}
+                  onClick={() => {
+                    onFork(variant);
+                    setMenuOpen(false);
+                  }}
                   disabled={!isReady}
                 >
                   <GitBranch className="h-3 w-3 text-violet-400" /> Fork variant
                 </button>
                 <button
                   className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted flex items-center gap-2"
-                  onClick={() => { onShare(variant); setMenuOpen(false); }}
+                  onClick={() => {
+                    onShare(variant);
+                    setMenuOpen(false);
+                  }}
                   disabled={!isReady}
                 >
                   <Share2 className="h-3 w-3 text-blue-400" /> Share preview link
                 </button>
                 <button
                   className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted flex items-center gap-2"
-                  onClick={() => { onSaveToLibrary(variant); setMenuOpen(false); }}
+                  onClick={() => {
+                    onSaveToLibrary(variant);
+                    setMenuOpen(false);
+                  }}
                   disabled={!isReady}
                 >
                   <Library className="h-3 w-3 text-emerald-400" /> Save to library
@@ -330,7 +358,10 @@ function VariantTile({
                 <div className="border-t border-border my-1" />
                 <button
                   className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted text-red-400 flex items-center gap-2"
-                  onClick={() => { void onDelete(variant); setMenuOpen(false); }}
+                  onClick={() => {
+                    void onDelete(variant);
+                    setMenuOpen(false);
+                  }}
                 >
                   <Trash2 className="h-3 w-3" /> Delete
                 </button>
@@ -347,7 +378,9 @@ function VariantTile({
                 <AlertCircle className="h-6 w-6 text-red-400" />
                 <div className="text-xs text-red-400 font-medium">Generation failed</div>
                 {variant.errorMessage && (
-                  <div className="text-[11px] text-muted-foreground max-w-xs line-clamp-3">{variant.errorMessage}</div>
+                  <div className="text-[11px] text-muted-foreground max-w-xs line-clamp-3">
+                    {variant.errorMessage}
+                  </div>
                 )}
               </>
             ) : (
@@ -437,31 +470,39 @@ function DiffPanel({
       <div className="shrink-0 border-b border-border bg-card px-4 py-2 flex items-center gap-3">
         <Diff className="h-4 w-4 text-violet-400 shrink-0" />
         <span className="text-sm font-medium text-foreground">
-          Comparing{" "}
-          <span className="text-violet-400">{varA?.label ?? `#${selectedIds[0]}`}</span>
+          Comparing <span className="text-violet-400">{varA?.label ?? `#${selectedIds[0]}`}</span>
           {" vs "}
           <span className="text-blue-400">{varB?.label ?? `#${selectedIds[1]}`}</span>
         </span>
         {diffData && (
           <div className="flex items-center gap-2 text-xs ml-2">
-            <span className="text-green-400 bg-green-500/10 px-2 py-0.5 rounded">+{diffData.summary.additions}</span>
-            <span className="text-red-400 bg-red-500/10 px-2 py-0.5 rounded">-{diffData.summary.deletions}</span>
+            <span className="text-green-400 bg-green-500/10 px-2 py-0.5 rounded">
+              +{diffData.summary.additions}
+            </span>
+            <span className="text-red-400 bg-red-500/10 px-2 py-0.5 rounded">
+              -{diffData.summary.deletions}
+            </span>
           </div>
         )}
         <div className="ml-auto flex items-center gap-2">
           <select
             className="h-7 rounded border border-border bg-background text-xs px-2"
             value={selectedFile}
-            onChange={(e) => { setSelectedFile(e.target.value); }}
+            onChange={(e) => {
+              setSelectedFile(e.target.value);
+            }}
             disabled={loading}
           >
-            {allFiles.length > 0
-              ? allFiles.map((f) => (
-                  <option key={f.path} value={f.path}>
-                    {f.path}{f.status !== "both" ? ` (${f.status})` : ""}
-                  </option>
-                ))
-              : <option value="index.html">index.html</option>}
+            {allFiles.length > 0 ? (
+              allFiles.map((f) => (
+                <option key={f.path} value={f.path}>
+                  {f.path}
+                  {f.status !== "both" ? ` (${f.status})` : ""}
+                </option>
+              ))
+            ) : (
+              <option value="index.html">index.html</option>
+            )}
           </select>
           <Button size="sm" variant="ghost" className="h-7 px-2" onClick={onClear}>
             <X className="h-3.5 w-3.5" />
@@ -623,7 +664,12 @@ function LibraryPanel({
         <Library className="h-4 w-4 text-emerald-400" />
         <span className="text-sm font-medium text-foreground">Variant Library</span>
         <span className="text-xs text-muted-foreground ml-1">— saved across all projects</span>
-        <Button size="sm" variant="ghost" className="h-7 px-2 ml-auto" onClick={() => void loadLibrary()}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 ml-auto"
+          onClick={() => void loadLibrary()}
+        >
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -643,7 +689,8 @@ function LibraryPanel({
             </div>
             <div className="text-sm font-medium text-foreground">Library is empty</div>
             <p className="text-xs text-muted-foreground max-w-xs mx-auto leading-relaxed">
-              Save any ready variant to the library via the more-actions menu. Saved variants can be imported into any project.
+              Save any ready variant to the library via the more-actions menu. Saved variants can be
+              imported into any project.
             </p>
           </div>
         )}
@@ -659,7 +706,9 @@ function LibraryPanel({
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-semibold text-foreground truncate">{item.label}</div>
                 {item.description && (
-                  <div className="text-[11px] text-muted-foreground truncate mt-0.5">{item.description}</div>
+                  <div className="text-[11px] text-muted-foreground truncate mt-0.5">
+                    {item.description}
+                  </div>
                 )}
                 <div className="text-[10px] text-muted-foreground mt-0.5">
                   {item.fileCount} file{item.fileCount !== 1 ? "s" : ""} ·{" "}
@@ -677,7 +726,9 @@ function LibraryPanel({
                   {importing === item.id ? (
                     <RefreshCw className="h-3 w-3 animate-spin" />
                   ) : (
-                    <><Plus className="h-3 w-3 mr-1" /> Import</>
+                    <>
+                      <Plus className="h-3 w-3 mr-1" /> Import
+                    </>
                   )}
                 </Button>
                 <Button
@@ -700,13 +751,7 @@ function LibraryPanel({
 /**
  * A/B Test panel — create and manage live traffic-split tests.
  */
-function AbTestsPanel({
-  projectId,
-  variants,
-}: {
-  projectId: number;
-  variants: CanvasVariant[];
-}) {
+function AbTestsPanel({ projectId, variants }: { projectId: number; variants: CanvasVariant[] }) {
   const [tests, setTests] = useState<CanvasAbTest[]>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -746,7 +791,12 @@ function AbTestsPanel({
       const res = await fetch(`/api/projects/${projectId}/canvas/ab-tests`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ variantAId: formVarA, variantBId: formVarB, trafficSplitPct: formSplit, metric: formMetric }),
+        body: JSON.stringify({
+          variantAId: formVarA,
+          variantBId: formVarB,
+          trafficSplitPct: formSplit,
+          metric: formMetric,
+        }),
       });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
@@ -771,7 +821,9 @@ function AbTestsPanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ winnerId: winnerId ?? null }),
       });
-      setTests((prev) => prev.map((t) => (t.id === testId ? { ...t, status: "ended" as const } : t)));
+      setTests((prev) =>
+        prev.map((t) => (t.id === testId ? { ...t, status: "ended" as const } : t)),
+      );
     } catch {
       /* non-fatal */
     }
@@ -794,7 +846,9 @@ function AbTestsPanel({
       <div className="shrink-0 border-b border-border bg-card px-4 py-2 flex items-center gap-2">
         <FlaskConical className="h-4 w-4 text-amber-400" />
         <span className="text-sm font-medium text-foreground">Live A/B Tests</span>
-        <span className="text-xs text-muted-foreground ml-1">— traffic-split between two variants</span>
+        <span className="text-xs text-muted-foreground ml-1">
+          — traffic-split between two variants
+        </span>
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => void loadTests()}>
             <RefreshCw className="h-3.5 w-3.5" />
@@ -820,7 +874,9 @@ function AbTestsPanel({
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Variant A</label>
+              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                Variant A
+              </label>
               <select
                 className="w-full h-8 rounded border border-border bg-background text-xs px-2"
                 value={formVarA}
@@ -828,12 +884,16 @@ function AbTestsPanel({
               >
                 <option value="">Select…</option>
                 {readyVariants.map((v) => (
-                  <option key={v.id} value={v.id}>{v.label}</option>
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Variant B</label>
+              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                Variant B
+              </label>
               <select
                 className="w-full h-8 rounded border border-border bg-background text-xs px-2"
                 value={formVarB}
@@ -841,7 +901,9 @@ function AbTestsPanel({
               >
                 <option value="">Select…</option>
                 {readyVariants.map((v) => (
-                  <option key={v.id} value={v.id}>{v.label}</option>
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -862,7 +924,9 @@ function AbTestsPanel({
               />
             </div>
             <div>
-              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Metric</label>
+              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                Metric
+              </label>
               <select
                 className="w-full h-8 rounded border border-border bg-background text-xs px-2"
                 value={formMetric}
@@ -875,7 +939,9 @@ function AbTestsPanel({
             </div>
           </div>
           <div className="flex justify-end gap-2">
-            <Button size="sm" variant="ghost" className="h-7" onClick={() => setFormOpen(false)}>Cancel</Button>
+            <Button size="sm" variant="ghost" className="h-7" onClick={() => setFormOpen(false)}>
+              Cancel
+            </Button>
             <Button
               size="sm"
               className="h-7"
@@ -899,10 +965,13 @@ function AbTestsPanel({
             </div>
             <div className="text-sm font-medium text-foreground">No A/B tests yet</div>
             <p className="text-xs text-muted-foreground max-w-xs mx-auto leading-relaxed">
-              Create a test to traffic-split between two ready variants. Share the test URL — visitors are randomly assigned and tracked.
+              Create a test to traffic-split between two ready variants. Share the test URL —
+              visitors are randomly assigned and tracked.
             </p>
             {readyVariants.length < 2 && (
-              <p className="text-xs text-amber-400">You need at least 2 ready variants to start a test.</p>
+              <p className="text-xs text-amber-400">
+                You need at least 2 ready variants to start a test.
+              </p>
             )}
           </div>
         )}
@@ -940,25 +1009,40 @@ function AbTestsPanel({
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div className="space-y-0.5">
                     <div className="text-[10px] font-semibold text-violet-400">
-                      {getVariantLabel(test.variantAId)} {test.winnerId === test.variantAId && "✓ WINNER"}
+                      {getVariantLabel(test.variantAId)}{" "}
+                      {test.winnerId === test.variantAId && "✓ WINNER"}
                     </div>
                     <div className="text-muted-foreground flex gap-2">
-                      <span><Eye className="inline h-3 w-3 mr-0.5" />{test.viewsA}</span>
-                      <span><BarChart2 className="inline h-3 w-3 mr-0.5" />{winRate(test.conversionsA, test.viewsA)}</span>
+                      <span>
+                        <Eye className="inline h-3 w-3 mr-0.5" />
+                        {test.viewsA}
+                      </span>
+                      <span>
+                        <BarChart2 className="inline h-3 w-3 mr-0.5" />
+                        {winRate(test.conversionsA, test.viewsA)}
+                      </span>
                     </div>
                   </div>
                   <div className="space-y-0.5">
                     <div className="text-[10px] font-semibold text-blue-400">
-                      {getVariantLabel(test.variantBId)} {test.winnerId === test.variantBId && "✓ WINNER"}
+                      {getVariantLabel(test.variantBId)}{" "}
+                      {test.winnerId === test.variantBId && "✓ WINNER"}
                     </div>
                     <div className="text-muted-foreground flex gap-2">
-                      <span><Eye className="inline h-3 w-3 mr-0.5" />{test.viewsB}</span>
-                      <span><BarChart2 className="inline h-3 w-3 mr-0.5" />{winRate(test.conversionsB, test.viewsB)}</span>
+                      <span>
+                        <Eye className="inline h-3 w-3 mr-0.5" />
+                        {test.viewsB}
+                      </span>
+                      <span>
+                        <BarChart2 className="inline h-3 w-3 mr-0.5" />
+                        {winRate(test.conversionsB, test.viewsB)}
+                      </span>
                     </div>
                   </div>
                 </div>
                 <div className="text-[10px] text-muted-foreground">
-                  {totalViews} total view{totalViews !== 1 ? "s" : ""} · {totalConversions} conversion{totalConversions !== 1 ? "s" : ""}
+                  {totalViews} total view{totalViews !== 1 ? "s" : ""} · {totalConversions}{" "}
+                  conversion{totalConversions !== 1 ? "s" : ""}
                 </div>
                 {/* Actions */}
                 <div className="flex gap-2 pt-1">
@@ -969,9 +1053,13 @@ function AbTestsPanel({
                     onClick={() => void copyTestUrl(test)}
                   >
                     {copiedTestId === test.id ? (
-                      <><Check className="h-3 w-3 mr-1" /> Copied!</>
+                      <>
+                        <Check className="h-3 w-3 mr-1" /> Copied!
+                      </>
                     ) : (
-                      <><Copy className="h-3 w-3 mr-1" /> Copy test URL</>
+                      <>
+                        <Copy className="h-3 w-3 mr-1" /> Copy test URL
+                      </>
                     )}
                   </Button>
                   {isRunning && (
@@ -1129,7 +1217,12 @@ function VariantsMode({ projectId }: { projectId: number }) {
   };
 
   const graduate = async (v: CanvasVariant) => {
-    if (!confirm(`Merge "${v.label}" into the main app? A pre-graduation snapshot will be saved so you can roll back.`)) return;
+    if (
+      !confirm(
+        `Merge "${v.label}" into the main app? A pre-graduation snapshot will be saved so you can roll back.`,
+      )
+    )
+      return;
     try {
       const res = await fetch(`/api/projects/${projectId}/canvas/variants/${v.id}/graduate`, {
         method: "POST",
@@ -1141,7 +1234,9 @@ function VariantsMode({ projectId }: { projectId: number }) {
         throw new Error(j.error ?? `Graduate failed (${res.status})`);
       }
       const json = (await res.json()) as { inserted: number; updated: number };
-      alert(`Merged ${json.inserted + json.updated} file(s) into the main app. Open the Preview tab to see the result.`);
+      alert(
+        `Merged ${json.inserted + json.updated} file(s) into the main app. Open the Preview tab to see the result.`,
+      );
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     }
@@ -1192,20 +1287,28 @@ function VariantsMode({ projectId }: { projectId: number }) {
       const fullUrl = `${window.location.origin}${json.shareUrl}`;
       await navigator.clipboard.writeText(fullUrl).catch(() => {});
       alert(`Share link copied to clipboard:\n${fullUrl}`);
-      setVariants((prev) => prev.map((x) => (x.id === v.id ? { ...x, hasShareToken: true, shareUrl: json.shareUrl } : x)));
+      setVariants((prev) =>
+        prev.map((x) =>
+          x.id === v.id ? { ...x, hasShareToken: true, shareUrl: json.shareUrl } : x,
+        ),
+      );
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     }
   };
 
   const saveToLibrary = async (v: CanvasVariant) => {
-    const labelInput = window.prompt(`Library label for "${v.label}" (or press OK to keep same label):`) ?? "";
+    const labelInput =
+      window.prompt(`Library label for "${v.label}" (or press OK to keep same label):`) ?? "";
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/variants/${v.id}/save-to-library`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ label: labelInput.trim() || undefined }),
-      });
+      const res = await fetch(
+        `/api/projects/${projectId}/canvas/variants/${v.id}/save-to-library`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ label: labelInput.trim() || undefined }),
+        },
+      );
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(j.error ?? `Save failed (${res.status})`);
@@ -1301,7 +1404,9 @@ function VariantsMode({ projectId }: { projectId: number }) {
             onClick={() => setShowLineage((v) => !v)}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ml-auto mb-0",
-              showLineage ? "border-violet-500 text-violet-400" : "border-transparent text-muted-foreground hover:text-foreground",
+              showLineage
+                ? "border-violet-500 text-violet-400"
+                : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
             <GitBranch className="h-3.5 w-3.5" /> Tree
@@ -1319,7 +1424,10 @@ function VariantsMode({ projectId }: { projectId: number }) {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); explore(); }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  explore();
+                }
               }}
               disabled={exploring}
             />
@@ -1332,15 +1440,26 @@ function VariantsMode({ projectId }: { projectId: number }) {
                 disabled={exploring}
               >
                 {[2, 3, 4, 5, 6, 7, 8].map((n) => (
-                  <option key={n} value={n}>{n}</option>
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
                 ))}
               </select>
             </div>
-            <Button size="sm" className="h-8 shrink-0" onClick={explore} disabled={exploring || !prompt.trim()}>
+            <Button
+              size="sm"
+              className="h-8 shrink-0"
+              onClick={explore}
+              disabled={exploring || !prompt.trim()}
+            >
               {exploring ? (
-                <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Exploring…</>
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Exploring…
+                </>
               ) : (
-                <><Sparkles className="h-3.5 w-3.5 mr-1.5" /> Explore</>
+                <>
+                  <Sparkles className="h-3.5 w-3.5 mr-1.5" /> Explore
+                </>
               )}
             </Button>
             <Button
@@ -1357,7 +1476,12 @@ function VariantsMode({ projectId }: { projectId: number }) {
             <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-2 py-1.5">
               <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <span className="flex-1">{errorMsg}</span>
-              <button onClick={() => setErrorMsg(null)} className="text-red-400 hover:text-red-300 text-[11px]">dismiss</button>
+              <button
+                onClick={() => setErrorMsg(null)}
+                className="text-red-400 hover:text-red-300 text-[11px]"
+              >
+                dismiss
+              </button>
             </div>
           )}
           {diffSelection.length > 0 && (
@@ -1369,18 +1493,28 @@ function VariantsMode({ projectId }: { projectId: number }) {
                   : `Comparing ${diffSelection.length} variants`}
               </span>
               {diffSelection.length === 2 && (
-                <Button size="sm" variant="default" className="h-6 text-xs ml-2 bg-violet-600 hover:bg-violet-500" onClick={() => setSubMode("diff")}>
+                <Button
+                  size="sm"
+                  variant="default"
+                  className="h-6 text-xs ml-2 bg-violet-600 hover:bg-violet-500"
+                  onClick={() => setSubMode("diff")}
+                >
                   View diff
                 </Button>
               )}
-              <button onClick={() => setDiffSelection([])} className="ml-auto text-violet-400 hover:text-violet-300">
+              <button
+                onClick={() => setDiffSelection([])}
+                className="ml-auto text-violet-400 hover:text-violet-300"
+              >
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
           )}
           {extractOpen && (
             <div className="rounded-md border border-border bg-muted/30 p-2 space-y-2">
-              <div className="text-[11px] font-semibold text-foreground">Extract files from main app</div>
+              <div className="text-[11px] font-semibold text-foreground">
+                Extract files from main app
+              </div>
               <Input
                 placeholder="Label (optional)"
                 className="h-7 text-xs"
@@ -1389,21 +1523,47 @@ function VariantsMode({ projectId }: { projectId: number }) {
               />
               <div className="max-h-40 overflow-y-auto border border-border rounded-md bg-background">
                 {(files ?? []).map((f) => (
-                  <label key={f.id} className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-muted cursor-pointer border-b border-border last:border-b-0">
-                    <input type="checkbox" checked={extractPaths.has(f.path)} onChange={() => togglePath(f.path)} />
+                  <label
+                    key={f.id}
+                    className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-muted cursor-pointer border-b border-border last:border-b-0"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={extractPaths.has(f.path)}
+                      onChange={() => togglePath(f.path)}
+                    />
                     <span className="font-mono truncate">{f.path}</span>
                   </label>
                 ))}
                 {(files?.length ?? 0) === 0 && (
-                  <div className="text-xs text-muted-foreground italic p-2">No files in this project yet.</div>
+                  <div className="text-xs text-muted-foreground italic p-2">
+                    No files in this project yet.
+                  </div>
                 )}
               </div>
               <div className="flex justify-end gap-2">
-                <Button size="sm" variant="ghost" className="h-7" onClick={() => { setExtractOpen(false); setExtractPaths(new Set()); }}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7"
+                  onClick={() => {
+                    setExtractOpen(false);
+                    setExtractPaths(new Set());
+                  }}
+                >
                   Cancel
                 </Button>
-                <Button size="sm" className="h-7" onClick={runExtract} disabled={extracting || extractPaths.size === 0}>
-                  {extracting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <>Extract {extractPaths.size > 0 ? `(${extractPaths.size})` : ""}</>}
+                <Button
+                  size="sm"
+                  className="h-7"
+                  onClick={runExtract}
+                  disabled={extracting || extractPaths.size === 0}
+                >
+                  {extracting ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <>Extract {extractPaths.size > 0 ? `(${extractPaths.size})` : ""}</>
+                  )}
                 </Button>
               </div>
             </div>
@@ -1419,7 +1579,10 @@ function VariantsMode({ projectId }: { projectId: number }) {
             variants={variants}
             onSelect={(id) => {
               const v = variants.find((x) => x.id === id);
-              if (v) document.getElementById(`variant-tile-${id}`)?.scrollIntoView({ behavior: "smooth" });
+              if (v)
+                document
+                  .getElementById(`variant-tile-${id}`)
+                  ?.scrollIntoView({ behavior: "smooth" });
             }}
           />
         )}
@@ -1428,7 +1591,9 @@ function VariantsMode({ projectId }: { projectId: number }) {
         {subMode === "grid" && (
           <div className="flex-1 min-h-0 overflow-y-auto p-4 bg-muted/10">
             {loading ? (
-              <div className="text-xs text-muted-foreground text-center py-12">Loading variants…</div>
+              <div className="text-xs text-muted-foreground text-center py-12">
+                Loading variants…
+              </div>
             ) : variants.length === 0 ? (
               <div className="max-w-md mx-auto text-center py-12 space-y-3">
                 <div className="w-14 h-14 mx-auto rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
@@ -1436,11 +1601,20 @@ function VariantsMode({ projectId }: { projectId: number }) {
                 </div>
                 <div className="text-sm font-semibold text-foreground">No variants yet</div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Type a design exploration above and click Explore. The AI will generate up to 8 self-contained variants in parallel — each with a distinct visual direction — so you can compare side-by-side. Select any two and click Diff to see exactly what changed.
+                  Type a design exploration above and click Explore. The AI will generate up to 8
+                  self-contained variants in parallel — each with a distinct visual direction — so
+                  you can compare side-by-side. Select any two and click Diff to see exactly what
+                  changed.
                 </p>
               </div>
             ) : (
-              <div className={cn("grid gap-4", gridColsClass(variants.length), gridRowHeightClass(variants.length))}>
+              <div
+                className={cn(
+                  "grid gap-4",
+                  gridColsClass(variants.length),
+                  gridRowHeightClass(variants.length),
+                )}
+              >
                 {variants.map((v) => (
                   <div key={v.id} id={`variant-tile-${v.id}`}>
                     <VariantTile
@@ -1467,9 +1641,12 @@ function VariantsMode({ projectId }: { projectId: number }) {
             {diffSelection.length < 2 ? (
               <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
                 <Diff className="h-10 w-10 text-violet-400/50" />
-                <div className="text-sm font-medium text-foreground">No variants selected for comparison</div>
+                <div className="text-sm font-medium text-foreground">
+                  No variants selected for comparison
+                </div>
                 <p className="text-xs text-muted-foreground max-w-xs">
-                  Switch to the Grid tab and click the diff icon on two ready variants to compare them here.
+                  Switch to the Grid tab and click the diff icon on two ready variants to compare
+                  them here.
                 </p>
                 <Button size="sm" variant="outline" onClick={() => setSubMode("grid")}>
                   Go to Grid
@@ -1480,7 +1657,10 @@ function VariantsMode({ projectId }: { projectId: number }) {
                 projectId={projectId}
                 selectedIds={[diffSelection[0]!, diffSelection[1]!]}
                 variants={variants}
-                onClear={() => { setDiffSelection([]); setSubMode("grid"); }}
+                onClear={() => {
+                  setDiffSelection([]);
+                  setSubMode("grid");
+                }}
               />
             )}
           </div>
@@ -1552,9 +1732,14 @@ export function CanvasTab({ projectId }: { projectId: number }) {
       `- brand/preview.html (brand board showing all assets, colors, and typography using Tailwind CDN)`,
       `Use only SVG primitives (rect, circle, path, text) — no external images or fonts.`,
       `Make it professional, scalable, and distinctive for the ${industry || "tech"} industry.`,
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
     sendMessage.mutate(
-      { id: projectId, data: { content: brandPrompt, agentMode: "power", planMode: false, background: false } },
+      {
+        id: projectId,
+        data: { content: brandPrompt, agentMode: "power", planMode: false, background: false },
+      },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
@@ -1575,7 +1760,10 @@ Update index.html to import brand/brand.css and use the CSS custom properties (-
 Ensure headings use --brand-font-heading, body text uses --brand-font-body, and primary actions use --brand-primary color.
 The app should feel visually consistent with the brand identity shown in brand/preview.html.`;
     sendMessage.mutate(
-      { id: projectId, data: { content: applyPrompt, agentMode: "power", planMode: false, background: false } },
+      {
+        id: projectId,
+        data: { content: applyPrompt, agentMode: "power", planMode: false, background: false },
+      },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
@@ -1592,7 +1780,12 @@ The app should feel visually consistent with the brand identity shown in brand/p
     sendMessage.mutate(
       {
         id: projectId,
-        data: { content: `Design change request: ${designPrompt}`, agentMode: "power", planMode: false, background: false },
+        data: {
+          content: `Design change request: ${designPrompt}`,
+          agentMode: "power",
+          planMode: false,
+          background: false,
+        },
       },
       {
         onSuccess: () => {
@@ -1613,7 +1806,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
             onClick={() => setMode("design")}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-              mode === "design" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              mode === "design"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             <Monitor className="h-3.5 w-3.5" /> Design
@@ -1622,7 +1817,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
             onClick={() => setMode("variants")}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-              mode === "variants" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              mode === "variants"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             <Grid3x3 className="h-3.5 w-3.5" /> Variants
@@ -1631,7 +1828,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
             onClick={() => setMode("brand-studio")}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-              mode === "brand-studio" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              mode === "brand-studio"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             <Sparkles className="h-3.5 w-3.5" /> Brand Studio
@@ -1653,10 +1852,15 @@ The app should feel visually consistent with the brand identity shown in brand/p
       {mode === "design" && (
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <div className="w-44 border-r border-border bg-card p-3 space-y-3 shrink-0">
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Screens</div>
+            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+              Screens
+            </div>
             <div className="space-y-0.5">
               {(files?.filter((f) => f.path.endsWith(".html")).slice(0, 8) ?? []).map((f) => (
-                <div key={f.id} className="px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted rounded-md cursor-pointer truncate">
+                <div
+                  key={f.id}
+                  className="px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted rounded-md cursor-pointer truncate"
+                >
                   {f.path.replace(".html", "")}
                 </div>
               ))}
@@ -1672,19 +1876,29 @@ The app should feel visually consistent with the brand identity shown in brand/p
                 className="flex-1 h-8 text-sm"
                 value={designPrompt}
                 onChange={(e) => setDesignPrompt(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") generateDesignVariant(); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") generateDesignVariant();
+                }}
               />
-              <Button size="sm" className="h-8 shrink-0" onClick={generateDesignVariant} disabled={sendMessage.isPending || !designPrompt.trim()}>
+              <Button
+                size="sm"
+                className="h-8 shrink-0"
+                onClick={generateDesignVariant}
+                disabled={sendMessage.isPending || !designPrompt.trim()}
+              >
                 {sendMessage.isPending ? (
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <><Paintbrush className="h-3.5 w-3.5 mr-1.5" /> Generate</>
+                  <>
+                    <Paintbrush className="h-3.5 w-3.5 mr-1.5" /> Generate
+                  </>
                 )}
               </Button>
             </div>
             <div className="flex-1 p-4 bg-muted/20 overflow-y-auto">
               <div className="text-xs text-muted-foreground text-center py-12">
-                Describe a design change above to generate variants of your app. The AI will modify your files and show changes in the Preview tab.
+                Describe a design change above to generate variants of your app. The AI will modify
+                your files and show changes in the Preview tab.
               </div>
             </div>
             <div className="p-3 border-t border-border bg-card flex justify-end shrink-0">
@@ -1708,25 +1922,55 @@ The app should feel visually consistent with the brand identity shown in brand/p
                 <div className="text-xs font-semibold text-foreground mb-3">Brand Details</div>
                 <div className="space-y-3">
                   <div>
-                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Brand Name *</label>
-                    <Input placeholder="e.g. SwiftRide" className="h-8 text-sm" value={brandName} onChange={(e) => setBrandName(e.target.value)} />
+                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                      Brand Name *
+                    </label>
+                    <Input
+                      placeholder="e.g. SwiftRide"
+                      className="h-8 text-sm"
+                      value={brandName}
+                      onChange={(e) => setBrandName(e.target.value)}
+                    />
                   </div>
                   <div>
-                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Tagline</label>
-                    <Input placeholder="e.g. Get there faster" className="h-8 text-sm" value={tagline} onChange={(e) => setTagline(e.target.value)} />
+                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                      Tagline
+                    </label>
+                    <Input
+                      placeholder="e.g. Get there faster"
+                      className="h-8 text-sm"
+                      value={tagline}
+                      onChange={(e) => setTagline(e.target.value)}
+                    />
                   </div>
                   <div>
-                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Industry</label>
-                    <Input placeholder="e.g. Ride-hailing, Healthcare..." className="h-8 text-sm" value={industry} onChange={(e) => setIndustry(e.target.value)} />
+                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                      Industry
+                    </label>
+                    <Input
+                      placeholder="e.g. Ride-hailing, Healthcare..."
+                      className="h-8 text-sm"
+                      value={industry}
+                      onChange={(e) => setIndustry(e.target.value)}
+                    />
                   </div>
                   <div>
-                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">Color Hint</label>
-                    <Input placeholder="e.g. Deep purple, Electric blue..." className="h-8 text-sm" value={colorHint} onChange={(e) => setColorHint(e.target.value)} />
+                    <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide block mb-1">
+                      Color Hint
+                    </label>
+                    <Input
+                      placeholder="e.g. Deep purple, Electric blue..."
+                      className="h-8 text-sm"
+                      value={colorHint}
+                      onChange={(e) => setColorHint(e.target.value)}
+                    />
                   </div>
                 </div>
               </div>
               <div>
-                <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">Style Direction</div>
+                <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                  Style Direction
+                </div>
                 <div className="grid grid-cols-2 gap-1.5">
                   {STYLE_OPTIONS.map((opt) => (
                     <button
@@ -1746,35 +1990,68 @@ The app should feel visually consistent with the brand identity shown in brand/p
                 </div>
               </div>
               <div className="space-y-2 pt-1">
-                <Button className="w-full h-9" onClick={generateBrandKit} disabled={!brandName.trim() || generating || sendMessage.isPending}>
+                <Button
+                  className="w-full h-9"
+                  onClick={generateBrandKit}
+                  disabled={!brandName.trim() || generating || sendMessage.isPending}
+                >
                   {generating || sendMessage.isPending ? (
-                    <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Generating…</>
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Generating…
+                    </>
                   ) : (
-                    <><Wand2 className="h-3.5 w-3.5 mr-1.5" /> Generate Brand Kit</>
+                    <>
+                      <Wand2 className="h-3.5 w-3.5 mr-1.5" /> Generate Brand Kit
+                    </>
                   )}
                 </Button>
                 {hasBrandFiles && (
-                  <Button variant="secondary" className="w-full h-9" onClick={applyBrandToApp} disabled={applying || sendMessage.isPending}>
+                  <Button
+                    variant="secondary"
+                    className="w-full h-9"
+                    onClick={applyBrandToApp}
+                    disabled={applying || sendMessage.isPending}
+                  >
                     {applying ? (
-                      <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Applying…</>
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Applying…
+                      </>
                     ) : (
-                      <><Paintbrush className="h-3.5 w-3.5 mr-1.5" /> Apply Brand to App</>
+                      <>
+                        <Paintbrush className="h-3.5 w-3.5 mr-1.5" /> Apply Brand to App
+                      </>
                     )}
                   </Button>
                 )}
                 {hasBrandFiles && (
-                  <Button variant="outline" className="w-full h-9" onClick={() => setBrandIframeKey((k) => k + 1)}>
+                  <Button
+                    variant="outline"
+                    className="w-full h-9"
+                    onClick={() => setBrandIframeKey((k) => k + 1)}
+                  >
                     <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Refresh Preview
                   </Button>
                 )}
               </div>
               {hasBrandFiles && (
                 <div className="space-y-1 pt-1">
-                  <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">Generated Assets</div>
-                  {["brand/logo.svg", "brand/icon.svg", "brand/logo-reversed.svg", "brand/favicon.svg", "brand/brand.css", "brand/preview.html"]
+                  <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                    Generated Assets
+                  </div>
+                  {[
+                    "brand/logo.svg",
+                    "brand/icon.svg",
+                    "brand/logo-reversed.svg",
+                    "brand/favicon.svg",
+                    "brand/brand.css",
+                    "brand/preview.html",
+                  ]
                     .filter((path) => files?.some((f) => f.path === path))
                     .map((path) => (
-                      <div key={path} className="flex items-center gap-1.5 text-[11px] text-green-400">
+                      <div
+                        key={path}
+                        className="flex items-center gap-1.5 text-[11px] text-green-400"
+                      >
                         <Check className="h-3 w-3 shrink-0" />
                         <span className="font-mono">{path}</span>
                       </div>
@@ -1784,7 +2061,11 @@ The app should feel visually consistent with the brand identity shown in brand/p
             </div>
           </div>
           <div className="flex-1 flex flex-col min-h-0 p-4 bg-muted/20">
-            {hasBrandFiles ? <BrandPreview projectId={projectId} iframeKey={brandIframeKey} /> : <BrandEmptyState />}
+            {hasBrandFiles ? (
+              <BrandPreview projectId={projectId} iframeKey={brandIframeKey} />
+            ) : (
+              <BrandEmptyState />
+            )}
           </div>
         </div>
       )}

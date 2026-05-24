@@ -117,7 +117,9 @@ export function PlanDecomposeView({
                 <ListChecks className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <p className="text-sm font-medium text-foreground mb-1">Break this plan into steps</p>
+                <p className="text-sm font-medium text-foreground mb-1">
+                  Break this plan into steps
+                </p>
                 <p className="text-xs text-muted-foreground leading-relaxed">
                   The AI will split your plan into 3–6 ordered build steps. You can kick off each
                   step individually, review the result, and then continue to the next.
@@ -158,8 +160,8 @@ export function PlanDecomposeView({
               <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-muted/50">
                 <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 <span className="text-[11px] text-muted-foreground">
-                  {result.steps.length} steps · ~{Math.round(result.totalEstimatedSeconds / 60)} min total ·{" "}
-                  {result.summary}
+                  {result.steps.length} steps · ~{Math.round(result.totalEstimatedSeconds / 60)} min
+                  total · {result.summary}
                 </span>
               </div>
 
@@ -178,9 +180,7 @@ export function PlanDecomposeView({
                     key={step.stepNumber}
                     className={cn(
                       "border rounded-lg overflow-hidden transition-colors",
-                      isDone
-                        ? "border-green-500/30 bg-green-500/5"
-                        : "border-border",
+                      isDone ? "border-green-500/30 bg-green-500/5" : "border-border",
                     )}
                   >
                     <div
@@ -233,7 +233,9 @@ export function PlanDecomposeView({
                           )}
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] text-muted-foreground">{step.description}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {step.description}
+                          </span>
                           {step.estimatedSeconds > 0 && (
                             <span className="text-[9px] text-muted-foreground/50 shrink-0">
                               ~{step.estimatedSeconds}s

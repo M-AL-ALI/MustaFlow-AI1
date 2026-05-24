@@ -989,14 +989,21 @@ router.post("/admin/billing/refund", async (req, res): Promise<void> => {
             charge: matchingCharge.id,
             amount: refundAmountCents,
             reason: "requested_by_customer",
-            metadata: { adminRefund: "true", transactionId: String(transactionId), reason: reason ?? "" },
+            metadata: {
+              adminRefund: "true",
+              transactionId: String(transactionId),
+              reason: reason ?? "",
+            },
           });
           stripeRefundId = ref.id;
         }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "unknown";
-      logger.warn({ err: msg, transactionId }, "Stripe refund attempt failed — proceeding with credit reversal only");
+      logger.warn(
+        { err: msg, transactionId },
+        "Stripe refund attempt failed — proceeding with credit reversal only",
+      );
     }
   }
 

@@ -71,7 +71,9 @@ async function bwFlush(): Promise<void> {
 }
 
 // Flush every 30 seconds. `unref()` so the timer doesn't keep Node alive.
-setInterval(() => { void bwFlush(); }, 30_000).unref();
+setInterval(() => {
+  void bwFlush();
+}, 30_000).unref();
 
 type SnapshotFile = { path: string; content: string; mimeType?: string };
 

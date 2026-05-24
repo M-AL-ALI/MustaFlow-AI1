@@ -1,8 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import {
-  useListKnowledge,
-  getListKnowledgeQueryKey,
-} from "@workspace/api-client-react";
+import { useListKnowledge, getListKnowledgeQueryKey } from "@workspace/api-client-react";
 import type { KnowledgeEntry } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -265,8 +262,8 @@ function BrandProfileSection() {
 
       <div className="border border-border rounded-xl p-5 bg-card">
         <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
-          Teach MustaFlow your brand. Every new build will start with these colours, fonts, and
-          tone — no need to repeat yourself in every prompt.
+          Teach MustaFlow your brand. Every new build will start with these colours, fonts, and tone
+          — no need to repeat yourself in every prompt.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -392,7 +389,11 @@ export default function MemoryPage() {
     limit: 100,
   };
 
-  const { data: entries = [], isLoading, refetch } = useListKnowledge(params, {
+  const {
+    data: entries = [],
+    isLoading,
+    refetch,
+  } = useListKnowledge(params, {
     query: {
       queryKey: getListKnowledgeQueryKey(params),
     },
@@ -496,7 +497,11 @@ export default function MemoryPage() {
                 ) : (
                   <div className="space-y-2">
                     {styleEntries.map((entry) => (
-                      <StyleMemoryCard key={entry.id} entry={entry} onRated={() => void refetch()} />
+                      <StyleMemoryCard
+                        key={entry.id}
+                        entry={entry}
+                        onRated={() => void refetch()}
+                      />
                     ))}
                   </div>
                 )}

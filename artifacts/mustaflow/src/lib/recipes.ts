@@ -59,7 +59,8 @@ export const RECIPES: RecipeDefinition[] = [
   {
     id: "contact-form",
     title: "Contact Form",
-    description: "Add a professional contact form with name, email, message fields, and a success confirmation",
+    description:
+      "Add a professional contact form with name, email, message fields, and a success confirmation",
     icon: "Mail",
     category: "Forms & Capture",
     difficulty: "Easy",
@@ -93,7 +94,8 @@ export const RECIPES: RecipeDefinition[] = [
   {
     id: "stripe-checkout",
     title: "Stripe Checkout",
-    description: "Add a Stripe-powered payment button and checkout flow for selling products or services",
+    description:
+      "Add a Stripe-powered payment button and checkout flow for selling products or services",
     icon: "CreditCard",
     category: "Payments",
     difficulty: "Medium",
@@ -127,7 +129,8 @@ export const RECIPES: RecipeDefinition[] = [
   {
     id: "newsletter-signup",
     title: "Newsletter Signup",
-    description: "Add an email newsletter signup with a compelling offer and Mailchimp or Resend integration",
+    description:
+      "Add an email newsletter signup with a compelling offer and Mailchimp or Resend integration",
     icon: "Send",
     category: "Forms & Capture",
     difficulty: "Easy",
@@ -162,7 +165,8 @@ export const RECIPES: RecipeDefinition[] = [
   {
     id: "google-analytics",
     title: "Google Analytics",
-    description: "Add Google Analytics 4 tracking to measure visitors, traffic sources, and behavior",
+    description:
+      "Add Google Analytics 4 tracking to measure visitors, traffic sources, and behavior",
     icon: "BarChart3",
     category: "Analytics",
     difficulty: "Easy",
@@ -202,7 +206,8 @@ export const RECIPES: RecipeDefinition[] = [
   {
     id: "pricing-table",
     title: "Pricing Table",
-    description: "Add a beautiful 3-tier pricing section with monthly/annual toggle and feature comparison",
+    description:
+      "Add a beautiful 3-tier pricing section with monthly/annual toggle and feature comparison",
     icon: "DollarSign",
     category: "Marketing",
     difficulty: "Easy",
@@ -243,7 +248,8 @@ export const RECIPES: RecipeDefinition[] = [
   {
     id: "testimonials",
     title: "Testimonials Section",
-    description: "Add a social proof section with customer testimonials, star ratings, and company logos",
+    description:
+      "Add a social proof section with customer testimonials, star ratings, and company logos",
     icon: "Star",
     category: "Marketing",
     difficulty: "Easy",
@@ -301,7 +307,8 @@ export const RECIPES: RecipeDefinition[] = [
   {
     id: "hero-cta",
     title: "Hero with CTA",
-    description: "Add a compelling hero section with headline, subtext, and a primary call-to-action",
+    description:
+      "Add a compelling hero section with headline, subtext, and a primary call-to-action",
     icon: "Sparkles",
     category: "Marketing",
     difficulty: "Easy",
@@ -371,7 +378,8 @@ export const RECIPES: RecipeDefinition[] = [
   {
     id: "video-embed",
     title: "Video Embed",
-    description: "Add a YouTube or Vimeo video section with a thumbnail play button and responsive player",
+    description:
+      "Add a YouTube or Vimeo video section with a thumbnail play button and responsive player",
     icon: "Play",
     category: "Content",
     difficulty: "Easy",
@@ -532,7 +540,13 @@ export const RECIPES: RecipeDefinition[] = [
         label: "Show service area radius?",
         placeholder: "Choose one",
         type: "select",
-        options: ["No radius", "5 mile radius", "10 mile radius", "25 mile radius", "50 mile radius"],
+        options: [
+          "No radius",
+          "5 mile radius",
+          "10 mile radius",
+          "25 mile radius",
+          "50 mile radius",
+        ],
       },
       {
         key: "sectionTitle",

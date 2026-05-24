@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { SecretEntryEnvironment } from './secretEntryEnvironment';
+import type { SecretEntryMinRole } from './secretEntryMinRole';
 
 export interface SecretEntry {
   id: number;
@@ -18,5 +19,7 @@ export interface SecretEntry {
   category?: string | null;
   /** @nullable */
   envWarning?: string | null;
+  /** Minimum org role required to view the decrypted secret value */
+  minRole?: SecretEntryMinRole;
   createdAt: Date;
 }

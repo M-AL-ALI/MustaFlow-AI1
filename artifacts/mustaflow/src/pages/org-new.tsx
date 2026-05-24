@@ -29,10 +29,10 @@ export default function OrgNewPage() {
         }),
       });
       if (r.ok) {
-        const org = await r.json() as { id: number };
+        const org = (await r.json()) as { id: number };
         setLocation(`/orgs/${org.id}`);
       } else {
-        const d = await r.json() as { error?: string };
+        const d = (await r.json()) as { error?: string };
         setError(d.error ?? "Failed to create organization");
       }
     } finally {
@@ -43,7 +43,12 @@ export default function OrgNewPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-md mx-auto px-4 py-16 space-y-8">
-        <Button variant="ghost" size="sm" className="gap-2" onClick={() => setLocation("/projects")}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-2"
+          onClick={() => setLocation("/projects")}
+        >
           <ArrowLeft className="h-3.5 w-3.5" />
           Back
         </Button>
@@ -66,11 +71,15 @@ export default function OrgNewPage() {
               onChange={(e) => setName(e.target.value)}
               placeholder="Acme Inc."
               autoFocus
-              onKeyDown={(e) => { if (e.key === "Enter") void handleCreate(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleCreate();
+              }}
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Description <span className="text-muted-foreground">(optional)</span></Label>
+            <Label>
+              Description <span className="text-muted-foreground">(optional)</span>
+            </Label>
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -79,7 +88,9 @@ export default function OrgNewPage() {
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Billing email <span className="text-muted-foreground">(optional)</span></Label>
+            <Label>
+              Billing email <span className="text-muted-foreground">(optional)</span>
+            </Label>
             <Input
               value={billingEmail}
               onChange={(e) => setBillingEmail(e.target.value)}

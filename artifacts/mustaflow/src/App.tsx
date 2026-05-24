@@ -47,6 +47,9 @@ import UserProfilePage from "./pages/u";
 // Components
 import { AppLayout } from "./components/layout/app-layout";
 import { WorkspaceProvider } from "./contexts/workspace-context";
+import { OnboardingTour } from "./components/onboarding-tour";
+import { OfflineIndicator } from "./components/offline-indicator";
+import TrustPage from "./pages/trust";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -539,9 +542,18 @@ function ClerkProviderWithRoutes() {
                   <StatusPage />
                 </AppLayout>
               </Route>
+              <Route path="/trust">
+                <AppLayout>
+                  <TrustPage />
+                </AppLayout>
+              </Route>
 
               <Route component={NotFound} />
             </Switch>
+            <Show when="signed-in">
+              <OnboardingTour />
+            </Show>
+            <OfflineIndicator />
             <Toaster />
           </TooltipProvider>
         </WorkspaceProvider>

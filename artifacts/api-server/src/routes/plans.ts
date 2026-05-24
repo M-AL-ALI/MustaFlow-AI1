@@ -7,12 +7,7 @@
  */
 import { Router, type IRouter } from "express";
 import { desc, eq } from "drizzle-orm";
-import {
-  db,
-  planTemplatesTable,
-  chatMessagesTable,
-  projectsTable,
-} from "@workspace/db";
+import { db, planTemplatesTable, chatMessagesTable, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { runPlanDecomposePipeline, runGuidedRefinementPipeline } from "../lib/builder";
 import type { AgentMode } from "../lib/ai";
@@ -25,10 +20,7 @@ const router: IRouter = Router();
 // Public (post-auth) — returns all system plan templates ordered by sort_order.
 router.get("/plan-templates", async (_req, res): Promise<void> => {
   try {
-    const rows = await db
-      .select()
-      .from(planTemplatesTable)
-      .orderBy(planTemplatesTable.sortOrder);
+    const rows = await db.select().from(planTemplatesTable).orderBy(planTemplatesTable.sortOrder);
     res.json(rows);
   } catch (err) {
     logger.error({ err }, "Failed to list plan templates");
@@ -57,9 +49,7 @@ router.get(
           agentMode: chatMessagesTable.agentMode,
         })
         .from(chatMessagesTable)
-        .where(
-          eq(chatMessagesTable.projectId, projectId),
-        )
+        .where(eq(chatMessagesTable.projectId, projectId))
         .orderBy(desc(chatMessagesTable.createdAt));
 
       // Filter to only messages that have a plan

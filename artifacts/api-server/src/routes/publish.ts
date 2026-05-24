@@ -882,7 +882,11 @@ router.post(
     }
 
     const files = await db
-      .select({ path: projectFilesTable.path, content: projectFilesTable.content, mimeType: projectFilesTable.mimeType })
+      .select({
+        path: projectFilesTable.path,
+        content: projectFilesTable.content,
+        mimeType: projectFilesTable.mimeType,
+      })
       .from(projectFilesTable)
       .where(eq(projectFilesTable.projectId, projectId));
 
@@ -915,7 +919,12 @@ router.post(
     }
 
     // Use a hex slug so it cannot be guessed
-    const previewSlug = `${project.name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16) || "preview"}-lnk-${randomBytes(8).toString("hex")}`;
+    const previewSlug = `${
+      project.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .slice(0, 16) || "preview"
+    }-lnk-${randomBytes(8).toString("hex")}`;
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     const [snap] = await db

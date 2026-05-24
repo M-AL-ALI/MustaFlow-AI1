@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+
 import {
   Briefcase,
   UtensilsCrossed,
@@ -67,9 +67,7 @@ export function OnboardingWizard({ onUseTemplate, onSkip }: OnboardingWizardProp
   }
 
   const industry = ONBOARDING_INDUSTRIES.find((i) => i.id === selectedIndustry);
-  const recommendedTemplate = industry
-    ? TEMPLATES.find((t) => t.id === industry.templateId)
-    : null;
+  const recommendedTemplate = industry ? TEMPLATES.find((t) => t.id === industry.templateId) : null;
 
   function handleUseTemplate() {
     if (recommendedTemplate) {

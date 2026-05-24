@@ -372,6 +372,7 @@ export * from './secretAuditEntryAction';
 export * from './secretAuditEntryMetadata';
 export * from './secretEntry';
 export * from './secretEntryEnvironment';
+export * from './secretEntryMinRole';
 export * from './secretInput';
 export * from './secretInputEnvironment';
 export * from './secretVerifyResult';

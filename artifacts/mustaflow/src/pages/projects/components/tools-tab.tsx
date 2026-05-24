@@ -754,14 +754,45 @@ function ModuleLibrary({
   );
 }
 
+const SECRET_MIN_ROLE_LABELS: Record<string, string> = {
+  viewer: "All members",
+  member: "Members+",
+  admin: "Admins+",
+  owner: "Owner only",
+};
+
 function SecretRowWithAudit({
   secret,
   projectId,
 }: {
-  secret: { id: number; name: string; masked: string; verificationStatus?: string | null };
+  secret: {
+    id: number;
+    name: string;
+    masked: string;
+    verificationStatus?: string | null;
+    minRole?: string | null;
+  };
   projectId: number;
 }) {
+  const queryClient = useQueryClient();
   const [showAudit, setShowAudit] = useState(false);
+  const [savingRole, setSavingRole] = useState(false);
+
+  const handleMinRoleChange = async (newRole: string) => {
+    setSavingRole(true);
+    try {
+      await fetch(`/api/projects/${projectId}/secrets/${secret.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ minRole: newRole }),
+      });
+      queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
+    } catch {
+      // best-effort
+    } finally {
+      setSavingRole(false);
+    }
+  };
 
   return (
     <div>
@@ -771,6 +802,19 @@ function SecretRowWithAudit({
           <Lock className="h-3 w-3 shrink-0" />
           {secret.masked}
         </div>
+        <select
+          value={secret.minRole ?? "viewer"}
+          onChange={(e) => void handleMinRoleChange(e.target.value)}
+          disabled={savingRole}
+          title="Minimum role to view this secret"
+          className="text-[10px] bg-muted border border-border rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground focus:outline-none shrink-0 disabled:opacity-50"
+        >
+          {Object.entries(SECRET_MIN_ROLE_LABELS).map(([val, label]) => (
+            <option key={val} value={val}>
+              {label}
+            </option>
+          ))}
+        </select>
         <SecretVerifyButton
           secretId={secret.id}
           projectId={projectId}

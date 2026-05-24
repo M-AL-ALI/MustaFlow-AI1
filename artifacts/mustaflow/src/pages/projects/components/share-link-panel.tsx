@@ -1,19 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import {
-  Link2,
-  Plus,
-  Trash2,
-  Copy,
-  Check,
-  Loader2,
-  Eye,
-  Clock,
-  Shield,
-} from "lucide-react";
+import { Link2, Plus, Trash2, Copy, Check, Loader2, Eye, Clock, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
 
 interface ShareLink {
   id: number;
@@ -58,7 +47,7 @@ export function ShareLinkPanel({ projectId }: ShareLinkPanelProps) {
     setLoading(true);
     try {
       const r = await fetch(`/api/projects/${projectId}/share`);
-      if (r.ok) setLinks(await r.json() as ShareLink[]);
+      if (r.ok) setLinks((await r.json()) as ShareLink[]);
     } finally {
       setLoading(false);
     }
@@ -119,11 +108,7 @@ export function ShareLinkPanel({ projectId }: ShareLinkPanelProps) {
             Anyone with the link can view this project — but not edit it.
           </p>
         </div>
-        <Button
-          size="sm"
-          className="h-7 gap-1.5 text-xs"
-          onClick={() => setShowForm((s) => !s)}
-        >
+        <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setShowForm((s) => !s)}>
           <Plus className="h-3 w-3" />
           New link
         </Button>

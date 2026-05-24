@@ -6,6 +6,7 @@ import {
   secretAuditLogTable,
   projectFilesTable,
   projectsTable,
+  orgMembersTable,
   containerLogsTable,
   agentTasksTable,
   taskEventsTable,
@@ -17,7 +18,7 @@ import {
   CreateSecretParams,
   CreateSecretBody,
 } from "@workspace/api-zod";
-import { requireProjectOwnership } from "../lib/auth";
+import { requireProjectOwnership, requireProjectAccess } from "../lib/auth";
 import { encryptionService, maskValue } from "../lib/encryption";
 import { writeKnowledge } from "../lib/knowledge";
 import { restartContainerWithSecrets, execInContainer } from "../lib/container";
@@ -262,6 +263,57 @@ function detectEnvMismatch(secretEnv: string, requestedEnv: string | undefined):
   return null;
 }
 
+// ── Role-level enforcement ────────────────────────────────────────────────────
+// Maps min_role values (and org member roles) to privilege levels.
+// viewer=0 < member=1 < admin=2 < owner=3
+// editor is treated as member (same privilege) for backward compat.
+const ROLE_LEVELS: Record<string, number> = {
+  viewer: 0,
+  editor: 1,
+  member: 1,
+  admin: 2,
+  owner: 3,
+};
+
+function roleLevel(role: string): number {
+  return ROLE_LEVELS[role] ?? 0;
+}
+
+function callerCanSeeSecret(callerRole: string, secretMinRole: string | null): boolean {
+  return roleLevel(callerRole) >= roleLevel(secretMinRole ?? "viewer");
+}
+
+/**
+ * Resolve the caller's effective role for a project.
+ * - Project owner → "owner"
+ * - Org member → their org role
+ * - Otherwise → "viewer"
+ */
+async function getCallerProjectRole(userId: string, projectId: number): Promise<string> {
+  const [project] = await db
+    .select({ ownerId: projectsTable.ownerId, organizationId: projectsTable.organizationId })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId));
+
+  if (!project) return "viewer";
+  if (project.ownerId === userId) return "owner";
+
+  if (project.organizationId) {
+    const [member] = await db
+      .select({ role: orgMembersTable.role })
+      .from(orgMembersTable)
+      .where(
+        and(
+          eq(orgMembersTable.organizationId, project.organizationId),
+          eq(orgMembersTable.userId, userId),
+        ),
+      );
+    return member?.role ?? "viewer";
+  }
+
+  return "viewer";
+}
+
 function toEntry(row: Secret, contextEnv?: string) {
   const envWarning = detectEnvMismatch(row.environment, contextEnv);
   return {
@@ -272,6 +324,7 @@ function toEntry(row: Secret, contextEnv?: string) {
     environment: row.environment,
     category: row.category,
     verificationStatus: row.verificationStatus,
+    minRole: (row.minRole ?? "viewer") as "viewer" | "member" | "admin" | "owner",
     envWarning: envWarning ?? null,
     encryptionNote: encryptionService.isDevelopmentOnly
       ? "DEV: values stored without encryption. Do not use real production secrets."
@@ -306,19 +359,30 @@ async function writeAuditLog(opts: {
 
 const router: IRouter = Router();
 
-router.get("/projects/:id/secrets", requireProjectOwnership, async (req, res): Promise<void> => {
+// Secrets list uses requireProjectAccess("viewer") so org members can reach
+// the route; per-secret minRole filtering is applied inside the handler via
+// getCallerProjectRole + callerCanSeeSecret.
+router.get("/projects/:id/secrets", requireProjectAccess("viewer"), async (req, res): Promise<void> => {
   const params = ListSecretsParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
   const contextEnv = typeof req.query.env === "string" ? req.query.env : undefined;
+
+  // Resolve caller's effective role so we can filter secrets by minRole.
+  const callerRole = await getCallerProjectRole(req.userId!, params.data.id);
+
   const rows = await db
     .select()
     .from(secretsTable)
     .where(eq(secretsTable.projectId, params.data.id))
     .orderBy(desc(secretsTable.createdAt));
-  res.json(ListSecretsResponse.parse(rows.map((r) => toEntry(r, contextEnv))));
+
+  // Filter: only return secrets the caller has permission to see.
+  const visible = rows.filter((r) => callerCanSeeSecret(callerRole, r.minRole));
+
+  res.json(ListSecretsResponse.parse(visible.map((r) => toEntry(r, contextEnv))));
 });
 
 router.post("/projects/:id/secrets", requireProjectOwnership, async (req, res): Promise<void> => {
@@ -444,12 +508,14 @@ router.patch(
       environment?: string;
       category?: string;
       verificationStatus?: string;
+      minRole?: string;
     };
     const updates: Partial<{
       valueEncrypted: string;
       environment: string;
       category: string;
       verificationStatus: string;
+      minRole: string;
       updatedAt: ReturnType<typeof sql>;
     }> = { updatedAt: sql`now()` };
 
@@ -457,6 +523,9 @@ router.patch(
     if (body.environment) updates.environment = body.environment;
     if (body.category) updates.category = body.category;
     if (body.verificationStatus) updates.verificationStatus = body.verificationStatus;
+    if (body.minRole && ["viewer", "member", "admin", "owner"].includes(body.minRole)) {
+      updates.minRole = body.minRole;
+    }
 
     const [row] = await db
       .update(secretsTable)

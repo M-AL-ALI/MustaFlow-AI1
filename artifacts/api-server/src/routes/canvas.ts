@@ -232,7 +232,11 @@ function computeLineDiff(aText: string, bText: string): DiffLine[] {
   return result;
 }
 
-function summariseDiff(lines: DiffLine[]): { additions: number; deletions: number; changes: number } {
+function summariseDiff(lines: DiffLine[]): {
+  additions: number;
+  deletions: number;
+  changes: number;
+} {
   let additions = 0;
   let deletions = 0;
   for (const l of lines) {
@@ -518,7 +522,13 @@ router.post(
       /* non-fatal */
     });
 
-    res.json({ graduated: true, variantId: variant.id, inserted, updated, filesMerged: filesToMerge.length });
+    res.json({
+      graduated: true,
+      variantId: variant.id,
+      inserted,
+      updated,
+      filesMerged: filesToMerge.length,
+    });
   },
 );
 
@@ -550,8 +560,15 @@ router.post(
     const missing: string[] = [];
     for (const p of paths) {
       const r = byPath.get(p);
-      if (!r) { missing.push(p); continue; }
-      snapshot.push({ path: r.path, content: r.content, mimeType: r.mimeType || guessMime(r.path) });
+      if (!r) {
+        missing.push(p);
+        continue;
+      }
+      snapshot.push({
+        path: r.path,
+        content: r.content,
+        mimeType: r.mimeType || guessMime(r.path),
+      });
     }
     if (snapshot.length === 0) {
       res.status(404).json({ error: "None of the requested paths exist", missing });
@@ -561,7 +578,11 @@ router.post(
     if (!snapshot.some((f) => f.path === "index.html")) {
       const mainIndex = byPath.get("index.html");
       if (mainIndex) {
-        snapshot.push({ path: "index.html", content: mainIndex.content, mimeType: mainIndex.mimeType || "text/html" });
+        snapshot.push({
+          path: "index.html",
+          content: mainIndex.content,
+          mimeType: mainIndex.mimeType || "text/html",
+        });
       }
     }
 
@@ -614,9 +635,7 @@ router.post(
         ? body.label.trim().slice(0, 80)
         : `Fork of ${parent.label}`;
     const forkPrompt =
-      typeof body?.prompt === "string" && body.prompt.trim()
-        ? body.prompt.trim()
-        : parent.prompt;
+      typeof body?.prompt === "string" && body.prompt.trim() ? body.prompt.trim() : parent.prompt;
 
     const explorationId = crypto.randomUUID();
     const [forked] = await db
@@ -720,13 +739,20 @@ router.get(
       if (l.type !== "unchanged") {
         lineACounter += l.type === "removed" ? 1 : 0;
         lineBCounter += l.type === "added" ? 1 : 0;
-        compactLines.push({ ...l, lineA: l.type !== "added" ? lineACounter : undefined, lineB: l.type !== "removed" ? lineBCounter : undefined });
+        compactLines.push({
+          ...l,
+          lineA: l.type !== "added" ? lineACounter : undefined,
+          lineB: l.type !== "removed" ? lineBCounter : undefined,
+        });
       } else {
         lineACounter++;
         lineBCounter++;
       }
     }
-    void lineANum; void lineBNum; void lastChangedIdx; void CONTEXT;
+    void lineANum;
+    void lineBNum;
+    void lastChangedIdx;
+    void CONTEXT;
 
     res.json({
       variantA: { id: varA.id, label: varA.label },
@@ -778,56 +804,59 @@ router.post(
 
 // ── GET /api/canvas/share/:token/{*splat} ─────────────────────────────────────
 // Public (no auth) serve route for shared variants.
-router.get(
-  "/canvas/share/:token/{*splat}",
-  async (req, res): Promise<void> => {
-    const token = req.params.token;
-    const splat = req.params.splat;
-    const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
-    const filePath = raw === "" ? "index.html" : raw;
+router.get("/canvas/share/:token/{*splat}", async (req, res): Promise<void> => {
+  const token = req.params.token;
+  const splat = req.params.splat;
+  const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
+  const filePath = raw === "" ? "index.html" : raw;
 
-    const [row] = await db
-      .select()
-      .from(canvasVariantsTable)
-      .where(eq(canvasVariantsTable.shareToken, token));
+  const [row] = await db
+    .select()
+    .from(canvasVariantsTable)
+    .where(eq(canvasVariantsTable.shareToken, token));
 
-    if (!row) {
-      res.status(404).type("text/html").send(
+  if (!row) {
+    res
+      .status(404)
+      .type("text/html")
+      .send(
         `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Preview not found</h1><p>This shared preview link is invalid or has expired.</p></body></html>`,
       );
-      return;
-    }
-    if (row.status !== "ready" || !row.files) {
-      res.status(202).type("text/html").send(
+    return;
+  }
+  if (row.status !== "ready" || !row.files) {
+    res
+      .status(202)
+      .type("text/html")
+      .send(
         `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Not ready</h1><p>This variant is still generating.</p></body></html>`,
       );
-      return;
-    }
+    return;
+  }
 
-    const files = row.files;
-    let file = files.find((f) => f.path === filePath);
-    if (!file && filePath !== "index.html") file = files.find((f) => f.path === "index.html");
-    if (!file) {
-      res.status(404).type("text/html").send("<h1>File not found in variant snapshot</h1>");
-      return;
-    }
+  const files = row.files;
+  let file = files.find((f) => f.path === filePath);
+  if (!file && filePath !== "index.html") file = files.find((f) => f.path === "index.html");
+  if (!file) {
+    res.status(404).type("text/html").send("<h1>File not found in variant snapshot</h1>");
+    return;
+  }
 
-    const mime = file.mimeType || guessMime(file.path);
-    res.setHeader("Cache-Control", "no-store");
-    if (isBinaryMime(mime)) {
-      res.type(mime).send(Buffer.from(file.content, "base64"));
-      return;
-    }
-    if (mime === "text/html") {
-      // Inject a simple banner so viewers know this is a shared preview.
-      const banner = `<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#1e1b4b;color:#c4b5fd;font-family:system-ui;font-size:12px;padding:6px 16px;text-align:center;">Shared canvas variant preview — <strong>${row.label}</strong></div><div style="height:32px"></div>`;
-      const html = file.content.replace(/<body[^>]*>/i, (m) => `${m}${banner}`);
-      res.type("text/html").send(html);
-      return;
-    }
-    res.type(mime).send(file.content);
-  },
-);
+  const mime = file.mimeType || guessMime(file.path);
+  res.setHeader("Cache-Control", "no-store");
+  if (isBinaryMime(mime)) {
+    res.type(mime).send(Buffer.from(file.content, "base64"));
+    return;
+  }
+  if (mime === "text/html") {
+    // Inject a simple banner so viewers know this is a shared preview.
+    const banner = `<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#1e1b4b;color:#c4b5fd;font-family:system-ui;font-size:12px;padding:6px 16px;text-align:center;">Shared canvas variant preview — <strong>${row.label}</strong></div><div style="height:32px"></div>`;
+    const html = file.content.replace(/<body[^>]*>/i, (m) => `${m}${banner}`);
+    res.type("text/html").send(html);
+    return;
+  }
+  res.type(mime).send(file.content);
+});
 
 // ── Cross-project Variant Library ─────────────────────────────────────────────
 
@@ -894,54 +923,48 @@ router.post(
 );
 
 // GET /api/canvas/library — list user's library (all projects)
-router.get(
-  "/canvas/library",
-  async (req, res): Promise<void> => {
-    const auth = getAuth(req);
-    if (!auth.userId) {
-      res.status(401).json({ error: "Not authenticated" });
-      return;
-    }
+router.get("/canvas/library", async (req, res): Promise<void> => {
+  const auth = getAuth(req);
+  if (!auth.userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
 
-    const items = await db
-      .select()
-      .from(canvasVariantLibraryTable)
-      .where(eq(canvasVariantLibraryTable.userId, auth.userId))
-      .orderBy(desc(canvasVariantLibraryTable.createdAt));
+  const items = await db
+    .select()
+    .from(canvasVariantLibraryTable)
+    .where(eq(canvasVariantLibraryTable.userId, auth.userId))
+    .orderBy(desc(canvasVariantLibraryTable.createdAt));
 
-    res.json({
-      items: items.map((item) => ({
-        id: item.id,
-        label: item.label,
-        description: item.description,
-        fileCount: (item.files ?? []).length,
-        sourceProjectId: item.sourceProjectId,
-        sourceVariantId: item.sourceVariantId,
-        createdAt: item.createdAt.toISOString(),
-      })),
-    });
-  },
-);
+  res.json({
+    items: items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      description: item.description,
+      fileCount: (item.files ?? []).length,
+      sourceProjectId: item.sourceProjectId,
+      sourceVariantId: item.sourceVariantId,
+      createdAt: item.createdAt.toISOString(),
+    })),
+  });
+});
 
 // DELETE /api/canvas/library/:lid — delete a library item
-router.delete(
-  "/canvas/library/:lid",
-  async (req, res): Promise<void> => {
-    const auth = getAuth(req);
-    if (!auth.userId) {
-      res.status(401).json({ error: "Not authenticated" });
-      return;
-    }
+router.delete("/canvas/library/:lid", async (req, res): Promise<void> => {
+  const auth = getAuth(req);
+  if (!auth.userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
 
-    const lid = Number(req.params.lid);
-    await db
-      .delete(canvasVariantLibraryTable)
-      .where(
-        and(eq(canvasVariantLibraryTable.id, lid), eq(canvasVariantLibraryTable.userId, auth.userId)),
-      );
-    res.json({ deleted: true });
-  },
-);
+  const lid = Number(req.params.lid);
+  await db
+    .delete(canvasVariantLibraryTable)
+    .where(
+      and(eq(canvasVariantLibraryTable.id, lid), eq(canvasVariantLibraryTable.userId, auth.userId)),
+    );
+  res.json({ deleted: true });
+});
 
 // POST /api/projects/:id/canvas/library/:lid/import — import into project
 router.post(
@@ -961,7 +984,10 @@ router.post(
       .select()
       .from(canvasVariantLibraryTable)
       .where(
-        and(eq(canvasVariantLibraryTable.id, lid), eq(canvasVariantLibraryTable.userId, auth.userId)),
+        and(
+          eq(canvasVariantLibraryTable.id, lid),
+          eq(canvasVariantLibraryTable.userId, auth.userId),
+        ),
       );
     if (!item) {
       res.status(404).json({ error: "Library item not found" });
@@ -995,18 +1021,21 @@ router.post(
   requireProjectOwnership,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
-    const body = req.body as {
-      variantAId?: unknown;
-      variantBId?: unknown;
-      trafficSplitPct?: unknown;
-      metric?: unknown;
-    } | undefined;
+    const body = req.body as
+      | {
+          variantAId?: unknown;
+          variantBId?: unknown;
+          trafficSplitPct?: unknown;
+          metric?: unknown;
+        }
+      | undefined;
 
     const variantAId = typeof body?.variantAId === "number" ? body.variantAId : 0;
     const variantBId = typeof body?.variantBId === "number" ? body.variantBId : 0;
-    const trafficSplitPct = typeof body?.trafficSplitPct === "number"
-      ? Math.max(10, Math.min(90, Math.floor(body.trafficSplitPct)))
-      : 50;
+    const trafficSplitPct =
+      typeof body?.trafficSplitPct === "number"
+        ? Math.max(10, Math.min(90, Math.floor(body.trafficSplitPct)))
+        : 50;
     const metric = typeof body?.metric === "string" ? body.metric.slice(0, 50) : "clicks";
 
     if (!variantAId || !variantBId) {
@@ -1019,11 +1048,19 @@ router.post(
     }
 
     const [varA, varB] = await Promise.all([
-      db.select().from(canvasVariantsTable)
-        .where(and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, variantAId)))
+      db
+        .select()
+        .from(canvasVariantsTable)
+        .where(
+          and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, variantAId)),
+        )
         .then((r) => r[0]),
-      db.select().from(canvasVariantsTable)
-        .where(and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, variantBId)))
+      db
+        .select()
+        .from(canvasVariantsTable)
+        .where(
+          and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, variantBId)),
+        )
         .then((r) => r[0]),
     ]);
 
@@ -1122,31 +1159,28 @@ router.post(
 );
 
 // POST /api/canvas/ab-tests/:testId/convert — record a conversion (public)
-router.post(
-  "/canvas/ab-tests/:testId/convert",
-  async (req, res): Promise<void> => {
-    const testId = Number(req.params.testId);
-    const body = req.body as { variant?: unknown } | undefined;
-    const variant = body?.variant === "b" ? "b" : "a";
+router.post("/canvas/ab-tests/:testId/convert", async (req, res): Promise<void> => {
+  const testId = Number(req.params.testId);
+  const body = req.body as { variant?: unknown } | undefined;
+  const variant = body?.variant === "b" ? "b" : "a";
 
-    try {
-      if (variant === "a") {
-        await db
-          .update(canvasAbTestsTable)
-          .set({ conversionsA: sql`${canvasAbTestsTable.conversionsA} + 1` })
-          .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
-      } else {
-        await db
-          .update(canvasAbTestsTable)
-          .set({ conversionsB: sql`${canvasAbTestsTable.conversionsB} + 1` })
-          .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
-      }
-    } catch {
-      /* non-fatal */
+  try {
+    if (variant === "a") {
+      await db
+        .update(canvasAbTestsTable)
+        .set({ conversionsA: sql`${canvasAbTestsTable.conversionsA} + 1` })
+        .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
+    } else {
+      await db
+        .update(canvasAbTestsTable)
+        .set({ conversionsB: sql`${canvasAbTestsTable.conversionsB} + 1` })
+        .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
     }
-    res.json({ recorded: true });
-  },
-);
+  } catch {
+    /* non-fatal */
+  }
+  res.json({ recorded: true });
+});
 
 // ── GET /api/canvas/ab/:testId/{*splat} ──────────────────────────────────────
 // Public (no auth) traffic-split serve route. Uses a cookie to ensure each
@@ -1161,88 +1195,101 @@ function parseCookieValue(cookieHeader: string | undefined, name: string): strin
   return undefined;
 }
 
-router.get(
-  "/canvas/ab/:testId/{*splat}",
-  async (req, res): Promise<void> => {
-    const testId = Number(req.params.testId);
-    const splat = req.params.splat;
-    const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
-    const filePath = raw === "" ? "index.html" : raw;
+router.get("/canvas/ab/:testId/{*splat}", async (req, res): Promise<void> => {
+  const testId = Number(req.params.testId);
+  const splat = req.params.splat;
+  const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
+  const filePath = raw === "" ? "index.html" : raw;
 
-    const [test] = await db
-      .select()
-      .from(canvasAbTestsTable)
-      .where(eq(canvasAbTestsTable.id, testId));
+  const [test] = await db
+    .select()
+    .from(canvasAbTestsTable)
+    .where(eq(canvasAbTestsTable.id, testId));
 
-    if (!test) {
-      res.status(404).type("text/html").send(
+  if (!test) {
+    res
+      .status(404)
+      .type("text/html")
+      .send(
         `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">A/B Test not found</h1></body></html>`,
       );
-      return;
-    }
-    if (test.status !== "running") {
-      res.status(410).type("text/html").send(
+    return;
+  }
+  if (test.status !== "running") {
+    res
+      .status(410)
+      .type("text/html")
+      .send(
         `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Test ended</h1><p>This A/B test is no longer active.</p></body></html>`,
       );
-      return;
-    }
+    return;
+  }
 
-    // Determine which variant to serve: cookie → deterministic; first visit → random.
-    const cookieName = `mf_ab_${testId}`;
-    const cookieHeader = req.headers.cookie;
-    let assignedVariant = parseCookieValue(cookieHeader, cookieName) as "a" | "b" | undefined;
-    if (!assignedVariant || (assignedVariant !== "a" && assignedVariant !== "b")) {
-      const rand = Math.random() * 100;
-      assignedVariant = rand < test.trafficSplitPct ? "a" : "b";
-      res.setHeader("Set-Cookie", `${cookieName}=${assignedVariant}; Path=/; Max-Age=${7 * 24 * 3600}; SameSite=Lax`);
-    }
+  // Determine which variant to serve: cookie → deterministic; first visit → random.
+  const cookieName = `mf_ab_${testId}`;
+  const cookieHeader = req.headers.cookie;
+  let assignedVariant = parseCookieValue(cookieHeader, cookieName) as "a" | "b" | undefined;
+  if (!assignedVariant || (assignedVariant !== "a" && assignedVariant !== "b")) {
+    const rand = Math.random() * 100;
+    assignedVariant = rand < test.trafficSplitPct ? "a" : "b";
+    res.setHeader(
+      "Set-Cookie",
+      `${cookieName}=${assignedVariant}; Path=/; Max-Age=${7 * 24 * 3600}; SameSite=Lax`,
+    );
+  }
 
-    const variantId = assignedVariant === "a" ? test.variantAId : test.variantBId;
+  const variantId = assignedVariant === "a" ? test.variantAId : test.variantBId;
 
-    // Record view (best-effort, non-blocking)
-    setImmediate(() => {
-      const updateSet = assignedVariant === "a"
+  // Record view (best-effort, non-blocking)
+  setImmediate(() => {
+    const updateSet =
+      assignedVariant === "a"
         ? { viewsA: sql`${canvasAbTestsTable.viewsA} + 1` }
         : { viewsB: sql`${canvasAbTestsTable.viewsB} + 1` };
-      db.update(canvasAbTestsTable).set(updateSet).where(eq(canvasAbTestsTable.id, testId)).catch(() => {});
-    });
+    db.update(canvasAbTestsTable)
+      .set(updateSet)
+      .where(eq(canvasAbTestsTable.id, testId))
+      .catch(() => {});
+  });
 
-    const [row] = await db
-      .select()
-      .from(canvasVariantsTable)
-      .where(eq(canvasVariantsTable.id, variantId));
+  const [row] = await db
+    .select()
+    .from(canvasVariantsTable)
+    .where(eq(canvasVariantsTable.id, variantId));
 
-    if (!row || row.status !== "ready" || !row.files) {
-      res.status(503).type("text/html").send(
+  if (!row || row.status !== "ready" || !row.files) {
+    res
+      .status(503)
+      .type("text/html")
+      .send(
         `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Variant not available</h1></body></html>`,
       );
-      return;
-    }
+    return;
+  }
 
-    const files = row.files;
-    let file = files.find((f) => f.path === filePath);
-    if (!file && filePath !== "index.html") file = files.find((f) => f.path === "index.html");
-    if (!file) {
-      res.status(404).type("text/html").send("<h1>File not found</h1>");
-      return;
-    }
+  const files = row.files;
+  let file = files.find((f) => f.path === filePath);
+  if (!file && filePath !== "index.html") file = files.find((f) => f.path === "index.html");
+  if (!file) {
+    res.status(404).type("text/html").send("<h1>File not found</h1>");
+    return;
+  }
 
-    const mime = file.mimeType || guessMime(file.path);
-    res.setHeader("Cache-Control", "no-store");
-    if (isBinaryMime(mime)) {
-      res.type(mime).send(Buffer.from(file.content, "base64"));
-      return;
-    }
-    if (mime === "text/html") {
-      // Inject conversion tracking script into served HTML.
-      const convScript = `<script>(function(){var t=${testId},v="${assignedVariant}";try{fetch('/api/canvas/ab-tests/'+t+'/convert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:v})});}catch(_){}})();</script>`;
-      const html = file.content.replace("</body>", `${convScript}</body>`);
-      res.type("text/html").send(html);
-      return;
-    }
-    res.type(mime).send(file.content);
-  },
-);
+  const mime = file.mimeType || guessMime(file.path);
+  res.setHeader("Cache-Control", "no-store");
+  if (isBinaryMime(mime)) {
+    res.type(mime).send(Buffer.from(file.content, "base64"));
+    return;
+  }
+  if (mime === "text/html") {
+    // Inject conversion tracking script into served HTML.
+    const convScript = `<script>(function(){var t=${testId},v="${assignedVariant}";try{fetch('/api/canvas/ab-tests/'+t+'/convert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:v})});}catch(_){}})();</script>`;
+    const html = file.content.replace("</body>", `${convScript}</body>`);
+    res.type("text/html").send(html);
+    return;
+  }
+  res.type(mime).send(file.content);
+});
 
 // ── Public canvas router (no auth required) ───────────────────────────────────
 // Mounted before the auth wall in routes/index.ts.
@@ -1256,160 +1303,211 @@ export const publicCanvasRouter: IRouter = Router();
 // We re-register them on publicCanvasRouter so they are reachable
 // before the Clerk auth wall.
 
-publicCanvasRouter.get(
-  "/canvas/share/:token/{*splat}",
-  async (req, res): Promise<void> => {
-    const token = req.params.token;
-    const splat = req.params.splat;
-    const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
-    const filePath = raw === "" ? "index.html" : raw;
+publicCanvasRouter.get("/canvas/share/:token/{*splat}", async (req, res): Promise<void> => {
+  const token = req.params.token;
+  const splat = req.params.splat;
+  const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
+  const filePath = raw === "" ? "index.html" : raw;
 
-    const [row] = await db
-      .select()
-      .from(canvasVariantsTable)
-      .where(eq(canvasVariantsTable.shareToken, token));
+  const [row] = await db
+    .select()
+    .from(canvasVariantsTable)
+    .where(eq(canvasVariantsTable.shareToken, token));
 
-    if (!row) {
-      res.status(404).type("text/html").send(
+  if (!row) {
+    res
+      .status(404)
+      .type("text/html")
+      .send(
         `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Preview not found</h1><p>This shared preview link is invalid or has expired.</p></body></html>`,
       );
-      return;
-    }
-    if (row.status !== "ready" || !row.files) {
-      res.status(202).type("text/html").send(
+    return;
+  }
+  if (row.status !== "ready" || !row.files) {
+    res
+      .status(202)
+      .type("text/html")
+      .send(
         `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Not ready</h1><p>This variant is still generating.</p></body></html>`,
       );
-      return;
-    }
+    return;
+  }
 
-    const files = row.files;
-    let file = files.find((f) => f.path === filePath);
-    if (!file && filePath !== "index.html") file = files.find((f) => f.path === "index.html");
-    if (!file) {
-      res.status(404).type("text/html").send("<h1>File not found in variant snapshot</h1>");
-      return;
-    }
+  const files = row.files;
+  let file = files.find((f) => f.path === filePath);
+  if (!file && filePath !== "index.html") file = files.find((f) => f.path === "index.html");
+  if (!file) {
+    res.status(404).type("text/html").send("<h1>File not found in variant snapshot</h1>");
+    return;
+  }
 
-    const mime = file.mimeType || guessMime(file.path);
-    res.setHeader("Cache-Control", "no-store");
-    if (isBinaryMime(mime)) {
-      res.type(mime).send(Buffer.from(file.content, "base64"));
-      return;
-    }
-    if (mime === "text/html") {
-      const banner = `<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#1e1b4b;color:#c4b5fd;font-family:system-ui;font-size:12px;padding:6px 16px;text-align:center;">Shared canvas variant preview — <strong>${row.label}</strong></div><div style="height:32px"></div>`;
-      const html = file.content.replace(/<body[^>]*>/i, (m) => `${m}${banner}`);
-      res.type("text/html").send(html);
-      return;
-    }
-    res.type(mime).send(file.content);
-  },
-);
+  const mime = file.mimeType || guessMime(file.path);
+  res.setHeader("Cache-Control", "no-store");
+  if (isBinaryMime(mime)) {
+    res.type(mime).send(Buffer.from(file.content, "base64"));
+    return;
+  }
+  if (mime === "text/html") {
+    const banner = `<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#1e1b4b;color:#c4b5fd;font-family:system-ui;font-size:12px;padding:6px 16px;text-align:center;">Shared canvas variant preview — <strong>${row.label}</strong></div><div style="height:32px"></div>`;
+    const html = file.content.replace(/<body[^>]*>/i, (m) => `${m}${banner}`);
+    res.type("text/html").send(html);
+    return;
+  }
+  res.type(mime).send(file.content);
+});
 
-publicCanvasRouter.get(
-  "/canvas/ab/:testId/{*splat}",
-  async (req, res): Promise<void> => {
-    const testId = Number(req.params.testId);
-    const splat = req.params.splat;
-    const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
-    const filePath = raw === "" ? "index.html" : raw;
+publicCanvasRouter.get("/canvas/ab/:testId/{*splat}", async (req, res): Promise<void> => {
+  const testId = Number(req.params.testId);
+  const splat = req.params.splat;
+  const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
+  const filePath = raw === "" ? "index.html" : raw;
 
-    const [test] = await db.select().from(canvasAbTestsTable).where(eq(canvasAbTestsTable.id, testId));
+  const [test] = await db
+    .select()
+    .from(canvasAbTestsTable)
+    .where(eq(canvasAbTestsTable.id, testId));
 
-    if (!test) {
-      res.status(404).type("text/html").send(`<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">A/B Test not found</h1></body></html>`);
-      return;
-    }
-    if (test.status !== "running") {
-      res.status(410).type("text/html").send(`<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Test ended</h1><p>This A/B test is no longer active.</p></body></html>`);
-      return;
-    }
+  if (!test) {
+    res
+      .status(404)
+      .type("text/html")
+      .send(
+        `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">A/B Test not found</h1></body></html>`,
+      );
+    return;
+  }
+  if (test.status !== "running") {
+    res
+      .status(410)
+      .type("text/html")
+      .send(
+        `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Test ended</h1><p>This A/B test is no longer active.</p></body></html>`,
+      );
+    return;
+  }
 
-    const cookieName = `mf_ab_${testId}`;
-    const cookieHeader = req.headers.cookie;
-    let assignedVariant = parseCookieValue(cookieHeader, cookieName) as "a" | "b" | undefined;
-    if (!assignedVariant || (assignedVariant !== "a" && assignedVariant !== "b")) {
-      const rand = Math.random() * 100;
-      assignedVariant = rand < test.trafficSplitPct ? "a" : "b";
-      res.setHeader("Set-Cookie", `${cookieName}=${assignedVariant}; Path=/; Max-Age=${7 * 24 * 3600}; SameSite=Lax`);
-    }
+  const cookieName = `mf_ab_${testId}`;
+  const cookieHeader = req.headers.cookie;
+  let assignedVariant = parseCookieValue(cookieHeader, cookieName) as "a" | "b" | undefined;
+  if (!assignedVariant || (assignedVariant !== "a" && assignedVariant !== "b")) {
+    const rand = Math.random() * 100;
+    assignedVariant = rand < test.trafficSplitPct ? "a" : "b";
+    res.setHeader(
+      "Set-Cookie",
+      `${cookieName}=${assignedVariant}; Path=/; Max-Age=${7 * 24 * 3600}; SameSite=Lax`,
+    );
+  }
 
-    const variantId = assignedVariant === "a" ? test.variantAId : test.variantBId;
+  const variantId = assignedVariant === "a" ? test.variantAId : test.variantBId;
 
-    setImmediate(() => {
-      const updateSet = assignedVariant === "a"
+  setImmediate(() => {
+    const updateSet =
+      assignedVariant === "a"
         ? { viewsA: sql`${canvasAbTestsTable.viewsA} + 1` }
         : { viewsB: sql`${canvasAbTestsTable.viewsB} + 1` };
-      db.update(canvasAbTestsTable).set(updateSet).where(eq(canvasAbTestsTable.id, testId)).catch(() => {});
-    });
+    db.update(canvasAbTestsTable)
+      .set(updateSet)
+      .where(eq(canvasAbTestsTable.id, testId))
+      .catch(() => {});
+  });
 
-    const [row] = await db.select().from(canvasVariantsTable).where(eq(canvasVariantsTable.id, variantId));
+  const [row] = await db
+    .select()
+    .from(canvasVariantsTable)
+    .where(eq(canvasVariantsTable.id, variantId));
 
-    if (!row || row.status !== "ready" || !row.files) {
-      res.status(503).type("text/html").send(`<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Variant not available</h1></body></html>`);
-      return;
+  if (!row || row.status !== "ready" || !row.files) {
+    res
+      .status(503)
+      .type("text/html")
+      .send(
+        `<!doctype html><html><body style="font-family:system-ui;padding:48px;color:#9ca3af;background:#0a0f1c"><h1 style="color:#fff">Variant not available</h1></body></html>`,
+      );
+    return;
+  }
+
+  const files = row.files;
+  let file = files.find((f) => f.path === filePath);
+  if (!file && filePath !== "index.html") file = files.find((f) => f.path === "index.html");
+  if (!file) {
+    res.status(404).type("text/html").send("<h1>File not found</h1>");
+    return;
+  }
+
+  const mime = file.mimeType || guessMime(file.path);
+  res.setHeader("Cache-Control", "no-store");
+  if (isBinaryMime(mime)) {
+    res.type(mime).send(Buffer.from(file.content, "base64"));
+    return;
+  }
+  if (mime === "text/html") {
+    const convScript = `<script>(function(){var t=${testId},v="${assignedVariant}";try{fetch('/api/canvas/ab-tests/'+t+'/convert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:v})});}catch(_){}})();</script>`;
+    const html = file.content.replace("</body>", `${convScript}</body>`);
+    res.type("text/html").send(html);
+    return;
+  }
+  res.type(mime).send(file.content);
+});
+
+publicCanvasRouter.post("/canvas/ab-tests/:testId/convert", async (req, res): Promise<void> => {
+  const testId = Number(req.params.testId);
+  const body = req.body as { variant?: unknown } | undefined;
+  const variant = body?.variant === "b" ? "b" : "a";
+  try {
+    if (variant === "a") {
+      await db
+        .update(canvasAbTestsTable)
+        .set({ conversionsA: sql`${canvasAbTestsTable.conversionsA} + 1` })
+        .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
+    } else {
+      await db
+        .update(canvasAbTestsTable)
+        .set({ conversionsB: sql`${canvasAbTestsTable.conversionsB} + 1` })
+        .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
     }
+  } catch {
+    /* non-fatal */
+  }
+  res.json({ recorded: true });
+});
 
-    const files = row.files;
-    let file = files.find((f) => f.path === filePath);
-    if (!file && filePath !== "index.html") file = files.find((f) => f.path === "index.html");
-    if (!file) {
-      res.status(404).type("text/html").send("<h1>File not found</h1>");
-      return;
-    }
+publicCanvasRouter.get("/canvas/library", async (req, res): Promise<void> => {
+  const auth = getAuth(req);
+  if (!auth.userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  const items = await db
+    .select()
+    .from(canvasVariantLibraryTable)
+    .where(eq(canvasVariantLibraryTable.userId, auth.userId))
+    .orderBy(desc(canvasVariantLibraryTable.createdAt));
+  res.json({
+    items: items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      description: item.description,
+      fileCount: (item.files ?? []).length,
+      sourceProjectId: item.sourceProjectId,
+      sourceVariantId: item.sourceVariantId,
+      createdAt: item.createdAt.toISOString(),
+    })),
+  });
+});
 
-    const mime = file.mimeType || guessMime(file.path);
-    res.setHeader("Cache-Control", "no-store");
-    if (isBinaryMime(mime)) {
-      res.type(mime).send(Buffer.from(file.content, "base64"));
-      return;
-    }
-    if (mime === "text/html") {
-      const convScript = `<script>(function(){var t=${testId},v="${assignedVariant}";try{fetch('/api/canvas/ab-tests/'+t+'/convert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:v})});}catch(_){}})();</script>`;
-      const html = file.content.replace("</body>", `${convScript}</body>`);
-      res.type("text/html").send(html);
-      return;
-    }
-    res.type(mime).send(file.content);
-  },
-);
-
-publicCanvasRouter.post(
-  "/canvas/ab-tests/:testId/convert",
-  async (req, res): Promise<void> => {
-    const testId = Number(req.params.testId);
-    const body = req.body as { variant?: unknown } | undefined;
-    const variant = body?.variant === "b" ? "b" : "a";
-    try {
-      if (variant === "a") {
-        await db.update(canvasAbTestsTable).set({ conversionsA: sql`${canvasAbTestsTable.conversionsA} + 1` }).where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
-      } else {
-        await db.update(canvasAbTestsTable).set({ conversionsB: sql`${canvasAbTestsTable.conversionsB} + 1` }).where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
-      }
-    } catch { /* non-fatal */ }
-    res.json({ recorded: true });
-  },
-);
-
-publicCanvasRouter.get(
-  "/canvas/library",
-  async (req, res): Promise<void> => {
-    const auth = getAuth(req);
-    if (!auth.userId) { res.status(401).json({ error: "Not authenticated" }); return; }
-    const items = await db.select().from(canvasVariantLibraryTable).where(eq(canvasVariantLibraryTable.userId, auth.userId)).orderBy(desc(canvasVariantLibraryTable.createdAt));
-    res.json({ items: items.map((item) => ({ id: item.id, label: item.label, description: item.description, fileCount: (item.files ?? []).length, sourceProjectId: item.sourceProjectId, sourceVariantId: item.sourceVariantId, createdAt: item.createdAt.toISOString() })) });
-  },
-);
-
-publicCanvasRouter.delete(
-  "/canvas/library/:lid",
-  async (req, res): Promise<void> => {
-    const auth = getAuth(req);
-    if (!auth.userId) { res.status(401).json({ error: "Not authenticated" }); return; }
-    const lid = Number(req.params.lid);
-    await db.delete(canvasVariantLibraryTable).where(and(eq(canvasVariantLibraryTable.id, lid), eq(canvasVariantLibraryTable.userId, auth.userId)));
-    res.json({ deleted: true });
-  },
-);
+publicCanvasRouter.delete("/canvas/library/:lid", async (req, res): Promise<void> => {
+  const auth = getAuth(req);
+  if (!auth.userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  const lid = Number(req.params.lid);
+  await db
+    .delete(canvasVariantLibraryTable)
+    .where(
+      and(eq(canvasVariantLibraryTable.id, lid), eq(canvasVariantLibraryTable.userId, auth.userId)),
+    );
+  res.json({ deleted: true });
+});
 
 export default router;

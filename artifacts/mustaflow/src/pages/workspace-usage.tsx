@@ -227,9 +227,7 @@ export default function WorkspaceUsagePage() {
                   </span>
                   <span className="text-sm text-neutral-400">
                     {quota.customDomainsUsed} of {quota.maxCustomDomains} used
-                    <span className="ml-2 text-neutral-500">
-                      ({getPlanLabel(quota.plan)} plan)
-                    </span>
+                    <span className="ml-2 text-neutral-500">({getPlanLabel(quota.plan)} plan)</span>
                   </span>
                 </div>
                 <div className="h-3 bg-neutral-800 rounded-full overflow-hidden">
