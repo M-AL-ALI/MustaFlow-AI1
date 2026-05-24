@@ -17,6 +17,7 @@ type TaskStatus =
   | "building"
   | "testing"
   | "needs_approval"
+  | "paused-insufficient-credits"
   | "completed"
   | "failed"
   | "canceled";

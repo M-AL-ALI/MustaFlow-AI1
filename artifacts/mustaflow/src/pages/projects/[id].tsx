@@ -881,7 +881,22 @@ export default function ProjectWorkspacePage() {
     const url = new URL(window.location.href);
     url.searchParams.delete("credits_success");
     window.history.replaceState({}, "", url.toString());
-  }, [creditsSuccess]);
+    // Task #638 — after a successful top-up, automatically resume any
+    // background tasks that were paused for insufficient credits.
+    void fetch(`/api/projects/${projectId}/queue/resume-paused`, {
+      method: "POST",
+      credentials: "include",
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { resumed?: number } | null) => {
+        if (data && (data.resumed ?? 0) > 0) {
+          void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+        }
+      })
+      .catch(() => {
+        // best-effort
+      });
+  }, [creditsSuccess, projectId, queryClient]);
 
   // One-shot: pre-fill AI builder chat prompt from URL (used by cross-project
   // Security page "Fix" links to seed a targeted fix prompt).
@@ -3136,6 +3151,7 @@ export default function ProjectWorkspacePage() {
           setActiveTab("tools-files");
           setBackgroundPanelOpen(false);
         }}
+        onTopUp={() => setBuyCreditsOpen(true)}
       >
         {activeBatchId && (
           <QueueProgressStrip

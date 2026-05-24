@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, asc, sql } from "drizzle-orm";
 import { db, projectsTable, chatMessagesTable, agentTasksTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
-import { enqueueJob } from "../lib/jobs";
+import { enqueueJob, resumeProjectPausedTasks } from "../lib/jobs";
 import { logger } from "../lib/logger";
 import { z } from "zod";
 import type { AgentMode } from "../lib/ai";
@@ -196,6 +196,29 @@ router.get(
       failedCount,
       cancelledCount,
     });
+  },
+);
+
+/**
+ * Task #638 — Resume paused-insufficient-credits tasks for a project after the
+ * user tops up. Idempotent: returns { resumed: 0 } when nothing was paused.
+ */
+router.post(
+  "/projects/:id/queue/resume-paused",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = parseInt(String(req.params.id ?? ""), 10);
+    if (isNaN(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+    try {
+      const resumed = await resumeProjectPausedTasks(projectId);
+      res.json({ resumed });
+    } catch (err) {
+      logger.error({ err, projectId }, "Failed to resume paused tasks");
+      res.status(500).json({ error: "Failed to resume paused tasks" });
+    }
   },
 );
 

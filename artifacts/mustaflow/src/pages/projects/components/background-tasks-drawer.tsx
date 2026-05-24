@@ -11,6 +11,8 @@ import {
   RotateCcw,
   FileCode2,
   Ban,
+  PauseCircle,
+  CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +44,7 @@ export type BgTask = {
 
 const ACTIVE_STATUSES = new Set(["planning", "building", "testing"]);
 const TERMINAL_STATUSES = new Set(["completed", "failed", "canceled"]);
+const PAUSED_STATUS = "paused-insufficient-credits";
 
 function LiveEvents({ projectId, taskId }: { projectId: number; taskId: number }) {
   const { data: raw = [] } = useListTaskEvents(projectId, taskId, {
@@ -106,6 +109,7 @@ function TaskCard({
   const isCompleted = task.status === "completed";
   const isFailed = task.status === "failed";
   const isCanceled = task.status === "canceled";
+  const isPaused = task.status === PAUSED_STATUS;
 
   const report = task.report as TaskReport | null;
   const versionId = report?.versionId;
@@ -126,9 +130,11 @@ function TaskCard({
             ? "border-destructive/20 bg-destructive/5"
             : isActive
               ? "border-primary/20 bg-primary/5"
-              : isCanceled
-                ? "border-border/30 bg-muted/10"
-                : "border-border bg-muted/30",
+              : isPaused
+                ? "border-amber-500/20 bg-amber-500/5"
+                : isCanceled
+                  ? "border-border/30 bg-muted/10"
+                  : "border-border bg-muted/30",
       )}
     >
       <div className="flex items-start gap-2">
@@ -138,6 +144,8 @@ function TaskCard({
           <XCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
         ) : isCanceled ? (
           <Ban className="h-3.5 w-3.5 text-muted-foreground/30 shrink-0 mt-0.5" />
+        ) : isPaused ? (
+          <PauseCircle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
         ) : isActive ? (
           <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0 mt-0.5" />
         ) : (
@@ -150,13 +158,15 @@ function TaskCard({
               ? "Waiting to start…"
               : isActive
                 ? "Running…"
-                : isCompleted
-                  ? `Done${fileCount > 0 ? ` · ${fileCount} file${fileCount !== 1 ? "s" : ""}` : ""}`
-                  : isFailed
-                    ? "Failed"
-                    : isCanceled
-                      ? "Canceled"
-                      : task.status}
+                : isPaused
+                  ? "Paused — needs credits"
+                  : isCompleted
+                    ? `Done${fileCount > 0 ? ` · ${fileCount} file${fileCount !== 1 ? "s" : ""}` : ""}`
+                    : isFailed
+                      ? "Failed"
+                      : isCanceled
+                        ? "Canceled"
+                        : task.status}
           </div>
         </div>
       </div>
@@ -201,6 +211,8 @@ interface BackgroundTasksDrawerProps {
   tasks: BgTask[];
   onRollback: (versionId: number) => void;
   onViewCode: () => void;
+  /** Task #638 — invoked when the user clicks the "Top up to resume" CTA. */
+  onTopUp?: () => void;
   children?: ReactNode;
 }
 
@@ -211,9 +223,11 @@ export function BackgroundTasksDrawer({
   tasks,
   onRollback,
   onViewCode,
+  onTopUp,
   children,
 }: BackgroundTasksDrawerProps) {
   const activeCount = tasks.filter((t) => !TERMINAL_STATUSES.has(t.status)).length;
+  const pausedCount = tasks.filter((t) => t.status === PAUSED_STATUS).length;
 
   return (
     <>
@@ -239,6 +253,28 @@ export function BackgroundTasksDrawer({
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {pausedCount > 0 && (
+          <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/5 px-4 py-3 flex items-start gap-2.5">
+            <PauseCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-foreground">Queue paused — out of credits</p>
+              <p className="text-[10px] text-muted-foreground/80 mt-0.5 leading-relaxed">
+                {pausedCount} task{pausedCount !== 1 ? "s" : ""} waiting. Top up to resume the
+                queue.
+              </p>
+              {onTopUp && (
+                <button
+                  onClick={onTopUp}
+                  className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-[11px] font-medium text-amber-200 transition-colors"
+                >
+                  <CreditCard className="h-3 w-3" />
+                  Top up to resume
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {children && <div className="shrink-0 border-b border-border">{children}</div>}
 

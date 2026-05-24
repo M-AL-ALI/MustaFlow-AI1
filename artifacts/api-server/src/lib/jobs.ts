@@ -1067,6 +1067,108 @@ async function drainNextProjectTask(projectId: number): Promise<void> {
   );
 }
 
+/**
+ * Task #638 — Pause the rest of a user's queued AI tasks when credits run out.
+ *
+ * Called from the credit pre-flight failure path so that an entire queue of
+ * builds doesn't drain one-by-one with the same insufficient-credits error.
+ * Transitions every still-queued task for this project (and, if the failed
+ * task belongs to a batch, every still-queued task in that batch — even if it
+ * lives in a different project) into the "paused-insufficient-credits" status
+ * with pausedAt = now(). Resume via `resumeProjectPausedTasks`.
+ */
+async function pauseRemainingQueuedTasks(failedTaskId: number, projectId: number): Promise<void> {
+  try {
+    const [failedTask] = await db
+      .select({ queueBatchId: agentTasksTable.queueBatchId })
+      .from(agentTasksTable)
+      .where(eq(agentTasksTable.id, failedTaskId))
+      .limit(1);
+
+    const conds = [
+      eq(agentTasksTable.status, "queued"),
+      failedTask?.queueBatchId
+        ? or(
+            eq(agentTasksTable.projectId, projectId),
+            eq(agentTasksTable.queueBatchId, failedTask.queueBatchId),
+          )
+        : eq(agentTasksTable.projectId, projectId),
+    ];
+
+    const paused = await db
+      .update(agentTasksTable)
+      .set({ status: "paused-insufficient-credits", pausedAt: sql`now()` })
+      .where(and(...conds))
+      .returning({ id: agentTasksTable.id });
+
+    if (paused.length > 0) {
+      logger.info(
+        { failedTaskId, projectId, pausedCount: paused.length },
+        "Paused remaining queued tasks — insufficient credits",
+      );
+    }
+  } catch (err) {
+    logger.warn({ err, failedTaskId, projectId }, "Failed to pause remaining queued tasks");
+  }
+}
+
+/**
+ * Task #638 — Resume paused-insufficient-credits tasks after a top-up.
+ *
+ * Transitions every paused task in this project back to "queued", clears
+ * `pausedAt`, then kicks off the drain helpers so the queue starts running
+ * again. Scoped to a single project so the drawer's resume CTA is local.
+ */
+export async function resumeProjectPausedTasks(projectId: number): Promise<number> {
+  const resumed = await db
+    .update(agentTasksTable)
+    .set({ status: "queued", pausedAt: null })
+    .where(
+      and(
+        eq(agentTasksTable.projectId, projectId),
+        eq(agentTasksTable.status, "paused-insufficient-credits"),
+      ),
+    )
+    .returning({
+      id: agentTasksTable.id,
+      queueBatchId: agentTasksTable.queueBatchId,
+    });
+
+  if (resumed.length === 0) return 0;
+
+  const batchIds = new Set<string>();
+  for (const r of resumed) {
+    if (r.queueBatchId) batchIds.add(r.queueBatchId);
+  }
+
+  // Pick a "head" task per batch to kick off the drain (it walks queueIndex).
+  for (const batchId of batchIds) {
+    const [head] = await db
+      .select({ id: agentTasksTable.id })
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.queueBatchId, batchId),
+          inArray(agentTasksTable.status, ["completed", "failed", "canceled"]),
+        ),
+      )
+      .orderBy(desc(agentTasksTable.queueIndex))
+      .limit(1);
+    if (head) {
+      void drainNextBatchTask(head.id).catch((err) =>
+        logger.warn({ err, batchId }, "drainNextBatchTask after resume failed"),
+      );
+    }
+  }
+
+  void drainNextProjectTask(projectId).catch((err) =>
+    logger.warn({ err, projectId }, "drainNextProjectTask after resume failed"),
+  );
+
+  logger.info({ projectId, resumedCount: resumed.length }, "Resumed paused tasks after top-up");
+  return resumed.length;
+}
+
 async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
   const [failedTask] = await db
     .select({ queueBatchId: agentTasksTable.queueBatchId, projectId: agentTasksTable.projectId })
@@ -1300,6 +1402,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           .update(agentTasksTable)
           .set({ status: "failed", result: msg, completedAt: sql`now()` })
           .where(eq(agentTasksTable.id, taskId));
+        // Task #638 — pause any remaining queued siblings so they don't drain
+        // and fail one-by-one with the same insufficient-credits error.
+        await pauseRemainingQueuedTasks(taskId, projectId);
         return;
       }
     }
