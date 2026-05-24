@@ -222,6 +222,43 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
   });
 });
 
+// ── GET /api/admin/inbox/recent-unread (Task #546) ───────────────────────────
+// Lists the most recent unread feedback items across all projects, with the
+// owning project's name resolved for display in the admin dashboard tile.
+router.get("/admin/inbox/recent-unread", async (req, res): Promise<void> => {
+  const { agentInboxTable, projectsTable } = await import("@workspace/db");
+  const { eq, desc, sql } = await import("drizzle-orm");
+  const limit = Math.min(
+    100,
+    Math.max(1, Number(req.query.limit) > 0 ? Math.floor(Number(req.query.limit)) : 25),
+  );
+  const rows = await db
+    .select({
+      id: agentInboxTable.id,
+      projectId: agentInboxTable.projectId,
+      projectName: projectsTable.name,
+      category: agentInboxTable.category,
+      severity: agentInboxTable.severity,
+      description: agentInboxTable.description,
+      screenshotUrl: agentInboxTable.screenshotUrl,
+      status: agentInboxTable.status,
+      createdAt: agentInboxTable.createdAt,
+    })
+    .from(agentInboxTable)
+    .leftJoin(projectsTable, eq(projectsTable.id, agentInboxTable.projectId))
+    .where(eq(agentInboxTable.status, "unread"))
+    .orderBy(desc(agentInboxTable.createdAt))
+    .limit(limit);
+  const [{ n }] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(agentInboxTable)
+    .where(eq(agentInboxTable.status, "unread"));
+  res.json({
+    items: rows.map((r) => ({ ...r, projectName: r.projectName ?? "(deleted)" })),
+    totalUnread: n,
+  });
+});
+
 // ── GET /api/admin/eval-results ──────────────────────────────────────────────
 // Returns the latest prompt-eval harness run (Task #545). Reads
 // scripts/eval-results/latest.json if present; returns { ran: false } otherwise.

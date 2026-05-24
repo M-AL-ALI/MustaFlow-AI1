@@ -27,3 +27,6 @@ export { ListBackgroundJobsResponse } from "./generated/api";
 export { SetProjectDomainWwwRedirectBody } from "./generated/api";
 export { RegisterProjectUploadBody } from "./generated/api";
 export { RequestProjectUploadUrlBody } from "./generated/api";
+export { ListAgentInboxParams } from "./generated/api";
+export { SearchMessagesParams } from "./generated/api";
+export { UpdateAgentInboxItemBody } from "./generated/api";

@@ -30,6 +30,8 @@ import {
   XCircle,
   FileCode,
   Sparkles,
+  MessageSquarePlus,
+  Bug,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -1582,6 +1584,142 @@ function InlinePlanCard({ plan }: { plan: StructuredPlan }) {
   );
 }
 
+function FeedbackModal({ projectId, onClose }: { projectId: number; onClose: () => void }) {
+  const [category, setCategory] = useState<"bug" | "design" | "feature" | "copy" | "other">("bug");
+  const [severity, setSeverity] = useState<"low" | "medium" | "high">("medium");
+  const [description, setDescription] = useState("");
+  const [screenshotUrl, setScreenshotUrl] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!description.trim()) {
+      setError("Please describe what should change.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/inbox`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          severity,
+          description: description.trim(),
+          screenshotUrl: screenshotUrl.trim() || null,
+        }),
+      });
+      if (!r.ok) {
+        const body = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${r.status}`);
+      }
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md bg-card border border-border rounded-xl shadow-xl flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+          <Bug className="h-4 w-4 text-amber-400" />
+          <h3 className="text-sm font-semibold">Send Feedback</h3>
+          <button onClick={onClose} className="ml-auto text-muted-foreground hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Category
+              </label>
+              <select
+                value={category}
+                onChange={(e) =>
+                  setCategory(e.target.value as "bug" | "design" | "feature" | "copy" | "other")
+                }
+                className="mt-1 w-full bg-muted border border-border rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-primary"
+              >
+                <option value="bug">Bug</option>
+                <option value="design">Design</option>
+                <option value="feature">Feature request</option>
+                <option value="copy">Copy / wording</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Severity
+              </label>
+              <select
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value as "low" | "medium" | "high")}
+                className="mt-1 w-full bg-muted border border-border rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-primary"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              What should change?
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Describe the bug, the design issue, or what you want the AI to address next time…"
+              rows={5}
+              className="mt-1 w-full bg-muted border border-border rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-primary resize-none"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Screenshot URL (optional)
+            </label>
+            <input
+              type="url"
+              value={screenshotUrl}
+              onChange={(e) => setScreenshotUrl(e.target.value)}
+              placeholder="https://…"
+              className="mt-1 w-full bg-muted border border-border rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-primary"
+            />
+          </div>
+          {error && <div className="text-[11px] text-destructive">{error}</div>}
+        </div>
+        <div className="px-4 py-3 border-t border-border flex items-center justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={submitting || !description.trim()}
+            className="px-3 py-1.5 text-xs font-semibold bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {submitting && <Loader2 className="h-3 w-3 animate-spin" />} Send to AI
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MessageRow({
   msg,
   searchQuery,
@@ -2204,12 +2342,67 @@ export function ChatHistory({
   onSendMessage?: (text: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [serverHits, setServerHits] = useState<
+    { id: number; role: string; content: string; createdAt: string; snippet: string }[] | null
+  >(null);
+  const [serverSearching, setServerSearching] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
-  const filtered = (messages ?? []).filter((m) =>
-    searchQuery.trim() ? m.content.toLowerCase().includes(searchQuery.toLowerCase()) : true,
-  );
+  // Debounce search input → server full-text search (Task #546)
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 250);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!debouncedQuery) {
+      setServerHits(null);
+      return;
+    }
+    let cancelled = false;
+    setServerSearching(true);
+    void (async () => {
+      try {
+        const r = await fetch(
+          `/api/projects/${projectId}/messages/search?q=${encodeURIComponent(debouncedQuery)}&limit=50`,
+        );
+        if (!r.ok) {
+          if (!cancelled) setServerHits([]);
+          return;
+        }
+        const data = (await r.json()) as {
+          results: {
+            id: number;
+            role: string;
+            content: string;
+            createdAt: string;
+            snippet: string;
+          }[];
+        };
+        if (!cancelled) setServerHits(data.results ?? []);
+      } catch {
+        if (!cancelled) setServerHits([]);
+      } finally {
+        if (!cancelled) setServerSearching(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQuery, projectId]);
+
+  // When a server search is active, intersect results with loaded messages by id
+  // so the rendered MessageRow components retain their rich rendering (plans, reports, etc).
+  const filtered =
+    serverHits !== null
+      ? (() => {
+          const hitIds = new Set(serverHits.map((h) => h.id));
+          return (messages ?? []).filter((m) => hitIds.has(m.id));
+        })()
+      : (messages ?? []);
 
   const grouped: { dateKey: string; label: string; msgs: Message[] }[] = [];
   for (const msg of filtered) {
@@ -2253,12 +2446,22 @@ export function ChatHistory({
           </span>
         )}
         <button
-          onClick={onClose}
+          onClick={() => setFeedbackOpen(true)}
           className="ml-auto flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-muted"
+          title="Send feedback to the AI builder"
+        >
+          <MessageSquarePlus className="h-3 w-3" /> Feedback
+        </button>
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-muted"
         >
           <X className="h-3 w-3" /> Back to chat
         </button>
       </div>
+      {feedbackOpen && (
+        <FeedbackModal projectId={projectId} onClose={() => setFeedbackOpen(false)} />
+      )}
 
       {/* Search bar */}
       <div className="shrink-0 px-3 py-2 border-b border-border/40">
@@ -2281,8 +2484,16 @@ export function ChatHistory({
           )}
         </div>
         {searchQuery && (
-          <div className="mt-1 text-[10px] text-muted-foreground px-0.5">
-            {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+          <div className="mt-1 text-[10px] text-muted-foreground px-0.5 flex items-center gap-2">
+            {serverSearching ? (
+              <>
+                <Loader2 className="h-2.5 w-2.5 animate-spin" /> Searching…
+              </>
+            ) : (
+              <span>
+                {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+              </span>
+            )}
           </div>
         )}
       </div>

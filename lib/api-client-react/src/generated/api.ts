@@ -27,10 +27,14 @@ import type {
   AddDomainInput,
   AddDomainResponse,
   AdminAuditLogPage,
+  AdminInboxRecentUnread,
   AdminLaunchReadiness,
   AdminMe,
   AdminRoleInput,
   AdminStats,
+  AgentInboxInput,
+  AgentInboxItem,
+  AgentInboxList,
   AgentTask,
   AgentTaskInput,
   AnalyticsPingInput,
@@ -44,6 +48,7 @@ import type {
   ChatExchange,
   ChatMessage,
   ChatMessageInput,
+  ChatMessageSearchResponse,
   CheckRun,
   CheckRunTrendsResponse,
   Checkpoint,
@@ -65,6 +70,7 @@ import type {
   DatabaseStatus,
   DbSnapshotListItem,
   DbSnapshotRestoreResult,
+  DeleteAgentInboxItem200,
   DeleteDbSnapshot200,
   DeleteKnowledge200,
   DeleteProjectFile200,
@@ -106,7 +112,9 @@ import type {
   KnowledgeEntry,
   KnowledgeInput,
   KnowledgeUpdate,
+  ListAdminRecentUnreadInboxParams,
   ListAdminRoles200,
+  ListAgentInboxParams,
   ListBackgroundJobsParams,
   ListBackgroundJobsResponse,
   ListBillingTransactions200,
@@ -170,6 +178,7 @@ import type {
   RollbackInput,
   RollbackResult,
   SbomDocument,
+  SearchMessagesParams,
   SearchProjectFilesParams,
   SecretAuditEntry,
   SecretEntry,
@@ -194,6 +203,7 @@ import type {
   TriggerChecksResult,
   UnpublishContainer200,
   UnpublishProject200,
+  UpdateAgentInboxItemBody,
   UpdatePreferencesBody,
   UpdateTaskBody,
   UploadUrlRequest,
@@ -3431,6 +3441,468 @@ export const useSendMessage = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getSendMessageMutationOptions(options));
     }
+
+export const getSearchMessagesUrl = (id: number,
+    params: SearchMessagesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/messages/search?${stringifiedParams}` : `/api/projects/${id}/messages/search`
+}
+
+/**
+ * @summary Full-text search across this project's chat history.
+ */
+export const searchMessages = async (id: number,
+    params: SearchMessagesParams, options?: RequestInit): Promise<ChatMessageSearchResponse> => {
+
+  return customFetch<ChatMessageSearchResponse>(getSearchMessagesUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSearchMessagesQueryKey = (id: number,
+    params?: SearchMessagesParams,) => {
+    return [
+    `/api/projects/${id}/messages/search`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getSearchMessagesQueryOptions = <TData = Awaited<ReturnType<typeof searchMessages>>, TError = ErrorType<unknown>>(id: number,
+    params: SearchMessagesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchMessages>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSearchMessagesQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof searchMessages>>> = ({ signal }) => searchMessages(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof searchMessages>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type SearchMessagesQueryResult = NonNullable<Awaited<ReturnType<typeof searchMessages>>>
+export type SearchMessagesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Full-text search across this project's chat history.
+ */
+
+export function useSearchMessages<TData = Awaited<ReturnType<typeof searchMessages>>, TError = ErrorType<unknown>>(
+ id: number,
+    params: SearchMessagesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchMessages>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getSearchMessagesQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListAgentInboxUrl = (id: number,
+    params?: ListAgentInboxParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/inbox?${stringifiedParams}` : `/api/projects/${id}/inbox`
+}
+
+export const listAgentInbox = async (id: number,
+    params?: ListAgentInboxParams, options?: RequestInit): Promise<AgentInboxList> => {
+
+  return customFetch<AgentInboxList>(getListAgentInboxUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAgentInboxQueryKey = (id: number,
+    params?: ListAgentInboxParams,) => {
+    return [
+    `/api/projects/${id}/inbox`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAgentInboxQueryOptions = <TData = Awaited<ReturnType<typeof listAgentInbox>>, TError = ErrorType<unknown>>(id: number,
+    params?: ListAgentInboxParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAgentInbox>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAgentInboxQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAgentInbox>>> = ({ signal }) => listAgentInbox(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAgentInbox>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAgentInboxQueryResult = NonNullable<Awaited<ReturnType<typeof listAgentInbox>>>
+export type ListAgentInboxQueryError = ErrorType<unknown>
+
+
+
+export function useListAgentInbox<TData = Awaited<ReturnType<typeof listAgentInbox>>, TError = ErrorType<unknown>>(
+ id: number,
+    params?: ListAgentInboxParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAgentInbox>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAgentInboxQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSubmitAgentInboxUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/inbox`
+}
+
+/**
+ * @summary Submit feedback to the project's agent inbox.
+ */
+export const submitAgentInbox = async (id: number,
+    agentInboxInput: AgentInboxInput, options?: RequestInit): Promise<AgentInboxItem> => {
+
+  return customFetch<AgentInboxItem>(getSubmitAgentInboxUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      agentInboxInput,)
+  }
+);}
+
+
+
+
+export const getSubmitAgentInboxMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitAgentInbox>>, TError,{id: number;data: BodyType<AgentInboxInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitAgentInbox>>, TError,{id: number;data: BodyType<AgentInboxInput>}, TContext> => {
+
+const mutationKey = ['submitAgentInbox'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitAgentInbox>>, {id: number;data: BodyType<AgentInboxInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  submitAgentInbox(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitAgentInboxMutationResult = NonNullable<Awaited<ReturnType<typeof submitAgentInbox>>>
+    export type SubmitAgentInboxMutationBody = BodyType<AgentInboxInput>
+    export type SubmitAgentInboxMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Submit feedback to the project's agent inbox.
+ */
+export const useSubmitAgentInbox = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitAgentInbox>>, TError,{id: number;data: BodyType<AgentInboxInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitAgentInbox>>,
+        TError,
+        {id: number;data: BodyType<AgentInboxInput>},
+        TContext
+      > => {
+      return useMutation(getSubmitAgentInboxMutationOptions(options));
+    }
+
+export const getUpdateAgentInboxItemUrl = (id: number,
+    itemId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/inbox/${itemId}`
+}
+
+export const updateAgentInboxItem = async (id: number,
+    itemId: number,
+    updateAgentInboxItemBody: UpdateAgentInboxItemBody, options?: RequestInit): Promise<AgentInboxItem> => {
+
+  return customFetch<AgentInboxItem>(getUpdateAgentInboxItemUrl(id,itemId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateAgentInboxItemBody,)
+  }
+);}
+
+
+
+
+export const getUpdateAgentInboxItemMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAgentInboxItem>>, TError,{id: number;itemId: number;data: BodyType<UpdateAgentInboxItemBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAgentInboxItem>>, TError,{id: number;itemId: number;data: BodyType<UpdateAgentInboxItemBody>}, TContext> => {
+
+const mutationKey = ['updateAgentInboxItem'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAgentInboxItem>>, {id: number;itemId: number;data: BodyType<UpdateAgentInboxItemBody>}> = (props) => {
+          const {id,itemId,data} = props ?? {};
+
+          return  updateAgentInboxItem(id,itemId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateAgentInboxItemMutationResult = NonNullable<Awaited<ReturnType<typeof updateAgentInboxItem>>>
+    export type UpdateAgentInboxItemMutationBody = BodyType<UpdateAgentInboxItemBody>
+    export type UpdateAgentInboxItemMutationError = ErrorType<unknown>
+
+    export const useUpdateAgentInboxItem = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAgentInboxItem>>, TError,{id: number;itemId: number;data: BodyType<UpdateAgentInboxItemBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateAgentInboxItem>>,
+        TError,
+        {id: number;itemId: number;data: BodyType<UpdateAgentInboxItemBody>},
+        TContext
+      > => {
+      return useMutation(getUpdateAgentInboxItemMutationOptions(options));
+    }
+
+export const getDeleteAgentInboxItemUrl = (id: number,
+    itemId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/inbox/${itemId}`
+}
+
+export const deleteAgentInboxItem = async (id: number,
+    itemId: number, options?: RequestInit): Promise<DeleteAgentInboxItem200> => {
+
+  return customFetch<DeleteAgentInboxItem200>(getDeleteAgentInboxItemUrl(id,itemId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteAgentInboxItemMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAgentInboxItem>>, TError,{id: number;itemId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAgentInboxItem>>, TError,{id: number;itemId: number}, TContext> => {
+
+const mutationKey = ['deleteAgentInboxItem'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAgentInboxItem>>, {id: number;itemId: number}> = (props) => {
+          const {id,itemId} = props ?? {};
+
+          return  deleteAgentInboxItem(id,itemId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteAgentInboxItemMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAgentInboxItem>>>
+
+    export type DeleteAgentInboxItemMutationError = ErrorType<unknown>
+
+    export const useDeleteAgentInboxItem = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAgentInboxItem>>, TError,{id: number;itemId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteAgentInboxItem>>,
+        TError,
+        {id: number;itemId: number},
+        TContext
+      > => {
+      return useMutation(getDeleteAgentInboxItemMutationOptions(options));
+    }
+
+export const getListAdminRecentUnreadInboxUrl = (params?: ListAdminRecentUnreadInboxParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/inbox/recent-unread?${stringifiedParams}` : `/api/admin/inbox/recent-unread`
+}
+
+/**
+ * @summary Recent unread inbox items across all projects (admin only).
+ */
+export const listAdminRecentUnreadInbox = async (params?: ListAdminRecentUnreadInboxParams, options?: RequestInit): Promise<AdminInboxRecentUnread> => {
+
+  return customFetch<AdminInboxRecentUnread>(getListAdminRecentUnreadInboxUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAdminRecentUnreadInboxQueryKey = (params?: ListAdminRecentUnreadInboxParams,) => {
+    return [
+    `/api/admin/inbox/recent-unread`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAdminRecentUnreadInboxQueryOptions = <TData = Awaited<ReturnType<typeof listAdminRecentUnreadInbox>>, TError = ErrorType<unknown>>(params?: ListAdminRecentUnreadInboxParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminRecentUnreadInbox>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAdminRecentUnreadInboxQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAdminRecentUnreadInbox>>> = ({ signal }) => listAdminRecentUnreadInbox(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAdminRecentUnreadInbox>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAdminRecentUnreadInboxQueryResult = NonNullable<Awaited<ReturnType<typeof listAdminRecentUnreadInbox>>>
+export type ListAdminRecentUnreadInboxQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Recent unread inbox items across all projects (admin only).
+ */
+
+export function useListAdminRecentUnreadInbox<TData = Awaited<ReturnType<typeof listAdminRecentUnreadInbox>>, TError = ErrorType<unknown>>(
+ params?: ListAdminRecentUnreadInboxParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminRecentUnreadInbox>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAdminRecentUnreadInboxQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListTaskEventsUrl = (id: number,
     taskId: number,) => {

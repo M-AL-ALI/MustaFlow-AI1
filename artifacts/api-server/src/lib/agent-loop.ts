@@ -344,6 +344,24 @@ export const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "read_inbox",
+      description:
+        "Read user feedback items submitted via the Feedback button in this project. Returns { items: [{ id, category, severity, description, screenshotUrl, status, createdAt }] }. By default returns only unread items so you can address fresh feedback. Pass include_read=true to also return previously-read items. Items returned by this call are automatically marked as read so the user does not see them again in your next build.",
+      parameters: {
+        type: "object",
+        properties: {
+          include_read: {
+            type: "boolean",
+            description: "If true, include items already marked read (but not resolved).",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "read_upload",
       description:
         "Read the text preview of a user-uploaded file by id (returned by list_uploads). Returns the first ~8 KB of UTF-8 text for textlike files (CSV, JSON, plain text, markdown). For binary uploads (PDF, images, video) returns a short metadata-only summary. Use this to ground generated code in user-supplied data.",
@@ -1435,16 +1453,35 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     { role: "system", content: buildSystemPrompt(input, stack, profile, skillsIndex) },
   ];
 
-  // Seed context: current file manifest
+  // Seed context: current file manifest + unread feedback count (Task #546)
   const seedManifest = workspace.list();
+  let unreadInboxCount = 0;
+  try {
+    const { db: _db, agentInboxTable } = await import("@workspace/db");
+    const { and, eq, sql } = await import("drizzle-orm");
+    const [row] = await _db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(agentInboxTable)
+      .where(
+        and(eq(agentInboxTable.projectId, input.projectId), eq(agentInboxTable.status, "unread")),
+      );
+    unreadInboxCount = row?.n ?? 0;
+  } catch {
+    /* non-fatal — agent can still call read_inbox */
+  }
+  const inboxLine =
+    unreadInboxCount > 0
+      ? `\n\nUser feedback: ${unreadInboxCount} unread feedback item${unreadInboxCount === 1 ? "" : "s"} are waiting. Call \`read_inbox\` early to review them before editing.`
+      : "";
   messages.push({
     role: "user",
     content:
       `User request:\n${input.userPrompt}\n\n` +
       `Current files in project (${seedManifest.length}):\n${
         seedManifest.length > 0 ? seedManifest.slice(0, 40).join("\n") : "(empty)"
-      }\n\n` +
-      `Conversation history follows.`,
+      }` +
+      inboxLine +
+      `\n\nConversation history follows.`,
   });
   for (const turn of (input.conversationHistory ?? []).slice(-6)) {
     messages.push({ role: turn.role, content: turn.content });
@@ -2737,6 +2774,52 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         return {
           ok: false,
           observation: `ERROR: list_uploads failed — ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+    case "read_inbox": {
+      try {
+        const { db, agentInboxTable } = await import("@workspace/db");
+        const { and, eq, desc, inArray } = await import("drizzle-orm");
+        const includeRead = args.include_read === true;
+        const where = includeRead
+          ? and(
+              eq(agentInboxTable.projectId, input.projectId),
+              inArray(agentInboxTable.status, ["unread", "read"]),
+            )
+          : and(
+              eq(agentInboxTable.projectId, input.projectId),
+              eq(agentInboxTable.status, "unread"),
+            );
+        const rows = await db
+          .select()
+          .from(agentInboxTable)
+          .where(where)
+          .orderBy(desc(agentInboxTable.createdAt))
+          .limit(50);
+        if (rows.length === 0) {
+          return { ok: true, observation: "(no feedback items)" };
+        }
+        const unreadIds = rows.filter((r) => r.status === "unread").map((r) => r.id);
+        if (unreadIds.length > 0) {
+          await db
+            .update(agentInboxTable)
+            .set({ status: "read", readAt: new Date() })
+            .where(inArray(agentInboxTable.id, unreadIds));
+        }
+        const summary = rows
+          .map((r) => {
+            const screenshot = r.screenshotUrl ? `\n  screenshot: ${r.screenshotUrl}` : "";
+            const desc =
+              r.description.length > 1200 ? r.description.slice(0, 1200) + "…" : r.description;
+            return `#${r.id} [${r.severity}/${r.category}] (${r.status}) — ${desc}${screenshot}`;
+          })
+          .join("\n\n");
+        return { ok: true, observation: summary };
+      } catch (err) {
+        return {
+          ok: false,
+          observation: `ERROR: read_inbox failed — ${err instanceof Error ? err.message : String(err)}`,
         };
       }
     }

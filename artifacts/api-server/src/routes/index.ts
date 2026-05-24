@@ -55,6 +55,7 @@ import canvasRouter from "./canvas";
 import blueprintsRouter from "./blueprints";
 import deploymentConfigRouter from "./deployment-config";
 import artifactsRouter from "./artifacts";
+import agentInboxRouter from "./agent-inbox";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -186,6 +187,7 @@ router.use(canvasRouter);
 router.use(blueprintsRouter);
 router.use(deploymentConfigRouter);
 router.use(artifactsRouter);
+router.use(agentInboxRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

@@ -863,6 +863,112 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChatExchange"
+  /projects/{id}/messages/search:
+    get:
+      operationId: searchMessages
+      tags: [chat]
+      summary: Full-text search across this project's chat history.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer } }
+      responses:
+        "200":
+          description: Ranked search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessageSearchResponse"
+  /projects/{id}/inbox:
+    get:
+      operationId: listAgentInbox
+      tags: [inbox]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [unread, read, resolved] }
+      responses:
+        "200":
+          description: Inbox items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentInboxList"
+    post:
+      operationId: submitAgentInbox
+      tags: [inbox]
+      summary: Submit feedback to the project's agent inbox.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentInboxInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentInboxItem"
+  /projects/{id}/inbox/{itemId}:
+    patch:
+      operationId: updateAgentInboxItem
+      tags: [inbox]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: itemId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [unread, read, resolved]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentInboxItem"
+    delete:
+      operationId: deleteAgentInboxItem
+      tags: [inbox]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: itemId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+  /admin/inbox/recent-unread:
+    get:
+      operationId: listAdminRecentUnreadInbox
+      tags: [admin]
+      summary: Recent unread inbox items across all projects (admin only).
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer } }
+      responses:
+        "200":
+          description: Recent unread feedback
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminInboxRecentUnread"
 
   /projects/{id}/tasks/{taskId}/events:
     get:
@@ -3854,6 +3960,97 @@ components:
         savedPath:
           type: string
           description: "Project file path the generated image was also saved to (e.g. assets/generated/img-123.png)."
+
+    AgentInboxInput:
+      type: object
+      required: [description]
+      properties:
+        category:
+          type: string
+          enum: [bug, design, feature, copy, other]
+        severity:
+          type: string
+          enum: [low, medium, high]
+        description: { type: string }
+        screenshotUrl:
+          type: ["string", "null"]
+    AgentInboxItem:
+      type: object
+      required: [id, projectId, category, severity, description, status, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        userId:
+          type: ["string", "null"]
+        category:
+          type: string
+          enum: [bug, design, feature, copy, other]
+        severity:
+          type: string
+          enum: [low, medium, high]
+        description: { type: string }
+        screenshotUrl:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [unread, read, resolved]
+        createdAt: { type: string, format: date-time }
+        readAt:
+          type: ["string", "null"]
+          format: date-time
+        resolvedAt:
+          type: ["string", "null"]
+          format: date-time
+    AgentInboxList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentInboxItem"
+    ChatMessageSearchHit:
+      type: object
+      required: [id, role, content, createdAt, rank, snippet]
+      properties:
+        id: { type: integer }
+        role: { type: string }
+        content: { type: string }
+        createdAt: { type: string, format: date-time }
+        rank: { type: number }
+        snippet: { type: string }
+    ChatMessageSearchResponse:
+      type: object
+      required: [query, results]
+      properties:
+        query: { type: string }
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessageSearchHit"
+    AdminInboxRecentUnreadEntry:
+      type: object
+      required: [id, projectId, projectName, category, severity, description, status, createdAt]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        projectName: { type: string }
+        category: { type: string }
+        severity: { type: string }
+        description: { type: string }
+        status: { type: string }
+        screenshotUrl:
+          type: ["string", "null"]
+        createdAt: { type: string, format: date-time }
+    AdminInboxRecentUnread:
+      type: object
+      required: [items, totalUnread]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminInboxRecentUnreadEntry"
+        totalUnread: { type: integer }
 
     ChatMessage:
       type: object

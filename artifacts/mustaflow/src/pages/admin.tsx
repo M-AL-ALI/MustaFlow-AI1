@@ -18,6 +18,8 @@ import {
   Activity,
   BookOpen,
   Sparkles,
+  Inbox,
+  Bug,
 } from "lucide-react";
 import {
   useGetAdminMe,
@@ -179,6 +181,8 @@ export default function AdminPage() {
       )}
 
       <EvalResultsTile />
+
+      <InboxRecentUnreadTile />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
@@ -1214,6 +1218,85 @@ type EvalFullRecord = EvalSummary & {
     losers: Array<string | { id: string; from: number; to: number }>;
   };
 };
+
+type InboxRecentItem = {
+  id: number;
+  projectId: number;
+  projectName: string;
+  category: string;
+  severity: string;
+  description: string;
+  status: string;
+  screenshotUrl: string | null;
+  createdAt: string;
+};
+
+function InboxRecentUnreadTile() {
+  const [data, setData] = useState<{ items: InboxRecentItem[]; totalUnread: number } | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch("/api/admin/inbox/recent-unread?limit=10");
+        if (r.ok) {
+          setData((await r.json()) as { items: InboxRecentItem[]; totalUnread: number });
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, []);
+  if (!loaded) return null;
+  const items = data?.items ?? [];
+  return (
+    <div className="border border-border rounded-xl bg-card overflow-hidden">
+      <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <Inbox className="h-3.5 w-3.5 text-amber-400" />
+          Agent Inbox — Recent Unread Feedback (Task #546)
+        </h3>
+        <span className="text-xs text-muted-foreground">{data?.totalUnread ?? 0} unread total</span>
+      </div>
+      {items.length === 0 ? (
+        <div className="p-4 text-sm text-muted-foreground">No unread feedback right now.</div>
+      ) : (
+        <div className="divide-y divide-border/60">
+          {items.map((it) => (
+            <a
+              key={it.id}
+              href={`/projects/${it.projectId}`}
+              className="block px-4 py-3 hover:bg-muted/30 transition-colors"
+            >
+              <div className="flex items-center gap-2 text-[11px] mb-1">
+                <Bug
+                  className={
+                    "h-3 w-3 " +
+                    (it.severity === "high"
+                      ? "text-destructive"
+                      : it.severity === "medium"
+                        ? "text-amber-400"
+                        : "text-muted-foreground")
+                  }
+                />
+                <span className="font-semibold uppercase tracking-wider text-muted-foreground">
+                  {it.category} · {it.severity}
+                </span>
+                <span className="text-muted-foreground">·</span>
+                <span className="font-medium text-foreground">{it.projectName}</span>
+                <span className="ml-auto text-muted-foreground">
+                  {new Date(it.createdAt).toLocaleString()}
+                </span>
+              </div>
+              <div className="text-sm text-foreground/90 line-clamp-2">{it.description}</div>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function EvalResultsTile() {
   const [data, setData] = useState<EvalFullRecord | null>(null);

@@ -32,3 +32,4 @@ export * from "./canvas-variants";
 export * from "./blueprints";
 export * from "./deployment-schedules";
 export * from "./project-artifacts";
+export * from "./agent-inbox";

@@ -1252,6 +1252,128 @@ export const SendMessageResponse = zod.object({
 
 
 /**
+ * @summary Full-text search across this project's chat history.
+ */
+export const SearchMessagesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SearchMessagesQueryParams = zod.object({
+  "q": zod.coerce.string(),
+  "limit": zod.coerce.number().optional()
+})
+
+export const SearchMessagesResponse = zod.object({
+  "query": zod.string(),
+  "results": zod.array(zod.object({
+  "id": zod.number(),
+  "role": zod.string(),
+  "content": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "rank": zod.number(),
+  "snippet": zod.string()
+}))
+})
+
+
+export const ListAgentInboxParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListAgentInboxQueryParams = zod.object({
+  "status": zod.enum(['unread', 'read', 'resolved']).optional()
+})
+
+export const ListAgentInboxResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "userId": zod.string().nullish(),
+  "category": zod.enum(['bug', 'design', 'feature', 'copy', 'other']),
+  "severity": zod.enum(['low', 'medium', 'high']),
+  "description": zod.string(),
+  "screenshotUrl": zod.string().nullish(),
+  "status": zod.enum(['unread', 'read', 'resolved']),
+  "createdAt": zod.coerce.date(),
+  "readAt": zod.coerce.date().nullish(),
+  "resolvedAt": zod.coerce.date().nullish()
+}))
+})
+
+
+/**
+ * @summary Submit feedback to the project's agent inbox.
+ */
+export const SubmitAgentInboxParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SubmitAgentInboxBody = zod.object({
+  "category": zod.enum(['bug', 'design', 'feature', 'copy', 'other']).optional(),
+  "severity": zod.enum(['low', 'medium', 'high']).optional(),
+  "description": zod.string(),
+  "screenshotUrl": zod.string().nullish()
+})
+
+
+export const UpdateAgentInboxItemParams = zod.object({
+  "id": zod.coerce.number(),
+  "itemId": zod.coerce.number()
+})
+
+export const UpdateAgentInboxItemBody = zod.object({
+  "status": zod.enum(['unread', 'read', 'resolved'])
+})
+
+export const UpdateAgentInboxItemResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "userId": zod.string().nullish(),
+  "category": zod.enum(['bug', 'design', 'feature', 'copy', 'other']),
+  "severity": zod.enum(['low', 'medium', 'high']),
+  "description": zod.string(),
+  "screenshotUrl": zod.string().nullish(),
+  "status": zod.enum(['unread', 'read', 'resolved']),
+  "createdAt": zod.coerce.date(),
+  "readAt": zod.coerce.date().nullish(),
+  "resolvedAt": zod.coerce.date().nullish()
+})
+
+
+export const DeleteAgentInboxItemParams = zod.object({
+  "id": zod.coerce.number(),
+  "itemId": zod.coerce.number()
+})
+
+export const DeleteAgentInboxItemResponse = zod.object({
+  "deleted": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Recent unread inbox items across all projects (admin only).
+ */
+export const ListAdminRecentUnreadInboxQueryParams = zod.object({
+  "limit": zod.coerce.number().optional()
+})
+
+export const ListAdminRecentUnreadInboxResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "projectName": zod.string(),
+  "category": zod.string(),
+  "severity": zod.string(),
+  "description": zod.string(),
+  "status": zod.string(),
+  "screenshotUrl": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})),
+  "totalUnread": zod.number()
+})
+
+
+/**
  * @summary Live event stream for a task (poll every 1-2 s)
  */
 export const ListTaskEventsParams = zod.object({

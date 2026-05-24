@@ -514,6 +514,117 @@ export interface ChatAttachment {
   savedPath?: string;
 }
 
+export type AgentInboxInputCategory = typeof AgentInboxInputCategory[keyof typeof AgentInboxInputCategory];
+
+
+export const AgentInboxInputCategory = {
+  bug: 'bug',
+  design: 'design',
+  feature: 'feature',
+  copy: 'copy',
+  other: 'other',
+} as const;
+
+export type AgentInboxInputSeverity = typeof AgentInboxInputSeverity[keyof typeof AgentInboxInputSeverity];
+
+
+export const AgentInboxInputSeverity = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export interface AgentInboxInput {
+  category?: AgentInboxInputCategory;
+  severity?: AgentInboxInputSeverity;
+  description: string;
+  /** @nullable */
+  screenshotUrl?: string | null;
+}
+
+export type AgentInboxItemCategory = typeof AgentInboxItemCategory[keyof typeof AgentInboxItemCategory];
+
+
+export const AgentInboxItemCategory = {
+  bug: 'bug',
+  design: 'design',
+  feature: 'feature',
+  copy: 'copy',
+  other: 'other',
+} as const;
+
+export type AgentInboxItemSeverity = typeof AgentInboxItemSeverity[keyof typeof AgentInboxItemSeverity];
+
+
+export const AgentInboxItemSeverity = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type AgentInboxItemStatus = typeof AgentInboxItemStatus[keyof typeof AgentInboxItemStatus];
+
+
+export const AgentInboxItemStatus = {
+  unread: 'unread',
+  read: 'read',
+  resolved: 'resolved',
+} as const;
+
+export interface AgentInboxItem {
+  id: number;
+  projectId: number;
+  /** @nullable */
+  userId?: string | null;
+  category: AgentInboxItemCategory;
+  severity: AgentInboxItemSeverity;
+  description: string;
+  /** @nullable */
+  screenshotUrl?: string | null;
+  status: AgentInboxItemStatus;
+  createdAt: string;
+  /** @nullable */
+  readAt?: string | null;
+  /** @nullable */
+  resolvedAt?: string | null;
+}
+
+export interface AgentInboxList {
+  items: AgentInboxItem[];
+}
+
+export interface ChatMessageSearchHit {
+  id: number;
+  role: string;
+  content: string;
+  createdAt: string;
+  rank: number;
+  snippet: string;
+}
+
+export interface ChatMessageSearchResponse {
+  query: string;
+  results: ChatMessageSearchHit[];
+}
+
+export interface AdminInboxRecentUnreadEntry {
+  id: number;
+  projectId: number;
+  projectName: string;
+  category: string;
+  severity: string;
+  description: string;
+  status: string;
+  /** @nullable */
+  screenshotUrl?: string | null;
+  createdAt: string;
+}
+
+export interface AdminInboxRecentUnread {
+  items: AdminInboxRecentUnreadEntry[];
+  totalUnread: number;
+}
+
 export type ChatMessageRole = typeof ChatMessageRole[keyof typeof ChatMessageRole];
 
 
@@ -2897,6 +3008,45 @@ export type DeleteWorkspace200 = {
 
 export type ListProjectsParams = {
 workspaceId?: number;
+};
+
+export type SearchMessagesParams = {
+q: string;
+limit?: number;
+};
+
+export type ListAgentInboxParams = {
+status?: ListAgentInboxStatus;
+};
+
+export type ListAgentInboxStatus = typeof ListAgentInboxStatus[keyof typeof ListAgentInboxStatus];
+
+
+export const ListAgentInboxStatus = {
+  unread: 'unread',
+  read: 'read',
+  resolved: 'resolved',
+} as const;
+
+export type UpdateAgentInboxItemBodyStatus = typeof UpdateAgentInboxItemBodyStatus[keyof typeof UpdateAgentInboxItemBodyStatus];
+
+
+export const UpdateAgentInboxItemBodyStatus = {
+  unread: 'unread',
+  read: 'read',
+  resolved: 'resolved',
+} as const;
+
+export type UpdateAgentInboxItemBody = {
+  status: UpdateAgentInboxItemBodyStatus;
+};
+
+export type DeleteAgentInboxItem200 = {
+  deleted?: boolean;
+};
+
+export type ListAdminRecentUnreadInboxParams = {
+limit?: number;
 };
 
 export type GetAgentRoutingParams = {
