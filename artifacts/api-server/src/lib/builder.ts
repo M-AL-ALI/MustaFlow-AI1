@@ -4441,16 +4441,21 @@ function autoCorrectPackageJson(files: BuilderFile[], detectedModuleIds: string[
 
 const MOBILE_PREVIEW_NOTE = `MOBILE WEB PREVIEW (index.html) — REQUIRED:
 You MUST include an index.html file that is a beautiful, realistic, AND INTERACTIVE web preview of the mobile app.
-- Render inside a mobile phone frame: max-w-[390px] mx-auto, dark phone shell around the content
+
+CRITICAL — DO NOT draw a phone shell or device frame inside index.html. The preview pane already wraps the iframe in a CSS phone frame. Adding your own phone shell creates a phone-within-a-phone that looks broken. Instead:
+- Use <body class="m-0 p-0 overflow-hidden bg-background w-screen h-screen flex flex-col">
+- Root div: class="flex flex-col flex-1 min-h-0 overflow-hidden" — fills the phone frame naturally
+- Simulate a status bar at the very top: a slim 28px bar (bg-black or themed) showing time + icons — this is the fake safe-area top inset
+- App content below the status bar, scrollable if needed
+- If the app has a bottom nav/tab bar, pin it at the bottom with a slim 24px safe-area pad below it
+
 - Show the app's main screen with realistic mock data
 - Use Tailwind CDN: <script src="https://cdn.tailwindcss.com"></script>
 - Use lucide icons: <script src="https://unpkg.com/lucide@latest"></script>
 - If the app has tabs, render a bottom tab bar with tab icons and labels
-- Use safe area insets: top bar + bottom bar like a real phone
 - Dark or light theme based on app design
 - No emojis — use lucide icons only
 - Mobile touch targets: min 44px height for interactive elements
-- Include a "Scan with Expo Go" badge or note in the preview header
 - Keep under 20,000 chars for the preview HTML
 
 INTERACTIVITY — MANDATORY (this is the #1 reason users say "the preview is broken"):
@@ -4465,7 +4470,7 @@ You MUST inline this exact helper near the top of <body> (or at the end of body 
     var timer = null;
     window.mockAction = function(msg){
       if(!t) return;
-      t.textContent = msg + '  ·  Simulated';
+      t.textContent = msg;
       t.classList.remove('hidden');
       if(timer) clearTimeout(timer);
       timer = setTimeout(function(){ t.classList.add('hidden'); }, 1800);
@@ -4493,11 +4498,10 @@ You MUST inline this exact helper near the top of <body> (or at the end of body 
 WIRING RULES for index.html:
 1. Every <button>, <a>, role="button" element, and clickable card MUST either:
    (a) have a real working JS handler (form validation, tab switching, modal open/close, list filter, theme toggle, etc.) — preferred for things that can actually work in a browser, OR
-   (b) carry a data-mock="<short description>" attribute describing what it would do on the real device (e.g. data-mock="Open camera to scan receipt" or data-mock="Upload to Supabase storage"). The inline helper above will auto-show the toast.
+   (b) carry a data-mock="<short description>" attribute describing what it would do on the real device (e.g. data-mock="Open camera" or data-mock="Upload photo"). The inline helper above will auto-show the toast.
 2. Tab bars: use data-tab-target on tab buttons and data-tab-panel on the panels — the helper will show/hide.
 3. Form inputs MUST be focusable and accept typing; submit buttons MUST either validate inline OR carry data-mock.
-4. Include a small fixed footer ribbon (text-[10px] text-zinc-500) at the bottom of the phone frame: "Interactive mockup — real device features run in Expo Go".
-5. NEVER leave a visible button without either a handler or a data-mock attribute. A non-responsive button in the preview is a bug.`;
+4. NEVER leave a visible button without either a handler or a data-mock attribute. A non-responsive button in the preview is a bug.`;
 
 const MOBILE_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Mobile Builder. You generate complete, production-ready Expo/React Native projects from a single user request. You output ONLY valid JSON — no prose, no markdown fences.
 
