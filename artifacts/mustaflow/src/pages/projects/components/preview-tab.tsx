@@ -34,6 +34,9 @@ import {
   Home,
   Camera,
   ListTree,
+  MousePointerClick,
+  Type as TypeIcon,
+  Palette,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -54,6 +57,15 @@ const DEVICE_LABELS: Record<DeviceFrame, string> = {
   tablet: "Tablet",
   mobile: "Mobile",
 };
+
+function rgbToHex(input: string): string {
+  if (!input) return "";
+  if (input.startsWith("#")) return input;
+  const m = input.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (!m) return "";
+  const h = (n: number) => n.toString(16).padStart(2, "0");
+  return "#" + h(Number(m[1])) + h(Number(m[2])) + h(Number(m[3]));
+}
 
 const DEVICE_ICONS: Record<DeviceFrame, React.ElementType> = {
   desktop: Monitor,
@@ -199,6 +211,167 @@ export function PreviewTab({
   const [qrOpen, setQrOpen] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [mocksOpen, setMocksOpen] = useState(false);
+
+  // ── Visual Edit (Task #539) ──
+  type VeSelection = {
+    mfmId: string;
+    tag: string;
+    text: string;
+    color: string;
+    backgroundColor: string;
+    padding: string;
+    rect: { top: number; left: number; width: number; height: number };
+  };
+  const [editMode, setEditMode] = useState(false);
+  const [veSelection, setVeSelection] = useState<VeSelection | null>(null);
+  const [vePanel, setVePanel] = useState<null | "text" | "color" | "background" | "padding">(null);
+  const [veDraftText, setVeDraftText] = useState("");
+  const [veDraftColor, setVeDraftColor] = useState("#ffffff");
+  const [veDraftPadding, setVeDraftPadding] = useState("");
+  const [veToast, setVeToast] = useState<string | null>(null);
+  // Tracks whether the in-iframe bridge has signalled "ready" for the current
+  // iframe load (reset whenever iframeKey changes so reloads re-handshake).
+  const veReadyRef = useRef(false);
+  useEffect(() => {
+    veReadyRef.current = false;
+  }, [iframeKey]);
+  // Notify iframe whenever editMode toggles — but only after the bridge has
+  // announced itself, otherwise the message would arrive before listeners
+  // are attached.
+  useEffect(() => {
+    const win = iframeRef.current?.contentWindow;
+    if (win && veReadyRef.current) {
+      try {
+        win.postMessage({ __mustaflow_edit: true, type: "setMode", on: editMode }, "*");
+      } catch {
+        /* cross-origin send is fine, target="*" */
+      }
+    }
+    if (!editMode) {
+      setVeSelection(null);
+      setVePanel(null);
+    }
+  }, [editMode, iframeKey]);
+  const closeVe = useCallback(() => {
+    setVeSelection(null);
+    setVePanel(null);
+  }, []);
+  // Apply edit — direct-patch fast path, with refine fallback
+  const applyVisualEdit = useCallback(
+    async (
+      payload:
+        | { kind: "text"; newText: string }
+        | { kind: "color"; target: "color" | "background"; newColor: string }
+        | { kind: "padding"; newPadding: string }
+        | { kind: "delete" },
+    ) => {
+      if (!veSelection) return;
+      const win = iframeRef.current?.contentWindow;
+      // Optimistic preview update
+      try {
+        if (payload.kind === "text") {
+          win?.postMessage(
+            {
+              __mustaflow_edit: true,
+              type: "apply",
+              action: "setText",
+              mfmId: veSelection.mfmId,
+              text: payload.newText,
+            },
+            "*",
+          );
+        } else if (payload.kind === "color") {
+          win?.postMessage(
+            {
+              __mustaflow_edit: true,
+              type: "apply",
+              action: payload.target === "background" ? "setBackgroundColor" : "setColor",
+              mfmId: veSelection.mfmId,
+              color: payload.newColor,
+            },
+            "*",
+          );
+        } else if (payload.kind === "padding") {
+          win?.postMessage(
+            {
+              __mustaflow_edit: true,
+              type: "apply",
+              action: "setPadding",
+              mfmId: veSelection.mfmId,
+              padding: payload.newPadding,
+            },
+            "*",
+          );
+        } else if (payload.kind === "delete") {
+          win?.postMessage(
+            {
+              __mustaflow_edit: true,
+              type: "apply",
+              action: "delete",
+              mfmId: veSelection.mfmId,
+            },
+            "*",
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+      // Persist server-side (direct patch or refine fallback)
+      try {
+        const body: Record<string, unknown> = { mfmId: veSelection.mfmId };
+        if (payload.kind === "text") {
+          body.kind = "text";
+          body.oldText = veSelection.text;
+          body.newText = payload.newText;
+        } else if (payload.kind === "color") {
+          body.kind = "color";
+          body.target = payload.target;
+          body.oldColor =
+            payload.target === "background" ? veSelection.backgroundColor : veSelection.color;
+          body.newColor = payload.newColor;
+          body.text = veSelection.text;
+        } else if (payload.kind === "padding") {
+          body.kind = "padding";
+          body.oldPadding = veSelection.padding;
+          body.newPadding = payload.newPadding;
+          body.text = veSelection.text;
+        } else {
+          body.kind = "delete";
+          body.text = veSelection.text;
+        }
+        const res = await fetch(`/api/projects/${project.id}/visual-edit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          credentials: "include",
+        });
+        const json = (await res.json()) as {
+          ok: boolean;
+          patched: boolean;
+          filePath?: string;
+          fileId?: number;
+          suggestedPrompt?: string;
+        };
+        if (json.patched) {
+          setVeToast(`Saved to ${json.filePath ?? "file"}`);
+          setTimeout(() => setVeToast(null), 2500);
+          // Refresh file list so the editor sees the new content
+          // (TanStack Query will refetch via key match elsewhere; fire a soft reload)
+          setIframeKey((k) => k + 1);
+        } else if (json.suggestedPrompt && (onAutoSendPrompt ?? onFixPrompt)) {
+          const target = onAutoSendPrompt ?? onFixPrompt!;
+          target(json.suggestedPrompt);
+          setVeToast("Sent to AI Builder…");
+          setTimeout(() => setVeToast(null), 2500);
+        }
+      } catch {
+        setVeToast("Visual edit failed");
+        setTimeout(() => setVeToast(null), 2500);
+      }
+      closeVe();
+    },
+    [veSelection, project.id, onAutoSendPrompt, onFixPrompt, closeVe],
+  );
 
   // EAS build status — fetch latest completed build for native QR
   type EasBuildEntry = {
@@ -438,7 +611,41 @@ export function PreviewTab({
     const handler = (event: MessageEvent) => {
       if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) return;
       const data = event.data;
-      if (!data || typeof data !== "object" || !data.__mustaflow) return;
+      if (!data || typeof data !== "object") return;
+      // ── Visual Edit messages (Task #539) ──
+      if (data.__mustaflow_edit) {
+        if (data.type === "ready") {
+          veReadyRef.current = true;
+          // Replay current edit mode now that the bridge is listening.
+          try {
+            iframeRef.current?.contentWindow?.postMessage(
+              { __mustaflow_edit: true, type: "setMode", on: editMode },
+              "*",
+            );
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        if (data.type === "click" && typeof data.mfmId === "string") {
+          const sel: VeSelection = {
+            mfmId: data.mfmId,
+            tag: String(data.tag ?? "div"),
+            text: String(data.text ?? ""),
+            color: String(data.color ?? ""),
+            backgroundColor: String(data.backgroundColor ?? ""),
+            padding: String(data.padding ?? ""),
+            rect: data.rect ?? { top: 0, left: 0, width: 0, height: 0 },
+          };
+          setVeSelection(sel);
+          setVeDraftText(sel.text);
+          setVeDraftColor(rgbToHex(sel.color) || "#ffffff");
+          setVeDraftPadding(sel.padding || "");
+          setVePanel(null);
+        }
+        return;
+      }
+      if (!data.__mustaflow) return;
       const VALID_LEVELS = ["log", "warn", "error", "info"] as const;
       type ValidLevel = (typeof VALID_LEVELS)[number];
       const rawLevel = data.level as string;
@@ -462,7 +669,7 @@ export function PreviewTab({
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, []);
+  }, [editMode]);
 
   // Scroll console to bottom on new entries
   useEffect(() => {
@@ -621,8 +828,204 @@ export function PreviewTab({
     </div>
   );
 
+  // Compute toolbar overlay position from iframe + selection rect
+  const veOverlayStyle: React.CSSProperties | null = (() => {
+    if (!veSelection || !iframeRef.current) return null;
+    const iframeRect = iframeRef.current.getBoundingClientRect();
+    const top = iframeRect.top + veSelection.rect.top + veSelection.rect.height + 6;
+    const left = iframeRect.left + veSelection.rect.left;
+    return { position: "fixed", top, left, zIndex: 60 };
+  })();
+
   return (
     <div className="flex flex-col h-full bg-background">
+      {/* Visual Edit toast */}
+      {veToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[70] px-3 py-1.5 rounded-md bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 shadow-lg">
+          {veToast}
+        </div>
+      )}
+      {/* Visual Edit inline toolbar — anchored under the selected iframe element */}
+      {editMode && veSelection && veOverlayStyle && (
+        <div
+          style={veOverlayStyle}
+          className="rounded-md border border-violet-500/40 bg-zinc-900/95 backdrop-blur shadow-xl p-1 flex flex-col gap-1 min-w-[220px] max-w-[320px]"
+          role="dialog"
+          aria-label="Visual edit toolbar"
+        >
+          <div className="flex items-center gap-1 px-1.5 pt-1 pb-0.5">
+            <span className="text-[10px] uppercase tracking-wider text-violet-300 font-semibold">
+              {veSelection.tag}
+            </span>
+            <span className="text-[10px] text-zinc-500 truncate flex-1">
+              {veSelection.text.slice(0, 40) || "(no text)"}
+            </span>
+            <button
+              type="button"
+              onClick={closeVe}
+              className="text-zinc-500 hover:text-zinc-200 p-0.5"
+              title="Close"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          {vePanel === null && (
+            <div className="flex items-center gap-1 px-1 pb-1">
+              <button
+                type="button"
+                onClick={() => setVePanel("text")}
+                className="flex-1 inline-flex items-center justify-center gap-1 text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+                title="Edit text"
+              >
+                <TypeIcon className="h-3 w-3" /> Text
+              </button>
+              <button
+                type="button"
+                onClick={() => setVePanel("color")}
+                className="flex-1 inline-flex items-center justify-center gap-1 text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+                title="Edit color"
+              >
+                <Palette className="h-3 w-3" /> Color
+              </button>
+              <button
+                type="button"
+                onClick={() => setVePanel("padding")}
+                className="flex-1 inline-flex items-center justify-center gap-1 text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+                title="Edit padding"
+              >
+                <LayoutTemplate className="h-3 w-3" /> Pad
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm("Delete this element?")) {
+                    void applyVisualEdit({ kind: "delete" });
+                  }
+                }}
+                className="inline-flex items-center justify-center text-[11px] px-2 py-1 rounded bg-red-600/20 hover:bg-red-600/40 text-red-300"
+                title="Delete element"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+          {vePanel === "text" && (
+            <div className="px-1 pb-1 flex flex-col gap-1.5">
+              <textarea
+                value={veDraftText}
+                onChange={(e) => setVeDraftText(e.target.value)}
+                rows={2}
+                className="w-full text-[12px] px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 focus:outline-none focus:border-violet-500 resize-none"
+                autoFocus
+              />
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setVePanel(null)}
+                  className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                >
+                  Cancel
+                </button>
+                <div className="flex-1" />
+                <button
+                  type="button"
+                  onClick={() => void applyVisualEdit({ kind: "text", newText: veDraftText })}
+                  disabled={veDraftText === veSelection.text}
+                  className="text-[11px] px-2 py-1 rounded bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          )}
+          {vePanel === "color" && (
+            <div className="px-1 pb-1 flex flex-col gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="color"
+                  value={veDraftColor}
+                  onChange={(e) => setVeDraftColor(e.target.value)}
+                  className="h-7 w-10 rounded border border-zinc-700 bg-zinc-800 cursor-pointer"
+                />
+                <input
+                  type="text"
+                  value={veDraftColor}
+                  onChange={(e) => setVeDraftColor(e.target.value)}
+                  className="flex-1 text-[12px] px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 focus:outline-none focus:border-violet-500 font-mono"
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setVePanel(null)}
+                  className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                >
+                  Cancel
+                </button>
+                <div className="flex-1" />
+                <button
+                  type="button"
+                  onClick={() =>
+                    void applyVisualEdit({
+                      kind: "color",
+                      target: "background",
+                      newColor: veDraftColor,
+                    })
+                  }
+                  className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+                >
+                  Background
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void applyVisualEdit({
+                      kind: "color",
+                      target: "color",
+                      newColor: veDraftColor,
+                    })
+                  }
+                  className="text-[11px] px-2 py-1 rounded bg-violet-600 hover:bg-violet-500 text-white"
+                >
+                  Text color
+                </button>
+              </div>
+            </div>
+          )}
+          {vePanel === "padding" && (
+            <div className="px-1 pb-1 flex flex-col gap-1.5">
+              <input
+                type="text"
+                value={veDraftPadding}
+                onChange={(e) => setVeDraftPadding(e.target.value)}
+                placeholder="e.g. 16px 24px"
+                className="w-full text-[12px] px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 focus:outline-none focus:border-violet-500 font-mono"
+                autoFocus
+              />
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setVePanel(null)}
+                  className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                >
+                  Cancel
+                </button>
+                <div className="flex-1" />
+                <button
+                  type="button"
+                  onClick={() =>
+                    void applyVisualEdit({ kind: "padding", newPadding: veDraftPadding })
+                  }
+                  disabled={!veDraftPadding}
+                  className="text-[11px] px-2 py-1 rounded bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {/* Preview toolbar */}
       <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-card overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {/* Device size switcher */}
@@ -1197,6 +1600,22 @@ export function PreviewTab({
               title="Snapshot to AI — drop current path + console state into the chat composer"
             >
               <Camera className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {hasFiles && !isReactVite && (
+            <Button
+              variant={editMode ? "default" : "ghost"}
+              size="icon"
+              className={cn("h-7 w-7", editMode && "bg-violet-600 hover:bg-violet-500 text-white")}
+              onClick={() => setEditMode((v) => !v)}
+              title={
+                editMode
+                  ? "Exit visual edit"
+                  : "Visual edit — click elements to change text, colors, padding"
+              }
+              aria-pressed={editMode}
+            >
+              <MousePointerClick className="h-3.5 w-3.5" />
             </Button>
           )}
           {hasFiles && (

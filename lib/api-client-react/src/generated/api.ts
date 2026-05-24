@@ -194,6 +194,8 @@ import type {
   UploadUrlResponse,
   UserCredit,
   UserPreferences,
+  VisualEditInput,
+  VisualEditResult,
   WorkflowList,
   WorkflowRunResponse,
   Workspace,
@@ -2765,6 +2767,78 @@ export const useRestoreCheckpoint = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRestoreCheckpointMutationOptions(options));
+    }
+
+export const getVisualEditUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/visual-edit`
+}
+
+/**
+ * @summary Click-to-edit preview — applies a direct patch for simple static-html text edits, otherwise returns a refine prompt for the agent.
+ */
+export const visualEdit = async (id: number,
+    visualEditInput: VisualEditInput, options?: RequestInit): Promise<VisualEditResult> => {
+
+  return customFetch<VisualEditResult>(getVisualEditUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      visualEditInput,)
+  }
+);}
+
+
+
+
+export const getVisualEditMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof visualEdit>>, TError,{id: number;data: BodyType<VisualEditInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof visualEdit>>, TError,{id: number;data: BodyType<VisualEditInput>}, TContext> => {
+
+const mutationKey = ['visualEdit'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof visualEdit>>, {id: number;data: BodyType<VisualEditInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  visualEdit(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VisualEditMutationResult = NonNullable<Awaited<ReturnType<typeof visualEdit>>>
+    export type VisualEditMutationBody = BodyType<VisualEditInput>
+    export type VisualEditMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Click-to-edit preview — applies a direct patch for simple static-html text edits, otherwise returns a refine prompt for the agent.
+ */
+export const useVisualEdit = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof visualEdit>>, TError,{id: number;data: BodyType<VisualEditInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof visualEdit>>,
+        TError,
+        {id: number;data: BodyType<VisualEditInput>},
+        TContext
+      > => {
+      return useMutation(getVisualEditMutationOptions(options));
     }
 
 export const getListWorkflowsUrl = (id: number,) => {

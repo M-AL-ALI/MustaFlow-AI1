@@ -5,6 +5,7 @@ import { requireProjectOwnership } from "../lib/auth";
 import { guessMime } from "../lib/builder";
 import { isBinaryMime } from "../lib/binary-mime";
 import { injectBridge, MOCK_FLAG_SCRIPT } from "../lib/consoleBridge";
+import { VISUAL_EDIT_SCRIPT } from "../lib/visualEditScript";
 import { extractPageMap } from "../lib/page-map";
 import { logger } from "../lib/logger";
 import { writeFileToContainer } from "../lib/container";
@@ -592,7 +593,12 @@ router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => 
     res
       .type("text/html")
       .setHeader("Cache-Control", "no-store, must-revalidate")
-      .send(injectBridge(fallback.content, isOwnerPreview ? MOCK_FLAG_SCRIPT : ""));
+      .send(
+        injectBridge(
+          fallback.content,
+          isOwnerPreview ? `${MOCK_FLAG_SCRIPT}${VISUAL_EDIT_SCRIPT}` : "",
+        ),
+      );
     return;
   }
 
@@ -604,7 +610,12 @@ router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => 
     res.end(Buffer.from(row.content, "base64"));
   } else {
     res.send(
-      isHtml ? injectBridge(row.content, isOwnerPreview ? MOCK_FLAG_SCRIPT : "") : row.content,
+      isHtml
+        ? injectBridge(
+            row.content,
+            isOwnerPreview ? `${MOCK_FLAG_SCRIPT}${VISUAL_EDIT_SCRIPT}` : "",
+          )
+        : row.content,
     );
   }
 });

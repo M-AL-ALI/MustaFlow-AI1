@@ -669,6 +669,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckpointRestoreResponse"
 
+  /projects/{id}/visual-edit:
+    post:
+      operationId: visualEdit
+      tags: [preview]
+      summary: Click-to-edit preview — applies a direct patch for simple static-html text edits, otherwise returns a refine prompt for the agent.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisualEditInput"
+      responses:
+        "200":
+          description: Edit processed (patched directly or fell back to a prompt)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VisualEditResult"
+
   /projects/{id}/workflows:
     get:
       operationId: listWorkflows
@@ -3736,6 +3757,36 @@ components:
         dbSnapshotSizeBytes: { type: ["integer", "null"] }
         triggerMessageId: { type: ["integer", "null"] }
         triggerMessagePreview: { type: ["string", "null"] }
+
+    VisualEditInput:
+      type: object
+      required: [kind, mfmId]
+      properties:
+        kind: { type: string, enum: [text, color, padding, delete] }
+        mfmId: { type: string }
+        oldText: { type: ["string", "null"] }
+        newText: { type: ["string", "null"] }
+        target: { type: ["string", "null"], enum: [color, background, null] }
+        oldColor: { type: ["string", "null"] }
+        newColor: { type: ["string", "null"] }
+        oldPadding: { type: ["string", "null"] }
+        newPadding: { type: ["string", "null"] }
+        text: { type: ["string", "null"] }
+
+    VisualEditResult:
+      type: object
+      required: [ok, patched]
+      properties:
+        ok: { type: boolean }
+        patched:
+          {
+            type: boolean,
+            description: "true = applied directly to the file; false = fall back to refine prompt",
+          }
+        kind: { type: ["string", "null"] }
+        filePath: { type: ["string", "null"] }
+        fileId: { type: ["integer", "null"] }
+        suggestedPrompt: { type: ["string", "null"] }
 
     Workflow:
       type: object

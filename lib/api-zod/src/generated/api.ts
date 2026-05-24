@@ -992,6 +992,36 @@ export const RestoreCheckpointResponse = zod.object({
 
 
 /**
+ * @summary Click-to-edit preview — applies a direct patch for simple static-html text edits, otherwise returns a refine prompt for the agent.
+ */
+export const VisualEditParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const VisualEditBody = zod.object({
+  "kind": zod.enum(['text', 'color', 'padding', 'delete']),
+  "mfmId": zod.string(),
+  "oldText": zod.string().nullish(),
+  "newText": zod.string().nullish(),
+  "target": zod.union([zod.literal('color'),zod.literal('background'),zod.literal(null)]).nullish(),
+  "oldColor": zod.string().nullish(),
+  "newColor": zod.string().nullish(),
+  "oldPadding": zod.string().nullish(),
+  "newPadding": zod.string().nullish(),
+  "text": zod.string().nullish()
+})
+
+export const VisualEditResponse = zod.object({
+  "ok": zod.boolean(),
+  "patched": zod.boolean().describe('true = applied directly to the file; false = fall back to refine prompt'),
+  "kind": zod.string().nullish(),
+  "filePath": zod.string().nullish(),
+  "fileId": zod.number().nullish(),
+  "suggestedPrompt": zod.string().nullish()
+})
+
+
+/**
  * @summary List named workflows declared in workflows.yaml (or per-stack defaults)
  */
 export const ListWorkflowsParams = zod.object({

@@ -551,6 +551,62 @@ export interface Checkpoint {
   triggerMessagePreview?: string | null;
 }
 
+export type VisualEditInputKind = typeof VisualEditInputKind[keyof typeof VisualEditInputKind];
+
+
+export const VisualEditInputKind = {
+  text: 'text',
+  color: 'color',
+  padding: 'padding',
+  delete: 'delete',
+} as const;
+
+/**
+ * @nullable
+ */
+export type VisualEditInputTarget = typeof VisualEditInputTarget[keyof typeof VisualEditInputTarget] | null;
+
+
+export const VisualEditInputTarget = {
+  color: 'color',
+  background: 'background',
+} as const;
+
+export interface VisualEditInput {
+  kind: VisualEditInputKind;
+  mfmId: string;
+  /** @nullable */
+  oldText?: string | null;
+  /** @nullable */
+  newText?: string | null;
+  /** @nullable */
+  target?: VisualEditInputTarget;
+  /** @nullable */
+  oldColor?: string | null;
+  /** @nullable */
+  newColor?: string | null;
+  /** @nullable */
+  oldPadding?: string | null;
+  /** @nullable */
+  newPadding?: string | null;
+  /** @nullable */
+  text?: string | null;
+}
+
+export interface VisualEditResult {
+  ok: boolean;
+  /** true = applied directly to the file; false = fall back to refine prompt */
+  patched: boolean;
+  /** @nullable */
+  kind?: string | null;
+  /** @nullable */
+  filePath?: string | null;
+  /** @nullable */
+  fileId?: number | null;
+  /** @nullable */
+  suggestedPrompt?: string | null;
+}
+
 export interface Workflow {
   name: string;
   command: string;
