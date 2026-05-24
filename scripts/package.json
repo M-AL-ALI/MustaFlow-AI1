@@ -13,6 +13,7 @@
     "migrate-db-snapshots": "tsx ./src/migrate-db-snapshots.ts",
     "migrate-check-runs": "tsx ./src/migrate-check-runs.ts",
     "migrate-e2e-enabled": "tsx ./src/migrate-e2e-enabled.ts",
+    "migrate-multiplayer-uploads": "tsx ./src/migrate-multiplayer-uploads.ts",
     "migrate-security-gate": "tsx ./src/migrate-security-gate.ts",
     "migrate-security-findings": "tsx ./src/migrate-security-findings.ts",
     "migrate-app-test-runs": "tsx ./src/migrate-app-test-runs.ts",

@@ -311,6 +311,8 @@ export interface Project {
   architectReviewEnabled?: boolean;
   /** When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true. */
   e2eEnabled?: boolean;
+  /** When true, the project accepts real-time multiplayer presence/edit broadcasts on WS /api/projects/{id}/multiplayer. Default false — opt-in per project. */
+  multiplayerEnabled?: boolean;
   /** When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains. */
   redirectWwwApex?: boolean;
   /**
@@ -320,6 +322,16 @@ export interface Project {
   stagingPublishedSnapshotId?: number | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProjectUpload {
+  id: number;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  objectPath?: string;
+  hasTextPreview?: boolean;
+  createdAt: string;
 }
 
 export type ProjectInputKind = typeof ProjectInputKind[keyof typeof ProjectInputKind];
@@ -425,6 +437,7 @@ export interface ProjectUpdate {
   /** Toggle the architect review subagent for this project. */
   architectReviewEnabled?: boolean;
   e2eEnabled?: boolean;
+  multiplayerEnabled?: boolean;
   redirectWwwApex?: boolean;
 }
 
@@ -2759,6 +2772,32 @@ export interface SecurityBadgeCountsByProject {
   /** Map of projectId (as string) → open critical+high finding count. */
   counts: SecurityBadgeCountsByProjectCounts;
 }
+
+export type RequestProjectUploadUrlBody = {
+  name: string;
+  contentType?: string;
+  size?: number;
+};
+
+export type RequestProjectUploadUrl200 = {
+  uploadURL: string;
+  objectPath: string;
+};
+
+export type ListProjectUploads200 = {
+  uploads: ProjectUpload[];
+};
+
+export type RegisterProjectUploadBody = {
+  name: string;
+  contentType?: string;
+  sizeBytes?: number;
+  objectPath: string;
+};
+
+export type DeleteProjectUpload200 = {
+  deleted?: boolean;
+};
 
 export type ListSecurityFindingsParams = {
 status?: ListSecurityFindingsStatus;

@@ -5,6 +5,7 @@ export * from "./tasks";
 export * from "./task-events";
 export * from "./versions";
 export * from "./files";
+export * from "./uploads";
 export * from "./secrets";
 export * from "./secret-audit";
 export * from "./knowledge";

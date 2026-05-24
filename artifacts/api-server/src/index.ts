@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { createTerminalServer } from "./lib/terminal";
+import { createMultiplayerServer } from "./lib/multiplayer";
 import { ensureFlyApp } from "./lib/container";
 import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
 import { startCveScheduler } from "./lib/cve-scheduler";
@@ -51,7 +52,26 @@ const server = createServer(app);
 
 // Attach the terminal WebSocket server (handles /api/projects/:id/terminal upgrades)
 const terminalServer = createTerminalServer();
-server.on("upgrade", terminalServer.handleUpgrade);
+const multiplayerServer = createMultiplayerServer();
+const MULTIPLAYER_PATH = /^\/api\/projects\/\d+\/multiplayer$/;
+const TERMINAL_PATH = /^\/api\/projects\/\d+\/terminal$/;
+server.on("upgrade", (req, socket, head) => {
+  const netSocket = socket as unknown as import("node:net").Socket;
+  let pathname = "";
+  try {
+    pathname = new URL(req.url ?? "/", "http://x").pathname;
+  } catch {
+    socket.destroy();
+    return;
+  }
+  if (MULTIPLAYER_PATH.test(pathname)) {
+    multiplayerServer.handleUpgrade(req, netSocket, head);
+  } else if (TERMINAL_PATH.test(pathname)) {
+    terminalServer.handleUpgrade(req, netSocket, head);
+  } else {
+    socket.destroy();
+  }
+});
 
 server.listen(port, (err?: Error) => {
   if (err) {

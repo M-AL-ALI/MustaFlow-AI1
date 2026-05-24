@@ -119,6 +119,10 @@ export const projectsTable = pgTable("projects", {
   // smoke E2E scenario set after every successful web build, and the `run_e2e` tool
   // is available to the model. Default true. Disable for speed-over-coverage builds.
   e2eEnabled: boolean("e2e_enabled").notNull().default(true),
+  // multiplayerEnabled: when true, this project participates in real-time multiplayer
+  // presence/edit broadcasts over the /api/projects/:id/multiplayer WebSocket. Default
+  // false — opt-in per project from the Manage tab. (Task #540)
+  multiplayerEnabled: boolean("multiplayer_enabled").notNull().default(false),
   // redirectWwwApex: when true, requests to www.<apex> are 301-redirected to apex (or vice versa).
   // Only meaningful when both the apex and www subdomain are attached as project_domains rows.
   redirectWwwApex: boolean("redirect_www_apex").notNull().default(false),

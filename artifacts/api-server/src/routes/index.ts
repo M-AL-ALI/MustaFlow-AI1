@@ -49,6 +49,8 @@ import testRunsRouter from "./test-runs";
 import prodLogsRouter, { publicProdLogRouter } from "./prod-logs";
 import backgroundJobsRouter from "./background-jobs";
 import previewSnapshotsRouter from "./preview-snapshots";
+import uploadsRouter from "./uploads";
+import transcribeRouter from "./transcribe";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -97,6 +99,7 @@ const KNOWN_PREFIXES = [
   "/security",
   "/test-runs",
   "/background-jobs",
+  "/transcribe",
 ];
 
 router.use((req, res, next) => {
@@ -172,6 +175,8 @@ router.use(testRunsRouter);
 router.use(prodLogsRouter);
 router.use(backgroundJobsRouter);
 router.use(previewSnapshotsRouter);
+router.use(uploadsRouter);
+router.use(transcribeRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

@@ -17,6 +17,73 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary Request a presigned PUT URL for a per-project upload.
+ */
+export const RequestProjectUploadUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RequestProjectUploadUrlBody = zod.object({
+  "name": zod.string(),
+  "contentType": zod.string().optional(),
+  "size": zod.number().optional()
+})
+
+export const RequestProjectUploadUrlResponse = zod.object({
+  "uploadURL": zod.string(),
+  "objectPath": zod.string()
+})
+
+
+/**
+ * @summary List user-uploaded files attached to a project.
+ */
+export const ListProjectUploadsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListProjectUploadsResponse = zod.object({
+  "uploads": zod.array(zod.object({
+  "id": zod.number(),
+  "filename": zod.string(),
+  "mimeType": zod.string(),
+  "sizeBytes": zod.number(),
+  "objectPath": zod.string().optional(),
+  "hasTextPreview": zod.boolean().optional(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Register an uploaded file after PUT to the presigned URL.
+ */
+export const RegisterProjectUploadParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RegisterProjectUploadBody = zod.object({
+  "name": zod.string(),
+  "contentType": zod.string().optional(),
+  "sizeBytes": zod.number().optional(),
+  "objectPath": zod.string()
+})
+
+
+/**
+ * @summary Delete a project upload by id.
+ */
+export const DeleteProjectUploadParams = zod.object({
+  "id": zod.coerce.number(),
+  "uploadId": zod.coerce.number()
+})
+
+export const DeleteProjectUploadResponse = zod.object({
+  "deleted": zod.boolean().optional()
+})
+
+
+/**
  * @summary Request a presigned URL for direct file upload to GCS.
  */
 
@@ -630,6 +697,7 @@ export const ListProjectsResponseItem = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
@@ -700,6 +768,7 @@ export const GetProjectResponse = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
@@ -726,6 +795,7 @@ export const UpdateProjectBody = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional(),
   "architectReviewEnabled": zod.boolean().optional().describe('Toggle the architect review subagent for this project.'),
   "e2eEnabled": zod.boolean().optional(),
+  "multiplayerEnabled": zod.boolean().optional(),
   "redirectWwwApex": zod.boolean().optional()
 })
 
@@ -771,6 +841,7 @@ export const UpdateProjectResponse = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
@@ -828,6 +899,7 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
@@ -885,6 +957,7 @@ export const RestoreProjectResponse = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),
@@ -941,6 +1014,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "multiplayerEnabled": zod.boolean().optional().describe('When true, the project accepts real-time multiplayer presence\/edit broadcasts on WS \/api\/projects\/{id}\/multiplayer. Default false — opt-in per project.'),
   "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "createdAt": zod.coerce.date(),

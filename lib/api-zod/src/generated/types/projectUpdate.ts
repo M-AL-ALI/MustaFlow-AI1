@@ -28,5 +28,6 @@ export interface ProjectUpdate {
   /** Toggle the architect review subagent for this project. */
   architectReviewEnabled?: boolean;
   e2eEnabled?: boolean;
+  multiplayerEnabled?: boolean;
   redirectWwwApex?: boolean;
 }

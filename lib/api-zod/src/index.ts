@@ -25,3 +25,5 @@ export { MoveBlockBetweenFilesBody } from "./generated/api";
 export { ReorderFileBlocksBody } from "./generated/api";
 export { ListBackgroundJobsResponse } from "./generated/api";
 export { SetProjectDomainWwwRedirectBody } from "./generated/api";
+export { RegisterProjectUploadBody } from "./generated/api";
+export { RequestProjectUploadUrlBody } from "./generated/api";

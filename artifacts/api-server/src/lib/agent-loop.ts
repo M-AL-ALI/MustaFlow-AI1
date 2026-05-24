@@ -334,6 +334,31 @@ export const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "list_uploads",
+      description:
+        "List user-uploaded files attached to this project (drag-drop uploads, NOT project source files). Returns { uploads: [{ id, filename, mimeType, sizeBytes, hasTextPreview }] }. Use this to discover what reference material (CSVs, PDFs, docs) the user has provided. Use `read_upload` to fetch the textual preview of an upload.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_upload",
+      description:
+        "Read the text preview of a user-uploaded file by id (returned by list_uploads). Returns the first ~8 KB of UTF-8 text for textlike files (CSV, JSON, plain text, markdown). For binary uploads (PDF, images, video) returns a short metadata-only summary. Use this to ground generated code in user-supplied data.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "integer", description: "Upload id from list_uploads." },
+        },
+        required: ["id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "list_files",
       description:
         "List paths of files currently in the project (relative to project root). Returns a flat array of strings.",
@@ -2573,6 +2598,58 @@ export async function executeTool(ctx: ToolCtx): Promise<{
     return { ok: false, observation: "ERROR: aborted by user" };
   }
   switch (name) {
+    case "list_uploads": {
+      try {
+        const { db, projectUploadsTable } = await import("@workspace/db");
+        const { eq, desc } = await import("drizzle-orm");
+        const rows = await db
+          .select()
+          .from(projectUploadsTable)
+          .where(eq(projectUploadsTable.projectId, input.projectId))
+          .orderBy(desc(projectUploadsTable.createdAt));
+        if (rows.length === 0) return { ok: true, observation: "(no uploads)" };
+        const summary = rows
+          .map(
+            (r) =>
+              `#${r.id}  ${r.filename}  (${r.mimeType}, ${r.sizeBytes} bytes${r.textPreview ? ", textPreview" : ""})`,
+          )
+          .join("\n");
+        return { ok: true, observation: summary };
+      } catch (err) {
+        return {
+          ok: false,
+          observation: `ERROR: list_uploads failed — ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+    case "read_upload": {
+      const id = typeof args.id === "number" ? Math.floor(args.id) : NaN;
+      if (!Number.isFinite(id)) return { ok: false, observation: "ERROR: id is required" };
+      try {
+        const { db, projectUploadsTable } = await import("@workspace/db");
+        const { and, eq } = await import("drizzle-orm");
+        const [row] = await db
+          .select()
+          .from(projectUploadsTable)
+          .where(
+            and(eq(projectUploadsTable.id, id), eq(projectUploadsTable.projectId, input.projectId)),
+          );
+        if (!row) return { ok: false, observation: `ERROR: upload #${id} not found` };
+        if (row.textPreview) {
+          const header = `[upload #${row.id} — ${row.filename} (${row.mimeType}, ${row.sizeBytes} bytes)]\n`;
+          return { ok: true, observation: header + row.textPreview };
+        }
+        return {
+          ok: true,
+          observation: `[upload #${row.id} — ${row.filename}] Binary content (${row.mimeType}, ${row.sizeBytes} bytes). No text preview available. PDF/image parsing is not enabled in this build.`,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          observation: `ERROR: read_upload failed — ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
     case "list_files": {
       const list = workspace.list();
       return { ok: true, observation: list.length === 0 ? "(no files)" : list.join("\n") };

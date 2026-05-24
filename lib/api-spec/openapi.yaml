@@ -64,6 +64,110 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
 
+  # POST /api/transcribe accepts a raw audio body (application/octet-stream) and
+  # returns { text }. It is intentionally NOT declared in this OpenAPI spec because
+  # Orval's generated client serialises bodies as JSON and would corrupt the audio.
+  # Frontend calls it directly with `fetch(..., { body: blob })`.
+
+  /projects/{id}/uploads/request-url:
+    post:
+      operationId: requestProjectUploadUrl
+      tags: [storage]
+      summary: Request a presigned PUT URL for a per-project upload.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                contentType: { type: string }
+                size: { type: integer }
+      responses:
+        "200":
+          description: Presigned URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [uploadURL, objectPath]
+                properties:
+                  uploadURL: { type: string }
+                  objectPath: { type: string }
+        "413":
+          description: Too large
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /projects/{id}/uploads:
+    get:
+      operationId: listProjectUploads
+      tags: [storage]
+      summary: List user-uploaded files attached to a project.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Uploads
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [uploads]
+                properties:
+                  uploads:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProjectUpload"
+    post:
+      operationId: registerProjectUpload
+      tags: [storage]
+      summary: Register an uploaded file after PUT to the presigned URL.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, objectPath]
+              properties:
+                name: { type: string }
+                contentType: { type: string }
+                sizeBytes: { type: integer }
+                objectPath: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectUpload"
+
+  /projects/{id}/uploads/{uploadId}:
+    delete:
+      operationId: deleteProjectUpload
+      tags: [storage]
+      summary: Delete a project upload by id.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: uploadId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+
   /storage/uploads/request-url:
     post:
       operationId: requestUploadUrl
@@ -3575,6 +3679,9 @@ components:
         e2eEnabled:
           type: boolean
           description: "When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true."
+        multiplayerEnabled:
+          type: boolean
+          description: "When true, the project accepts real-time multiplayer presence/edit broadcasts on WS /api/projects/{id}/multiplayer. Default false — opt-in per project."
         redirectWwwApex:
           type: boolean
           description: "When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains."
@@ -3583,6 +3690,18 @@ components:
           description: "Version ID currently live on the staging slot. Null = not staged. Set by POST /publish?env=staging, promoted by POST /promote."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    ProjectUpload:
+      type: object
+      required: [id, filename, mimeType, sizeBytes, createdAt]
+      properties:
+        id: { type: integer }
+        filename: { type: string }
+        mimeType: { type: string }
+        sizeBytes: { type: integer }
+        objectPath: { type: string }
+        hasTextPreview: { type: boolean }
+        createdAt: { type: string, format: date-time }
 
     ProjectInput:
       type: object
@@ -3644,6 +3763,7 @@ components:
           type: boolean
           description: "Toggle the architect review subagent for this project."
         e2eEnabled: { type: boolean }
+        multiplayerEnabled: { type: boolean }
         redirectWwwApex: { type: boolean }
 
     MobileAppSettingsInput:

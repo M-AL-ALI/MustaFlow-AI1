@@ -68,6 +68,7 @@ import type {
   DeleteDbSnapshot200,
   DeleteKnowledge200,
   DeleteProjectFile200,
+  DeleteProjectUpload200,
   DeleteSecret200,
   DeleteWorkspace200,
   DeployResult,
@@ -117,6 +118,7 @@ import type {
   ListGithubRepositoriesParams,
   ListKnowledgeParams,
   ListMobileBuilds200,
+  ListProjectUploads200,
   ListProjectsParams,
   ListSecurityFindingsParams,
   ListSuggestionsParams,
@@ -149,6 +151,7 @@ import type {
   ProjectInput,
   ProjectSuggestion,
   ProjectUpdate,
+  ProjectUpload,
   ProjectVersion,
   ProjectVersionDetail,
   ProjectVersionInput,
@@ -156,9 +159,12 @@ import type {
   PublishContainer200,
   PublishResult,
   ReadinessResult,
+  RegisterProjectUploadBody,
   RemoveProjectDomain200,
   ReorderBlocksResponse,
   ReorderFileBlocksBody,
+  RequestProjectUploadUrl200,
+  RequestProjectUploadUrlBody,
   RerunTestsResult,
   RevokeAdminRole200,
   RollbackInput,
@@ -291,6 +297,299 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
 
 
+
+export const getRequestProjectUploadUrlUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/uploads/request-url`
+}
+
+/**
+ * @summary Request a presigned PUT URL for a per-project upload.
+ */
+export const requestProjectUploadUrl = async (id: number,
+    requestProjectUploadUrlBody: RequestProjectUploadUrlBody, options?: RequestInit): Promise<RequestProjectUploadUrl200> => {
+
+  return customFetch<RequestProjectUploadUrl200>(getRequestProjectUploadUrlUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      requestProjectUploadUrlBody,)
+  }
+);}
+
+
+
+
+export const getRequestProjectUploadUrlMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestProjectUploadUrl>>, TError,{id: number;data: BodyType<RequestProjectUploadUrlBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestProjectUploadUrl>>, TError,{id: number;data: BodyType<RequestProjectUploadUrlBody>}, TContext> => {
+
+const mutationKey = ['requestProjectUploadUrl'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestProjectUploadUrl>>, {id: number;data: BodyType<RequestProjectUploadUrlBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  requestProjectUploadUrl(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestProjectUploadUrlMutationResult = NonNullable<Awaited<ReturnType<typeof requestProjectUploadUrl>>>
+    export type RequestProjectUploadUrlMutationBody = BodyType<RequestProjectUploadUrlBody>
+    export type RequestProjectUploadUrlMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Request a presigned PUT URL for a per-project upload.
+ */
+export const useRequestProjectUploadUrl = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestProjectUploadUrl>>, TError,{id: number;data: BodyType<RequestProjectUploadUrlBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof requestProjectUploadUrl>>,
+        TError,
+        {id: number;data: BodyType<RequestProjectUploadUrlBody>},
+        TContext
+      > => {
+      return useMutation(getRequestProjectUploadUrlMutationOptions(options));
+    }
+
+export const getListProjectUploadsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/uploads`
+}
+
+/**
+ * @summary List user-uploaded files attached to a project.
+ */
+export const listProjectUploads = async (id: number, options?: RequestInit): Promise<ListProjectUploads200> => {
+
+  return customFetch<ListProjectUploads200>(getListProjectUploadsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListProjectUploadsQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/uploads`
+    ] as const;
+    }
+
+
+export const getListProjectUploadsQueryOptions = <TData = Awaited<ReturnType<typeof listProjectUploads>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProjectUploads>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListProjectUploadsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listProjectUploads>>> = ({ signal }) => listProjectUploads(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listProjectUploads>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListProjectUploadsQueryResult = NonNullable<Awaited<ReturnType<typeof listProjectUploads>>>
+export type ListProjectUploadsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List user-uploaded files attached to a project.
+ */
+
+export function useListProjectUploads<TData = Awaited<ReturnType<typeof listProjectUploads>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProjectUploads>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListProjectUploadsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getRegisterProjectUploadUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/uploads`
+}
+
+/**
+ * @summary Register an uploaded file after PUT to the presigned URL.
+ */
+export const registerProjectUpload = async (id: number,
+    registerProjectUploadBody: RegisterProjectUploadBody, options?: RequestInit): Promise<ProjectUpload> => {
+
+  return customFetch<ProjectUpload>(getRegisterProjectUploadUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      registerProjectUploadBody,)
+  }
+);}
+
+
+
+
+export const getRegisterProjectUploadMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerProjectUpload>>, TError,{id: number;data: BodyType<RegisterProjectUploadBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof registerProjectUpload>>, TError,{id: number;data: BodyType<RegisterProjectUploadBody>}, TContext> => {
+
+const mutationKey = ['registerProjectUpload'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof registerProjectUpload>>, {id: number;data: BodyType<RegisterProjectUploadBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  registerProjectUpload(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegisterProjectUploadMutationResult = NonNullable<Awaited<ReturnType<typeof registerProjectUpload>>>
+    export type RegisterProjectUploadMutationBody = BodyType<RegisterProjectUploadBody>
+    export type RegisterProjectUploadMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Register an uploaded file after PUT to the presigned URL.
+ */
+export const useRegisterProjectUpload = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerProjectUpload>>, TError,{id: number;data: BodyType<RegisterProjectUploadBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof registerProjectUpload>>,
+        TError,
+        {id: number;data: BodyType<RegisterProjectUploadBody>},
+        TContext
+      > => {
+      return useMutation(getRegisterProjectUploadMutationOptions(options));
+    }
+
+export const getDeleteProjectUploadUrl = (id: number,
+    uploadId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/uploads/${uploadId}`
+}
+
+/**
+ * @summary Delete a project upload by id.
+ */
+export const deleteProjectUpload = async (id: number,
+    uploadId: number, options?: RequestInit): Promise<DeleteProjectUpload200> => {
+
+  return customFetch<DeleteProjectUpload200>(getDeleteProjectUploadUrl(id,uploadId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteProjectUploadMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProjectUpload>>, TError,{id: number;uploadId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteProjectUpload>>, TError,{id: number;uploadId: number}, TContext> => {
+
+const mutationKey = ['deleteProjectUpload'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteProjectUpload>>, {id: number;uploadId: number}> = (props) => {
+          const {id,uploadId} = props ?? {};
+
+          return  deleteProjectUpload(id,uploadId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteProjectUploadMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProjectUpload>>>
+
+    export type DeleteProjectUploadMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a project upload by id.
+ */
+export const useDeleteProjectUpload = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProjectUpload>>, TError,{id: number;uploadId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteProjectUpload>>,
+        TError,
+        {id: number;uploadId: number},
+        TContext
+      > => {
+      return useMutation(getDeleteProjectUploadMutationOptions(options));
+    }
 
 export const getRequestUploadUrlUrl = () => {
 
