@@ -132,8 +132,6 @@ export default function BillingPage() {
   const [cancelLoading, setCancelLoading] = useState(false);
   const [planCheckoutLoading, setPlanCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
-  // workspaceId: billing portal requires a workspace; set to null until workspace context is wired
-  const workspaceId: number | null = null;
 
   // Recommended tier passed as ?tier= from inline upgrade CTAs (Task #660).
   // Accepts the marketing tier names ("starter", "pro", "enterprise") and
