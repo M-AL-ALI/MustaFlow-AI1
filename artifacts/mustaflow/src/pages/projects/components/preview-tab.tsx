@@ -867,15 +867,12 @@ export function PreviewTab({
                 onClick={async () => {
                   if (!veSelection?.text) return;
                   try {
-                    const res = await fetch(
-                      `/api/projects/${project.id}/visual-edit/resolve`,
-                      {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        credentials: "include",
-                        body: JSON.stringify({ text: veSelection.text }),
-                      },
-                    );
+                    const res = await fetch(`/api/projects/${project.id}/visual-edit/resolve`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify({ text: veSelection.text }),
+                    });
                     if (res.ok) {
                       const j = (await res.json()) as { fileId?: number; filePath?: string };
                       if (typeof j.fileId === "number") {
@@ -1661,7 +1658,7 @@ export function PreviewTab({
               <Camera className="h-3.5 w-3.5" />
             </Button>
           )}
-          {hasFiles && !isReactVite && (
+          {hasFiles && (
             <Button
               variant={editMode ? "default" : "ghost"}
               size="icon"
@@ -1670,7 +1667,9 @@ export function PreviewTab({
               title={
                 editMode
                   ? "Exit visual edit"
-                  : "Visual edit — click elements to change text, colors, padding"
+                  : isReactVite
+                    ? "Visual edit — clicks fall back to a refine prompt in the React/Vite preview"
+                    : "Visual edit — click elements to change text, colors, padding"
               }
               aria-pressed={editMode}
             >

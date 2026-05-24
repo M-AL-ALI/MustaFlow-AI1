@@ -217,10 +217,7 @@ async function findUniqueHtmlFile(projectId: number, needle: string) {
     .select()
     .from(projectFilesTable)
     .where(
-      and(
-        eq(projectFilesTable.projectId, projectId),
-        eq(projectFilesTable.mimeType, "text/html"),
-      ),
+      and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.mimeType, "text/html")),
     );
   const hits = htmlFiles.filter((f) => occurrences(f.content, needle) === 1);
   return hits.length === 1 ? hits[0]! : null;
@@ -277,8 +274,7 @@ function isSafeCssValue(v: string): boolean {
   if (!v || v.length > 80) return false;
   if (/[;<>"'`{}]/.test(v)) return false;
   const color = /^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)|[a-zA-Z]{3,32})$/;
-  const length =
-    /^(\s*-?\d+(\.\d+)?(px|rem|em|%)?\s*){1,4}$/;
+  const length = /^(\s*-?\d+(\.\d+)?(px|rem|em|%)?\s*){1,4}$/;
   return color.test(v.trim()) || length.test(v);
 }
 
@@ -355,9 +351,7 @@ function spliceStyle(
     const cleaned = inner
       .split(";")
       .map((d) => d.trim())
-      .filter(
-        (d) => d.length > 0 && d.slice(0, d.indexOf(":")).trim().toLowerCase() !== property,
-      );
+      .filter((d) => d.length > 0 && d.slice(0, d.indexOf(":")).trim().toLowerCase() !== property);
     cleaned.push(`${property}: ${value}`);
     const next = cleaned.join("; ");
     newTag =
@@ -369,8 +363,7 @@ function spliceStyle(
     const m = /^<([a-zA-Z][a-zA-Z0-9-]*)/.exec(tag);
     if (!m) return source;
     const insertAt = m[0].length;
-    newTag =
-      tag.slice(0, insertAt) + ` style="${property}: ${value}"` + tag.slice(insertAt);
+    newTag = tag.slice(0, insertAt) + ` style="${property}: ${value}"` + tag.slice(insertAt);
   }
   return source.slice(0, openStart) + newTag + source.slice(openEnd + 1);
 }
