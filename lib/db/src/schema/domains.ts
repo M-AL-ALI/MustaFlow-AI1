@@ -9,6 +9,7 @@ import {
   jsonb,
 } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
+import { workspaceDomainsTable } from "./workspace-domains";
 
 export const DOMAIN_RECORD_TYPES = ["a", "cname"] as const;
 export type DomainRecordType = (typeof DOMAIN_RECORD_TYPES)[number];
@@ -58,6 +59,11 @@ export const projectDomainsTable = pgTable(
     // Suspension: null = active. When set, hostname middleware returns 451.
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
     suspensionReason: text("suspension_reason"),
+    // workspaceDomainId: when set, this project subdomain is carved from an org-owned
+    // workspace domain (Task #558). Verification is skipped — org already proved ownership.
+    workspaceDomainId: integer("workspace_domain_id").references(() => workspaceDomainsTable.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -465,3 +465,26 @@ The intended user journey is: Login → create project → build app → preview
 - Prometheus alerts / alerting rules are not yet wired to a real Alertmanager — `slo_violations_total` counter is instrumented but no alert route is configured.
 - pg-boss dead-letter (archived failed jobs) is not surfaced in the admin dashboard.
 - Circuit breakers are not yet wrapped around the actual OpenAI/Fly/Stripe call sites in `builder.ts` / `container.ts` — the utility is in place and available for follow-up.
+
+## Task #558 — Org-level domain ownership, roles, plan quotas, bandwidth billing
+
+- **Org-level domain claims**: Workspaces can claim and verify a domain once (`workspace_domains` table). Projects can then attach sub-hostnames under an org-verified apex (e.g. `acme.com` → `app.acme.com`) without additional TXT proof — ownership is inherited from the org.
+- **Domain-scoped roles**: Three roles per workspace domain: `viewer` (read), `editor` (add/verify/DNS edit), `owner` (delete/transfer). Backed by `workspace_domain_roles` table. `requireDomainRole(minRole)` middleware guards every mutation route. Workspace owner always passes.
+- **Per-plan quotas**: `artifacts/api-server/src/lib/plans.ts` — `PLAN_QUOTAS` maps `free|starter|pro|enterprise` → `{maxCustomDomains, maxBandwidthGbPerMonth, maxCustomCerts, maxDomainRoleGrants}`. `enforceQuota('domain', count, workspaceId)` returns a structured result; 402 response includes `upgradeMessage` CTA. Plan resolved via `PLAN_OVERRIDE_<WORKSPACE_ID>` env var (bridge until Stripe subscriptions are wired). Default: all workspaces free.
+- **Per-org usage rollup**: `workspace_usage_daily` table stores daily request + bandwidth counts per workspace × hostname. `rollupUsage(fromDate, toDate)` aggregates `domain_serve_events` (via project→workspace join). Called on-demand from the Usage API for the current month. `getWorkspaceUsage(workspaceId, month)` queries the rollup.
+- **Stripe metered billing**: `reportBandwidthOverageToStripe(workspaceId)` in `usage-rollup.ts` — reads `STRIPE_BANDWIDTH_OVERAGE_PRICE_ID` env, reports unreported rows via `stripe.billing.meterEvents.create` (gracefully skips if SDK version predates the API). Marks reported rows with `stripe_meter_reported_at`.
+- **Audit log**: `workspace_domain_audit` table. Every domain claim, release, verification, role grant/revoke, and sub-hostname claim writes a row with `action`, `hostname`, and JSON `payload`.
+- **API routes** (`artifacts/api-server/src/routes/workspace-domains.ts`, mounted after auth wall):
+  - `GET /workspaces/:id/domains` — list org domains + quota info
+  - `POST /workspaces/:id/domains` — claim (quota-gated, returns TXT verification instructions)
+  - `DELETE /workspaces/:id/domains/:domainId` — release (`owner` role required)
+  - `POST /workspaces/:id/domains/:domainId/verify` — DNS TXT check
+  - `GET/POST/DELETE /workspaces/:id/domains/:domainId/roles[/:targetUserId]` — role CRUD (`owner` required for mutations)
+  - `POST /workspaces/:id/domains/:domainId/sub-claim` — attach project sub-hostname under verified org apex (auto-verified, `editor` required)
+  - `GET /workspaces/:id/usage` — monthly bandwidth/request rollup + quota bar data
+  - `GET /workspaces/:id/audit` — paginated org-wide domain audit log
+- **`project_domains.workspace_domain_id`**: New nullable FK column links a project custom domain back to the workspace domain it was carved from.
+- **UI pages**: `/workspaces/:id/usage` (bandwidth quota bar, per-domain breakdown, upgrade CTA) and `/workspaces/:id/audit` (paginated audit log with action icons, user masking, timestamps).
+- **Migration**: `pnpm --filter @workspace/scripts run migrate-workspace-domains` — creates all 4 new tables + adds `workspace_domain_id` FK to `project_domains` (idempotent `IF NOT EXISTS`).
+- **Env vars (optional)**: `PLAN_OVERRIDE_<WORKSPACE_ID>` (e.g. `PLAN_OVERRIDE_42=pro`), `DEFAULT_PLAN_TIER` (global default), `STRIPE_BANDWIDTH_OVERAGE_PRICE_ID`.
+- **Key files**: `lib/db/src/schema/workspace-domains.ts`, `lib/db/src/schema/workspace-domain-roles.ts`, `lib/db/src/schema/workspace-usage-daily.ts`, `artifacts/api-server/src/lib/plans.ts`, `artifacts/api-server/src/lib/usage-rollup.ts`, `artifacts/api-server/src/routes/workspace-domains.ts`, `scripts/src/migrate-workspace-domains.ts`.

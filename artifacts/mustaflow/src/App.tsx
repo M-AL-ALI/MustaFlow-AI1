@@ -29,6 +29,8 @@ import PublishedPage from "./pages/published";
 import IntegrationsPage from "./pages/integrations";
 import SecurityPage from "./pages/security";
 import PricingPage from "./pages/pricing";
+import WorkspaceUsagePage from "./pages/workspace-usage";
+import WorkspaceAuditPage from "./pages/workspace-audit";
 
 // Components
 import { AppLayout } from "./components/layout/app-layout";
@@ -404,6 +406,20 @@ function ClerkProviderWithRoutes() {
                 <Protected>
                   <AppLayout>
                     <SecurityPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/workspaces/:id/usage">
+                <Protected>
+                  <AppLayout>
+                    <WorkspaceUsagePage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/workspaces/:id/audit">
+                <Protected>
+                  <AppLayout>
+                    <WorkspaceAuditPage />
                   </AppLayout>
                 </Protected>
               </Route>

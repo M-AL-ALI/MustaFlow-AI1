@@ -29,6 +29,7 @@ import mobileSettingsRouter from "./mobile-settings";
 import adminRouter from "./admin";
 import billingRouter, { billingWebhookRouter } from "./billing";
 import workspacesRouter from "./workspaces";
+import workspaceDomainsRouter from "./workspace-domains";
 import buildsRouter from "./builds";
 import queueRouter from "./queue";
 import easRouter from "./eas";
@@ -150,6 +151,7 @@ router.get("/projects/:id/export", exportLimiter);
 router.post("/billing/checkout", exportLimiter);
 
 router.use(workspacesRouter);
+router.use(workspaceDomainsRouter);
 router.use(projectsRouter);
 router.use(messagesRouter);
 router.use(tasksRouter);

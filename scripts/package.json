@@ -48,6 +48,7 @@
     "migrate-domain-security": "tsx ./src/migrate-domain-security.ts",
     "migrate-dns-records": "tsx ./src/migrate-dns-records.ts",
     "migrate-pg-boss": "tsx ./src/migrate-pg-boss.ts",
+    "migrate-workspace-domains": "tsx ./src/migrate-workspace-domains.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },
