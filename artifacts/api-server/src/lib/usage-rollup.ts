@@ -46,12 +46,14 @@ export async function rollupUsage(fromDate: string, toDate?: string): Promise<nu
     date: string;
     hostname: string;
     request_count: number;
+    bandwidth_bytes: number;
   }>(sql`
     SELECT
       p.workspace_id,
       DATE(e.ts AT TIME ZONE 'UTC')::text        AS date,
       COALESCE(e.hostname, '')                    AS hostname,
-      COUNT(*)::bigint                            AS request_count
+      COUNT(*)::bigint                            AS request_count,
+      COALESCE(SUM(e.bytes_served), 0)::bigint    AS bandwidth_bytes
     FROM domain_serve_events e
     JOIN projects p ON p.id = e.project_id
     WHERE p.workspace_id IS NOT NULL
@@ -80,14 +82,15 @@ export async function rollupUsage(fromDate: string, toDate?: string): Promise<nu
   await Promise.all(deletePromises);
 
   // 3. Insert fresh absolute values.
-  //    bandwidth_bytes: domain_serve_events has no bytes column yet (requires task #645).
-  //    Stored as 0 until that follow-up adds bytes_served to the table.
+  //    bandwidth_bytes: SUM(domain_serve_events.bytes_served) — populated by
+  //    the serving middleware (Task #645). Legacy rows without bytes_served
+  //    contribute 0 via COALESCE in the SELECT above.
   const insertValues = rows.rows.map((row) => ({
     workspaceId: Number(row.workspace_id),
     date: row.date,
     hostname: row.hostname, // always a string (never null) — see COALESCE above
     requestCount: Number(row.request_count),
-    bandwidthBytes: 0,
+    bandwidthBytes: Number(row.bandwidth_bytes),
   }));
 
   await db.insert(workspaceUsageDailyTable).values(insertValues);
@@ -140,7 +143,8 @@ export async function getWorkspaceUsage(
  * No-op when:
  *   - Stripe is not configured
  *   - STRIPE_BANDWIDTH_OVERAGE_PRICE_ID is not set
- *   - All bandwidth_bytes values are 0 (byte tracking not yet enabled — task #645)
+ *   - All bandwidth_bytes values are 0 (no traffic this month, or all serves
+ *     happened before Task #645's bytes_served column was populated)
  *   - Stripe SDK predates the meterEvents API
  *
  * Called from GET /workspaces/:id/usage after the monthly rollup so every

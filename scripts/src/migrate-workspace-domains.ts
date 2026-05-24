@@ -99,6 +99,14 @@ async function run(): Promise<void> {
     `);
     console.log("  ✓ project_domains.workspace_domain_id column");
 
+    // 6. Add bytes_served column to domain_serve_events (Task #645) — nullable so
+    //    legacy rows (request-only) stay valid; rollup sums COALESCE(bytes_served, 0).
+    await client.query(`
+      ALTER TABLE domain_serve_events
+        ADD COLUMN IF NOT EXISTS bytes_served BIGINT;
+    `);
+    console.log("  ✓ domain_serve_events.bytes_served column");
+
     console.log("\nMigration complete.");
   } finally {
     client.release();

@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, bigint } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export const domainServeEventsTable = pgTable("domain_serve_events", {
@@ -9,6 +9,7 @@ export const domainServeEventsTable = pgTable("domain_serve_events", {
   domainId: integer("domain_id"),
   snapshotId: integer("snapshot_id"),
   hostname: text("hostname"),
+  bytesServed: bigint("bytes_served", { mode: "number" }),
   ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
 });
 

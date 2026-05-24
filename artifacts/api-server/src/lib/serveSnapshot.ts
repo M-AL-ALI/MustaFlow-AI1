@@ -120,9 +120,20 @@ async function serveSnapshotById(
   }
 }
 
-/** Best-effort: record that a custom domain served a request (sampled at 5%). */
-function recordDomainServeEvent(projectId: number, hostname: string | null): void {
-  if (Math.random() > 0.05) return; // 5% sampling
+/**
+ * Best-effort: record that a project snapshot was served.
+ *
+ * Task #645: writes the actual response byte count alongside the hit so the
+ * workspace bandwidth rollup (`workspace_usage_daily.bandwidth_bytes`) has
+ * real data backing the quota bar. Called for both custom-domain and
+ * platform (`/api/p/:slug/`) serves; hostname is null for the latter and
+ * gets normalised to '' by `rollupUsage`.
+ */
+function recordDomainServeEvent(
+  projectId: number,
+  hostname: string | null,
+  bytesServed: number,
+): void {
   setImmediate(() => {
     void (async () => {
       try {
@@ -139,11 +150,31 @@ function recordDomainServeEvent(projectId: number, hostname: string | null): voi
             );
           domainId = dom?.id ?? null;
         }
-        await db.insert(domainServeEventsTable).values({ projectId, domainId, hostname });
+        await db.insert(domainServeEventsTable).values({
+          projectId,
+          domainId,
+          hostname,
+          bytesServed: Math.max(0, Math.floor(bytesServed)),
+        });
       } catch {
         /* best-effort, never throws */
       }
     })();
+  });
+}
+
+/**
+ * Attach a one-shot 'finish' listener that records the served byte count
+ * after the response completes. Uses res.getHeader('content-length') which
+ * Express sets automatically on res.send()/res.end(<Buffer|string>).
+ */
+function trackServeBytes(res: Response, projectId: number, hostname: string | null): void {
+  res.once("finish", () => {
+    if (res.statusCode >= 400) return; // only count successful serves
+    const raw = res.getHeader("content-length");
+    const bytes = typeof raw === "number" ? raw : Number(raw ?? 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return;
+    recordDomainServeEvent(projectId, hostname, bytes);
   });
 }
 
@@ -189,15 +220,14 @@ export async function serveSnapshotByProjectEnv(
     return;
   }
 
-  // Production — record domain serve event (sampled) when a custom hostname is involved
-  if (hostname) {
-    recordDomainServeEvent(projectId, hostname);
-  }
-
   if (project.status !== "published" || !project.publishedSnapshotId) {
     res.status(404).type("text/html").send(NOT_PUBLISHED_HTML);
     return;
   }
+  // Task #645: record a serve event with the actual response byte count once
+  // the response finishes. Hostname carries the custom domain (if any) so the
+  // rollup can attribute bandwidth per-hostname.
+  trackServeBytes(res, projectId, hostname ?? null);
   await serveSnapshotById(res, projectId, project.publishedSnapshotId, filePath, "production");
 }
 
@@ -310,6 +340,11 @@ export async function serveSnapshot(
     res.status(404).type("text/html").send(NOT_PUBLISHED_HTML);
     return;
   }
+
+  // Task #645: record a serve event with the actual response byte count once
+  // the response finishes. Public `/api/p/:slug/` traffic has no custom hostname,
+  // so we pass null — `rollupUsage` maps that to '' for the platform bucket.
+  trackServeBytes(res, projectId, null);
 
   // If a production container is deployed and running, proxy the request to it.
   if (project.prodContainerUrl && project.prodContainerStatus === "running") {
