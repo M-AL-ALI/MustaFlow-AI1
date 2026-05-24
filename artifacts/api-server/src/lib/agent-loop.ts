@@ -1243,7 +1243,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         callIdx++;
       }
 
+      // Pre-execution STEP_CAP clamp: never start more parallel calls than the
+      // remaining tool-call budget allows. Without this, a single LLM response
+      // emitting many parallel-safe calls could fire billable/network side
+      // effects past STEP_CAP before the mid-loop guard in handleToolResult
+      // observed the breach.
       if (batch.length > 0) {
+        const remainingBudget = Math.max(0, STEP_CAP - toolCalls.length);
+        if (remainingBudget === 0) {
+          terminationReason = "step-cap";
+          stepFinalized = true;
+          break;
+        }
+        if (batch.length > remainingBudget) {
+          batch.length = remainingBudget;
+        }
         const parsedBatch = batch.map((c) => parseArgs(c));
         const tBatchStart = Date.now();
         const settled = await Promise.all(
