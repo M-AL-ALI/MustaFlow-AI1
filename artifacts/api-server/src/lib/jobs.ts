@@ -1532,51 +1532,72 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       let resolvedProjectFormat = project.projectFormat ?? null;
 
       // ── Auto-detect required stack on the very first build ──────────────────
-      // The project was created before the user wrote their first real request,
-      // so we don't lock in the stack at creation time. Instead, right before
-      // the first build we classify the prompt and upgrade the stack if needed.
-      // This way a user who says "build me a todo app with user accounts" gets
-      // a real Node.js backend + database without ever having to choose.
-      if (
-        kind === "build" &&
-        !isMobileProject &&
-        ["static-html", "react-vite"].includes(resolvedProjectStack)
-      ) {
+      // The project is created before the user writes their first real request,
+      // so the stack is not locked at creation time. Right before the first
+      // build we classify the prompt and pick the correct architecture — the
+      // user never has to choose. Priority: mobile > full-stack > react > static.
+      let resolvedIsMobile = isMobileProject;
+      if (kind === "build" && !isMobileProject) {
         try {
           await emitEvent(
             taskId,
             "narration",
-            "Analysing your request to choose the right architecture…",
+            "Reading your request to choose the right architecture…",
           );
           const detectedStack = await detectRequiredStack(userPrompt);
-          if (detectedStack !== resolvedProjectStack) {
+          const stackChanged = detectedStack !== resolvedProjectStack;
+          const becomesMobile = detectedStack === "mobile-cross";
+
+          if (stackChanged || becomesMobile) {
             logger.info(
               { taskId, projectId, from: resolvedProjectStack, to: detectedStack },
-              "Auto-upgrading project stack based on request analysis",
+              "Auto-selecting project stack based on request",
             );
+
+            const narration: Record<string, string> = {
+              "mobile-cross":
+                "This sounds like a native mobile app — building it for iOS and Android.",
+              "node-api": "This needs a real backend and database — building full-stack.",
+              "react-vite": "Using React for a richer interactive experience.",
+            };
             await emitEvent(
               taskId,
               "narration",
-              detectedStack === "node-api"
-                ? "This needs a real backend and database — switching to full-stack mode."
-                : "Using React for a richer interactive experience.",
+              narration[detectedStack] ?? "Architecture selected.",
             );
-            const newFormat = detectedStack === "react-vite" ? "react-vite" : "static-html";
-            await db
-              .update(projectsTable)
-              .set({ stack: detectedStack, projectFormat: newFormat })
-              .where(eq(projectsTable.id, projectId));
-            resolvedProjectStack = detectedStack;
-            resolvedProjectFormat = newFormat;
+
+            if (becomesMobile) {
+              // Upgrade project kind + platform so the mobile pipeline runs.
+              await db
+                .update(projectsTable)
+                .set({
+                  kind: "mobile-cross",
+                  platform: "cross",
+                  stack: "react-vite",
+                  projectFormat: "static-html",
+                })
+                .where(eq(projectsTable.id, projectId));
+              resolvedProjectStack = "react-vite";
+              resolvedProjectFormat = "static-html";
+              resolvedIsMobile = true;
+            } else {
+              const newFormat = detectedStack === "react-vite" ? "react-vite" : "static-html";
+              await db
+                .update(projectsTable)
+                .set({ stack: detectedStack, projectFormat: newFormat })
+                .where(eq(projectsTable.id, projectId));
+              resolvedProjectStack = detectedStack;
+              resolvedProjectFormat = newFormat;
+            }
+
             // Reload project row so downstream code has fresh containerId etc.
             const [refreshed] = await db
               .select()
               .from(projectsTable)
               .where(eq(projectsTable.id, projectId));
             if (refreshed) Object.assign(project, refreshed);
-            // If we just upgraded to a container-based stack and have no
-            // container yet, kick off provisioning in the background so the
-            // agent loop gets a containerId as early as possible.
+
+            // Full-stack upgrade: kick off container + DB provisioning in background.
             if (detectedStack === "node-api" && !project.containerId) {
               const { enqueueProvisionProjectJob } = await import("./provisioning");
               enqueueProvisionProjectJob(projectId);
@@ -1591,11 +1612,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }
       }
 
-      const isReactViteProject = !isMobileProject && resolvedProjectFormat === "react-vite";
-      const isNextjsProject = !isMobileProject && resolvedProjectStack === "nextjs";
-      const isNodeApiProject = !isMobileProject && resolvedProjectStack === "node-api";
-      const isPythonFlaskProject = !isMobileProject && resolvedProjectStack === "python-flask";
-      const isPythonFastapiProject = !isMobileProject && resolvedProjectStack === "python-fastapi";
+      const isReactViteProject = !resolvedIsMobile && resolvedProjectFormat === "react-vite";
+      const isNextjsProject = !resolvedIsMobile && resolvedProjectStack === "nextjs";
+      const isNodeApiProject = !resolvedIsMobile && resolvedProjectStack === "node-api";
+      const isPythonFlaskProject = !resolvedIsMobile && resolvedProjectStack === "python-flask";
+      const isPythonFastapiProject = !resolvedIsMobile && resolvedProjectStack === "python-fastapi";
 
       // For mobile projects: load last successful task's wired modules + project secret names once,
       // so both build and refine pipelines have durable module context.

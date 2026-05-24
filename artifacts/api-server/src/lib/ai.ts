@@ -154,7 +154,66 @@ export function buildInitialAssistantMessage(projectName: string, initialPrompt:
   return `Welcome to MustaFlow AI. I've spun up "${projectName}" for you. Here's what I heard:\n\n"${initialPrompt.trim()}"\n\nWhen you're ready, send me a message describing the first thing you want to see, or toggle Plan Mode and I'll lay out a full build plan for your approval.`;
 }
 
-export type StackId = "static-html" | "react-vite" | "node-api";
+export type StackId = "static-html" | "react-vite" | "node-api" | "mobile-cross";
+
+/**
+ * Keyword signals that strongly suggest a native mobile app is needed.
+ * Checked FIRST — mobile intent overrides all web stack choices.
+ */
+const MOBILE_SIGNALS = [
+  "mobile app",
+  "ios app",
+  "android app",
+  "iphone app",
+  "ipad app",
+  "phone app",
+  "native app",
+  "expo",
+  "react native",
+  "app store",
+  "play store",
+  "push notification",
+  "camera",
+  "gps",
+  "geolocation",
+  "maps",
+  "location",
+  "swipe",
+  "gestures",
+  "haptic",
+  "offline mode",
+  "mobile",
+  "smartphone",
+  "tablet app",
+  "download on",
+  "install on phone",
+  "uber",
+  "airbnb",
+  "instagram",
+  "tiktok",
+  "whatsapp",
+  "telegram",
+  "like uber",
+  "like airbnb",
+  "like instagram",
+  "delivery app",
+  "ride app",
+  "ride sharing",
+  "food delivery",
+  "dating app",
+  "fitness app",
+  "workout app",
+  "health app",
+  "banking app",
+  "wallet app",
+  "shopping app",
+  "e-commerce app",
+  "marketplace app",
+  "social app",
+  "social network",
+  "messaging app",
+  "chat app",
+];
 
 /**
  * Keyword signals that strongly suggest a backend / database is required.
@@ -234,15 +293,22 @@ const REACT_SIGNALS = [
 /**
  * Automatically classify the required stack from the user's app description.
  *
- * Priority: backend signals win over react signals; react signals win over
- * static default.  Falls back to a fast gpt-5-mini call when heuristics
- * return no clear signal.
+ * Priority order (highest to lowest):
+ *   1. mobile-cross — native mobile app signals (checked first, always wins)
+ *   2. node-api     — full-stack backend + database signals
+ *   3. react-vite   — rich SPA signals without a dedicated backend
+ *   4. static-html  — default for simple pages with no detected complexity
  *
- * Returns one of: "node-api" | "react-vite" | "static-html".
+ * Falls back to a fast gpt-5-mini call when heuristics return no clear signal.
  */
 export async function detectRequiredStack(prompt: string): Promise<StackId> {
   const lower = prompt.toLowerCase();
 
+  // Mobile intent always wins — a user asking for "an app like Uber" or
+  // "a fitness tracking mobile app" should get a real native app, not a web page.
+  if (MOBILE_SIGNALS.some((s) => lower.includes(s))) {
+    return "mobile-cross";
+  }
   if (BACKEND_SIGNALS.some((s) => lower.includes(s))) {
     return "node-api";
   }
@@ -262,16 +328,18 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
           content:
             "Classify this app idea into exactly one category. Reply with a single word only.\n" +
             "Categories:\n" +
-            "  static  — landing page, portfolio, brochure, simple UI with no persistent data\n" +
-            "  react   — rich single-page app, dashboard, data viz, but no server-side DB\n" +
-            "  fullstack — needs a real backend: user auth, database, file uploads, payments, APIs\n" +
-            "Reply with ONLY one of: static | react | fullstack",
+            "  mobile    — native phone/tablet app: something you'd install from the App Store or Play Store\n" +
+            "  fullstack — web app that needs a real backend: user auth, database, file uploads, payments, APIs\n" +
+            "  react     — rich web single-page app, dashboard, or data viz with no server-side database\n" +
+            "  static    — simple web page: landing page, portfolio, brochure, no persistent data\n" +
+            "Reply with ONLY one of: mobile | fullstack | react | static",
         },
         { role: "user", content: prompt.slice(0, 800) },
       ],
       max_completion_tokens: 10,
     });
     const word = res.choices[0]?.message?.content?.trim().toLowerCase() ?? "";
+    if (word.includes("mobile")) return "mobile-cross";
     if (word.includes("fullstack") || word.includes("full")) return "node-api";
     if (word.includes("react")) return "react-vite";
     return "static-html";
