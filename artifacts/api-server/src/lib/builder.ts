@@ -174,6 +174,24 @@ const PREVIEW_NOTE = `IMPORTANT preview-runtime constraints:
 - Forms should validate client-side and show a friendly success state — do NOT post to real servers.
 - Do not use emojis in copy. Use lucide icons via class="lucide" or inline SVG instead.
 
+INTERACTIVITY — every visible interactive element MUST respond to clicks (this is the #1 complaint):
+- Every <button> MUST have an onclick handler. A button with no handler is a bug — never ship one.
+- Toggles, accordions, modals, dropdowns, and tabs MUST work via inline JavaScript (vanilla classList.toggle / style.display — no framework needed).
+- For actions that require a real backend (save, submit, fetch from API): show an immediate visual feedback state — a brief loading indicator, then a realistic success state with plausible mock data. Do NOT leave the button silent.
+- Multi-page navigation: use relative <a href="./page.html"> links — they work in the static preview.
+- Inline this helper at the end of <body> so you can wire any button with data-action="description":
+  <script>
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('[data-action]');
+    if(!el)return;
+    var msg=el.getAttribute('data-action');
+    var toast=document.getElementById('_toast');
+    if(!toast){toast=document.createElement('div');toast.id='_toast';toast.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#18181b;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;z-index:9999;pointer-events:none;transition:opacity .3s';document.body.appendChild(toast);}
+    toast.textContent=msg;toast.style.opacity='1';
+    clearTimeout(toast._t);toast._t=setTimeout(function(){toast.style.opacity='0';},2000);
+  });
+  </script>
+
 MAP / LOCATION APPS:
 - For ALL map/location previews, use Leaflet.js + OpenStreetMap — works without any API key:
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
