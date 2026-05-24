@@ -381,8 +381,14 @@ The intended user journey is: Login → create project → build app → preview
   - `GET/POST/PATCH/DELETE /schedules[/:sid]` — full CRUD. Validates cron via `parseCron`.
 - **UI**: New `DeploymentSubstratePanel` in `publishing-tab.tsx`, rendered above the Domains section. Sections: deployment-type picker (3 tiles with pricing copy), region/health-path/alert-email/CDN-toggle grid, uptime tile with "Probe now" button, schedules manager (kind + cron + note + add/toggle/delete). Uses raw `fetch()` (canvas-variants pattern — Orval drift kept tight).
 - **Drift**: New routes not in `lib/api-spec/openapi.yaml`. Frontend uses raw fetch. Adding Orval hooks is a clean follow-up once the contract stabilizes.
-- **Known limitations**:
-  - CDN push is a stub — no real R2/Bunny upload. Follow-up #608.
-  - Uptime alert email field stored but no SMTP dispatcher yet. Follow-up #610.
-  - `task_run` and `redeploy` schedule kinds stamp lastRunStatus but are no-ops pending agent-task enqueue / republish-from-snapshot wiring.
+- **Scheduler executors (wired)**:
+  - `task_run` — inserts an `agent_tasks` row (`kind="refine"`, `agentIdentity="task"`, `runMode="background"`) and calls `enqueueJob`. Schedule note becomes the prompt; falls back to `Scheduled task (cron <expr>)` when empty.
+  - `redeploy` — only runs for already-published projects. Snapshots current `project_files` into a new `project_versions` row (`label = "Scheduled redeploy — <stamp>"`, `environment="production"`) and updates `projects.publishedSnapshotId`. Skips container/CDN side effects (those run on next manual publish).
+  - Both stamp `lastRunStatus` and `lastRunMessage` with success/skip/error detail.
+- **Uptime alert email (wired)**: After 3 consecutive failed `prod_health_checks` rows for the same project, `maybeSendUptimeAlert` POSTs to Resend (`RESEND_API_KEY`, optional `RESEND_FROM`, default `alerts@mustaflow.app`). 1-hour per-project cooldown (in-process Map). When `RESEND_API_KEY` is unset, the intent is logged at WARN and cooldown still advances (Knowledge Vault breadcrumb remains the user-facing signal).
+- **Uptime probe fixes**: target uses `http://127.0.0.1:${PORT}/api/p/<slug>` (matches actual API port); healthy = status `200–399` only (4xx/5xx fail). Sweep ordering is `MAX(prod_health_checks.created_at) ASC NULLS FIRST` so the 20/tick cap rotates fairly across all published projects.
+- **Known limitations (real-world infra gaps)**:
+  - **CDN push is a stub**. Real R2/Workers or Bunny PUT upload + edge-routing cutover is follow-up #608 — requires provisioning the bucket + token, which is operator work outside this code change.
+  - **Multi-region probes**: probes run from this server's region only; true 3-region 1-minute probes need fan-out workers or a third-party (UptimeRobot/Checkly), tracked as future work.
+  - **Always-on background worker lifecycle**: `reserved_vm` keeps the app container always-on (`min_machines_running:1`), but a *separate* persistent worker process model (think `worker.ts` next to `app.ts`) is not yet defined.
 - **Env vars (optional)**: `CDN_PROVIDER` (`r2|bunny|none`, default `none`), `CDN_PUBLIC_BASE` (e.g. `https://cdn.mustaflow.app`), `CDN_API_TOKEN` (reserved for follow-up). Without these, CDN is disabled and the toggle is locked off in the UI.
