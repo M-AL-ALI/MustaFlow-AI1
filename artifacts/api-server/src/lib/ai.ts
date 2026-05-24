@@ -153,3 +153,130 @@ export async function generatePlan(
 export function buildInitialAssistantMessage(projectName: string, initialPrompt: string): string {
   return `Welcome to MustaFlow AI. I've spun up "${projectName}" for you. Here's what I heard:\n\n"${initialPrompt.trim()}"\n\nWhen you're ready, send me a message describing the first thing you want to see, or toggle Plan Mode and I'll lay out a full build plan for your approval.`;
 }
+
+export type StackId = "static-html" | "react-vite" | "node-api";
+
+/**
+ * Keyword signals that strongly suggest a backend / database is required.
+ * Matched case-insensitively against the user's prompt.
+ */
+const BACKEND_SIGNALS = [
+  "database",
+  "postgres",
+  "mysql",
+  "sqlite",
+  "mongodb",
+  "store data",
+  "save data",
+  "save to",
+  "saved",
+  "persist",
+  "login",
+  "log in",
+  "logout",
+  "log out",
+  "signup",
+  "sign up",
+  "register",
+  "authentication",
+  "user account",
+  "user profile",
+  "user data",
+  "session",
+  "jwt",
+  "token",
+  "password",
+  "rest api",
+  "restful",
+  "api endpoint",
+  "api server",
+  "backend",
+  "server side",
+  "serverside",
+  "real-time",
+  "realtime",
+  "websocket",
+  "file upload",
+  "file storage",
+  "payment",
+  "stripe",
+  "webhook",
+  "email",
+  "send email",
+  "crud",
+  "admin panel",
+  "admin dashboard",
+  "multi-user",
+  "multiuser",
+  "multiple users",
+  "search",
+  "full text search",
+  "notification",
+  "subscription",
+];
+
+/**
+ * Keyword signals that suggest a React SPA (no dedicated backend).
+ */
+const REACT_SIGNALS = [
+  "react",
+  "vite",
+  "component",
+  "single page app",
+  "spa",
+  "dashboard",
+  "chart",
+  "recharts",
+  "data visualization",
+  "interactive",
+];
+
+/**
+ * Automatically classify the required stack from the user's app description.
+ *
+ * Priority: backend signals win over react signals; react signals win over
+ * static default.  Falls back to a fast gpt-5-mini call when heuristics
+ * return no clear signal.
+ *
+ * Returns one of: "node-api" | "react-vite" | "static-html".
+ */
+export async function detectRequiredStack(prompt: string): Promise<StackId> {
+  const lower = prompt.toLowerCase();
+
+  if (BACKEND_SIGNALS.some((s) => lower.includes(s))) {
+    return "node-api";
+  }
+  if (REACT_SIGNALS.some((s) => lower.includes(s))) {
+    return "react-vite";
+  }
+
+  // Unclear from keywords — ask the model. Keep it cheap: 20 output tokens max.
+  try {
+    const { createChatCompletion } = await import("./ai-providers");
+    const res = await createChatCompletion({
+      provider: "openai",
+      model: "gpt-5-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Classify this app idea into exactly one category. Reply with a single word only.\n" +
+            "Categories:\n" +
+            "  static  — landing page, portfolio, brochure, simple UI with no persistent data\n" +
+            "  react   — rich single-page app, dashboard, data viz, but no server-side DB\n" +
+            "  fullstack — needs a real backend: user auth, database, file uploads, payments, APIs\n" +
+            "Reply with ONLY one of: static | react | fullstack",
+        },
+        { role: "user", content: prompt.slice(0, 800) },
+      ],
+      max_completion_tokens: 10,
+    });
+    const word = res.choices[0]?.message?.content?.trim().toLowerCase() ?? "";
+    if (word.includes("fullstack") || word.includes("full")) return "node-api";
+    if (word.includes("react")) return "react-vite";
+    return "static-html";
+  } catch (err) {
+    logger.warn({ err }, "Stack auto-detection AI call failed — defaulting to static-html");
+    return "static-html";
+  }
+}

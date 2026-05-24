@@ -48,6 +48,7 @@ import {
 } from "./builder";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import type { AgentMode } from "./ai";
+import { detectRequiredStack } from "./ai";
 import { logger } from "./logger";
 import { writeKnowledge } from "./knowledge";
 import { generateEmbedding, cosineSimilarity } from "./embeddings";
@@ -1527,11 +1528,74 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       const isMobileProject = ["mobile-ios", "mobile-android", "mobile-cross"].includes(
         project.kind,
       );
-      const isReactViteProject = !isMobileProject && project.projectFormat === "react-vite";
-      const isNextjsProject = !isMobileProject && project.stack === "nextjs";
-      const isNodeApiProject = !isMobileProject && project.stack === "node-api";
-      const isPythonFlaskProject = !isMobileProject && project.stack === "python-flask";
-      const isPythonFastapiProject = !isMobileProject && project.stack === "python-fastapi";
+      let resolvedProjectStack = project.stack ?? "static-html";
+      let resolvedProjectFormat = project.projectFormat ?? null;
+
+      // ── Auto-detect required stack on the very first build ──────────────────
+      // The project was created before the user wrote their first real request,
+      // so we don't lock in the stack at creation time. Instead, right before
+      // the first build we classify the prompt and upgrade the stack if needed.
+      // This way a user who says "build me a todo app with user accounts" gets
+      // a real Node.js backend + database without ever having to choose.
+      if (
+        kind === "build" &&
+        !isMobileProject &&
+        ["static-html", "react-vite"].includes(resolvedProjectStack)
+      ) {
+        try {
+          await emitEvent(
+            taskId,
+            "narration",
+            "Analysing your request to choose the right architecture…",
+          );
+          const detectedStack = await detectRequiredStack(userPrompt);
+          if (detectedStack !== resolvedProjectStack) {
+            logger.info(
+              { taskId, projectId, from: resolvedProjectStack, to: detectedStack },
+              "Auto-upgrading project stack based on request analysis",
+            );
+            await emitEvent(
+              taskId,
+              "narration",
+              detectedStack === "node-api"
+                ? "This needs a real backend and database — switching to full-stack mode."
+                : "Using React for a richer interactive experience.",
+            );
+            const newFormat = detectedStack === "react-vite" ? "react-vite" : "static-html";
+            await db
+              .update(projectsTable)
+              .set({ stack: detectedStack, projectFormat: newFormat })
+              .where(eq(projectsTable.id, projectId));
+            resolvedProjectStack = detectedStack;
+            resolvedProjectFormat = newFormat;
+            // Reload project row so downstream code has fresh containerId etc.
+            const [refreshed] = await db
+              .select()
+              .from(projectsTable)
+              .where(eq(projectsTable.id, projectId));
+            if (refreshed) Object.assign(project, refreshed);
+            // If we just upgraded to a container-based stack and have no
+            // container yet, kick off provisioning in the background so the
+            // agent loop gets a containerId as early as possible.
+            if (detectedStack === "node-api" && !project.containerId) {
+              const { enqueueProvisionProjectJob } = await import("./provisioning");
+              enqueueProvisionProjectJob(projectId);
+              logger.info({ taskId, projectId }, "Provisioning job enqueued for stack upgrade");
+            }
+          }
+        } catch (err) {
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err), taskId },
+            "Stack auto-detection failed — continuing with existing stack",
+          );
+        }
+      }
+
+      const isReactViteProject = !isMobileProject && resolvedProjectFormat === "react-vite";
+      const isNextjsProject = !isMobileProject && resolvedProjectStack === "nextjs";
+      const isNodeApiProject = !isMobileProject && resolvedProjectStack === "node-api";
+      const isPythonFlaskProject = !isMobileProject && resolvedProjectStack === "python-flask";
+      const isPythonFastapiProject = !isMobileProject && resolvedProjectStack === "python-fastapi";
 
       // For mobile projects: load last successful task's wired modules + project secret names once,
       // so both build and refine pipelines have durable module context.
