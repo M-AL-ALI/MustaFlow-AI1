@@ -1,9 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Plan quotas — Task #558
+// Plan quotas — Task #558 + Task #644 (Stripe subscription wiring)
 //
 // Maps plan tier → resource limits. Enforced server-side via enforceQuota().
 // Quotas apply per workspace (org) for domain operations.
+//
+// Plan tier resolution order (first match wins):
+//   1. PLAN_OVERRIDE_<WORKSPACE_ID> env var (operator override, dev/test)
+//   2. DEFAULT_PLAN_TIER env var (global override, dev/test)
+//   3. workspace_subscriptions.planTier when status in (active, trialing)
+//   4. "free"
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { eq } from "drizzle-orm";
+import { db, workspaceSubscriptionsTable } from "@workspace/db";
 
 export const PLAN_TIERS = ["free", "starter", "pro", "enterprise"] as const;
 export type PlanTier = (typeof PLAN_TIERS)[number];
@@ -60,19 +69,76 @@ export interface QuotaEnforcementResult {
   upgradeMessage?: string;
 }
 
+const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
+
+function isValidPlanTier(value: string | undefined | null): value is PlanTier {
+  return !!value && (PLAN_TIERS as readonly string[]).includes(value);
+}
+
 /**
- * Resolve the plan tier for a workspace. In Phase 1 all workspaces are "free"
- * unless overridden via the PLAN_OVERRIDE_<WORKSPACE_ID> env var (for manual
- * upgrades before Stripe subscriptions are wired). The Stripe subscription
- * lookup will be wired here once the billing tables are expanded.
+ * Resolve the plan tier for a workspace. Reads the workspace_subscriptions
+ * row (populated by the Stripe webhook on customer.subscription.* events)
+ * and returns the tier when the subscription is active/trialing. Env-var
+ * overrides remain supported for dev/test and one-off manual upgrades.
  */
-export function resolveWorkspacePlan(workspaceId: number): PlanTier {
-  const override = process.env[`PLAN_OVERRIDE_${workspaceId}`] as PlanTier | undefined;
-  if (override && PLAN_TIERS.includes(override)) return override;
-  // Global override for testing
-  const globalOverride = process.env.DEFAULT_PLAN_TIER as PlanTier | undefined;
-  if (globalOverride && PLAN_TIERS.includes(globalOverride)) return globalOverride;
+export async function resolveWorkspacePlan(workspaceId: number): Promise<PlanTier> {
+  const override = process.env[`PLAN_OVERRIDE_${workspaceId}`];
+  if (isValidPlanTier(override)) return override;
+
+  const globalOverride = process.env.DEFAULT_PLAN_TIER;
+  if (isValidPlanTier(globalOverride)) return globalOverride;
+
+  try {
+    const [row] = await db
+      .select({
+        planTier: workspaceSubscriptionsTable.planTier,
+        status: workspaceSubscriptionsTable.status,
+      })
+      .from(workspaceSubscriptionsTable)
+      .where(eq(workspaceSubscriptionsTable.workspaceId, workspaceId))
+      .limit(1);
+
+    if (row && ACTIVE_SUBSCRIPTION_STATUSES.has(row.status) && isValidPlanTier(row.planTier)) {
+      return row.planTier;
+    }
+  } catch {
+    // Table may not exist yet in environments where the migration has not
+    // been run. Fall through to "free" — fail-safe to the smallest plan.
+  }
+
   return "free";
+}
+
+/**
+ * Map a Stripe Price ID to the MustaFlow plan tier. Reads
+ * PLAN_PRICE_STARTER / PLAN_PRICE_PRO / PLAN_PRICE_ENTERPRISE env vars.
+ * Returns null when the price doesn't match any configured plan.
+ */
+export function planTierForStripePriceId(priceId: string | null | undefined): PlanTier | null {
+  if (!priceId) return null;
+  const map: Array<[PlanTier, string | undefined]> = [
+    ["starter", process.env.PLAN_PRICE_STARTER],
+    ["pro", process.env.PLAN_PRICE_PRO],
+    ["enterprise", process.env.PLAN_PRICE_ENTERPRISE],
+  ];
+  for (const [tier, env] of map) {
+    if (env && env.trim() === priceId) return tier;
+  }
+  return null;
+}
+
+/** Lookup the configured Stripe Price ID for a plan tier (env-driven). */
+export function stripePriceIdForPlan(tier: PlanTier): string | undefined {
+  switch (tier) {
+    case "starter":
+      return process.env.PLAN_PRICE_STARTER?.trim() || undefined;
+    case "pro":
+      return process.env.PLAN_PRICE_PRO?.trim() || undefined;
+    case "enterprise":
+      return process.env.PLAN_PRICE_ENTERPRISE?.trim() || undefined;
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -80,12 +146,12 @@ export function resolveWorkspacePlan(workspaceId: number): PlanTier {
  * Does NOT throw — returns a result object so callers can respond with a
  * structured 402 including an upgrade CTA.
  */
-export function enforceQuota(
+export async function enforceQuota(
   resource: QuotaResource,
   currentCount: number,
   workspaceId: number,
-): QuotaEnforcementResult {
-  const plan = resolveWorkspacePlan(workspaceId);
+): Promise<QuotaEnforcementResult> {
+  const plan = await resolveWorkspacePlan(workspaceId);
   const quota = PLAN_QUOTAS[plan];
 
   let limit: number;

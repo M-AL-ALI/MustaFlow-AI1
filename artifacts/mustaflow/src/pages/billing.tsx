@@ -7,8 +7,10 @@ import {
   AlertCircle,
   ExternalLink,
   History,
+  Crown,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkspace } from "@/contexts/workspace-context";
 
 interface CreditPackage {
   id: string;
@@ -43,22 +45,63 @@ interface TransactionsResponse {
   transactions: CreditTransaction[];
 }
 
+interface PlanInfo {
+  tier: "free" | "starter" | "pro" | "enterprise";
+  priceId: string | null;
+  available: boolean;
+}
+
+interface PlansResponse {
+  stripeConfigured: boolean;
+  plans: PlanInfo[];
+}
+
+interface SubscriptionResponse {
+  workspaceId: number;
+  effectivePlan: "free" | "starter" | "pro" | "enterprise";
+  subscription: {
+    planTier: string;
+    status: string;
+    stripeSubscriptionId: string | null;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+  } | null;
+}
+
+const PLAN_LABELS: Record<string, { name: string; price: string; tagline: string }> = {
+  free: { name: "Free", price: "$0", tagline: "1 custom domain, 5 GB / month" },
+  starter: { name: "Starter", price: "$9/mo", tagline: "5 domains, 50 GB / month" },
+  pro: { name: "Pro", price: "$29/mo", tagline: "25 domains, 500 GB / month" },
+  enterprise: { name: "Enterprise", price: "Contact us", tagline: "Unlimited domains & bandwidth" },
+};
+
 export default function BillingPage() {
   const { toast } = useToast();
+  const { currentWorkspace } = useWorkspace();
   const [balance, setBalance] = useState<CreditsBalance | null>(null);
   const [packages, setPackages] = useState<PackagesResponse | null>(null);
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
+  const [plans, setPlans] = useState<PlansResponse | null>(null);
+  const [subscription, setSubscription] = useState<SubscriptionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const [planCheckoutLoading, setPlanCheckoutLoading] = useState<string | null>(null);
+
+  const workspaceId = currentWorkspace?.id ?? null;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [balRes, pkgRes, txRes] = await Promise.all([
+      const requests: Promise<Response>[] = [
         fetch("/api/billing/credits"),
         fetch("/api/billing/packages"),
         fetch("/api/billing/transactions"),
-      ]);
+        fetch("/api/billing/plans"),
+      ];
+      if (workspaceId != null) {
+        requests.push(fetch(`/api/billing/subscription/${workspaceId}`));
+      }
+      const [balRes, pkgRes, txRes, plansRes, subRes] = await Promise.all(requests);
 
       if (balRes.ok) setBalance((await balRes.json()) as CreditsBalance);
       if (pkgRes.ok) setPackages((await pkgRes.json()) as PackagesResponse);
@@ -66,12 +109,65 @@ export default function BillingPage() {
         const txData = (await txRes.json()) as TransactionsResponse;
         setTransactions(txData.transactions);
       }
+      if (plansRes?.ok) setPlans((await plansRes.json()) as PlansResponse);
+      if (subRes?.ok) setSubscription((await subRes.json()) as SubscriptionResponse);
+      else if (subRes) setSubscription(null);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [workspaceId]);
+
+  async function handlePlanUpgrade(tier: PlanInfo["tier"]) {
+    if (workspaceId == null) {
+      toast({
+        title: "No workspace selected",
+        description: "Select a workspace before upgrading.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPlanCheckoutLoading(tier);
+    try {
+      const res = await fetch("/api/billing/subscription/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId,
+          planTier: tier,
+          successUrl: `${window.location.origin}/billing?plan_upgraded=1`,
+          cancelUrl: `${window.location.origin}/billing`,
+        }),
+      });
+      const data = (await res.json()) as {
+        setupRequired?: boolean;
+        checkoutUrl?: string;
+        error?: string;
+      };
+      if (data.setupRequired) {
+        toast({
+          title: "Billing not configured",
+          description: "Stripe is not yet configured. Contact your administrator.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      } else if (data.error) {
+        toast({ title: "Upgrade failed", description: data.error, variant: "destructive" });
+      }
+    } catch {
+      toast({
+        title: "Upgrade failed",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPlanCheckoutLoading(null);
+    }
+  }
 
   useEffect(() => {
     void fetchData();
@@ -167,6 +263,93 @@ export default function BillingPage() {
           </div>
         </div>
       )}
+
+      {/* Current plan + upgrade */}
+      <div className="border border-border rounded-xl bg-card overflow-hidden">
+        <div className="px-4 py-2.5 bg-muted/40 border-b border-border flex items-center gap-2">
+          <Crown className="h-3.5 w-3.5 text-muted-foreground" />
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Workspace plan
+          </h3>
+          {currentWorkspace && (
+            <span className="text-xs text-muted-foreground ml-auto">{currentWorkspace.name}</span>
+          )}
+        </div>
+
+        <div className="p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-muted-foreground">Current plan</p>
+              <p className="text-2xl font-bold capitalize">
+                {subscription?.effectivePlan ?? "free"}
+              </p>
+              {subscription?.subscription?.status &&
+                subscription.subscription.status !== "active" && (
+                  <p className="text-xs text-yellow-600 mt-0.5">
+                    Status: {subscription.subscription.status}
+                  </p>
+                )}
+              {subscription?.subscription?.cancelAtPeriodEnd && (
+                <p className="text-xs text-yellow-600 mt-0.5">
+                  Cancels at end of current period
+                </p>
+              )}
+            </div>
+            {!workspaceId && (
+              <p className="text-xs text-muted-foreground">Select a workspace to manage your plan.</p>
+            )}
+          </div>
+
+          {plans && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {plans.plans
+                .filter((p) => p.tier !== "free")
+                .map((p) => {
+                  const meta = PLAN_LABELS[p.tier];
+                  const isCurrent = subscription?.effectivePlan === p.tier;
+                  const disabled =
+                    !p.available || isCurrent || !workspaceId || planCheckoutLoading !== null;
+                  return (
+                    <div
+                      key={p.tier}
+                      className="border border-border rounded-lg p-4 flex flex-col gap-2 bg-background/40"
+                    >
+                      <div className="flex items-baseline justify-between">
+                        <p className="font-semibold">{meta?.name ?? p.tier}</p>
+                        <p className="text-sm font-medium">{meta?.price ?? ""}</p>
+                      </div>
+                      <p className="text-xs text-muted-foreground flex-1">{meta?.tagline}</p>
+                      <button
+                        onClick={() => void handlePlanUpgrade(p.tier)}
+                        disabled={disabled}
+                        className={`w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-colors ${
+                          isCurrent
+                            ? "bg-muted text-muted-foreground cursor-default"
+                            : !p.available
+                              ? "bg-muted text-muted-foreground cursor-not-allowed"
+                              : "bg-primary text-primary-foreground hover:bg-primary/90"
+                        }`}
+                      >
+                        {planCheckoutLoading === p.tier ? (
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        ) : isCurrent ? (
+                          "Current plan"
+                        ) : !p.available ? (
+                          "Coming soon"
+                        ) : (
+                          <>
+                            Upgrade
+                            <ExternalLink className="h-3 w-3" />
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Credit balance */}
       <div className="border border-border rounded-xl bg-card p-6 flex items-center justify-between">

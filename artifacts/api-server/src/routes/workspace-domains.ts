@@ -272,7 +272,7 @@ router.get("/workspaces/:id/domains", requireWorkspaceMember, async (req, res): 
     .orderBy(asc(workspaceDomainsTable.createdAt));
 
   // Count to show quota info
-  const plan = (await import("../lib/plans")).resolveWorkspacePlan(workspaceId);
+  const plan = await (await import("../lib/plans")).resolveWorkspacePlan(workspaceId);
   const { PLAN_QUOTAS } = await import("../lib/plans");
   const quota = PLAN_QUOTAS[plan];
 
@@ -313,7 +313,7 @@ router.post("/workspaces/:id/domains", requireWorkspaceOwner, async (req, res): 
     .from(workspaceDomainsTable)
     .where(eq(workspaceDomainsTable.workspaceId, workspaceId));
 
-  const quotaResult = enforceQuota("domain", existing.length, workspaceId);
+  const quotaResult = await enforceQuota("domain", existing.length, workspaceId);
   if (!quotaResult.allowed) {
     res.status(402).json({
       error: "Domain quota exceeded",
@@ -588,7 +588,7 @@ router.post(
         )
         .where(eq(workspaceDomainsTable.workspaceId, workspaceId));
 
-      const quotaResult = enforceQuota("domainRole", workspaceRoles.length, workspaceId);
+      const quotaResult = await enforceQuota("domainRole", workspaceRoles.length, workspaceId);
       if (!quotaResult.allowed) {
         res.status(402).json({
           error: "Domain role grant quota exceeded for this workspace",
@@ -720,7 +720,7 @@ router.get("/workspaces/:id/usage", requireWorkspaceMember, async (req, res): Pr
 
   // Quota info
   const { resolveWorkspacePlan, PLAN_QUOTAS } = await import("../lib/plans");
-  const plan = resolveWorkspacePlan(workspaceId);
+  const plan = await resolveWorkspacePlan(workspaceId);
   const quota = PLAN_QUOTAS[plan];
   const usedGb = totalBytes / (1024 * 1024 * 1024);
   const limitGb = quota.maxBandwidthGbPerMonth;

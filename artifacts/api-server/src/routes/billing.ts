@@ -10,12 +10,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { eq, desc, sql, and, like } from "drizzle-orm";
+import { eq, desc, sql, and, like, isNull } from "drizzle-orm";
 import {
   db,
   creditTransactionsTable,
   stripeProcessedEventsTable,
   userCreditsTable,
+  workspaceSubscriptionsTable,
+  workspacesTable,
 } from "@workspace/db";
 import { getOrCreateCredits } from "./credits";
 import {
@@ -24,6 +26,12 @@ import {
   getStripePublishableKey,
   invalidateStripeCredentialCache,
 } from "../lib/stripeClient";
+import {
+  PLAN_TIERS,
+  type PlanTier,
+  planTierForStripePriceId,
+  stripePriceIdForPlan,
+} from "../lib/plans";
 import { logger } from "../lib/logger";
 
 // Stripe credentials come from the Replit Stripe connector at runtime
@@ -77,6 +85,139 @@ function priceIdForPack(pkg: (typeof CREDIT_PACKAGES)[number]): string | undefin
 //   the credit grant idempotently.
 const IS_PRODUCTION = process.env.REPLIT_DEPLOYMENT === "1";
 
+// ── Subscription event handler (Task #644) ───────────────────────────────────
+// Syncs Stripe subscription state into workspace_subscriptions so that
+// resolveWorkspacePlan() returns the correct tier the moment Stripe confirms
+// the change. Workspace association comes from subscription.metadata.workspaceId
+// (set in handleStripeWebhook on checkout.session.completed) or, as a fallback,
+// a customer-id lookup against an existing workspace_subscriptions row.
+async function handleSubscriptionEvent(event: {
+  id: string;
+  type: string;
+  data: {
+    object: {
+      id?: string;
+      status?: string;
+      customer?: string | null;
+      metadata?: { workspaceId?: string; planTier?: string };
+      current_period_end?: number;
+      cancel_at_period_end?: boolean;
+      items?: { data?: Array<{ price?: { id?: string } }> };
+    };
+  };
+}): Promise<void> {
+  const sub = event.data?.object;
+  const subscriptionId = sub?.id;
+  if (!subscriptionId) {
+    logger.warn({ eventId: event.id }, "Subscription event missing subscription id — skipping");
+    return;
+  }
+
+  const customerId = typeof sub.customer === "string" ? sub.customer : null;
+  const priceId = sub.items?.data?.[0]?.price?.id ?? null;
+
+  // Resolve workspace: prefer subscription.metadata.workspaceId, fall back to
+  // existing row keyed on stripeSubscriptionId, then on stripeCustomerId.
+  let workspaceId: number | null = null;
+  const metaWorkspaceId = sub.metadata?.workspaceId;
+  if (metaWorkspaceId) {
+    const parsed = parseInt(metaWorkspaceId, 10);
+    if (Number.isFinite(parsed)) workspaceId = parsed;
+  }
+
+  if (workspaceId === null) {
+    const [existingBySub] = await db
+      .select({ workspaceId: workspaceSubscriptionsTable.workspaceId })
+      .from(workspaceSubscriptionsTable)
+      .where(eq(workspaceSubscriptionsTable.stripeSubscriptionId, subscriptionId))
+      .limit(1);
+    if (existingBySub) workspaceId = existingBySub.workspaceId;
+  }
+
+  if (workspaceId === null && customerId) {
+    const [existingByCustomer] = await db
+      .select({ workspaceId: workspaceSubscriptionsTable.workspaceId })
+      .from(workspaceSubscriptionsTable)
+      .where(eq(workspaceSubscriptionsTable.stripeCustomerId, customerId))
+      .limit(1);
+    if (existingByCustomer) workspaceId = existingByCustomer.workspaceId;
+  }
+
+  if (workspaceId === null) {
+    logger.warn(
+      { eventId: event.id, subscriptionId, customerId },
+      "Subscription event has no resolvable workspaceId — skipping",
+    );
+    return;
+  }
+
+  // Confirm the workspace still exists (soft-delete tolerant).
+  const [ws] = await db
+    .select({ id: workspacesTable.id })
+    .from(workspacesTable)
+    .where(and(eq(workspacesTable.id, workspaceId), isNull(workspacesTable.deletedAt)))
+    .limit(1);
+  if (!ws) {
+    logger.warn(
+      { eventId: event.id, workspaceId },
+      "Subscription event for unknown/deleted workspace — skipping",
+    );
+    return;
+  }
+
+  // Derive plan tier: prefer price-id mapping (canonical), fall back to
+  // metadata.planTier (set during checkout for new subscriptions).
+  let planTier: PlanTier = "free";
+  const fromPrice = planTierForStripePriceId(priceId);
+  if (fromPrice) {
+    planTier = fromPrice;
+  } else {
+    const metaTier = sub.metadata?.planTier;
+    if (metaTier && (PLAN_TIERS as readonly string[]).includes(metaTier)) {
+      planTier = metaTier as PlanTier;
+    }
+  }
+
+  // Deleted subscriptions always revert to free regardless of price mapping.
+  const status =
+    event.type === "customer.subscription.deleted" ? "canceled" : (sub.status ?? "inactive");
+  if (status === "canceled") planTier = "free";
+
+  const currentPeriodEnd =
+    typeof sub.current_period_end === "number" ? new Date(sub.current_period_end * 1000) : null;
+
+  await db
+    .insert(workspaceSubscriptionsTable)
+    .values({
+      workspaceId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subscriptionId,
+      stripePriceId: priceId,
+      planTier,
+      status,
+      currentPeriodEnd,
+      cancelAtPeriodEnd: sub.cancel_at_period_end ? "true" : "false",
+    })
+    .onConflictDoUpdate({
+      target: workspaceSubscriptionsTable.workspaceId,
+      set: {
+        stripeCustomerId: customerId,
+        stripeSubscriptionId: subscriptionId,
+        stripePriceId: priceId,
+        planTier,
+        status,
+        currentPeriodEnd,
+        cancelAtPeriodEnd: sub.cancel_at_period_end ? "true" : "false",
+        updatedAt: sql`now()`,
+      },
+    });
+
+  logger.info(
+    { eventId: event.id, workspaceId, planTier, status, subscriptionId },
+    "Workspace subscription synced",
+  );
+}
+
 async function handleStripeWebhook(
   req: Parameters<Parameters<IRouter["post"]>[1]>[0],
   res: Parameters<Parameters<IRouter["post"]>[1]>[1],
@@ -93,7 +234,7 @@ async function handleStripeWebhook(
   const sig = req.headers["stripe-signature"] as string | undefined;
   const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody;
 
-  type CheckoutEvent = {
+  type StripeEvent = {
     id: string;
     type: string;
     data: {
@@ -103,10 +244,21 @@ async function handleStripeWebhook(
         payment_intent?: string | null;
         customer?: string | null;
         amount_total?: number | null;
+        // checkout.session.completed (subscription mode) fields
+        mode?: string;
+        subscription?: string | null;
+        // customer.subscription.* fields
+        id?: string;
+        status?: string;
+        current_period_end?: number;
+        cancel_at_period_end?: boolean;
+        items?: {
+          data?: Array<{ price?: { id?: string } }>;
+        };
       };
     };
   };
-  let event: CheckoutEvent | null = null;
+  let event: StripeEvent | null = null;
 
   if (STRIPE_WEBHOOK_SECRET) {
     if (!sig || !rawBody) {
@@ -118,7 +270,7 @@ async function handleStripeWebhook(
         rawBody,
         sig,
         STRIPE_WEBHOOK_SECRET,
-      ) as unknown as CheckoutEvent;
+      ) as unknown as StripeEvent;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "verify failed";
       logger.warn({ err: msg }, "Stripe webhook signature verification failed");
@@ -132,11 +284,35 @@ async function handleStripeWebhook(
       return;
     }
     logger.warn("STRIPE_WEBHOOK_SECRET not set — accepting unverified webhook (DEV ONLY)");
-    event = req.body as CheckoutEvent;
+    event = req.body as StripeEvent;
   }
 
   if (!event?.id || !event.type) {
     res.status(400).json({ error: "Malformed event payload" });
+    return;
+  }
+
+  // ── Subscription lifecycle events (Task #644) ───────────────────────────────
+  // customer.subscription.{created,updated,deleted} sync the workspace plan
+  // tier into workspace_subscriptions so resolveWorkspacePlan() returns the
+  // correct quotas without operator overrides.
+  if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    try {
+      await handleSubscriptionEvent(event);
+      await db
+        .insert(stripeProcessedEventsTable)
+        .values({ eventId: event.id, type: event.type })
+        .onConflictDoNothing();
+      res.json({ ok: true, type: event.type, processed: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unexpected error";
+      logger.error({ err: msg, eventId: event.id, type: event.type }, "Subscription sync failed");
+      res.status(500).json({ error: "Subscription sync failed", willRetry: true });
+    }
     return;
   }
 
@@ -151,6 +327,38 @@ async function handleStripeWebhook(
   }
 
   const session = event.data?.object;
+
+  // Subscription-mode checkout sessions: the session itself doesn't grant
+  // plan access — that comes from customer.subscription.created. We just
+  // attach the workspaceId metadata onto the subscription so the follow-up
+  // event can resolve which workspace to upgrade.
+  if (session?.mode === "subscription") {
+    const workspaceIdStr = session?.metadata?.workspaceId;
+    const subscriptionId = session?.subscription;
+    if (workspaceIdStr && subscriptionId && typeof subscriptionId === "string") {
+      try {
+        await stripe.subscriptions.update(subscriptionId, {
+          metadata: {
+            workspaceId: workspaceIdStr,
+            planTier: session?.metadata?.planTier ?? "",
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "unknown";
+        logger.warn(
+          { err: msg, subscriptionId, eventId: event.id },
+          "Failed to attach workspaceId metadata to subscription — handler will fall back to customer lookup",
+        );
+      }
+    }
+    await db
+      .insert(stripeProcessedEventsTable)
+      .values({ eventId: event.id, type: event.type })
+      .onConflictDoNothing();
+    res.json({ ok: true, type: event.type, mode: "subscription", processed: true });
+    return;
+  }
+
   if (session?.payment_status !== "paid") {
     await db
       .insert(stripeProcessedEventsTable)
@@ -584,5 +792,185 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
     res.status(502).json({ error: `Stripe API error: ${msg}` });
   }
 });
+
+// ── Plan / subscription routes (Task #644) ───────────────────────────────────
+
+// GET /api/billing/plans — list configured plan tiers with their Stripe Price
+// IDs (when set). Used by the billing UI to render upgrade buttons.
+router.get("/billing/plans", async (_req, res): Promise<void> => {
+  const stripeConfigured = await stripeAvailable();
+  const plans = (["free", "starter", "pro", "enterprise"] as const).map((tier) => ({
+    tier,
+    priceId: stripePriceIdForPlan(tier) ?? null,
+    available: tier === "free" || (stripeConfigured && !!stripePriceIdForPlan(tier)),
+  }));
+  res.json({ stripeConfigured, plans });
+});
+
+// GET /api/billing/subscription/:workspaceId — current subscription state.
+// Owner-only. Used by the billing UI to show "Current plan: Pro" etc.
+router.get("/billing/subscription/:workspaceId", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const workspaceId = parseInt(req.params.workspaceId ?? "", 10);
+  if (!Number.isFinite(workspaceId)) {
+    res.status(400).json({ error: "Invalid workspace id" });
+    return;
+  }
+  const [ws] = await db
+    .select()
+    .from(workspacesTable)
+    .where(and(eq(workspacesTable.id, workspaceId), isNull(workspacesTable.deletedAt)));
+  if (!ws) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
+  if (ws.ownerUserId !== userId) {
+    res.status(403).json({ error: "You do not own this workspace" });
+    return;
+  }
+  const [sub] = await db
+    .select()
+    .from(workspaceSubscriptionsTable)
+    .where(eq(workspaceSubscriptionsTable.workspaceId, workspaceId));
+  const { resolveWorkspacePlan } = await import("../lib/plans");
+  const effectivePlan = await resolveWorkspacePlan(workspaceId);
+  res.json({
+    workspaceId,
+    effectivePlan,
+    subscription: sub
+      ? {
+          planTier: sub.planTier,
+          status: sub.status,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
+          currentPeriodEnd: sub.currentPeriodEnd,
+          cancelAtPeriodEnd: sub.cancelAtPeriodEnd === "true",
+        }
+      : null,
+  });
+});
+
+// POST /api/billing/subscription/checkout — create a Stripe Checkout session in
+// subscription mode for a plan upgrade. Workspace owner only. Returns the
+// hosted checkout URL.
+router.post("/billing/subscription/checkout", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+
+  const { workspaceId, planTier, successUrl, cancelUrl } = req.body as {
+    workspaceId?: number;
+    planTier?: string;
+    successUrl?: string;
+    cancelUrl?: string;
+  };
+
+  if (typeof workspaceId !== "number" || !Number.isFinite(workspaceId)) {
+    res.status(400).json({ error: "workspaceId is required" });
+    return;
+  }
+  if (!planTier || !(PLAN_TIERS as readonly string[]).includes(planTier) || planTier === "free") {
+    res.status(400).json({
+      error: "planTier must be one of: starter, pro, enterprise",
+    });
+    return;
+  }
+  if (!successUrl || !cancelUrl) {
+    res.status(400).json({ error: "successUrl and cancelUrl are required" });
+    return;
+  }
+
+  const priceId = stripePriceIdForPlan(planTier as PlanTier);
+  if (!priceId) {
+    res.status(400).json({
+      error: `Stripe Price ID for plan '${planTier}' is not configured. Set the PLAN_PRICE_${planTier.toUpperCase()} env var.`,
+    });
+    return;
+  }
+
+  // Ownership check
+  const [ws] = await db
+    .select({ id: workspacesTable.id, ownerUserId: workspacesTable.ownerUserId })
+    .from(workspacesTable)
+    .where(and(eq(workspacesTable.id, workspaceId), isNull(workspacesTable.deletedAt)));
+  if (!ws) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
+  if (ws.ownerUserId !== userId) {
+    res.status(403).json({ error: "You do not own this workspace" });
+    return;
+  }
+
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) {
+    res.json({
+      setupRequired: true,
+      message:
+        "Stripe is not configured. Connect the Stripe integration (or set STRIPE_SECRET_KEY) to enable plan upgrades.",
+    });
+    return;
+  }
+
+  try {
+    // Reuse the existing Stripe customer for this workspace when we already
+    // have one stored — keeps the customer's invoice history consolidated.
+    const [existing] = await db
+      .select({ customerId: workspaceSubscriptionsTable.stripeCustomerId })
+      .from(workspaceSubscriptionsTable)
+      .where(eq(workspaceSubscriptionsTable.workspaceId, workspaceId));
+
+    const { stripeCircuit, withRetry, isTransientError } = await import("../lib/resilience");
+    const session = await stripeCircuit.call(() =>
+      withRetry(
+        () =>
+          stripe.checkout.sessions.create({
+            mode: "subscription",
+            line_items: [{ price: priceId, quantity: 1 }],
+            success_url: successUrl,
+            cancel_url: cancelUrl,
+            ...(existing?.customerId ? { customer: existing.customerId } : {}),
+            metadata: {
+              userId,
+              workspaceId: String(workspaceId),
+              planTier,
+            },
+            subscription_data: {
+              metadata: {
+                userId,
+                workspaceId: String(workspaceId),
+                planTier,
+              },
+            },
+          }),
+        {
+          maxAttempts: 2,
+          baseDelayMs: 1_000,
+          shouldRetry: isTransientError,
+          label: "stripe:subscription.checkout.sessions.create",
+        },
+      ),
+    );
+
+    res.json({
+      sessionId: session.id,
+      checkoutUrl: session.url ?? undefined,
+      workspaceId,
+      planTier,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    if (/api key|authentication|invalid_api_key/i.test(msg)) {
+      invalidateStripeCredentialCache();
+    }
+    res.status(502).json({ error: `Stripe API error: ${msg}` });
+  }
+});
+
 
 export default router;

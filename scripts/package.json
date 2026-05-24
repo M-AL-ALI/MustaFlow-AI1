@@ -50,6 +50,7 @@
     "migrate-pg-boss": "tsx ./src/migrate-pg-boss.ts",
     "migrate-workspace-domains": "tsx ./src/migrate-workspace-domains.ts",
     "migrate-purchased-domains": "tsx ./src/migrate-purchased-domains.ts",
+    "migrate-workspace-subscriptions": "tsx ./src/migrate-workspace-subscriptions.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },
