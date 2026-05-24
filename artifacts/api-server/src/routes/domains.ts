@@ -1313,7 +1313,7 @@ router.post(
       const parsed = JSON.parse(raw) as {
         suggestions?: Array<{ domain: string; tld: string; rationale: string }>;
       };
-      const suggestions = (parsed.suggestions ?? []).slice(0, 5).map((s) => ({
+      const rawSuggestions = (parsed.suggestions ?? []).slice(0, 5).map((s) => ({
         domain: String(s.domain ?? "")
           .toLowerCase()
           .replace(/[^a-z0-9-]/g, ""),
@@ -1323,6 +1323,27 @@ router.post(
           .replace(/[^a-z0-9-]/g, "")}${String(s.tld ?? ".com")}`,
         rationale: String(s.rationale ?? ""),
       }));
+
+      // D8: Check availability via Namecheap. Only surface available domains.
+      let suggestions = rawSuggestions;
+      try {
+        const { namecheapEnabled, checkAvailability } = await import("../lib/namecheap");
+        if (namecheapEnabled()) {
+          const domainList = rawSuggestions.map((s) => s.full);
+          const availability = await checkAvailability(domainList);
+          const availMap = new Map(availability.map((a) => [a.domain, a.available]));
+          // Keep suggestions where available=true; pass through if availability unknown
+          suggestions = rawSuggestions.filter((s) => {
+            const avail = availMap.get(s.full);
+            return avail === true || avail === undefined;
+          });
+          // If all AI suggestions were unavailable, return empty — caller should prompt a new search
+          if (suggestions.length === 0) suggestions = [];
+        }
+      } catch {
+        // availability check is best-effort; return all suggestions on error
+      }
+
       res.json({ suggestions });
     } catch (err) {
       req.log.warn({ err, projectId }, "Domain suggestion AI call failed");

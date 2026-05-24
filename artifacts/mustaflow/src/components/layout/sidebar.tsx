@@ -19,6 +19,7 @@ import {
   Zap,
   AlertTriangle,
   Trash2,
+  ShoppingCart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser, useClerk } from "@clerk/react";
@@ -40,6 +41,7 @@ const NAV_ITEMS = [
 
 const SECONDARY_NAV_ITEMS = [
   { name: "Published", href: "/published", icon: Globe },
+  { name: "My Domains", href: "/account/domains", icon: ShoppingCart },
   { name: "Integrations", href: "/integrations", icon: Blocks },
   { name: "Billing", href: "/billing", icon: CreditCard },
 ];

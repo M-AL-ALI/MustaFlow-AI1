@@ -98,9 +98,11 @@ async function handleStripeWebhook(
     type: string;
     data: {
       object: {
-        metadata?: { userId?: string; packageId?: string; credits?: string };
+        metadata?: Record<string, string | undefined>;
         payment_status?: string;
         payment_intent?: string | null;
+        customer?: string | null;
+        amount_total?: number | null;
       };
     };
   };
@@ -155,6 +157,79 @@ async function handleStripeWebhook(
       .values({ eventId: event.id, type: event.type })
       .onConflictDoNothing();
     res.json({ ok: true, processed: false, reason: "payment_status not paid" });
+    return;
+  }
+
+  const sessionType = session?.metadata?.type;
+
+  // ── Domain purchase / transfer fulfillment ──────────────────────────────────
+  // Provides server-side idempotent fulfillment so Namecheap registration
+  // succeeds even if the user closes the tab before the browser confirm call.
+  if (sessionType === "domain_purchase" || sessionType === "domain_transfer") {
+    const domainUserId = session?.metadata?.userId;
+    const hostname = session?.metadata?.hostname;
+
+    if (!domainUserId || !hostname) {
+      logger.warn({ eventId: event.id, sessionType }, "Domain webhook: missing userId or hostname in metadata");
+      res.status(400).json({ error: "Missing userId or hostname in session metadata" });
+      return;
+    }
+
+    // Record idempotency + fulfill (non-credit path — uses its own dedup on purchased_domains)
+    await db
+      .insert(stripeProcessedEventsTable)
+      .values({ eventId: event.id, type: event.type })
+      .onConflictDoNothing();
+
+    if (sessionType === "domain_purchase") {
+      try {
+        const { fulfillDomainPurchase } = await import("../lib/domain-fulfillment");
+        const pricePaidUsd = session?.amount_total
+          ? String(session.amount_total / 100)
+          : (session?.metadata?.priceUsd ?? "12.99");
+        const stripeCustomerId =
+          typeof session?.customer === "string" ? session.customer : null;
+        const projectIdStr = session?.metadata?.projectId;
+        const projectId =
+          projectIdStr ? (parseInt(projectIdStr, 10) || undefined) : undefined;
+        const years = session?.metadata?.years ? parseInt(session.metadata.years, 10) || 1 : 1;
+
+        const { alreadyRegistered } = await fulfillDomainPurchase({
+          hostname,
+          userId: domainUserId,
+          years,
+          pricePaidUsd,
+          stripeCustomerId,
+          stripePaymentIntentId: null,
+          projectId,
+        });
+
+        logger.info(
+          { eventId: event.id, hostname, alreadyRegistered },
+          "Domain purchase webhook fulfillment complete",
+        );
+        res.json({ ok: true, eventId: event.id, hostname, alreadyRegistered });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown";
+        logger.error(
+          { err: msg, eventId: event.id, hostname },
+          "Domain purchase webhook fulfillment failed — Stripe will retry",
+        );
+        // 500 so Stripe retries. Idempotency row was already inserted, so
+        // on retry we need to check if the domain was already fulfilled first.
+        // The fulfillDomainPurchase idempotency check handles this correctly.
+        res.status(500).json({ error: "Domain fulfillment failed", willRetry: true });
+      }
+    } else {
+      // domain_transfer: the transfer-in/confirm endpoint handles Namecheap
+      // transfer initiation.  Webhook acknowledges payment only; the client
+      // confirm endpoint is responsible for the full transfer flow.
+      logger.info(
+        { eventId: event.id, hostname },
+        "Domain transfer webhook: payment acknowledged, client confirm handles transfer initiation",
+      );
+      res.json({ ok: true, eventId: event.id, hostname, type: "domain_transfer", acknowledged: true });
+    }
     return;
   }
 

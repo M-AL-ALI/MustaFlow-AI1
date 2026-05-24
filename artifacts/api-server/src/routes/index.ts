@@ -60,6 +60,7 @@ import artifactsRouter from "./artifacts";
 import agentInboxRouter from "./agent-inbox";
 import webhooksRouter from "./webhooks";
 import domainAnalyticsRouter from "./domain-analytics";
+import purchasedDomainsRouter from "./purchased-domains";
 import v1Router from "./v1/index";
 import abuseRouter from "./abuse";
 import metricsRouter from "./metrics";
@@ -123,6 +124,7 @@ const KNOWN_PREFIXES = [
   "/background-jobs",
   "/transcribe",
   "/blueprints",
+  "/account",
 ];
 
 router.use((req, res, next) => {
@@ -210,6 +212,7 @@ router.use(agentInboxRouter);
 router.use(webhooksRouter);
 router.use(domainAnalyticsRouter);
 router.use(healthProjectRouter); // GET /projects/:id/health — per-project metrics
+router.use(purchasedDomainsRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

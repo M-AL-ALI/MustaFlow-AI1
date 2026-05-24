@@ -52,6 +52,7 @@ import { DnsRecordsPanel, RegistrarGuideSection } from "./dns-records-panel";
 import { EmailSetupWizard } from "./email-setup-wizard";
 import { WebhooksPanel } from "./webhooks-panel";
 import { DomainAnalyticsCard } from "./domain-analytics-card";
+import { DomainPurchaseWidget } from "./domain-purchase-widget";
 
 // ─── Post-publish health banner (Task #511) ─────────────────────────────────
 function HealthCheckBanner({
@@ -2619,6 +2620,31 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
   );
 }
 
+// ── Buy a domain — collapsible inline search/purchase widget ─────────────────
+function BuyDomainSection({ projectId }: { projectId: number }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        className="flex items-center gap-2 text-xs text-primary hover:text-primary/80 transition-colors"
+      >
+        <Globe className="h-3.5 w-3.5" />
+        <span>Buy a domain</span>
+        <ChevronDown
+          className={cn("h-3 w-3 transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open && (
+        <div className="mt-2">
+          <DomainPurchaseWidget projectId={projectId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PublishingTab({
   projectId,
   kind,
@@ -4041,6 +4067,11 @@ export function PublishingTab({
                       }}
                     />
                   )}
+
+                  <div className="border-t border-border" />
+
+                  {/* Buy a domain — embedded search/purchase panel */}
+                  <BuyDomainSection projectId={projectId} />
 
                   <div className="border-t border-border" />
 

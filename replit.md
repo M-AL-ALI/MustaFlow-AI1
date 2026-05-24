@@ -20,6 +20,7 @@ The intended user journey is: Login → create project → build app → preview
 - Required env: `DATABASE_URL`, `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `SESSION_SECRET`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `ENCRYPTION_KEY`
 - Optional env (Knowledge Vault retrieval): `KNOWLEDGE_RETRIEVAL_ENABLED` (default `true`; set to `"false"` to disable vault injection into prompts for A/B testing). `KNOWLEDGE_TOKEN_BUDGET` (default `2400` chars, ~600 tokens; controls how much of the lessons section reaches the model).
 - Optional env (GitHub OAuth): `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, optional `GITHUB_OAUTH_REDIRECT_URL`. Without them, the "Connect with GitHub" one-click button is hidden and users fall back to the personal access token form. Register an OAuth App at https://github.com/settings/developers; set the Authorization callback URL to `https://<your-domain>/api/projects/0/github/oauth/callback` (any project ID works — GitHub matches by prefix) or use `GITHUB_OAUTH_REDIRECT_URL` to override.
+- Optional env (Namecheap domain purchasing — Task #559): `NAMECHEAP_API_USER` (API username), `NAMECHEAP_API_KEY` (API key), `NAMECHEAP_USERNAME` (account username, often same as API user), `NAMECHEAP_CLIENT_IP` (whitelisted IP for API calls), `NAMECHEAP_SANDBOX` (set `"true"` for sandbox testing). Without these, all domain search/purchase/transfer operations gracefully no-op. Additional: `NS1_HOSTNAME`/`NS2_HOSTNAME` (custom nameservers for registered domains), `DOMAIN_MARKUP_PERCENT` (default `20` — percent above Namecheap cost charged to users). Migration: `pnpm --filter @workspace/scripts run migrate-purchased-domains`.
 - Optional env (Cloudflare edge CDN — Task #561): `CF_ACCOUNT_ID` (required for R2 + KV), `CF_R2_ACCESS_KEY_ID` + `CF_R2_SECRET_ACCESS_KEY` (R2 S3-compatible API credentials), `CF_R2_BUCKET` (default: `mustaflow-snapshots`), `CF_KV_NAMESPACE_ID` (Workers KV namespace for hostname routing), `EDGE_SERVING_ENABLED` (set `"true"` once the Cloudflare Worker is deployed and handling traffic — tags API-served responses with `X-Mustaflow-Origin: api-fallback` for outage detection). All R2/KV operations gracefully no-op when these vars are missing.
 - Migration (edge CDN): `pnpm --filter @workspace/scripts run migrate-preferred-region` — adds `preferred_region` column to `projects` table (geo-routing hint for Worker).
 
@@ -488,3 +489,29 @@ The intended user journey is: Login → create project → build app → preview
 - **Migration**: `pnpm --filter @workspace/scripts run migrate-workspace-domains` — creates all 4 new tables + adds `workspace_domain_id` FK to `project_domains` (idempotent `IF NOT EXISTS`).
 - **Env vars (optional)**: `PLAN_OVERRIDE_<WORKSPACE_ID>` (e.g. `PLAN_OVERRIDE_42=pro`), `DEFAULT_PLAN_TIER` (global default), `STRIPE_BANDWIDTH_OVERAGE_PRICE_ID`.
 - **Key files**: `lib/db/src/schema/workspace-domains.ts`, `lib/db/src/schema/workspace-domain-roles.ts`, `lib/db/src/schema/workspace-usage-daily.ts`, `artifacts/api-server/src/lib/plans.ts`, `artifacts/api-server/src/lib/usage-rollup.ts`, `artifacts/api-server/src/routes/workspace-domains.ts`, `scripts/src/migrate-workspace-domains.ts`.
+
+## Task #559 — In-Product Domain Purchasing (Namecheap Reseller)
+
+- **Namecheap client**: `artifacts/api-server/src/lib/namecheap.ts` — XML API wrapper (sandbox + production). Methods: `checkAvailability`, `getPricing`, `register`, `renew`, `getInfo`, `setNameservers`, `setAutoRenew`, `setWhoisContacts`, `getAuthCode`, `setRegistrarLock`, `transferIn`, `getTransferStatus`. Gracefully no-ops when env vars not set.
+- **DB schema**: `lib/db/src/schema/purchased-domains.ts` — `purchased_domains` table. Tracks userId, hostname, registrar, registration/expiry dates, autoRenew, whoisPrivacy, status, Stripe payment IDs, Namecheap order IDs, and WHOIS contact fields.
+- **API routes** (`artifacts/api-server/src/routes/purchased-domains.ts`, prefix `/api/domains/`):
+  - `GET /api/domains/search?q=<name>` — availability + pricing for top TLDs (`.com`, `.net`, `.org`, `.io`, `.app`, `.dev`, `.co`)
+  - `GET /api/domains/purchased` — list user's purchased domains
+  - `POST /api/domains/purchase` — creates Stripe Checkout Session for a domain
+  - `POST /api/domains/purchase/confirm` — verifies payment and registers domain via Namecheap
+  - `POST /api/domains/transfer-in` — initiates inbound domain transfer (Stripe checkout)
+  - `POST /api/domains/transfer-in/confirm` — confirms payment + submits transfer to Namecheap
+  - `GET /api/domains/purchased/:id` — single domain detail
+  - `PATCH /api/domains/purchased/:id/auto-renew` — toggle auto-renew
+  - `PATCH /api/domains/purchased/:id/whois` — update WHOIS contacts
+  - `POST /api/domains/purchased/:id/renew` — manual renew (Stripe checkout)
+  - `POST /api/domains/purchased/:id/renew/confirm` — confirm renewal payment + Namecheap renewal
+  - `GET /api/domains/purchased/:id/auth-code` — retrieve EPP auth code for outbound transfer
+  - `POST /api/domains/purchased/:id/release` — release domain lock for outbound transfer
+  - `POST /api/domains/purchased/:id/attach-project` — attach/detach purchased domain to a project (auto-adds to project_domains with SSL issuance)
+  - `POST /api/domains/purchased/:id/refresh-info` — sync status from Namecheap
+- **Renewal scheduler**: `artifacts/api-server/src/lib/domain-renewal-scheduler.ts` — daily sweep: expiry warning notifications at 60/30/7/1 days, auto-renewal via Stripe + Namecheap for domains with `autoRenew=true` expiring ≤30 days. No-ops when credentials not set.
+- **Frontend**: `artifacts/mustaflow/src/pages/account/domains.tsx` — "My Domains" page at `/account/domains`. Sections: domain search (availability grid), transfer-in form, owned domain list with expandable detail (auto-renew toggle, WHOIS edit, manual renew, auth-code/release). Accessible via "My Domains" sidebar link.
+- **Domain suggestions enriched**: `routes/domains.ts` suggest-domains endpoint now filters AI-generated suggestions through Namecheap availability check (best-effort; falls back to full list on error).
+- **Migration**: `pnpm --filter @workspace/scripts run migrate-purchased-domains`
+- **Pricing**: `DOMAIN_MARKUP_PERCENT` (default `20`) adds a margin on top of Namecheap wholesale cost for each TLD.

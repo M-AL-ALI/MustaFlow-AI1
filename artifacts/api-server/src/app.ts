@@ -19,6 +19,7 @@ import { initSentry, captureError, Sentry } from "./lib/sentry";
 import { httpRequestDuration, httpRequestsTotal } from "./lib/metrics";
 import { startDurableQueue, stopDurableQueue } from "./lib/durable-queue";
 import { runJob } from "./lib/jobs";
+import { startDomainRenewalScheduler } from "./lib/domain-renewal-scheduler";
 
 // Initialise Sentry before anything else so uncaught exceptions are captured.
 initSentry();
@@ -40,6 +41,11 @@ startDeploymentScheduler();
 void startDurableQueue(async (payload) => {
   await runJob(payload as unknown as Parameters<typeof runJob>[0]);
 });
+
+// Kick off the domain renewal scheduler (Task #559).
+// Daily sweep: expiry warnings at 60/30/7/1 days + auto-renew for domains ≤ 30 days out.
+// No-ops gracefully when Namecheap / Stripe credentials are not set.
+startDomainRenewalScheduler();
 
 const app: Express = express();
 

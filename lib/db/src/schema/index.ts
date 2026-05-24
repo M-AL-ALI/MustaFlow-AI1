@@ -41,3 +41,4 @@ export * from "./abuse-reports";
 export * from "./workspace-domains";
 export * from "./workspace-domain-roles";
 export * from "./workspace-usage-daily";
+export * from "./purchased-domains";
