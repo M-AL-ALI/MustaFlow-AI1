@@ -11,6 +11,7 @@ import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
 import { startCveScheduler } from "./lib/cve-scheduler";
 import { failStuckBackgroundTasksOnBoot } from "./lib/jobs";
 import { resumeStuckProvisioningOnBoot } from "./lib/provisioning";
+import { handleLivePreviewUpgrade, matchPreviewPath } from "./lib/livePreviewProxy";
 
 const execFileAsync = promisify(execFile);
 
@@ -79,6 +80,22 @@ server.on("upgrade", (req, socket, head) => {
   } else if (DEBUG_PATH.test(pathname)) {
     debugServer.handleUpgrade(req, netSocket, head);
   } else {
+    // Task #740: forward WebSocket upgrades on /api/projects/:id/preview/...
+    // to the project's live container so Vite HMR works inside the iframe.
+    const previewMatch = matchPreviewPath(pathname);
+    if (previewMatch) {
+      void handleLivePreviewUpgrade(previewMatch.projectId, req, netSocket, head).catch(
+        (err: unknown) => {
+          logger.warn({ err, projectId: previewMatch.projectId }, "Preview WS upgrade failed");
+          try {
+            netSocket.destroy();
+          } catch {
+            /* ignore */
+          }
+        },
+      );
+      return;
+    }
     socket.destroy();
   }
 });

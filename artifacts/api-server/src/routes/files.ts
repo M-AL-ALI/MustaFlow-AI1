@@ -1,12 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
-import {
-  db,
-  projectFilesTable,
-  projectsTable,
-  projectVersionsTable,
-  orgMembersTable,
-} from "@workspace/db";
+import { db, projectFilesTable, projectsTable, projectVersionsTable } from "@workspace/db";
 import { requireProjectAccess } from "../lib/auth";
 import { guessMime } from "../lib/builder";
 import { isBinaryMime } from "../lib/binary-mime";
@@ -18,6 +12,11 @@ import { writeFileToContainer } from "../lib/container";
 import { runEslintFix } from "../lib/checks/eslint-runner";
 import { applyProjectEslintFixes } from "../lib/eslint-fix-all";
 import { readDiagnostics } from "../lib/agent-senses";
+import {
+  handleLivePreviewHttp,
+  loadPreviewProject,
+  userCanPreviewProject,
+} from "../lib/livePreviewProxy";
 
 const router: IRouter = Router();
 
@@ -570,25 +569,20 @@ router.get(
 // PUBLISHED projects are publicly accessible without authentication — anyone
 // with the URL can open the generated app.
 // UNPUBLISHED projects require the requesting user to be the project owner.
-router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => {
+//
+// Task #740: for projects with builder_mode = 'agentic', requests are
+// reverse-proxied to the live Fly container's dev server (HTTP + WS for
+// Vite HMR). Projects with builder_mode = 'static-legacy' continue to be
+// served from the project_files rows below.
+router.get("/projects/:id/preview/{*splat}", async (req, res, next): Promise<void> => {
   const projectId = Number(req.params.id);
   if (!Number.isFinite(projectId)) {
     res.status(404).type("text/plain").send("Not found");
     return;
   }
 
-  // Resolve the project so we can check its publish status and ownership
-  const [project] = await db
-    .select({
-      id: projectsTable.id,
-      status: projectsTable.status,
-      ownerId: projectsTable.ownerId,
-      organizationId: projectsTable.organizationId,
-    })
-    .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
-
-  if (!project) {
+  const previewProject = await loadPreviewProject(projectId);
+  if (!previewProject) {
     res
       .status(404)
       .type("text/html")
@@ -598,33 +592,33 @@ router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => 
     return;
   }
 
-  // Only published projects are publicly accessible. All other statuses
-  // require the caller to either own the project directly OR be a member
-  // of the project's organization (any role — viewers can preview).
-  if (project.status !== "published") {
+  // Auth: published projects are public; anything else requires owner or org-member access.
+  if (previewProject.status !== "published") {
     if (!req.userId) {
       res.status(401).json({ error: "Unauthenticated" });
       return;
     }
-    let allowed = project.ownerId === req.userId;
-    if (!allowed && project.organizationId != null) {
-      const [member] = await db
-        .select({ role: orgMembersTable.role })
-        .from(orgMembersTable)
-        .where(
-          and(
-            eq(orgMembersTable.organizationId, project.organizationId),
-            eq(orgMembersTable.userId, req.userId),
-          ),
-        );
-      allowed = !!member;
-    }
+    const allowed = await userCanPreviewProject(previewProject, req.userId);
     if (!allowed) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
   }
 
+  // Agentic projects → live container proxy. Static-legacy projects keep
+  // the original DB-row serving below.
+  if (previewProject.builderMode === "agentic") {
+    await handleLivePreviewHttp(req, res, next, previewProject);
+    return;
+  }
+
+  // ─── Legacy: serve files from the project_files table ────────────────────
+  const project = {
+    id: previewProject.id,
+    status: previewProject.status,
+    ownerId: previewProject.ownerId,
+    organizationId: previewProject.organizationId,
+  };
   const splat = req.params.splat;
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
   const filePath = raw === "" ? "index.html" : raw;
