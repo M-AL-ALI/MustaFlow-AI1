@@ -862,7 +862,27 @@ export function QueueComposer({
   const canSend = rows.some((r) => r.text.trim().length > 0) && !isBusy;
 
   return (
-    <div className="shrink-0 px-3 py-2.5 border-t border-border">
+    <div
+      className="shrink-0 px-3 py-2.5 border-t border-border relative"
+      onDragEnter={(e) => {
+        if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) {
+          e.preventDefault();
+        }
+      }}
+      onDragOver={(e) => {
+        if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }
+      }}
+      onDrop={(e) => {
+        const files = e.dataTransfer?.files;
+        if (files && files.length > 0) {
+          e.preventDefault();
+          void handleFiles(files);
+        }
+      }}
+    >
       {isMultiRow && (
         <div className="flex items-center gap-2 mb-2">
           <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
@@ -1104,7 +1124,7 @@ export function QueueComposer({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="*/*"
                   multiple
                   hidden
                   onChange={(e) => {
@@ -1116,7 +1136,7 @@ export function QueueComposer({
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
-                  title="Attach image"
+                  title="Attach file (image, CSV, PDF, etc.)"
                 >
                   <Paperclip className="h-3.5 w-3.5" />
                 </button>
