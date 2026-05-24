@@ -42,6 +42,9 @@ import {
   ExternalLink,
   Square,
   BrainCircuit,
+  TerminalSquare,
+  EyeOff,
+  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -91,6 +94,9 @@ const STEP_ICON: Record<string, React.ElementType> = {
   generate_video: Sparkles,
   generate_audio: Sparkles,
   remove_image_background: Sparkles,
+  file_diff: FilePen,
+  command_output: TerminalSquare,
+  thinking: BrainCircuit,
 };
 
 const STEP_COLOR: Record<string, string> = {
@@ -114,6 +120,9 @@ const STEP_COLOR: Record<string, string> = {
   restoring_files: "text-blue-400",
   completed: "text-green-400",
   failed: "text-destructive",
+  file_diff: "text-yellow-400",
+  command_output: "text-cyan-400",
+  thinking: "text-violet-300",
 };
 
 function getStepIcon(eventType: string): React.ElementType {
@@ -299,6 +308,340 @@ function parseCreativeEvent(eventType: string, message: string): CreativePreview
   }
 }
 
+/**
+ * Task #733 — inline diff event emitted by write_file / apply_patch /
+ * delete_file. Backend caps the diff body at 8KB and strips obvious secrets
+ * before publishing; we just parse and render.
+ */
+type FileDiffPayload = {
+  path: string;
+  op: "write" | "patch" | "delete";
+  added: number;
+  removed: number;
+  diff: string;
+  truncated: boolean;
+};
+function parseFileDiff(eventType: string, message: string): FileDiffPayload | null {
+  if (eventType !== "file_diff") return null;
+  if (!message || !message.startsWith("{")) return null;
+  try {
+    const obj = JSON.parse(message) as Partial<FileDiffPayload>;
+    if (typeof obj.path !== "string" || typeof obj.op !== "string") return null;
+    return {
+      path: obj.path,
+      op: (obj.op as FileDiffPayload["op"]) ?? "write",
+      added: typeof obj.added === "number" ? obj.added : 0,
+      removed: typeof obj.removed === "number" ? obj.removed : 0,
+      diff: typeof obj.diff === "string" ? obj.diff : "",
+      truncated: obj.truncated === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function FileDiffCard({ data }: { data: FileDiffPayload }) {
+  const [expanded, setExpanded] = useState(false);
+  const lines = data.diff ? data.diff.split("\n") : [];
+  return (
+    <div className="rounded-md border border-border/40 bg-muted/30 p-1.5 my-0.5 max-w-full">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-1.5 text-left group"
+      >
+        <div className="shrink-0 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors">
+          {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        </div>
+        <span
+          className="text-[10px] font-mono text-foreground/80 truncate flex-1"
+          title={data.path}
+        >
+          {data.path}
+        </span>
+        <span className="shrink-0 text-[10px] text-muted-foreground/70 uppercase tracking-wide">
+          {data.op}
+        </span>
+        {data.added > 0 && (
+          <span className="shrink-0 text-[10px] font-mono text-green-400">+{data.added}</span>
+        )}
+        {data.removed > 0 && (
+          <span className="shrink-0 text-[10px] font-mono text-red-400">-{data.removed}</span>
+        )}
+      </button>
+      {expanded && lines.length > 0 && (
+        <pre className="mt-1 max-h-48 overflow-auto rounded bg-background/60 border border-border/40 p-1.5 text-[10px] font-mono leading-snug">
+          {lines.map((l, i) => {
+            const cls = l.startsWith("+ ")
+              ? "text-green-400"
+              : l.startsWith("- ")
+                ? "text-red-400"
+                : "text-muted-foreground";
+            return (
+              <div key={i} className={cn("whitespace-pre-wrap break-all", cls)}>
+                {l || " "}
+              </div>
+            );
+          })}
+          {data.truncated && (
+            <div className="text-muted-foreground/60 italic mt-1">
+              (diff truncated to 8KB — open Tools & Files to see the full file)
+            </div>
+          )}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Task #733 — `command_output` payload from run_command. Backend caps output
+ * at 16KB and strips obvious secrets. Rendered as a collapsible terminal tile.
+ */
+type CommandOutputPayload = {
+  runId: string;
+  status: "running" | "chunk" | "final";
+  seq: number;
+  argv: string[];
+  exitCode: number;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+  output: string;
+  truncated: boolean;
+  startedAt: number;
+};
+function parseCommandOutput(eventType: string, message: string): CommandOutputPayload | null {
+  if (eventType !== "command_output") return null;
+  if (!message || !message.startsWith("{")) return null;
+  try {
+    const obj = JSON.parse(message) as Partial<CommandOutputPayload>;
+    if (!Array.isArray(obj.argv)) return null;
+    const stdout = typeof obj.stdout === "string" ? obj.stdout : "";
+    const stderr = typeof obj.stderr === "string" ? obj.stderr : "";
+    const legacyOutput = typeof obj.output === "string" ? obj.output : "";
+    const status: CommandOutputPayload["status"] =
+      obj.status === "running" ? "running" : obj.status === "chunk" ? "chunk" : "final";
+    return {
+      runId: typeof obj.runId === "string" ? obj.runId : "",
+      status,
+      seq: typeof obj.seq === "number" ? obj.seq : 1,
+      argv: obj.argv.map(String),
+      exitCode: typeof obj.exitCode === "number" ? obj.exitCode : 0,
+      durationMs: typeof obj.durationMs === "number" ? obj.durationMs : 0,
+      stdout,
+      stderr,
+      // Legacy fallback for older snapshots that only stored joined `output`.
+      output: stdout || stderr ? [stdout, stderr].filter(Boolean).join("\n") : legacyOutput,
+      truncated: obj.truncated === true,
+      startedAt: typeof obj.startedAt === "number" ? obj.startedAt : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Collapse a sequence of command_output events down to one card per `runId`
+ * by keeping the latest event for each command. This lets us render a
+ * "running…" placeholder that gets replaced by the "final" exit-code card
+ * once the command returns — without duplicating cards in the timeline.
+ */
+function dedupeCommandOutputs(steps: StepEvent[]): StepEvent[] {
+  const out: StepEvent[] = [];
+  const indexByRun = new Map<string, number>();
+  const accumulatedByRun = new Map<string, { stdout: string; stderr: string }>();
+  for (const s of steps) {
+    if (s.eventType !== "command_output") {
+      out.push(s);
+      continue;
+    }
+    const parsed = parseCommandOutput(s.eventType, s.message);
+    const runId = parsed?.runId ?? "";
+    if (!parsed || !runId) {
+      out.push(s);
+      continue;
+    }
+    // Accumulate streamed `chunk` payloads so the rendered live card grows
+    // as new tail content arrives. The `final` event carries the full
+    // captured output and supersedes the accumulator.
+    let acc = accumulatedByRun.get(runId);
+    if (!acc) {
+      acc = { stdout: "", stderr: "" };
+      accumulatedByRun.set(runId, acc);
+    }
+    if (parsed.status === "chunk") {
+      acc.stdout += parsed.stdout;
+      acc.stderr += parsed.stderr;
+    } else if (parsed.status === "final") {
+      acc.stdout = parsed.stdout;
+      acc.stderr = parsed.stderr;
+    }
+    // Rewrite the message to carry the accumulated stdout/stderr so the
+    // downstream card sees a coherent snapshot regardless of which event
+    // wins the dedupe slot.
+    const enriched: StepEvent = {
+      ...s,
+      message: JSON.stringify({
+        ...parsed,
+        stdout: acc.stdout,
+        stderr: acc.stderr,
+        output: [acc.stdout, acc.stderr].filter(Boolean).join("\n"),
+      }),
+    };
+    const prevIdx = indexByRun.get(runId);
+    if (prevIdx === undefined) {
+      indexByRun.set(runId, out.length);
+      out.push(enriched);
+    } else {
+      // Replace the older event with the newer one, preserving the React
+      // key so the card stays mounted across status transitions.
+      out[prevIdx] = { ...enriched, id: out[prevIdx].id };
+    }
+  }
+  return out;
+}
+
+function CommandOutputCard({
+  data,
+  projectId,
+  taskId,
+}: {
+  data: CommandOutputPayload;
+  projectId: number;
+  taskId?: number;
+}) {
+  const isFinal = data.status === "final";
+  const isStreaming = data.status === "running" || data.status === "chunk";
+  const [expanded, setExpanded] = useState(false);
+  const cmd = data.argv.join(" ").slice(0, 200);
+  const ok = data.exitCode === 0;
+  const hasStdout = data.stdout.length > 0;
+  const hasStderr = isFinal && data.stderr.length > 0;
+  // Task #733 (code-review pass): the "View full log" link now deep-links
+  // to the Logs tab pre-filtered to the originating task (auto-expanded +
+  // scrolled into view) and carries the run identifier so a future log
+  // viewer can pinpoint the exact command. `cmd` is informational so the
+  // user sees what they're filtering on if the task lookup misses.
+  const params = new URLSearchParams({ tab: "logs" });
+  if (taskId != null) params.set("logsTaskId", String(taskId));
+  if (data.runId) params.set("runId", data.runId);
+  if (cmd) params.set("cmd", cmd);
+  const fullLogHref = `/projects/${projectId}?${params.toString()}`;
+  return (
+    <div className="rounded-md border border-border/40 bg-muted/30 p-1.5 my-0.5 max-w-full">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-1.5 text-left group"
+      >
+        <div className="shrink-0 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors">
+          {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        </div>
+        {isStreaming ? (
+          <Loader2 className="h-3 w-3 shrink-0 text-cyan-400 animate-spin" />
+        ) : (
+          <TerminalSquare className="h-3 w-3 shrink-0 text-cyan-400" />
+        )}
+        <span className="text-[10px] font-mono text-foreground/80 truncate flex-1" title={cmd}>
+          {cmd}
+        </span>
+        {isStreaming ? (
+          <span className="shrink-0 text-[10px] font-mono text-cyan-400">
+            {data.status === "chunk" ? "streaming…" : "running…"}
+          </span>
+        ) : (
+          <>
+            <span
+              className={cn(
+                "shrink-0 text-[10px] font-mono",
+                ok ? "text-green-400" : "text-red-400",
+              )}
+            >
+              exit={data.exitCode}
+            </span>
+            <span className="shrink-0 text-[10px] text-muted-foreground/60">
+              {data.durationMs}ms
+            </span>
+          </>
+        )}
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-1">
+          {data.status === "running" && !hasStdout ? (
+            <div className="rounded bg-black/60 border border-border/40 p-1.5 text-[10px] font-mono text-cyan-300/70 italic">
+              Waiting for command to finish…
+            </div>
+          ) : (
+            <>
+              {hasStdout && (
+                <pre className="max-h-48 overflow-auto rounded bg-black/60 border border-border/40 p-1.5 text-[10px] font-mono leading-snug text-green-300 whitespace-pre-wrap break-all">
+                  {data.stdout}
+                  {data.status === "chunk" && (
+                    <span className="text-cyan-300/60 animate-pulse">▌</span>
+                  )}
+                </pre>
+              )}
+              {hasStderr && (
+                <pre className="max-h-48 overflow-auto rounded bg-black/60 border border-destructive/30 p-1.5 text-[10px] font-mono leading-snug text-red-300 whitespace-pre-wrap break-all">
+                  {data.stderr}
+                </pre>
+              )}
+              {isFinal && !hasStdout && !hasStderr && (
+                <div className="rounded bg-black/60 border border-border/40 p-1.5 text-[10px] font-mono text-muted-foreground/60 italic">
+                  (no output)
+                </div>
+              )}
+            </>
+          )}
+          {data.truncated && (
+            <div className="flex items-center gap-1 text-[10px] text-muted-foreground/70 italic">
+              <span>Output truncated to 16KB.</span>
+              <a
+                href={fullLogHref}
+                className="inline-flex items-center gap-0.5 not-italic text-primary/80 hover:text-primary transition-colors"
+                title="Open the Logs tab to see the full command stream"
+              >
+                View full log
+                <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThinkingRow({ text, isActive }: { text: string; isActive: boolean }) {
+  // Task #733 (code-review pass): use the same typewriter reveal as the
+  // narration line so the thinking row feels alive when the agent is mid-step
+  // rather than popping in fully-formed.
+  const displayed = useWordReveal(text, isActive);
+  const shown = isActive ? displayed : text;
+  return (
+    <div className="flex items-start gap-1.5 py-0.5 italic text-muted-foreground/70">
+      <BrainCircuit className="h-3 w-3 shrink-0 mt-px text-violet-300/70" />
+      <span className="text-[11px] leading-tight">{shown}</span>
+    </div>
+  );
+}
+
+const HIDE_THINKING_KEY = "mustaflow_hide_thinking";
+function useHideThinking(): [boolean, (v: boolean) => void] {
+  const [hide, setHide] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(HIDE_THINKING_KEY) === "1";
+  });
+  const update = (v: boolean) => {
+    setHide(v);
+    try {
+      window.localStorage.setItem(HIDE_THINKING_KEY, v ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  };
+  return [hide, update];
+}
+
 function CreativePreviewCard({ data }: { data: CreativePreview }) {
   const isImage = data.mimeType.startsWith("image/");
   const isAudio = data.mimeType.startsWith("audio/");
@@ -343,8 +686,22 @@ function CreativePreviewCard({ data }: { data: CreativePreview }) {
   );
 }
 
-function FinishedGroupRow({ group }: { group: StepGroup }) {
+function FinishedGroupRow({
+  group,
+  hideThinking,
+  projectId,
+  taskId,
+}: {
+  group: StepGroup;
+  hideThinking: boolean;
+  projectId: number;
+  taskId?: number;
+}) {
   const [expanded, setExpanded] = useState(false);
+  const filtered = hideThinking
+    ? group.steps.filter((s) => s.eventType !== "thinking")
+    : group.steps;
+  const visibleSteps = dedupeCommandOutputs(filtered);
 
   return (
     <div className="space-y-1">
@@ -363,14 +720,14 @@ function FinishedGroupRow({ group }: { group: StepGroup }) {
           )}
           <div className="flex items-center gap-2 mt-0.5">
             <div className="flex items-center gap-0.5">
-              {group.steps.slice(0, 10).map((step) => {
+              {visibleSteps.slice(0, 10).map((step) => {
                 const Icon = getStepIcon(step.eventType);
                 const color = getStepColor(step.eventType);
                 return <Icon key={step.id} className={cn("h-2.5 w-2.5", color, "opacity-40")} />;
               })}
             </div>
             <span className="text-[10px] text-muted-foreground/50">
-              {group.steps.length} action{group.steps.length !== 1 ? "s" : ""}
+              {visibleSteps.length} action{visibleSteps.length !== 1 ? "s" : ""}
             </span>
           </div>
         </div>
@@ -378,16 +735,25 @@ function FinishedGroupRow({ group }: { group: StepGroup }) {
 
       {expanded && (
         <div className="ml-5 space-y-0.5 border-l border-border/40 pl-2">
-          {group.steps.map((step) => {
+          {visibleSteps.map((step) => {
             const Icon = getStepIcon(step.eventType);
             const color = getStepColor(step.eventType);
             const creative = parseCreativeEvent(step.eventType, step.message);
+            const diff = parseFileDiff(step.eventType, step.message);
+            const cmd = parseCommandOutput(step.eventType, step.message);
+            if (step.eventType === "thinking") {
+              return <ThinkingRow key={step.id} text={step.message} isActive={false} />;
+            }
             return (
               <div key={step.id} className="flex items-start gap-1.5 py-0.5">
                 <Icon className={cn("h-3 w-3 shrink-0 mt-px", color, "opacity-60")} />
                 <div className="min-w-0 flex-1">
                   {creative ? (
                     <CreativePreviewCard data={creative} />
+                  ) : diff ? (
+                    <FileDiffCard data={diff} />
+                  ) : cmd ? (
+                    <CommandOutputCard data={cmd} projectId={projectId} taskId={taskId} />
                   ) : (
                     <>
                       <span className="text-[11px] text-muted-foreground leading-tight block truncate">
@@ -410,22 +776,57 @@ function FinishedGroupRow({ group }: { group: StepGroup }) {
   );
 }
 
-function ActiveGroupRow({ group, isTerminal }: { group: StepGroup; isTerminal: boolean }) {
-  const lastStep = group.steps[group.steps.length - 1];
-  const statusLabel = lastStep?.message ?? (isTerminal ? "Done" : "Working…");
+function ActiveGroupRow({
+  group,
+  isTerminal,
+  hideThinking,
+  projectId,
+  taskId,
+}: {
+  group: StepGroup;
+  isTerminal: boolean;
+  hideThinking: boolean;
+  projectId: number;
+  taskId?: number;
+}) {
+  const filtered = hideThinking
+    ? group.steps.filter((s) => s.eventType !== "thinking")
+    : group.steps;
+  const visibleSteps = dedupeCommandOutputs(filtered);
+  const lastStep = visibleSteps[visibleSteps.length - 1];
+  // Task #733: when the current step is a structured payload (file_diff /
+  // command_output) the JSON blob is useless as a status string, so fall back
+  // to a friendlier label. For thinking events, surface the trimmed text.
+  const fallbackLabel = (() => {
+    if (!lastStep) return isTerminal ? "Done" : "Working…";
+    const diff = parseFileDiff(lastStep.eventType, lastStep.message);
+    if (diff) return `${diff.op} ${diff.path}`;
+    const cmd = parseCommandOutput(lastStep.eventType, lastStep.message);
+    if (cmd) return `${cmd.argv.join(" ").slice(0, 80)} (exit=${cmd.exitCode})`;
+    return lastStep.message;
+  })();
+
+  // Render the latest structured step inline so live diffs / output appear
+  // without waiting for the group to finish.
+  const lastDiff = lastStep ? parseFileDiff(lastStep.eventType, lastStep.message) : null;
+  const lastCmd = lastStep ? parseCommandOutput(lastStep.eventType, lastStep.message) : null;
+  const lastThinking = lastStep?.eventType === "thinking" ? lastStep.message : null;
 
   return (
     <div className="space-y-1">
       <NarrationText text={group.narration} isActive={true} isFinished={isTerminal} />
-      <IconStrip steps={group.steps} isGroupActive={true} isTerminal={isTerminal} />
-      {group.steps.length > 0 && (
+      <IconStrip steps={visibleSteps} isGroupActive={true} isTerminal={isTerminal} />
+      {lastThinking && <ThinkingRow text={lastThinking} isActive={!isTerminal} />}
+      {lastDiff && <FileDiffCard data={lastDiff} />}
+      {lastCmd && <CommandOutputCard data={lastCmd} projectId={projectId} taskId={taskId} />}
+      {visibleSteps.length > 0 && !lastDiff && !lastCmd && !lastThinking && (
         <p
           className={cn(
             "text-[10px] truncate leading-tight",
             isTerminal ? "text-muted-foreground/50" : "text-muted-foreground",
           )}
         >
-          {statusLabel}
+          {fallbackLabel}
         </p>
       )}
     </div>
@@ -679,6 +1080,7 @@ export function AgentThinkingBubble({
   const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
   const [groupsExpanded, setGroupsExpanded] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  const [hideThinking, setHideThinking] = useHideThinking();
   const cancelTask = useCancelTask();
 
   const { data: events = [] } = useListTaskEvents(projectId, taskId, {
@@ -864,6 +1266,13 @@ export function AgentThinkingBubble({
                     ? "Cancelling…"
                     : "Building"}
           </span>
+          <button
+            onClick={() => setHideThinking(!hideThinking)}
+            title={hideThinking ? "Show agent thinking" : "Hide agent thinking"}
+            className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground transition-colors shrink-0"
+          >
+            {hideThinking ? <EyeOff className="h-2.5 w-2.5" /> : <Eye className="h-2.5 w-2.5" />}
+          </button>
           {!isTerminal && (
             <button
               onClick={handleCancel}
@@ -902,11 +1311,24 @@ export function AgentThinkingBubble({
         {groupsExpanded && (
           <div className="px-3 pb-2.5 space-y-2.5">
             {finishedGroups.map((group) => (
-              <FinishedGroupRow key={group.key} group={group} />
+              <FinishedGroupRow
+                key={group.key}
+                group={group}
+                hideThinking={hideThinking}
+                projectId={projectId}
+                taskId={taskId}
+              />
             ))}
 
             {activeGroup && (
-              <ActiveGroupRow key={activeGroup.key} group={activeGroup} isTerminal={isTerminal} />
+              <ActiveGroupRow
+                key={activeGroup.key}
+                group={activeGroup}
+                isTerminal={isTerminal}
+                hideThinking={hideThinking}
+                projectId={projectId}
+                taskId={taskId}
+              />
             )}
 
             {groups.length === 0 && !isTerminal && (

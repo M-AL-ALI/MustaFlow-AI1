@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   useListTasks,
   useSubmitTaskFeedback,
@@ -202,6 +202,8 @@ function TaskRow({
   task,
   projectId,
   onTryFix,
+  highlight,
+  highlightCmd,
 }: {
   task: {
     id: number;
@@ -218,8 +220,25 @@ function TaskRow({
   };
   projectId: number;
   onTryFix: (text: string) => void;
+  highlight?: boolean;
+  highlightCmd?: string;
 }) {
-  const [expanded, setExpanded] = useState(task.status === "failed");
+  const [expanded, setExpanded] = useState(task.status === "failed" || !!highlight);
+  // Task #733 (code-review pass): when deep-linked from the AI Builder
+  // chat's "View full log", auto-expand and scroll the matching task into
+  // view so the user lands directly on the relevant run.
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!highlight) return;
+    setExpanded(true);
+    const t = setTimeout(() => {
+      rowRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+    return () => clearTimeout(t);
+  }, [highlight]);
+  // Surface the filter source so the user can see (and dismiss) what
+  // brought them here when the deep-link carries a command snippet.
+  const showCmdBanner = highlight && !!highlightCmd;
   const report = task.report as TaskReport | null;
   const suggestions = report?.suggestions ?? [];
   const warnings = report?.warnings ?? [];
@@ -234,15 +253,23 @@ function TaskRow({
 
   return (
     <div
+      ref={rowRef}
       className={cn(
         "rounded-xl border overflow-hidden transition-colors",
-        task.status === "failed"
-          ? "border-destructive/30 bg-destructive/5"
-          : task.status === "completed"
-            ? "border-border bg-card"
-            : "border-border bg-card/50",
+        highlight
+          ? "border-primary/50 ring-1 ring-primary/30 bg-primary/5"
+          : task.status === "failed"
+            ? "border-destructive/30 bg-destructive/5"
+            : task.status === "completed"
+              ? "border-border bg-card"
+              : "border-border bg-card/50",
       )}
     >
+      {showCmdBanner && (
+        <div className="px-3 py-1.5 text-[10px] font-mono text-primary/80 border-b border-primary/20 bg-primary/5 truncate">
+          Filtered to command: {highlightCmd}
+        </div>
+      )}
       <button
         className="w-full flex items-start gap-3 p-3 text-left hover:bg-muted/30 transition-colors"
         onClick={() => setExpanded((v) => !v)}
@@ -859,6 +886,25 @@ export function LogsTab({
   onTryFix?: (text: string) => void;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
+  // Task #733 (code-review pass): the AI Builder chat's "View full log"
+  // deep-link carries ?logsTaskId / ?runId / ?cmd so we can auto-expand and
+  // scroll to the originating task. We parse once on mount (the bubble
+  // generates a fresh URL per command so we don't need to react to in-flight
+  // search-string changes).
+  const filter = useMemo(() => {
+    if (typeof window === "undefined") return { taskId: null as number | null, cmd: "" };
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const tid = p.get("logsTaskId");
+      const parsedId = tid ? parseInt(tid, 10) : NaN;
+      return {
+        taskId: Number.isFinite(parsedId) ? parsedId : null,
+        cmd: p.get("cmd") ?? "",
+      };
+    } catch {
+      return { taskId: null as number | null, cmd: "" };
+    }
+  }, []);
   const { data: tasks, isLoading } = useListTasks(projectId, {
     query: {
       enabled: !!projectId,
@@ -970,6 +1016,8 @@ export function LogsTab({
             task={task}
             projectId={projectId}
             onTryFix={onTryFix ?? (() => {})}
+            highlight={filter.taskId === task.id}
+            highlightCmd={filter.taskId === task.id ? filter.cmd : undefined}
           />
         ))}
       </div>

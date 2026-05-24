@@ -346,9 +346,21 @@ export async function execInContainer(
   command: string[],
   projectId: number,
   workdir = "/app",
-): Promise<{ ok: boolean; output: string }> {
+): Promise<{
+  ok: boolean;
+  output: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}> {
   if (!isConfigured()) {
-    return { ok: false, output: "Container exec not available — FLY_API_TOKEN not configured" };
+    return {
+      ok: false,
+      output: "Container exec not available — FLY_API_TOKEN not configured",
+      stdout: "",
+      stderr: "Container exec not available — FLY_API_TOKEN not configured",
+      exitCode: -1,
+    };
   }
   try {
     const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/exec`, {
@@ -359,18 +371,21 @@ export async function execInContainer(
     if (!res.ok) {
       const text = await res.text();
       logger.warn({ machineId, projectId, command, body: text }, "Exec failed");
-      return { ok: false, output: text };
+      return { ok: false, output: text, stdout: "", stderr: text, exitCode: -1 };
     }
 
     const data = (await res.json()) as { stdout?: string; stderr?: string; exit_code?: number };
-    const output = [data.stdout ?? "", data.stderr ?? ""].filter(Boolean).join("\n");
-    const ok = (data.exit_code ?? 0) === 0;
+    const stdout = data.stdout ?? "";
+    const stderr = data.stderr ?? "";
+    const output = [stdout, stderr].filter(Boolean).join("\n");
+    const exitCode = data.exit_code ?? 0;
+    const ok = exitCode === 0;
 
     await writeLog(projectId, ok ? "stdout" : "stderr", output.slice(0, 4000));
-    return { ok, output };
+    return { ok, output, stdout, stderr, exitCode };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, output: msg };
+    return { ok: false, output: msg, stdout: "", stderr: msg, exitCode: -1 };
   }
 }
 

@@ -1653,6 +1653,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       tool_calls: toolReqs.length > 0 ? toolReqs : undefined,
     });
 
+    // Task #733: when the model emits free-form prose alongside tool_calls
+    // (i.e. a brief plan / "I'll first read X, then patch Y" thought), surface
+    // it as a `thinking` event so the chat bubble can show 1-3 lines of
+    // muted reasoning between tool steps. Pure-text turns are handled by the
+    // existing model-stopped branch below and don't need a thinking event.
+    if (toolReqs.length > 0 && msg.content) {
+      await emitThinkingEvent(input.onEvent, String(msg.content));
+    }
+
     // Task #546: mark surfaced unread inbox items as read exactly once, after
     // the first assistant turn produces output. Skipping the DB write before
     // this point ensures unread feedback survives an aborted first turn.
@@ -2418,6 +2427,344 @@ async function safeEvent(fn: AgentLoopEvent, type: string, msg: string): Promise
   }
 }
 
+// Task #733: best-effort secret stripping for inline diff / command output
+// events. We are conservative — better to redact a few false-positives than
+// to leak a real key into the chat stream. The agent never sees these events
+// (they only flow to the UI), so over-redacting has no downstream cost.
+//
+// Two layers of redaction:
+//   1) The project's secret registry (decrypted values from project_secrets)
+//      — authoritative literal match. Loaded once per project + cached for 5
+//      minutes so we don't pay decryption cost on every event.
+//   2) Conservative regex patterns for well-known secret shapes — catches
+//      keys that came from outside the registry (env files printed by the
+//      shell, AI-generated tokens, etc).
+type SecretRegistryEntry = { values: string[]; expiresAt: number };
+const SECRET_REGISTRY_CACHE = new Map<number, SecretRegistryEntry>();
+const SECRET_REGISTRY_PENDING = new Map<number, Promise<string[]>>();
+const SECRET_REGISTRY_TTL_MS = 5 * 60_000;
+
+async function loadProjectSecretLiterals(projectId: number): Promise<string[]> {
+  const now = Date.now();
+  const cached = SECRET_REGISTRY_CACHE.get(projectId);
+  if (cached && cached.expiresAt > now) return cached.values;
+  const pending = SECRET_REGISTRY_PENDING.get(projectId);
+  if (pending) return pending;
+  const p = (async (): Promise<string[]> => {
+    try {
+      const { db: _db, secretsTable } = await import("@workspace/db");
+      const { eq } = await import("drizzle-orm");
+      const rows = await _db
+        .select({ valueEncrypted: secretsTable.valueEncrypted })
+        .from(secretsTable)
+        .where(eq(secretsTable.projectId, projectId));
+      const { encryptionService } = await import("./encryption");
+      const values: string[] = [];
+      for (const row of rows) {
+        try {
+          const v = encryptionService.decrypt(row.valueEncrypted);
+          // Only redact values that are non-trivially long — short values
+          // (e.g. "dev", "true") would cause far too many false positives.
+          if (v && v.length >= 6) values.push(v);
+        } catch {
+          // skip malformed
+        }
+      }
+      SECRET_REGISTRY_CACHE.set(projectId, {
+        values,
+        expiresAt: Date.now() + SECRET_REGISTRY_TTL_MS,
+      });
+      return values;
+    } catch (err) {
+      logger.warn({ err, projectId }, "agent-loop: secret registry load failed");
+      return [];
+    } finally {
+      SECRET_REGISTRY_PENDING.delete(projectId);
+    }
+  })();
+  SECRET_REGISTRY_PENDING.set(projectId, p);
+  return p;
+}
+
+function escapeForRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const SECRET_PATTERNS: RegExp[] = [
+  // AWS-style
+  /AKIA[0-9A-Z]{16}/g,
+  // GitHub PAT
+  /ghp_[A-Za-z0-9]{20,}/g,
+  /github_pat_[A-Za-z0-9_]{20,}/g,
+  // Stripe live keys
+  /sk_live_[A-Za-z0-9]{16,}/g,
+  /rk_live_[A-Za-z0-9]{16,}/g,
+  // OpenAI
+  /sk-[A-Za-z0-9_-]{20,}/g,
+  // Slack
+  /xox[abprs]-[A-Za-z0-9-]{10,}/g,
+  // Generic bearer
+  /Bearer\s+[A-Za-z0-9._\-+/=]{20,}/gi,
+  // KEY=value style env assignments for likely-secret keys
+  /\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|API|DSN))\s*=\s*([^\s"']{6,})/g,
+  // JWTs
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+];
+
+function redactSecrets(text: string, literals: readonly string[] = []): string {
+  let out = text;
+  // Pass 1: authoritative registry — exact-match decrypted project secret
+  // values. Replace the longest values first so a key whose value is a
+  // substring of another isn't double-redacted.
+  if (literals.length > 0) {
+    const sorted = [...literals].sort((a, b) => b.length - a.length);
+    for (const v of sorted) {
+      if (!v) continue;
+      out = out.split(v).join("[REDACTED]");
+    }
+  }
+  // Pass 2: shape-based fallback.
+  for (const re of SECRET_PATTERNS) {
+    out = out.replace(re, (_m, k: string | undefined) => (k ? `${k}=[REDACTED]` : "[REDACTED]"));
+  }
+  return out;
+}
+
+// Ordered, LCS-based line diff. Produces a unified-style body with context
+// (`  line`), additions (`+ line`), and removals (`- line`) in source order,
+// so repeated or reordered lines aren't conflated. Bounded at 2000 lines per
+// side to keep DP cost (O(n*m)) negligible — larger inputs are truncated and
+// the cap downstream (FILE_DIFF_CAP) further bounds the emitted body.
+function computeLineDiff(
+  before: string,
+  after: string,
+): { diff: string; added: number; removed: number } {
+  const MAX_LINES = 2000;
+  const a = before.split("\n").slice(0, MAX_LINES);
+  const b = after.split("\n").slice(0, MAX_LINES);
+  const n = a.length;
+  const m = b.length;
+  // dp[i][j] = LCS length of a[i..] vs b[j..]
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const lines: string[] = [];
+  let added = 0;
+  let removed = 0;
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      lines.push(`  ${a[i]}`);
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      lines.push(`- ${a[i]}`);
+      removed++;
+      i++;
+    } else {
+      lines.push(`+ ${b[j]}`);
+      added++;
+      j++;
+    }
+  }
+  while (i < n) {
+    lines.push(`- ${a[i++]}`);
+    removed++;
+  }
+  while (j < m) {
+    lines.push(`+ ${b[j++]}`);
+    added++;
+  }
+  return { diff: lines.join("\n"), added, removed };
+}
+
+const FILE_DIFF_CAP = 8 * 1024;
+const COMMAND_OUTPUT_CAP = 16 * 1024;
+const THINKING_CAP = 320;
+
+async function emitFileDiffEvent(
+  fn: AgentLoopEvent,
+  projectId: number,
+  payload: {
+    path: string;
+    op: "write" | "patch" | "delete";
+    before: string;
+    after: string;
+  },
+): Promise<void> {
+  try {
+    let added = 0;
+    let removed = 0;
+    let diffBody = "";
+    if (payload.op === "delete") {
+      removed = payload.before ? payload.before.split("\n").length : 0;
+      diffBody = payload.before
+        .split("\n")
+        .map((l) => `- ${l}`)
+        .join("\n");
+    } else {
+      const r = computeLineDiff(payload.before, payload.after);
+      diffBody = r.diff;
+      added = r.added;
+      removed = r.removed;
+    }
+    const literals = await loadProjectSecretLiterals(projectId);
+    diffBody = redactSecrets(diffBody, literals);
+    let truncated = false;
+    if (diffBody.length > FILE_DIFF_CAP) {
+      diffBody = diffBody.slice(0, FILE_DIFF_CAP);
+      truncated = true;
+    }
+    const msg = JSON.stringify({
+      path: payload.path,
+      op: payload.op,
+      added,
+      removed,
+      diff: diffBody,
+      truncated,
+    });
+    await fn("file_diff", msg);
+  } catch (err) {
+    logger.warn({ err }, "agent-loop: file_diff emit failed");
+  }
+}
+
+/**
+ * Stable key for grouping the start + final chunks of one command on the
+ * client. The frontend uses this to dedupe / replace cards as the command
+ * progresses from "running" → "final".
+ */
+function commandRunKey(argv: string[], startedAt: number): string {
+  return `${startedAt}:${argv.slice(0, 4).join(" ").slice(0, 80)}`;
+}
+
+/**
+ * Task #733: emit a "start" chunk for a command. The frontend renders a
+ * "running…" card immediately so the user sees activity before the command
+ * returns. Fly's exec API does not stream chunks, so we get one start event
+ * up-front and a single final event when the call returns — but the payload
+ * shape is streaming-ready (seq + status) so we can swap in a chunked
+ * provider later without breaking the contract.
+ */
+/**
+ * Single-quote escape a shell argument for safe embedding in `sh -c "..."`.
+ * Closes the quote, inserts an escaped single quote, reopens. Bulletproof
+ * against arbitrary content.
+ */
+function shSingleQuote(arg: string): string {
+  return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Task #733: emit an interim chunk while the command is still running.
+ * Carries the new tail of stdout (combined with stderr via the wrapping
+ * `2>&1` shell) so the bubble can append to the live card incrementally.
+ */
+async function emitCommandChunkEvent(
+  fn: AgentLoopEvent,
+  projectId: number,
+  payload: { runId: string; argv: string[]; seq: number; text: string },
+): Promise<void> {
+  try {
+    const literals = await loadProjectSecretLiterals(projectId);
+    let text = redactSecrets(payload.text ?? "", literals);
+    let truncated = false;
+    if (text.length > COMMAND_OUTPUT_CAP) {
+      text = text.slice(-COMMAND_OUTPUT_CAP);
+      truncated = true;
+    }
+    const msg = JSON.stringify({
+      runId: payload.runId,
+      status: "chunk" as const,
+      seq: payload.seq,
+      argv: payload.argv.slice(0, 12).map((s) => String(s).slice(0, 200)),
+      stdout: text,
+      stderr: "",
+      truncated,
+    });
+    await fn("command_output", msg);
+  } catch (err) {
+    logger.warn({ err }, "agent-loop: command_output chunk emit failed");
+  }
+}
+
+async function emitCommandStartEvent(
+  fn: AgentLoopEvent,
+  payload: { runId: string; argv: string[]; startedAt: number },
+): Promise<void> {
+  try {
+    const msg = JSON.stringify({
+      runId: payload.runId,
+      status: "running" as const,
+      seq: 0,
+      argv: payload.argv.slice(0, 12).map((s) => String(s).slice(0, 200)),
+      startedAt: payload.startedAt,
+    });
+    await fn("command_output", msg);
+  } catch (err) {
+    logger.warn({ err }, "agent-loop: command_output start emit failed");
+  }
+}
+
+async function emitCommandFinalEvent(
+  fn: AgentLoopEvent,
+  projectId: number,
+  payload: {
+    runId: string;
+    argv: string[];
+    exitCode: number;
+    durationMs: number;
+    stdout: string;
+    stderr: string;
+  },
+): Promise<void> {
+  try {
+    const literals = await loadProjectSecretLiterals(projectId);
+    let stdout = redactSecrets(payload.stdout ?? "", literals);
+    let stderr = redactSecrets(payload.stderr ?? "", literals);
+    let truncated = false;
+    if (stdout.length > COMMAND_OUTPUT_CAP) {
+      stdout = stdout.slice(0, COMMAND_OUTPUT_CAP);
+      truncated = true;
+    }
+    if (stderr.length > COMMAND_OUTPUT_CAP) {
+      stderr = stderr.slice(0, COMMAND_OUTPUT_CAP);
+      truncated = true;
+    }
+    const msg = JSON.stringify({
+      runId: payload.runId,
+      status: "final" as const,
+      seq: 1,
+      argv: payload.argv.slice(0, 12).map((s) => String(s).slice(0, 200)),
+      exitCode: payload.exitCode,
+      durationMs: payload.durationMs,
+      stdout,
+      stderr,
+      // Kept for backward compatibility with older clients that read `output`.
+      output: [stdout, stderr].filter(Boolean).join("\n"),
+      truncated,
+    });
+    await fn("command_output", msg);
+  } catch (err) {
+    logger.warn({ err }, "agent-loop: command_output final emit failed");
+  }
+}
+
+async function emitThinkingEvent(fn: AgentLoopEvent, text: string): Promise<void> {
+  if (!text) return;
+  const cleaned = text.trim().replace(/\s+/g, " ").slice(0, THINKING_CAP);
+  if (!cleaned) return;
+  try {
+    await fn("thinking", cleaned);
+  } catch (err) {
+    logger.warn({ err }, "agent-loop: thinking emit failed");
+  }
+}
+
 /**
  * Best-effort extraction of the resolved version from a package manager's
  * stdout. Returns null when nothing matches — the structured tool result
@@ -2697,35 +3044,69 @@ async function execWithTimeout(
   projectId: number,
   timeoutMs: number,
   signal: AbortSignal,
-): Promise<{ ok: boolean; output: string; timedOut: boolean; aborted: boolean }> {
+): Promise<{
+  ok: boolean;
+  output: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  timedOut: boolean;
+  aborted: boolean;
+}> {
   const { execInContainer } = await import("./container");
   let timer: NodeJS.Timeout | null = null;
-  const timeoutPromise = new Promise<{ ok: false; output: string; timedOut: true; aborted: false }>(
-    (resolve) => {
-      timer = setTimeout(
-        () =>
-          resolve({
-            ok: false,
-            output: `timeout after ${timeoutMs}ms`,
-            timedOut: true,
-            aborted: false,
-          }),
-        Math.max(1_000, timeoutMs),
-      );
-    },
-  );
-  const abortPromise = new Promise<{ ok: false; output: string; timedOut: false; aborted: true }>(
-    (resolve) => {
-      const onAbort = () =>
-        resolve({ ok: false, output: "aborted by user", timedOut: false, aborted: true });
-      if (signal.aborted) onAbort();
-      else signal.addEventListener("abort", onAbort, { once: true });
-    },
-  );
+  const timeoutPromise = new Promise<{
+    ok: false;
+    output: string;
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+    timedOut: true;
+    aborted: false;
+  }>((resolve) => {
+    timer = setTimeout(
+      () =>
+        resolve({
+          ok: false,
+          output: `timeout after ${timeoutMs}ms`,
+          stdout: "",
+          stderr: `timeout after ${timeoutMs}ms`,
+          exitCode: 124,
+          timedOut: true,
+          aborted: false,
+        }),
+      Math.max(1_000, timeoutMs),
+    );
+  });
+  const abortPromise = new Promise<{
+    ok: false;
+    output: string;
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+    timedOut: false;
+    aborted: true;
+  }>((resolve) => {
+    const onAbort = () =>
+      resolve({
+        ok: false,
+        output: "aborted by user",
+        stdout: "",
+        stderr: "aborted by user",
+        exitCode: 130,
+        timedOut: false,
+        aborted: true,
+      });
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
   try {
     const realRun = execInContainer(containerId, argv, projectId).then((r) => ({
       ok: r.ok,
       output: r.output,
+      stdout: r.stdout,
+      stderr: r.stderr,
+      exitCode: r.exitCode,
       timedOut: false as const,
       aborted: false as const,
     }));
@@ -2968,8 +3349,17 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         return { ok: false, observation: `ERROR: content too large (${content.length} bytes)` };
       }
       const mime = typeof args.mime_type === "string" ? args.mime_type : undefined;
+      const prior = workspace.read(path)?.content ?? "";
       workspace.write(path, content, mime);
       void invalidateEmbeddingSafe(input.projectId, path);
+      // Task #733: emit a file_diff event so the chat bubble can render an
+      // inline diff. Stripped of secrets, capped to 8KB inside the emitter.
+      void emitFileDiffEvent(input.onEvent, input.projectId, {
+        path,
+        op: "write",
+        before: prior,
+        after: content,
+      });
       if (containerState.id) {
         try {
           const { writeFileToContainer } = await import("./container");
@@ -3000,6 +3390,14 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       const next = f.content.slice(0, idx) + newText + f.content.slice(idx + oldText.length);
       workspace.write(path, next, f.mimeType);
       void invalidateEmbeddingSafe(input.projectId, path);
+      // Task #733: apply_patch has an exact before/after pair already, so the
+      // diff is just `- oldText\n+ newText` rather than a bag-of-lines reduce.
+      void emitFileDiffEvent(input.onEvent, input.projectId, {
+        path,
+        op: "patch",
+        before: oldText,
+        after: newText,
+      });
       if (containerState.id) {
         try {
           const { writeFileToContainer } = await import("./container");
@@ -3013,9 +3411,18 @@ export async function executeTool(ctx: ToolCtx): Promise<{
     case "delete_file": {
       const path = sanitizePath(args.path);
       if (!path) return { ok: false, observation: "ERROR: invalid path" };
+      const priorFile = workspace.read(path);
       const removed = workspace.delete(path);
       if (!removed) return { ok: false, observation: `ERROR: file not found: ${path}` };
       void invalidateEmbeddingSafe(input.projectId, path);
+      // Task #733: surface a delete file_diff so the chat bubble can show
+      // the removed lines (capped/redacted by the emitter).
+      void emitFileDiffEvent(input.onEvent, input.projectId, {
+        path,
+        op: "delete",
+        before: priorFile?.content ?? "",
+        after: "",
+      });
       if (containerState.id) {
         try {
           // Direct argv (no shell wrapper) — sanitizePath already rejected any
@@ -3204,22 +3611,117 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           ? Math.min(args.timeout_ms, PER_CALL_TIMEOUT_CAP_MS)
           : PER_CALL_TIMEOUT_DEFAULT_MS;
       const t = Date.now();
+      // Task #733: emit a "running" chunk before the call so the chat bubble
+      // can show the command as in-flight. Then wrap the argv in a shell
+      // that tees combined stdout+stderr to a tmp log file and writes the
+      // inner exit code to a sidecar file. While the wrapped exec is in
+      // flight, a bounded poller tails the log and emits interim `chunk`
+      // events so the bubble can render live output. On completion we read
+      // the full log + parsed exit code, supersede the live card with a
+      // `final` event, and best-effort cleanup the tmp files.
+      const runId = commandRunKey(argv, t);
+      await emitCommandStartEvent(input.onEvent, { runId, argv, startedAt: t });
+      const { execInContainer } = await import("./container");
+      const slug = `${t}_${Math.random().toString(36).slice(2, 8)}`;
+      const logPath = `/tmp/agent-cmd-${slug}.log`;
+      const exitPath = `/tmp/agent-cmd-${slug}.exit`;
+      const escaped = argv.map(shSingleQuote).join(" ");
+      const wrappedScript = `${escaped} > ${logPath} 2>&1; echo $? > ${exitPath}`;
+      const wrappedArgv = ["sh", "-c", wrappedScript];
+
+      // Live poller: starts after a 1.2s delay so fast commands incur zero
+      // extra Fly API calls. Bounded at 10 polls (~12s of streaming) to cap
+      // cost; the final event still carries the full captured output.
+      let polling = true;
+      let offset = 0;
+      let chunkSeq = 1;
+      const pollerPromise = (async () => {
+        const pollEveryMs = 1200;
+        const maxPolls = 10;
+        for (let i = 0; i < maxPolls && polling; i++) {
+          await new Promise((resolve) => setTimeout(resolve, pollEveryMs));
+          if (!polling) break;
+          try {
+            const tailRes = await execInContainer(
+              containerState.id!,
+              ["sh", "-c", `tail -c +${offset + 1} ${logPath} 2>/dev/null || true`],
+              input.projectId,
+            );
+            const newText = tailRes.stdout ?? "";
+            if (newText.length > 0) {
+              offset += newText.length;
+              await emitCommandChunkEvent(input.onEvent, input.projectId, {
+                runId,
+                argv,
+                seq: chunkSeq++,
+                text: newText,
+              });
+            }
+          } catch {
+            // ignore poll failures — final event still has the full output
+          }
+        }
+      })();
+
       const r = await execWithTimeout(
         containerState.id!,
-        argv,
+        wrappedArgv,
         input.projectId,
         timeoutMs,
         input.signal,
       );
+      polling = false;
+      await pollerPromise;
+
+      // Read full captured output + parsed inner exit code. We rely on a
+      // separator to split log content from the exit file in a single exec
+      // call (saves an RPC).
+      let stdout = "";
+      let exitCode = r.timedOut ? 124 : r.exitCode;
+      try {
+        const finalRead = await execInContainer(
+          containerState.id!,
+          [
+            "sh",
+            "-c",
+            `cat ${logPath} 2>/dev/null; printf '\\n__AGENT_SEP__\\n'; cat ${exitPath} 2>/dev/null`,
+          ],
+          input.projectId,
+        );
+        const all = finalRead.stdout ?? "";
+        const sepIdx = all.lastIndexOf("__AGENT_SEP__");
+        if (sepIdx >= 0) {
+          stdout = all.slice(0, sepIdx).replace(/\n$/, "");
+          const exitStr = all.slice(sepIdx + "__AGENT_SEP__".length).trim();
+          const parsed = parseInt(exitStr, 10);
+          if (Number.isFinite(parsed) && !r.timedOut && !r.aborted) {
+            exitCode = parsed;
+          }
+        } else {
+          stdout = all;
+        }
+      } catch {
+        // fall back to wrapper output if the read fails
+        stdout = r.stdout ?? "";
+      }
+      // Best-effort cleanup; don't block on it.
+      void execInContainer(
+        containerState.id!,
+        ["sh", "-c", `rm -f ${logPath} ${exitPath}`],
+        input.projectId,
+      ).catch(() => undefined);
+
       const dur = Date.now() - t;
-      const exitCode = r.timedOut ? 124 : r.ok ? 0 : 1;
+      const stderr = "";
+      const combined = stdout;
+      const ok = !r.timedOut && !r.aborted && exitCode === 0;
       commandsRun.push({
         step,
         argv,
         exitCode,
         durationMs: dur,
-        stdoutPreview: r.ok ? r.output.slice(0, 400) : "",
-        stderrPreview: r.ok ? "" : r.output.slice(0, 400),
+        stdoutPreview: stdout.slice(0, 400),
+        stderrPreview: stderr.slice(0, 400),
       });
       await writeToolAudit(ctx, {
         toolName: "run_command",
@@ -3228,15 +3730,25 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         durationMs: dur,
         blocked: false,
         blockReason: null,
-        stdoutTail: r.ok ? r.output.slice(-400) : "",
-        stderrTail: r.ok ? "" : r.output.slice(-400),
+        stdoutTail: stdout.slice(-400),
+        stderrTail: stderr.slice(-400),
+      });
+      // Final chunk — emitted even on timeout/abort so the user can see what
+      // got printed before the command was cut off.
+      void emitCommandFinalEvent(input.onEvent, input.projectId, {
+        runId,
+        argv,
+        exitCode,
+        durationMs: dur,
+        stdout,
+        stderr,
       });
       if (r.aborted) return { ok: false, observation: "ERROR: aborted by user" };
       if (r.timedOut)
         return { ok: false, observation: `ERROR: command exceeded ${timeoutMs}ms timeout` };
       return {
-        ok: r.ok,
-        observation: `exit=${exitCode}\n${r.output.slice(0, MAX_OBSERVATION_CHARS)}`,
+        ok,
+        observation: `exit=${exitCode}\n${combined.slice(0, MAX_OBSERVATION_CHARS)}`,
       };
     }
     case "run_workflow": {
