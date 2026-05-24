@@ -1554,17 +1554,31 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               "Auto-selecting project stack based on request",
             );
 
-            const narration: Record<string, string> = {
+            // #757 — emit a clear summary of what was chosen and why.
+            const architectureSummaries: Record<string, string> = {
               "mobile-cross":
-                "This sounds like a native mobile app — building it for iOS and Android.",
-              "node-api": "This needs a real backend and database — building full-stack.",
-              "react-vite": "Using React for a richer interactive experience.",
+                "Building a native mobile app for iOS and Android using Expo and React Native.",
+              "node-api":
+                "Building a full-stack app with a Node.js server, REST API, and PostgreSQL database.",
+              "react-vite": "Building an interactive React single-page app.",
+              "static-html":
+                "Building a fast, lightweight static page with HTML, CSS, and JavaScript.",
             };
-            await emitEvent(
-              taskId,
-              "narration",
-              narration[detectedStack] ?? "Architecture selected.",
-            );
+            const archMessage =
+              architectureSummaries[detectedStack] ?? `Architecture selected: ${detectedStack}.`;
+            await emitEvent(taskId, "architecture_chosen", archMessage);
+            // #757 — write a permanent chat message so the user always sees what was chosen.
+            await db.insert(chatMessagesTable).values({
+              projectId,
+              role: "assistant",
+              content: archMessage,
+              agentMode,
+              planMode: false,
+              plan: {
+                kind: "architecture_chosen",
+                stack: detectedStack,
+              } as unknown as Record<string, unknown>,
+            });
 
             if (becomesMobile) {
               // Upgrade project kind + platform so the mobile pipeline runs.
@@ -1602,6 +1616,27 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               const { enqueueProvisionProjectJob } = await import("./provisioning");
               enqueueProvisionProjectJob(projectId);
               logger.info({ taskId, projectId }, "Provisioning job enqueued for stack upgrade");
+              // #758 — wait up to 90 s for the Fly container to become available
+              // before handing off to the agent loop (which needs a live containerId).
+              await emitEvent(taskId, "narration", "Setting up your server environment…");
+              const containerDeadline = Date.now() + 90_000;
+              while (Date.now() < containerDeadline) {
+                const [waitRow] = await db
+                  .select({
+                    containerId: projectsTable.containerId,
+                    provisioningStatus: projectsTable.provisioningStatus,
+                  })
+                  .from(projectsTable)
+                  .where(eq(projectsTable.id, projectId));
+                if (waitRow?.containerId || waitRow?.provisioningStatus === "ready") break;
+                await new Promise<void>((r) => setTimeout(r, 5_000));
+              }
+              // Reload so the agent loop gets the fresh containerId.
+              const [containerReady] = await db
+                .select()
+                .from(projectsTable)
+                .where(eq(projectsTable.id, projectId));
+              if (containerReady) Object.assign(project, containerReady);
             }
           }
         } catch (err) {
@@ -1622,7 +1657,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       // so both build and refine pipelines have durable module context.
       let activeModuleIds: string[] = [];
       let configuredSecretNames: string[] = [];
-      if (isMobileProject) {
+      if (resolvedIsMobile) {
         const [lastTask, projectSecrets] = await Promise.all([
           db
             .select({ report: agentTasksTable.report })
@@ -1649,7 +1684,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         await emitEvent(
           taskId,
           "narration",
-          isMobileProject
+          resolvedIsMobile
             ? "Let me plan the mobile app structure before writing any code."
             : isReactViteProject
               ? "Let me plan the React + Vite project structure before writing any code."
@@ -1663,7 +1698,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         await emitEvent(
           taskId,
           "generating_code",
-          isMobileProject
+          resolvedIsMobile
             ? "Generating Expo/React Native app with AI…"
             : isReactViteProject
               ? "Generating React + Vite project with AI…"
@@ -1745,7 +1780,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               });
               return loopResultToBuildResult(loopRes, userPrompt, project.name);
             })()
-          : isMobileProject
+          : resolvedIsMobile
             ? await runMobileBuildPipeline({
                 projectName: project.name,
                 projectKind: project.kind,
@@ -1808,7 +1843,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         if (
           result.correctionFailed &&
           buildEscalationMode &&
-          !isMobileProject &&
+          !resolvedIsMobile &&
           !USE_AGENT_LOOP_BUILD
         ) {
           logger.info(
@@ -3522,7 +3557,21 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               }
             }
 
-            await emitEvent(taskId, "narration", "Container ready.");
+            // #756 — start the Node.js server in background so it keeps running.
+            if (project.stack === "node-api") {
+              await execInContainer(
+                containerId,
+                [
+                  "/bin/sh",
+                  "-c",
+                  "pkill -f 'node ' 2>/dev/null; nohup npm start &>/tmp/app.log &",
+                ],
+                projectId,
+              );
+              await emitEvent(taskId, "narration", "Server started.");
+            } else {
+              await emitEvent(taskId, "narration", "Container ready.");
+            }
           } catch (err) {
             logger.warn({ err, projectId, taskId }, "Container sync/install failed (non-fatal)");
           }

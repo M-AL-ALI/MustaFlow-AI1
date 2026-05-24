@@ -24,6 +24,7 @@ import {
   Cpu,
   Zap,
   Navigation,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,7 @@ type EventType =
   | "updating_preview"
   | "saving_version"
   | "writing_lessons"
+  | "architecture_chosen"
   | "completed"
   | "failed";
 
@@ -113,6 +115,11 @@ const EVENT_META: Record<EventType, { icon: React.ElementType; color: string; la
     icon: GraduationCap,
     color: "text-emerald-400",
     label: "Writing lessons",
+  },
+  architecture_chosen: {
+    icon: Layers,
+    color: "text-violet-400",
+    label: "Architecture chosen",
   },
   completed: {
     icon: CheckCircle2,

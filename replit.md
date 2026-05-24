@@ -6,7 +6,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 
 ## Scope
 
-- **Web-first**: the builder generates static web apps (HTML/CSS/JS + Tailwind + Lucide via CDN). Mobile (Expo/React Native) project kind exists but is gated — do not add new mobile generation surfaces unless explicitly approved.
+- **Web-first by default, mobile when the prompt calls for it**: the builder generates static web apps (HTML/CSS/JS + Tailwind + Lucide via CDN), React SPAs, full-stack Node.js apps, or native mobile apps (Expo/React Native) — the stack is auto-detected from the user's prompt. Mobile generation is fully enabled; no UI changes needed to surface it.
 - **User journey**: visit landing → create account → describe idea → AI builds → preview → publish to testing → promote to production.
 
 ## Run & operate
@@ -101,7 +101,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **Original branding** — never reference Replit or other third-party brands in user-facing copy or imagery.
 - **Landing page**: sidebar-free for visitors; sidebar appears only after login.
 - **Dark mode is default**; light mode is an opt-in toggle.
-- **Web-first**: do not surface mobile generation in the UI unless explicitly approved.
+- **All stacks enabled**: static HTML, React SPA, full-stack Node.js, and native mobile (Expo/React Native) are all live. Stack is auto-detected; do not hard-code kind on new projects.
 
 ## Theme J — Enterprise, Compliance & Polish (Task #632)
 
@@ -124,7 +124,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 
 ## Known limitations (honest status)
 
-- **Mobile generation**: gated by default; only `mobile-cross` Expo SDK pipeline exists when surfaced.
+- **Mobile generation**: fully enabled — `mobile-cross` Expo SDK pipeline runs automatically when the prompt describes a mobile app.
 - **Clerk dev keys** banner is expected in dev. Production keys auto-provisioned by Replit on deploy.
 - **Publishing v1**: `/api/p/:slug/` is served by the API server from DB snapshots, not a real CDN. Cloudflare R2/Worker is wired but `EDGE_SERVING_ENABLED` must be set when the Worker is deployed.
 - **Soft-deleted projects**: not self-recoverable from the UI — needs an admin SQL update.
