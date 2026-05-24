@@ -46,3 +46,7 @@ export * from "./workspace-subscriptions";
 export * from "./plan-templates";
 export * from "./bandwidth";
 export * from "./subscriptions";
+export * from "./scheduled-job-runs";
+export * from "./managed-addons";
+export * from "./project-environments";
+export * from "./usage-events";

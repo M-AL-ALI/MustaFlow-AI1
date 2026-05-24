@@ -65,6 +65,7 @@ import webhooksRouter from "./webhooks";
 import domainAnalyticsRouter from "./domain-analytics";
 import purchasedDomainsRouter from "./purchased-domains";
 import bandwidthRouter from "./bandwidth";
+import runtimeRouter from "./runtime";
 import v1Router from "./v1/index";
 import abuseRouter from "./abuse";
 import metricsRouter from "./metrics";
@@ -130,6 +131,9 @@ const KNOWN_PREFIXES = [
   "/blueprints",
   "/account",
   "/plan-templates",
+  "/environments",
+  "/addons",
+  "/usage",
 ];
 
 router.use((req, res, next) => {
@@ -220,6 +224,7 @@ router.use(agentInboxRouter);
 router.use(webhooksRouter);
 router.use(domainAnalyticsRouter);
 router.use(bandwidthRouter);
+router.use(runtimeRouter);
 router.use(healthProjectRouter); // GET /projects/:id/health — per-project metrics
 router.use(purchasedDomainsRouter);
 

@@ -74,6 +74,7 @@ import {
   Plug,
   HeartPulse,
   Crown,
+  Cpu,
 } from "lucide-react";
 
 function SubscriptionTierBadge({ tier }: { tier: "free" | "pro" | "team" }) {
@@ -125,6 +126,7 @@ import { KnowledgeTab } from "./components/knowledge-tab";
 import { HistoryTab } from "./components/history-tab";
 import { TerminalTab } from "./components/terminal-tab";
 import { DatabaseTab } from "./components/database-tab";
+import { RuntimeTab } from "./components/runtime-tab";
 import { ChecksTab, useCveCriticalHighCount } from "./components/checks-tab";
 import { SecurityTab } from "./components/security-tab";
 import {
@@ -663,6 +665,7 @@ const ADVANCED_TABS = [
   { label: "Security", value: "security", icon: ShieldCheck },
   { label: "AI Memory", value: "knowledge", icon: BrainCircuit },
   { label: "Database", value: "database", icon: DatabaseZap },
+  { label: "Runtime", value: "runtime", icon: Cpu },
   { label: "Git", value: "git", icon: Github },
   { label: "Logs", value: "logs", icon: Wrench },
   { label: "Resources", value: "resources", icon: BookOpen },
@@ -3227,6 +3230,7 @@ export default function ProjectWorkspacePage() {
               />
             )}
             {activeTab === "database" && <DatabaseTab projectId={projectId} />}
+            {activeTab === "runtime" && <RuntimeTab projectId={projectId} />}
             {activeTab === "git" && <GithubTab projectId={projectId} />}
             {activeTab === "knowledge" && <KnowledgeTab projectId={projectId} />}
             {activeTab === "analytics" && <AnalyticsTab project={project} />}
