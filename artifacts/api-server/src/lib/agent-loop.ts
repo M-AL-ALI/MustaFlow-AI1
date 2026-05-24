@@ -1184,19 +1184,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     try {
       const { createChatCompletion, resolveStageProvider, VISION_MODEL } =
         await import("./ai-providers");
+      // Pass agent-mode OpenAI default (`model`) as openaiOverride so an
+      // `AI_PROVIDER_BUILD=openai:<model>` env wins for the loop's main LLM
+      // call, but unset env keeps the historical agent-mode default.
       const { provider, model: routedModel } = resolveStageProvider(
         input.mode === "refine" ? "refine" : "build",
         input.agentMode,
+        model,
       );
       // Vision-override: if a screenshot was just pushed, this turn must use a
       // vision-capable model regardless of stage routing (Task #533).
       const useVision = visionTurnsRemaining > 0;
       if (useVision) visionTurnsRemaining -= 1;
-      const effectiveModel = useVision
-        ? VISION_MODEL[provider]
-        : provider === "openai"
-          ? model
-          : routedModel;
+      const effectiveModel = useVision ? VISION_MODEL[provider] : routedModel;
       response = await createChatCompletion({
         provider,
         model: effectiveModel,
@@ -1813,10 +1813,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           const { provider: fixProv, model: fixModel } = resolveStageProvider(
             input.mode === "refine" ? "refine" : "build",
             input.agentMode,
+            model,
           );
           const fixResp = await createChatCompletion({
             provider: fixProv,
-            model: fixProv === "openai" ? model : fixModel,
+            model: fixModel,
             messages,
             tools: TOOLS,
             tool_choice: "auto",

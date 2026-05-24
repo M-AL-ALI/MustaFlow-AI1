@@ -25,10 +25,12 @@ async function callChat(
   },
 ) {
   const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-  const { provider, model } = resolveStageProvider(stage, agentMode);
+  // Pass the legacy openaiDefault as the override — env model wins, otherwise
+  // we keep the historical OpenAI default for this stage.
+  const { provider, model } = resolveStageProvider(stage, agentMode, openaiDefault);
   return createChatCompletion({
     provider,
-    model: provider === "openai" ? openaiDefault : model,
+    model,
     ...body,
   });
 }

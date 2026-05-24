@@ -91,8 +91,34 @@ export function parseProviderSpec(raw: string | undefined): {
   if (provider !== "openai" && provider !== "anthropic" && provider !== "gemini") {
     return null;
   }
-  const model = rest.length > 0 ? rest.join(":").trim() : null;
+  const rawModel = rest.length > 0 ? rest.join(":").trim() : null;
+  const model = rawModel ? normalizeModelId(provider as Provider, rawModel) : null;
   return { provider, model: model && model.length > 0 ? model : null };
+}
+
+/**
+ * Normalize per-provider short-form model aliases into the canonical id the
+ * provider SDK expects. Operators frequently write `gemini:2.5-pro` or
+ * `anthropic:claude-sonnet-4-6` — both forms should reach the SDK as a valid
+ * id. Unknown values are passed through unchanged so a literal future model
+ * id still works without a code change.
+ */
+function normalizeModelId(provider: Provider, id: string): string {
+  const lower = id.toLowerCase().trim();
+  if (provider === "gemini") {
+    // Accept `2.5-pro`, `gemini-2.5-pro`, `models/gemini-2.5-pro`.
+    if (lower.startsWith("models/")) return lower.slice("models/".length);
+    if (lower.startsWith("gemini-")) return lower;
+    if (/^\d/.test(lower)) return `gemini-${lower}`;
+    return lower;
+  }
+  if (provider === "anthropic") {
+    // Accept `sonnet-4-6` shorthand → `claude-sonnet-4-6`.
+    if (lower.startsWith("claude-")) return lower;
+    if (/^(haiku|sonnet|opus)-/.test(lower)) return `claude-${lower}`;
+    return lower;
+  }
+  return lower;
 }
 
 /**
@@ -107,20 +133,36 @@ export function parseProviderSpec(raw: string | undefined): {
 export function resolveStageProvider(
   stage: Stage,
   agentMode: AgentMode,
+  // Optional per-call-site OpenAI fallback model. Used when (a) the resolved
+  // provider is OpenAI AND (b) the env var did not supply an explicit model.
+  // Lets pipelines that historically forced a specific small/fast OpenAI
+  // model (e.g. intent classifier → gpt-5-nano) preserve their existing
+  // default without blocking an `AI_PROVIDER_*=openai:gpt-5.4` override.
+  openaiOverride?: string,
 ): { provider: Provider; model: string } {
   const envValue = process.env[STAGE_ENV_VAR[stage]];
   const parsed = parseProviderSpec(envValue);
   let provider: Provider = parsed?.provider ?? "openai";
 
-  if (provider === "anthropic" && !process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL) {
+  // Both BASE_URL and API_KEY are required — the integration SDKs throw at
+  // import time when the API key is missing, which would crash a routed call.
+  // Fall back to OpenAI gracefully when either half is missing.
+  if (
+    provider === "anthropic" &&
+    (!process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL ||
+      !process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY)
+  ) {
     warnOnce(
-      `${STAGE_ENV_VAR[stage]} set to anthropic but Anthropic integration is not provisioned. Falling back to OpenAI.`,
+      `${STAGE_ENV_VAR[stage]} set to anthropic but Anthropic integration is not fully provisioned (BASE_URL or API_KEY missing). Falling back to OpenAI.`,
     );
     provider = "openai";
   }
-  if (provider === "gemini" && !process.env.AI_INTEGRATIONS_GEMINI_BASE_URL) {
+  if (
+    provider === "gemini" &&
+    (!process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || !process.env.AI_INTEGRATIONS_GEMINI_API_KEY)
+  ) {
     warnOnce(
-      `${STAGE_ENV_VAR[stage]} set to gemini but Gemini integration is not provisioned. Falling back to OpenAI.`,
+      `${STAGE_ENV_VAR[stage]} set to gemini but Gemini integration is not fully provisioned (BASE_URL or API_KEY missing). Falling back to OpenAI.`,
     );
     provider = "openai";
   }
@@ -128,11 +170,17 @@ export function resolveStageProvider(
   // Only honor the env-supplied model when the requested provider actually ran;
   // if we fell back to OpenAI, ignore any Anthropic/Gemini model string and use
   // the OpenAI default for the agent mode (otherwise OpenAI gets called with
-  // an unknown model id).
-  const model =
-    parsed?.model && parsed.provider === provider
-      ? parsed.model
-      : MODEL_DEFAULTS[provider][agentMode];
+  // an unknown model id). When no env model was supplied AND a call-site
+  // openaiOverride is provided, prefer the override over the agent-mode
+  // default (preserves legacy per-stage OpenAI defaults).
+  let model: string;
+  if (parsed?.model && parsed.provider === provider) {
+    model = parsed.model;
+  } else if (provider === "openai" && openaiOverride) {
+    model = openaiOverride;
+  } else {
+    model = MODEL_DEFAULTS[provider][agentMode];
+  }
   return { provider, model };
 }
 

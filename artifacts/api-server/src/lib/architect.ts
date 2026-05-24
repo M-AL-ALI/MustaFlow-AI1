@@ -165,10 +165,10 @@ ${diffSection}${commandsSection}${excerptsSection}${summarySection}${warningsSec
 Now produce your JSON review.`;
 
   try {
-    const { provider, model } = resolveStageProvider("architect", input.agentMode);
+    const { provider, model } = resolveStageProvider("architect", input.agentMode, ARCHITECT_MODEL);
     const response = await createChatCompletion({
       provider,
-      model: provider === "openai" ? ARCHITECT_MODEL : model,
+      model,
       max_completion_tokens: 4096,
       messages: [
         { role: "system", content: ARCHITECT_SYSTEM_PROMPT },

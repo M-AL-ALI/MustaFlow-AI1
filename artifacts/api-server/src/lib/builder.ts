@@ -462,10 +462,10 @@ function scanFilesForCdnIssues(files: BuilderFile[]): NonNullable<TaskReport["se
 async function runProPlanMicroCall(projectName: string, userPrompt: string): Promise<string> {
   try {
     const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-    const { provider, model: routedModel } = resolveStageProvider("build", "eco");
+    const { provider, model: routedModel } = resolveStageProvider("build", "eco", "gpt-5-mini");
     const response = await createChatCompletion({
       provider,
-      model: provider === "openai" ? "gpt-5-mini" : routedModel,
+      model: routedModel,
       max_completion_tokens: 300,
       messages: [
         {
@@ -1629,8 +1629,10 @@ async function callWithRetry(
   let lastError: Error = new Error("Unknown error");
 
   const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-  const { provider, model: routedModel } = resolveStageProvider(stage, agentMode);
-  const effectiveModel = provider === "openai" ? model : routedModel;
+  // `model` is the legacy hardcoded OpenAI model for this pipeline — pass it
+  // as the openaiOverride so an `AI_PROVIDER_*=openai:<model>` env wins, but
+  // an unset env still uses the pipeline's historical OpenAI default.
+  const { provider, model: effectiveModel } = resolveStageProvider(stage, agentMode, model);
 
   for (let attempt = 0; attempt < 2; attempt++) {
     if (signal?.aborted) throw new Error("Build cancelled");
@@ -4097,10 +4099,10 @@ export async function detectMobileModules(
       "\n",
     );
     const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-    const { provider: mProv, model: mModel } = resolveStageProvider("build", "eco");
+    const { provider: mProv, model: mModel } = resolveStageProvider("build", "eco", "gpt-5-mini");
     const response = await createChatCompletion({
       provider: mProv,
-      model: mProv === "openai" ? "gpt-5-mini" : mModel,
+      model: mModel,
       max_completion_tokens: 200,
       messages: [
         {
@@ -7277,10 +7279,10 @@ export async function runIntentClassifierPipeline(
       .join("\n\n");
 
     const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-    const { provider, model } = resolveStageProvider("intent", "lite");
+    const { provider, model } = resolveStageProvider("intent", "lite", "gpt-5-nano");
     const response = await createChatCompletion({
       provider,
-      model: provider === "openai" ? "gpt-5-nano" : model,
+      model,
       max_completion_tokens: 60,
       messages: [
         { role: "system", content: INTENT_CLASSIFIER_SYSTEM },
@@ -7440,10 +7442,14 @@ export async function runConversePipeline(args: {
   if (isAmbiguous) {
     try {
       const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-      const { provider: cProvider, model: cModel } = resolveStageProvider("converse", "lite");
+      const { provider: cProvider, model: cModel } = resolveStageProvider(
+        "converse",
+        "lite",
+        "gpt-5-nano",
+      );
       const response = await createChatCompletion({
         provider: cProvider,
-        model: cProvider === "openai" ? "gpt-5-nano" : cModel,
+        model: cModel,
         max_completion_tokens: 200,
         messages: [
           { role: "system", content: CLARIFY_SYSTEM_PROMPT },
@@ -7517,10 +7523,14 @@ export async function runConversePipeline(args: {
 
   try {
     const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-    const { provider: cProvider, model: cModel } = resolveStageProvider("converse", agentMode);
+    const { provider: cProvider, model: cModel } = resolveStageProvider(
+      "converse",
+      agentMode,
+      model,
+    );
     const response = await createChatCompletion({
       provider: cProvider,
-      model: cProvider === "openai" ? model : cModel,
+      model: cModel,
       max_completion_tokens: 1200,
       // OpenAI types accept multimodal content; our local union mirrors that shape.
       messages: messages as Parameters<typeof openai.chat.completions.create>[0]["messages"],
@@ -7549,10 +7559,10 @@ export async function runConversationSummarizePipeline(
     .join("\n\n");
 
   const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-  const { provider: sProv, model: sModel } = resolveStageProvider("converse", "eco");
+  const { provider: sProv, model: sModel } = resolveStageProvider("converse", "eco", "gpt-5-mini");
   const response = await createChatCompletion({
     provider: sProv,
-    model: sProv === "openai" ? "gpt-5-mini" : sModel,
+    model: sModel,
     max_completion_tokens: 600,
     messages: [
       {
@@ -7602,10 +7612,14 @@ export async function runConverseStreamPipeline(
   if (isAmbiguous) {
     try {
       const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-      const { provider: cProvider, model: cModel } = resolveStageProvider("converse", "lite");
+      const { provider: cProvider, model: cModel } = resolveStageProvider(
+        "converse",
+        "lite",
+        "gpt-5-nano",
+      );
       const response = await createChatCompletion({
         provider: cProvider,
-        model: cProvider === "openai" ? "gpt-5-nano" : cModel,
+        model: cModel,
         max_completion_tokens: 200,
         messages: [
           { role: "system", content: CLARIFY_SYSTEM_PROMPT },
@@ -7675,14 +7689,18 @@ export async function runConverseStreamPipeline(
     // are normalized into the same `onToken(delta)` contract as OpenAI's
     // chat completion deltas, so the SSE channel above stays unchanged.
     const { streamChatCompletion, resolveStageProvider } = await import("./ai-providers");
+    // Pass `model` (legacy hardcoded OpenAI default for converse streaming)
+    // as the openaiOverride so an `AI_PROVIDER_CONVERSE=openai:<model>` env
+    // wins, but unset env keeps the historical OpenAI default.
     const { provider: streamProv, model: streamModel } = resolveStageProvider(
       "converse",
       agentMode,
+      model,
     );
     let markdown = "";
     for await (const delta of streamChatCompletion({
       provider: streamProv,
-      model: streamProv === "openai" ? model : streamModel,
+      model: streamModel,
       max_completion_tokens: 1200,
       messages: messages as Parameters<typeof streamChatCompletion>[0]["messages"],
       signal,
@@ -7738,10 +7756,10 @@ export async function runTestGenerationPipeline(
     const htmlSnippet = indexHtmlContent.slice(0, 3000);
 
     const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-    const { provider: tProv, model: tModel } = resolveStageProvider("build", "eco");
+    const { provider: tProv, model: tModel } = resolveStageProvider("build", "eco", "gpt-5-mini");
     const response = await createChatCompletion({
       provider: tProv,
-      model: tProv === "openai" ? "gpt-5-mini" : tModel,
+      model: tModel,
       max_completion_tokens: 800,
       messages: [
         { role: "system", content: TEST_GENERATION_SYSTEM_PROMPT },
@@ -7877,10 +7895,14 @@ Please upgrade "${packageName}" from "${currentVersion ?? "unknown"}" to "${targ
 
   try {
     const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
-    const { provider: cveProv, model: cveModel } = resolveStageProvider("refine", "eco");
+    const { provider: cveProv, model: cveModel } = resolveStageProvider(
+      "refine",
+      "eco",
+      "gpt-5-mini",
+    );
     const response = await createChatCompletion({
       provider: cveProv,
-      model: cveProv === "openai" ? "gpt-5-mini" : cveModel,
+      model: cveModel,
       max_completion_tokens: 2000,
       messages: [
         { role: "system", content: CVE_PATCH_SYSTEM_PROMPT },
