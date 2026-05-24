@@ -376,7 +376,14 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     // If the user can't afford it, refuse before creating the task row.
     let reservedCredits: number | null = null;
     if (runInBackground && project.ownerId) {
-      const cost = CREDIT_COST[mode] ?? 1;
+      // Provider-aware reservation: charge what the actual stage routing will
+      // bill so background runs match foreground deductions (Task #533).
+      const { resolveStageProvider, creditCostFor } = await import("../lib/ai-providers");
+      const { provider: resolvedProvider } = resolveStageProvider(
+        kind === "build" ? "build" : "refine",
+        mode as Parameters<typeof creditCostFor>[0],
+      );
+      const cost = creditCostFor(mode as Parameters<typeof creditCostFor>[0], resolvedProvider);
       const credits = await getOrCreateCredits(project.ownerId);
       if (credits.balance < cost) {
         res.status(402).json({

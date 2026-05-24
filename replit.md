@@ -276,6 +276,22 @@ The intended user journey is: Login → create project → build app → preview
 - **Admin metric**: `GET /api/admin/stats` now returns `e2e: { runs7d, scenarios7d, passRate7d }` aggregated from `agent_tasks.report->'e2eResults'` over the last 7 days.
 - **Key files**: `artifacts/api-server/src/lib/checks/e2e-runner.ts` (runner + default smoke + spec discovery + container-sandboxed user spec executor), `artifacts/api-server/src/lib/agent-loop.ts` (`run_e2e` tool, auto-smoke + fix turn, e2eResults plumbing, screenshot budget), `artifacts/mustaflow/src/pages/projects/components/chat-history.tsx` (E2E card).
 
+## Multi-provider AI routing (Task #533)
+
+- **Provider abstraction**: `artifacts/api-server/src/lib/ai-providers.ts` — single `createChatCompletion()` accepts OpenAI-shaped messages + tools and dispatches to OpenAI, Anthropic, or Gemini based on a per-stage env override. Anthropic + Gemini responses are translated back into OpenAI's chat-completion shape (including tool calls) so call sites stay provider-agnostic.
+- **Per-stage env vars** (format: `provider:model`, e.g. `openai:gpt-5.4`, `anthropic:claude-sonnet-4-6`, `gemini:2.5-pro`):
+  - `AI_PROVIDER_BUILD` — initial build pipelines (default: openai + agentMode model)
+  - `AI_PROVIDER_REFINE` — change-request pipelines
+  - `AI_PROVIDER_PLAN` — Plan Mode
+  - `AI_PROVIDER_ARCHITECT` — architect reviewer
+  - `AI_PROVIDER_INTENT` — intent classifier
+  - `AI_PROVIDER_CONVERSE` — chat/converse pipeline + clarify branches
+  - When unset, the existing OpenAI + agentMode mapping is used (zero behavior change).
+- **Credits recalibration**: `creditCostFor(mode, provider)` multiplies the base `mode` cost by a provider factor — `openai: 1.0`, `anthropic: 1.6`, `gemini: 0.7`. Deductions in `jobs.ts` (pre-flight + post-success) use this helper so per-task credit cost reflects whichever provider the stage was routed to.
+- **Wiring**: all entry-point pipelines in `builder.ts` (web/mobile/node/python build + refine, plan, plan-retry, intent classifier, converse) pass `stage` + `agentMode` through `callWithRetry` → `createChatCompletion`. `architect.ts`, `ai.ts` (converse/plan), and `agent-loop.ts` main LLM call all go through the same shim.
+- **Transport**: uses the existing Replit AI Integrations proxies — Anthropic via `@workspace/integrations-anthropic-ai`, Gemini via `@workspace/integrations-gemini-ai`. No new secrets required.
+- **Out of scope (intentional)**: user-facing model dropdown — selection stays env-driven for now.
+
 ## Gotchas
 
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. It also runs `typecheck:libs`, which will fail if generated types break consumers — fix consumers, don't suppress. The `codegen-drift` validation check (`pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated`) catches any drift between the spec and committed generated files — run it (or let CI run it) after every spec edit.

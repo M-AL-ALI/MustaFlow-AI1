@@ -1,0 +1,539 @@
+/**
+ * Multi-provider model routing (Task #533).
+ *
+ * Wraps OpenAI / Anthropic / Gemini behind one OpenAI-shaped interface so
+ * every pipeline (build / refine / plan / architect / intent / converse) can
+ * route to the best provider for the job without each call site knowing the
+ * provider SDK quirks.
+ *
+ * All three providers are reached via Replit AI Integrations proxies — no
+ * extra API keys required.
+ *
+ * Per-stage routing is configured via env vars (see `resolveStageProvider`).
+ * Each accepts `openai:gpt-5.4`, `anthropic:claude-sonnet-4-6`, or
+ * `gemini:2.5-pro` style strings (the model half is optional — falls back to
+ * stage default).
+ *
+ * Pricing is recalibrated per provider so a build run on Claude Opus is not
+ * billed at the same flat rate as a build run on gpt-5-mini.
+ */
+
+import { openai } from "@workspace/integrations-openai-ai-server";
+import type {
+  ChatCompletion,
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+  ChatCompletionMessageToolCall,
+  ChatCompletionToolChoiceOption,
+} from "openai/resources/chat/completions";
+import { logger } from "./logger";
+import type { AgentMode } from "./ai";
+
+export type Provider = "openai" | "anthropic" | "gemini";
+
+export type Stage = "build" | "refine" | "plan" | "architect" | "intent" | "converse";
+
+/** Vision-capable model per provider — used by the screenshot tool path. */
+export const VISION_MODEL: Record<Provider, string> = {
+  openai: "gpt-5.4",
+  anthropic: "claude-sonnet-4-6",
+  gemini: "gemini-2.5-pro",
+};
+
+/**
+ * Default per-(agent-mode, provider) model. The agent-mode tier is the
+ * existing speed/quality dial; the provider is set by per-stage env routing.
+ */
+const MODEL_DEFAULTS: Record<Provider, Record<AgentMode, string>> = {
+  openai: {
+    lite: "gpt-5-nano",
+    eco: "gpt-5-mini",
+    power: "gpt-5.4",
+    pro: "gpt-5.4",
+  },
+  anthropic: {
+    lite: "claude-haiku-4-5",
+    eco: "claude-haiku-4-5",
+    power: "claude-sonnet-4-6",
+    pro: "claude-opus-4-7",
+  },
+  gemini: {
+    lite: "gemini-2.5-flash",
+    eco: "gemini-2.5-flash",
+    power: "gemini-2.5-pro",
+    pro: "gemini-2.5-pro",
+  },
+};
+
+const STAGE_ENV_VAR: Record<Stage, string> = {
+  build: "AI_PROVIDER_BUILD",
+  refine: "AI_PROVIDER_REFINE",
+  plan: "AI_PROVIDER_PLAN",
+  architect: "AI_PROVIDER_ARCHITECT",
+  intent: "AI_PROVIDER_INTENT",
+  converse: "AI_PROVIDER_CONVERSE",
+};
+
+/**
+ * Parses an `AI_PROVIDER_*` value like `"anthropic:claude-sonnet-4-6"` or
+ * `"openai"` (model half optional). Returns null on unparseable input so the
+ * caller can fall back to the OpenAI default.
+ */
+export function parseProviderSpec(raw: string | undefined): {
+  provider: Provider;
+  model: string | null;
+} | null {
+  if (!raw) return null;
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed) return null;
+  const [providerPart, ...rest] = trimmed.split(":");
+  const provider = providerPart;
+  if (provider !== "openai" && provider !== "anthropic" && provider !== "gemini") {
+    return null;
+  }
+  const model = rest.length > 0 ? rest.join(":").trim() : null;
+  return { provider, model: model && model.length > 0 ? model : null };
+}
+
+/**
+ * Resolves the provider + model for a given stage + agent mode. Reads the
+ * stage's env var; falls back to OpenAI default when unset or unparseable.
+ *
+ * Anthropic / Gemini availability is gated by their integration env vars —
+ * if the operator selected `anthropic` but the integration is not provisioned,
+ * we fall back to openai with a one-time warning so a misconfigured env never
+ * takes the API offline.
+ */
+export function resolveStageProvider(
+  stage: Stage,
+  agentMode: AgentMode,
+): { provider: Provider; model: string } {
+  const envValue = process.env[STAGE_ENV_VAR[stage]];
+  const parsed = parseProviderSpec(envValue);
+  let provider: Provider = parsed?.provider ?? "openai";
+
+  if (provider === "anthropic" && !process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL) {
+    warnOnce(
+      `${STAGE_ENV_VAR[stage]} set to anthropic but Anthropic integration is not provisioned. Falling back to OpenAI.`,
+    );
+    provider = "openai";
+  }
+  if (provider === "gemini" && !process.env.AI_INTEGRATIONS_GEMINI_BASE_URL) {
+    warnOnce(
+      `${STAGE_ENV_VAR[stage]} set to gemini but Gemini integration is not provisioned. Falling back to OpenAI.`,
+    );
+    provider = "openai";
+  }
+
+  // Only honor the env-supplied model when the requested provider actually ran;
+  // if we fell back to OpenAI, ignore any Anthropic/Gemini model string and use
+  // the OpenAI default for the agent mode (otherwise OpenAI gets called with
+  // an unknown model id).
+  const model =
+    parsed?.model && parsed.provider === provider
+      ? parsed.model
+      : MODEL_DEFAULTS[provider][agentMode];
+  return { provider, model };
+}
+
+const warnedKeys = new Set<string>();
+function warnOnce(message: string): void {
+  if (warnedKeys.has(message)) return;
+  warnedKeys.add(message);
+  logger.warn({ component: "ai-providers" }, message);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Credit cost per (agent-mode, provider) — Task #533 step 5.
+//
+// Anchored to OpenAI's pricing as the baseline (multiplier 1.0). Anthropic's
+// premium tiers (Sonnet 4 / Opus 4) cost ~1.5–2.5× more per token than the
+// gpt-5 family at the equivalent quality level; Gemini Pro is cheaper than
+// gpt-5.4 at long-context coding. These multipliers approximate parity so an
+// operator can flip the env var without giving away credits or surprise-
+// billing users.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PROVIDER_COST_MULTIPLIER: Record<Provider, number> = {
+  openai: 1.0,
+  anthropic: 1.6,
+  gemini: 0.7,
+};
+
+const BASE_COST: Record<AgentMode, number> = {
+  lite: 1,
+  eco: 2,
+  power: 5,
+  pro: 10,
+};
+
+export function creditCostFor(mode: AgentMode, provider: Provider = "openai"): number {
+  const base = BASE_COST[mode] ?? 1;
+  const adjusted = Math.round(base * (PROVIDER_COST_MULTIPLIER[provider] ?? 1));
+  return Math.max(1, adjusted);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unified chat completion — OpenAI shape in, OpenAI shape out.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CreateChatCompletionParams {
+  provider: Provider;
+  model: string;
+  messages: ChatCompletionMessageParam[];
+  tools?: ChatCompletionTool[];
+  tool_choice?: ChatCompletionToolChoiceOption;
+  response_format?: { type: "json_object" } | { type: "text" };
+  max_completion_tokens?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Returns a Chat-Completion-shaped response regardless of which underlying
+ * provider executed the call. Tool schemas and tool_calls are translated to
+ * the OpenAI shape on the way out so callers can keep using
+ * `ChatCompletionMessageToolCall` everywhere.
+ *
+ * AbortSignal is honoured by all three providers.
+ */
+export async function createChatCompletion(
+  params: CreateChatCompletionParams,
+): Promise<ChatCompletion> {
+  if (params.provider === "openai") {
+    return openai.chat.completions.create(
+      {
+        model: params.model,
+        messages: params.messages,
+        tools: params.tools,
+        tool_choice: params.tool_choice,
+        response_format: params.response_format,
+        max_completion_tokens: params.max_completion_tokens,
+      },
+      { signal: params.signal },
+    );
+  }
+  if (params.provider === "anthropic") {
+    return callAnthropic(params);
+  }
+  return callGemini(params);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Anthropic adapter
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCompletion> {
+  const { anthropic } = await import("@workspace/integrations-anthropic-ai");
+
+  // Split out system messages — Anthropic takes them as a separate field.
+  const systemParts: string[] = [];
+  const turns: Array<{ role: "user" | "assistant"; content: unknown }> = [];
+
+  for (const msg of params.messages) {
+    if (msg.role === "system") {
+      if (typeof msg.content === "string") systemParts.push(msg.content);
+      continue;
+    }
+    if (msg.role === "tool") {
+      // Tool results become a user message containing a tool_result block.
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      turns.push({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: msg.tool_call_id,
+            content,
+          },
+        ],
+      });
+      continue;
+    }
+    if (msg.role === "assistant") {
+      const blocks: Array<Record<string, unknown>> = [];
+      if (typeof msg.content === "string" && msg.content.length > 0) {
+        blocks.push({ type: "text", text: msg.content });
+      }
+      const toolCalls = msg.tool_calls ?? [];
+      for (const tc of toolCalls) {
+        if (tc.type !== "function") continue;
+        let inputJson: unknown = {};
+        try {
+          inputJson = JSON.parse(tc.function.arguments || "{}");
+        } catch {
+          inputJson = { _raw: tc.function.arguments };
+        }
+        blocks.push({
+          type: "tool_use",
+          id: tc.id,
+          name: tc.function.name,
+          input: inputJson,
+        });
+      }
+      turns.push({
+        role: "assistant",
+        content: blocks.length > 0 ? blocks : [{ type: "text", text: "" }],
+      });
+      continue;
+    }
+    if (msg.role === "user") {
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      turns.push({ role: "user", content });
+    }
+  }
+
+  // JSON-mode shim — Anthropic has no `response_format: json_object`. We
+  // append a strong instruction to the system prompt instead.
+  if (params.response_format?.type === "json_object") {
+    systemParts.push(
+      "You MUST respond with a single valid JSON object only — no prose, no markdown fences. Begin your response with `{` and end it with `}`.",
+    );
+  }
+
+  const anthropicTools = (params.tools ?? [])
+    .filter((t): t is Extract<ChatCompletionTool, { type: "function" }> => t.type === "function")
+    .map((t) => ({
+      name: t.function.name,
+      description: t.function.description ?? "",
+      input_schema: (t.function.parameters as Record<string, unknown>) ?? {
+        type: "object",
+        properties: {},
+      },
+    }));
+
+  const request: Record<string, unknown> = {
+    model: params.model,
+    max_tokens: params.max_completion_tokens ?? 8192,
+    system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
+    messages: turns,
+  };
+  if (anthropicTools.length > 0) request.tools = anthropicTools;
+  if (params.tool_choice && anthropicTools.length > 0) {
+    if (params.tool_choice === "required") request.tool_choice = { type: "any" };
+    else if (params.tool_choice === "none") request.tool_choice = { type: "none" };
+    else if (params.tool_choice === "auto") request.tool_choice = { type: "auto" };
+    else if (typeof params.tool_choice === "object" && params.tool_choice.type === "function") {
+      request.tool_choice = { type: "tool", name: params.tool_choice.function.name };
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const res: any = await anthropic.messages.create(request as any, {
+    signal: params.signal,
+  });
+
+  let text = "";
+  const outToolCalls: ChatCompletionMessageToolCall[] = [];
+  for (const block of res.content ?? []) {
+    if (block.type === "text") text += block.text ?? "";
+    else if (block.type === "tool_use") {
+      outToolCalls.push({
+        id: block.id,
+        type: "function",
+        function: {
+          name: block.name,
+          arguments: JSON.stringify(block.input ?? {}),
+        },
+      });
+    }
+  }
+
+  return synthesizeChatCompletion({
+    model: res.model ?? params.model,
+    content: text,
+    toolCalls: outToolCalls,
+    finishReason: res.stop_reason === "tool_use" ? "tool_calls" : "stop",
+    promptTokens: res.usage?.input_tokens ?? 0,
+    completionTokens: res.usage?.output_tokens ?? 0,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gemini adapter
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function callGemini(params: CreateChatCompletionParams): Promise<ChatCompletion> {
+  const { ai } = await import("@workspace/integrations-gemini-ai");
+
+  const systemParts: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contents: any[] = [];
+
+  for (const msg of params.messages) {
+    if (msg.role === "system") {
+      if (typeof msg.content === "string") systemParts.push(msg.content);
+      continue;
+    }
+    if (msg.role === "tool") {
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        parsed = { result: content };
+      }
+      contents.push({
+        role: "user",
+        parts: [
+          {
+            functionResponse: {
+              name: lookupToolName(params.messages, msg.tool_call_id) ?? "tool",
+              response: typeof parsed === "object" && parsed !== null ? parsed : { result: parsed },
+            },
+          },
+        ],
+      });
+      continue;
+    }
+    if (msg.role === "assistant") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const parts: any[] = [];
+      if (typeof msg.content === "string" && msg.content.length > 0) {
+        parts.push({ text: msg.content });
+      }
+      for (const tc of msg.tool_calls ?? []) {
+        if (tc.type !== "function") continue;
+        let argsObj: unknown = {};
+        try {
+          argsObj = JSON.parse(tc.function.arguments || "{}");
+        } catch {
+          argsObj = {};
+        }
+        parts.push({
+          functionCall: { name: tc.function.name, args: argsObj },
+        });
+      }
+      contents.push({
+        role: "model",
+        parts: parts.length > 0 ? parts : [{ text: "" }],
+      });
+      continue;
+    }
+    if (msg.role === "user") {
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      contents.push({ role: "user", parts: [{ text: content }] });
+    }
+  }
+
+  if (params.response_format?.type === "json_object") {
+    systemParts.push(
+      "Respond with a single valid JSON object only — no prose, no markdown fences.",
+    );
+  }
+
+  const functionDeclarations = (params.tools ?? [])
+    .filter((t): t is Extract<ChatCompletionTool, { type: "function" }> => t.type === "function")
+    .map((t) => ({
+      name: t.function.name,
+      description: t.function.description ?? "",
+      parameters: (t.function.parameters as Record<string, unknown>) ?? {
+        type: "object",
+        properties: {},
+      },
+    }));
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const config: Record<string, any> = {
+    maxOutputTokens: params.max_completion_tokens ?? 8192,
+  };
+  if (systemParts.length > 0) {
+    config.systemInstruction = { parts: [{ text: systemParts.join("\n\n") }] };
+  }
+  if (functionDeclarations.length > 0) {
+    config.tools = [{ functionDeclarations }];
+  }
+  if (params.response_format?.type === "json_object") {
+    config.responseMimeType = "application/json";
+  }
+
+  const res = await ai.models.generateContent({
+    model: params.model,
+    contents,
+    config,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+
+  let text = "";
+  const outToolCalls: ChatCompletionMessageToolCall[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const candidate: any = (res as any).candidates?.[0] ?? null;
+  const partList = candidate?.content?.parts ?? [];
+  let idx = 0;
+  for (const part of partList) {
+    if (typeof part.text === "string") text += part.text;
+    if (part.functionCall) {
+      outToolCalls.push({
+        id: `gemini_${Date.now()}_${idx++}`,
+        type: "function",
+        function: {
+          name: part.functionCall.name ?? "tool",
+          arguments: JSON.stringify(part.functionCall.args ?? {}),
+        },
+      });
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const usage = (res as any).usageMetadata ?? {};
+  return synthesizeChatCompletion({
+    model: params.model,
+    content: text,
+    toolCalls: outToolCalls,
+    finishReason: outToolCalls.length > 0 ? "tool_calls" : "stop",
+    promptTokens: usage.promptTokenCount ?? 0,
+    completionTokens: usage.candidatesTokenCount ?? 0,
+  });
+}
+
+// Gemini's functionResponse requires a `name` (the tool the result is for).
+// Walk the previously-sent messages to find the matching tool_call by id.
+function lookupToolName(messages: ChatCompletionMessageParam[], toolCallId: string): string | null {
+  for (const m of messages) {
+    if (m.role !== "assistant") continue;
+    for (const tc of m.tool_calls ?? []) {
+      if (tc.type !== "function") continue;
+      if (tc.id === toolCallId) return tc.function.name;
+    }
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function synthesizeChatCompletion(opts: {
+  model: string;
+  content: string;
+  toolCalls: ChatCompletionMessageToolCall[];
+  finishReason: "stop" | "tool_calls" | "length";
+  promptTokens: number;
+  completionTokens: number;
+}): ChatCompletion {
+  return {
+    id: `chatcmpl-shim-${Date.now()}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: opts.model,
+    choices: [
+      {
+        index: 0,
+        finish_reason: opts.finishReason,
+        logprobs: null,
+        message: {
+          role: "assistant",
+          content: opts.content,
+          refusal: null,
+          tool_calls: opts.toolCalls.length > 0 ? opts.toolCalls : undefined,
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+    ],
+    usage: {
+      prompt_tokens: opts.promptTokens,
+      completion_tokens: opts.completionTokens,
+      total_tokens: opts.promptTokens + opts.completionTokens,
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+}

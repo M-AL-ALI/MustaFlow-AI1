@@ -74,7 +74,13 @@ import {
   ARCHITECT_AUTOFIX_TITLE_PREFIX,
 } from "./architect";
 
-/** Credit cost per AI call, keyed by agentMode. */
+/**
+ * Credit cost per AI call, keyed by agentMode. Kept as a flat table for
+ * backwards compat with callers that don't know the resolved provider. For
+ * provider-aware costing use `creditCostFor(mode, provider)` from
+ * `./ai-providers.ts` — it applies the per-provider multiplier so a Claude
+ * Opus build costs proportionally more than the equivalent gpt-5 build.
+ */
 export const CREDIT_COST: Record<string, number> = {
   lite: 1,
   eco: 2,
@@ -1197,7 +1203,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
     // --- Credit pre-flight: fail fast if user cannot afford this AI call ---
     // For background jobs (Task #509) the credits were already reserved at enqueue,
     // so the pre-flight check + post-success deduction is skipped here.
-    const creditCost = CREDIT_COST[agentMode] ?? 1;
+    // Provider-aware cost — Anthropic premium tiers cost ~1.6× more, Gemini ~0.7×.
+    const { creditCostFor, resolveStageProvider } = await import("./ai-providers");
+    const buildStageForCost = input.kind === "refine" ? "refine" : "build";
+    const { provider: costProvider } = resolveStageProvider(buildStageForCost, agentMode);
+    const creditCost = creditCostFor(agentMode, costProvider);
     const creditsAlreadyReserved =
       input.runMode === "background" ||
       (await db
@@ -3605,7 +3615,9 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   // Credit deduction (post-success, non-fatal).
   // Background jobs (Task #509) reserved credits at enqueue — skip double-charging.
   if (project.ownerId && task.creditsReserved === null) {
-    const creditCost = CREDIT_COST[agentMode] ?? 1;
+    const { creditCostFor, resolveStageProvider } = await import("./ai-providers");
+    const { provider: costProvider } = resolveStageProvider("refine", agentMode);
+    const creditCost = creditCostFor(agentMode, costProvider);
     void deductCredits(project.ownerId, creditCost, {
       type: "refine",
       description: `Task Agent apply — Task #${taskId}, project ${projectId}`,

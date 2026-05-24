@@ -17,8 +17,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { z } from "zod";
-import { openai } from "@workspace/integrations-openai-ai-server";
 import { logger } from "./logger";
+import { createChatCompletion, resolveStageProvider } from "./ai-providers";
 import type { AgentMode } from "./ai";
 import type { TaskReport } from "@workspace/db";
 
@@ -165,8 +165,10 @@ ${diffSection}${commandsSection}${excerptsSection}${summarySection}${warningsSec
 Now produce your JSON review.`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: ARCHITECT_MODEL,
+    const { provider, model } = resolveStageProvider("architect", input.agentMode);
+    const response = await createChatCompletion({
+      provider,
+      model: provider === "openai" ? ARCHITECT_MODEL : model,
       max_completion_tokens: 4096,
       messages: [
         { role: "system", content: ARCHITECT_SYSTEM_PROMPT },

@@ -1,14 +1,37 @@
-import { openai } from "@workspace/integrations-openai-ai-server";
 import { logger } from "./logger";
 
 export type AgentMode = "lite" | "eco" | "power" | "pro";
 
+// Default openai model per agent mode — used when the per-stage env var
+// resolves to openai (or is unset). Multi-provider routing lives in
+// ./ai-providers.ts.
 const MODEL_FOR_MODE: Record<AgentMode, string> = {
   lite: "gpt-5-nano",
   eco: "gpt-5-mini",
   power: "gpt-5.4",
   pro: "gpt-5.4",
 };
+
+// Imported lazily to avoid a circular dep with ai-providers.ts (which
+// imports AgentMode from this file).
+async function callChat(
+  stage: "converse" | "plan",
+  agentMode: AgentMode,
+  openaiDefault: string,
+  body: {
+    messages: import("openai/resources/chat/completions").ChatCompletionMessageParam[];
+    response_format?: { type: "json_object" } | { type: "text" };
+    max_completion_tokens?: number;
+  },
+) {
+  const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+  const { provider, model } = resolveStageProvider(stage, agentMode);
+  return createChatCompletion({
+    provider,
+    model: provider === "openai" ? openaiDefault : model,
+    ...body,
+  });
+}
 
 const SYSTEM_PROMPT = `You are MustaFlow AI, a friendly, focused AI app-building assistant. You help non-technical users plan, design, and build web, iOS, and Android apps. You are concise, encouraging, and never use emojis. You speak in plain English, never jargon.
 
@@ -61,8 +84,7 @@ export async function generateAssistantReply(
   ];
 
   try {
-    const response = await openai.chat.completions.create({
-      model,
+    const response = await callChat("converse", agentMode, model, {
       max_completion_tokens: 8192,
       messages,
     });
@@ -100,8 +122,7 @@ export async function generatePlan(
   ];
 
   try {
-    const response = await openai.chat.completions.create({
-      model,
+    const response = await callChat("plan", agentMode, model, {
       max_completion_tokens: 8192,
       messages,
       response_format: { type: "json_object" },

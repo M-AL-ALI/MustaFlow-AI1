@@ -461,8 +461,11 @@ function scanFilesForCdnIssues(files: BuilderFile[]): NonNullable<TaskReport["se
  */
 async function runProPlanMicroCall(projectName: string, userPrompt: string): Promise<string> {
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+    const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+    const { provider, model: routedModel } = resolveStageProvider("build", "eco");
+    const response = await createChatCompletion({
+      provider,
+      model: provider === "openai" ? "gpt-5-mini" : routedModel,
       max_completion_tokens: 300,
       messages: [
         {
@@ -1618,21 +1621,28 @@ async function callWithRetry(
   maxTokens: number,
   label: string,
   signal?: AbortSignal,
+  // Stage drives per-stage provider routing (Task #533). Defaults to "build"
+  // so legacy callers that don't know their stage keep working unchanged.
+  stage: "build" | "refine" | "plan" = "build",
+  agentMode: AgentMode = "power",
 ): Promise<Record<string, unknown>> {
   let lastError: Error = new Error("Unknown error");
+
+  const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+  const { provider, model: routedModel } = resolveStageProvider(stage, agentMode);
+  const effectiveModel = provider === "openai" ? model : routedModel;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     if (signal?.aborted) throw new Error("Build cancelled");
     try {
-      const response = await openai.chat.completions.create(
-        {
-          model,
-          max_completion_tokens: maxTokens,
-          messages,
-          response_format: { type: "json_object" },
-        },
-        signal ? { signal } : undefined,
-      );
+      const response = await createChatCompletion({
+        provider,
+        model: effectiveModel,
+        max_completion_tokens: maxTokens,
+        messages,
+        response_format: { type: "json_object" },
+        signal,
+      });
 
       const raw = response.choices[0]?.message?.content?.trim() ?? "{}";
       try {
@@ -2370,7 +2380,15 @@ export async function runBuildPipeline(args: {
   pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Generating app blueprint and code…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "build", signal);
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    "build",
+    signal,
+    "build",
+    agentMode,
+  );
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -2764,7 +2782,15 @@ export async function runRefinePipeline(args: {
   pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Applying change request with AI…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "refine", signal);
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    "refine",
+    signal,
+    "refine",
+    agentMode,
+  );
 
   // Build changedFiles from full replacements returned by AI
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
@@ -3366,6 +3392,8 @@ export async function runReactViteBuildPipeline(args: {
     32000,
     "react-vite-build",
     signal,
+    "build",
+    agentMode,
   );
 
   const blueprint = (parsed.blueprint ?? {
@@ -3626,6 +3654,8 @@ export async function runReactViteRefinePipeline(args: {
     32000,
     "react-vite-refine",
     signal,
+    "refine",
+    agentMode,
   );
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
@@ -4066,8 +4096,11 @@ export async function detectMobileModules(
     const moduleList = MOBILE_MODULES.map((m) => `${m.id}: ${m.name} — ${m.description}`).join(
       "\n",
     );
-    const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+    const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+    const { provider: mProv, model: mModel } = resolveStageProvider("build", "eco");
+    const response = await createChatCompletion({
+      provider: mProv,
+      model: mProv === "openai" ? "gpt-5-mini" : mModel,
       max_completion_tokens: 200,
       messages: [
         {
@@ -4928,6 +4961,8 @@ async function runStackBuildPipeline(
     32000,
     `${stackLabel}-build`,
     signal,
+    "build",
+    agentMode,
   );
 
   const blueprint = (parsed.blueprint ?? {
@@ -5093,6 +5128,8 @@ async function runStackRefinePipeline(
     32000,
     `${stackLabel}-refine`,
     signal,
+    "refine",
+    agentMode,
   );
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
@@ -5350,7 +5387,15 @@ export async function runMobileBuildPipeline(args: {
   pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Generating Expo/React Native app blueprint…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "mobile-build", signal);
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    "mobile-build",
+    signal,
+    "build",
+    agentMode,
+  );
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -5755,7 +5800,15 @@ export async function runMobileRefinePipeline(args: {
   pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Applying change request to Expo project…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "mobile-refine", signal);
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    "mobile-refine",
+    signal,
+    "refine",
+    agentMode,
+  );
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
   const changedFiles: BuilderFile[] = rawFiles
@@ -6250,7 +6303,15 @@ export async function runPlanPipeline(args: {
   // eslint-disable-next-line no-useless-assignment
   let plan: Record<string, unknown> | null = null;
   try {
-    plan = await callWithRetry(messages, modelFor(agentMode), 8000, "plan");
+    plan = await callWithRetry(
+      messages,
+      modelFor(agentMode),
+      8000,
+      "plan",
+      undefined,
+      "plan",
+      agentMode,
+    );
 
     // Retry once if required new fields are missing
     if (plan && !validatePlanResponse(plan)) {
@@ -6264,7 +6325,15 @@ export async function runPlanPipeline(args: {
         content:
           "Your plan is missing required fields. Please regenerate with ALL fields: complexityScore (integer 1-10), recommendedMode (lite/eco/power/pro), sitemap (array of objects with name/route/purpose), uxNotes (object keyed by page name), estimatedBuildSeconds (integer). Output ONLY valid JSON.",
       });
-      plan = await callWithRetry(messages, modelFor(agentMode), 8000, "plan-retry");
+      plan = await callWithRetry(
+        messages,
+        modelFor(agentMode),
+        8000,
+        "plan-retry",
+        undefined,
+        "plan",
+        agentMode,
+      );
     }
   } catch {
     plan = null;
@@ -6519,7 +6588,15 @@ export async function runNodeBuildPipeline(args: {
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", "Generating Node.js / Express project with AI…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "node-build");
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    "node-build",
+    undefined,
+    "build",
+    agentMode,
+  );
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -6655,7 +6732,15 @@ export async function runNodeRefinePipeline(args: {
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", "Applying changes to Node.js project…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "node-refine");
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    "node-refine",
+    undefined,
+    "refine",
+    agentMode,
+  );
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
   let changedFiles: BuilderFile[] = rawFiles
@@ -6787,7 +6872,15 @@ export async function runPythonBuildPipeline(args: {
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", "Generating Python / Flask project with AI…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "python-build");
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    "python-build",
+    undefined,
+    "build",
+    agentMode,
+  );
 
   const blueprint = (parsed.blueprint ?? {
     projectName,
@@ -6923,7 +7016,15 @@ export async function runPythonRefinePipeline(args: {
   messages.push({ role: "user", content: userPrompt });
 
   await onEvent?.("generating_code", "Applying changes to Python project…");
-  const parsed = await callWithRetry(messages, modelFor(agentMode), 32000, "python-refine");
+  const parsed = await callWithRetry(
+    messages,
+    modelFor(agentMode),
+    32000,
+    "python-refine",
+    undefined,
+    "refine",
+    agentMode,
+  );
 
   const rawFiles = Array.isArray(parsed.files) ? parsed.files : [];
   let changedFiles: BuilderFile[] = rawFiles
@@ -7175,8 +7276,11 @@ export async function runIntentClassifierPipeline(
       .filter(Boolean)
       .join("\n\n");
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-5-nano",
+    const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+    const { provider, model } = resolveStageProvider("intent", "lite");
+    const response = await createChatCompletion({
+      provider,
+      model: provider === "openai" ? "gpt-5-nano" : model,
       max_completion_tokens: 60,
       messages: [
         { role: "system", content: INTENT_CLASSIFIER_SYSTEM },
@@ -7335,8 +7439,11 @@ export async function runConversePipeline(args: {
 
   if (isAmbiguous) {
     try {
-      const response = await openai.chat.completions.create({
-        model: "gpt-5-nano",
+      const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+      const { provider: cProvider, model: cModel } = resolveStageProvider("converse", "lite");
+      const response = await createChatCompletion({
+        provider: cProvider,
+        model: cProvider === "openai" ? "gpt-5-nano" : cModel,
         max_completion_tokens: 200,
         messages: [
           { role: "system", content: CLARIFY_SYSTEM_PROMPT },
@@ -7409,8 +7516,11 @@ export async function runConversePipeline(args: {
   }
 
   try {
-    const response = await openai.chat.completions.create({
-      model,
+    const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+    const { provider: cProvider, model: cModel } = resolveStageProvider("converse", agentMode);
+    const response = await createChatCompletion({
+      provider: cProvider,
+      model: cProvider === "openai" ? model : cModel,
       max_completion_tokens: 1200,
       // OpenAI types accept multimodal content; our local union mirrors that shape.
       messages: messages as Parameters<typeof openai.chat.completions.create>[0]["messages"],
@@ -7438,8 +7548,11 @@ export async function runConversationSummarizePipeline(
     .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.content.slice(0, 800)}`)
     .join("\n\n");
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-5-mini",
+  const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+  const { provider: sProv, model: sModel } = resolveStageProvider("converse", "eco");
+  const response = await createChatCompletion({
+    provider: sProv,
+    model: sProv === "openai" ? "gpt-5-mini" : sModel,
     max_completion_tokens: 600,
     messages: [
       {
@@ -7488,8 +7601,11 @@ export async function runConverseStreamPipeline(
   // Ambiguous path uses JSON mode — not streamable; call onToken once with full text.
   if (isAmbiguous) {
     try {
-      const response = await openai.chat.completions.create({
-        model: "gpt-5-nano",
+      const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+      const { provider: cProvider, model: cModel } = resolveStageProvider("converse", "lite");
+      const response = await createChatCompletion({
+        provider: cProvider,
+        model: cProvider === "openai" ? "gpt-5-nano" : cModel,
         max_completion_tokens: 200,
         messages: [
           { role: "system", content: CLARIFY_SYSTEM_PROMPT },
@@ -7555,6 +7671,9 @@ export async function runConverseStreamPipeline(
   }
 
   try {
+    // NOTE: streaming converse stays on OpenAI — translating Anthropic /
+    // Gemini SSE shapes into Chat Completion delta chunks is out of scope for
+    // Task #533. Non-streaming converse (above) goes through createChatCompletion.
     const stream = await openai.chat.completions.create(
       {
         model,
@@ -7620,8 +7739,11 @@ export async function runTestGenerationPipeline(
   try {
     const htmlSnippet = indexHtmlContent.slice(0, 3000);
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+    const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+    const { provider: tProv, model: tModel } = resolveStageProvider("build", "eco");
+    const response = await createChatCompletion({
+      provider: tProv,
+      model: tProv === "openai" ? "gpt-5-mini" : tModel,
       max_completion_tokens: 800,
       messages: [
         { role: "system", content: TEST_GENERATION_SYSTEM_PROMPT },
@@ -7756,8 +7878,11 @@ ${filesContext}
 Please upgrade "${packageName}" from "${currentVersion ?? "unknown"}" to "${targetVersion}" in the relevant file(s) above.`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+    const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+    const { provider: cveProv, model: cveModel } = resolveStageProvider("refine", "eco");
+    const response = await createChatCompletion({
+      provider: cveProv,
+      model: cveProv === "openai" ? "gpt-5-mini" : cveModel,
       max_completion_tokens: 2000,
       messages: [
         { role: "system", content: CVE_PATCH_SYSTEM_PROMPT },

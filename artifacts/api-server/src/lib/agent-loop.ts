@@ -1178,15 +1178,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
     let response;
     try {
-      response = await openai.chat.completions.create(
-        {
-          model,
-          messages,
-          tools: TOOLS,
-          tool_choice: "auto",
-        },
-        { signal: input.signal },
+      const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+      const { provider, model: routedModel } = resolveStageProvider(
+        input.mode === "refine" ? "refine" : "build",
+        input.agentMode,
       );
+      response = await createChatCompletion({
+        provider,
+        model: provider === "openai" ? model : routedModel,
+        messages,
+        tools: TOOLS,
+        tool_choice: "auto",
+        signal: input.signal,
+      });
     } catch (err) {
       if (input.signal.aborted) {
         terminationReason = "aborted";
@@ -1744,10 +1748,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             renderE2eObservation(smokeRun).slice(0, MAX_OBSERVATION_CHARS),
         });
         try {
-          const fixResp = await openai.chat.completions.create(
-            { model, messages, tools: TOOLS, tool_choice: "auto" },
-            { signal: input.signal },
+          const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+          const { provider: fixProv, model: fixModel } = resolveStageProvider(
+            input.mode === "refine" ? "refine" : "build",
+            input.agentMode,
           );
+          const fixResp = await createChatCompletion({
+            provider: fixProv,
+            model: fixProv === "openai" ? model : fixModel,
+            messages,
+            tools: TOOLS,
+            tool_choice: "auto",
+            signal: input.signal,
+          });
           totalTokens += fixResp.usage?.total_tokens ?? 0;
           const fixChoice = fixResp.choices[0];
           const fixMsg = fixChoice?.message;
