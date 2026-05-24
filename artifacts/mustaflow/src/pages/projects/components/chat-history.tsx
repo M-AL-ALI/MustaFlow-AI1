@@ -323,7 +323,7 @@ function StagingFileDiffRow({
   path: string;
   stagingContent: string | null;
   status: "created" | "modified" | "deleted";
-  onViewFile?: (path: string) => void;
+  onViewFile?: (path: string, line?: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const { data: filesList } = useListProjectFiles(projectId, {
@@ -806,7 +806,7 @@ function InlineReportCard({
   taskCreatedAt,
 }: {
   report: TaskReport;
-  onViewFile?: (path: string) => void;
+  onViewFile?: (path: string, line?: number) => void;
   onSendMessage?: (text: string) => void;
   taskId?: number;
   projectId?: number;
@@ -1588,7 +1588,7 @@ function MessageRow({
   msg: Message;
   searchQuery: string;
   projectId: number;
-  onViewFile?: (path: string) => void;
+  onViewFile?: (path: string, line?: number) => void;
   onApply?: (code: string) => void;
   onSendMessage?: (text: string) => void;
 }) {
@@ -1830,7 +1830,7 @@ function TaskReviewCard({
   projectId: number;
   taskId: number;
   report: TaskReport;
-  onViewFile?: (path: string) => void;
+  onViewFile?: (path: string, line?: number) => void;
 }) {
   const queryClient = useQueryClient();
   const applyStaging = useApplyTaskStaging();
@@ -2051,7 +2051,7 @@ export function ChatHistory({
   messages: Message[] | undefined;
   isLoading: boolean;
   projectId: number;
-  onViewFile?: (path: string) => void;
+  onViewFile?: (path: string, line?: number) => void;
   onClose: () => void;
   onApplyCode?: (code: string) => void;
   onSendMessage?: (text: string) => void;

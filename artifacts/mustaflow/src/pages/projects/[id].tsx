@@ -174,7 +174,7 @@ function ReportCard({
   onSendMessage,
 }: {
   report: TaskReport;
-  onViewFile?: (path: string) => void;
+  onViewFile?: (path: string, line?: number) => void;
   onViewHistory?: () => void;
   onSendMessage?: (text: string) => void;
 }) {
@@ -1953,11 +1953,11 @@ export default function ProjectWorkspacePage() {
                     messages={messages}
                     isLoading={messages === undefined}
                     projectId={projectId}
-                    onViewFile={(path) => {
+                    onViewFile={(path, line) => {
                       const f = files.find((x) => x.path === path);
                       if (f) {
                         setSelectedCodeFileId(f.id);
-                        setSelectedCodeFileLine(null);
+                        setSelectedCodeFileLine(line ?? null);
                         setActiveTab("code");
                       }
                     }}
@@ -2140,11 +2140,11 @@ export default function ProjectWorkspacePage() {
                                         )}
                                         <ReportCard
                                           report={rp.report}
-                                          onViewFile={(path) => {
+                                          onViewFile={(path, line) => {
                                             const f = files.find((x) => x.path === path);
                                             if (f) {
                                               setSelectedCodeFileId(f.id);
-                                              setSelectedCodeFileLine(null);
+                                              setSelectedCodeFileLine(line ?? null);
                                               setActiveTab("code");
                                             }
                                           }}
