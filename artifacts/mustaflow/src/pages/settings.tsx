@@ -15,6 +15,7 @@ import {
   History,
   ArrowUpRight,
   X,
+  Receipt,
 } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
@@ -710,14 +711,28 @@ function CreditsTab() {
                     {new Date(tx.createdAt).toLocaleString()} · balance after: {tx.balanceAfter}
                   </p>
                 </div>
-                <span
-                  className={`font-semibold tabular-nums ${
-                    tx.amount > 0 ? "text-green-500" : "text-muted-foreground"
-                  }`}
-                >
-                  {tx.amount > 0 ? "+" : ""}
-                  {tx.amount}
-                </span>
+                <div className="flex items-center gap-3">
+                  {tx.type === "purchase" && tx.receiptUrl && (
+                    <a
+                      href={tx.receiptUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                      data-testid={`link-receipt-${tx.id}`}
+                    >
+                      <Receipt className="h-3 w-3" />
+                      Receipt
+                    </a>
+                  )}
+                  <span
+                    className={`font-semibold tabular-nums ${
+                      tx.amount > 0 ? "text-green-500" : "text-muted-foreground"
+                    }`}
+                  >
+                    {tx.amount > 0 ? "+" : ""}
+                    {tx.amount}
+                  </span>
+                </div>
               </div>
             ))}
           </div>

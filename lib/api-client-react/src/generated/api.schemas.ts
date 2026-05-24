@@ -1677,6 +1677,11 @@ export interface CreditTransaction {
   /** @nullable */
   description?: string | null;
   balanceAfter: number;
+  /**
+     * Stripe-hosted receipt URL for purchase rows. Null for non-purchase entries or older purchases.
+     * @nullable
+     */
+  receiptUrl?: string | null;
   createdAt: string;
 }
 

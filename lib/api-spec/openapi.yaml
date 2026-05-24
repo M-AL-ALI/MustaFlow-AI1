@@ -5188,6 +5188,9 @@ components:
         amount: { type: integer }
         description: { type: ["string", "null"] }
         balanceAfter: { type: integer }
+        receiptUrl:
+          type: ["string", "null"]
+          description: Stripe-hosted receipt URL for purchase rows. Null for non-purchase entries or older purchases.
         createdAt: { type: string, format: date-time }
 
     BillingPackage:

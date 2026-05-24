@@ -30,6 +30,7 @@ export const creditTransactionsTable = pgTable("credit_transactions", {
   amount: integer("amount").notNull(),
   description: text("description"),
   balanceAfter: integer("balance_after").notNull(),
+  receiptUrl: text("receipt_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

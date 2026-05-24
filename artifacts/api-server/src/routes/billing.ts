@@ -100,6 +100,7 @@ async function handleStripeWebhook(
       object: {
         metadata?: { userId?: string; packageId?: string; credits?: string };
         payment_status?: string;
+        payment_intent?: string | null;
       };
     };
   };
@@ -172,6 +173,31 @@ async function handleStripeWebhook(
     return;
   }
 
+  // Best-effort: fetch the Stripe-hosted receipt URL from the payment_intent's
+  // latest_charge so we can show users a "View receipt" link in billing history.
+  // Failures here are non-fatal — credits should always grant even if the
+  // receipt fetch fails (network blip, expanded API change, etc.).
+  let receiptUrl: string | null = null;
+  const paymentIntentId = session?.payment_intent;
+  if (paymentIntentId && typeof paymentIntentId === "string") {
+    try {
+      const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+        expand: ["latest_charge"],
+      });
+      const latestCharge = (pi as { latest_charge?: unknown }).latest_charge;
+      if (latestCharge && typeof latestCharge === "object") {
+        const url = (latestCharge as { receipt_url?: string | null }).receipt_url;
+        if (typeof url === "string" && url.length > 0) receiptUrl = url;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown";
+      logger.warn(
+        { err: msg, paymentIntentId, eventId: event.id },
+        "Failed to fetch receipt_url from Stripe — proceeding without it",
+      );
+    }
+  }
+
   // Atomic: insert event row + grant credits + write transaction in one tx.
   // If anything throws, the event row rolls back so Stripe's retry can succeed.
   // If event was already processed (concurrent retry won earlier), the insert
@@ -204,6 +230,7 @@ async function handleStripeWebhook(
         amount: credits,
         description: `Stripe purchase: ${packageId ?? "unknown"} pack (${credits} credits) [event ${event.id}]`,
         balanceAfter: newBalance,
+        receiptUrl,
       });
 
       return { duplicate: false as const, newBalance };

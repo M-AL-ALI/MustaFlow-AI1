@@ -3372,6 +3372,7 @@ export const ListCreditTransactionsResponse = zod.object({
   "amount": zod.number(),
   "description": zod.string().nullish(),
   "balanceAfter": zod.number(),
+  "receiptUrl": zod.string().nullish().describe('Stripe-hosted receipt URL for purchase rows. Null for non-purchase entries or older purchases.'),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -4176,6 +4177,7 @@ export const ListBillingTransactionsResponse = zod.object({
   "amount": zod.number(),
   "description": zod.string().nullish(),
   "balanceAfter": zod.number(),
+  "receiptUrl": zod.string().nullish().describe('Stripe-hosted receipt URL for purchase rows. Null for non-purchase entries or older purchases.'),
   "createdAt": zod.coerce.date()
 }))
 })
