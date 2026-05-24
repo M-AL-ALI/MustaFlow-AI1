@@ -5,6 +5,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { createTerminalServer } from "./lib/terminal";
 import { createMultiplayerServer } from "./lib/multiplayer";
+import { createDebugServer } from "./routes/debug";
 import { ensureFlyApp } from "./lib/container";
 import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
 import { startCveScheduler } from "./lib/cve-scheduler";
@@ -53,8 +54,10 @@ const server = createServer(app);
 // Attach the terminal WebSocket server (handles /api/projects/:id/terminal upgrades)
 const terminalServer = createTerminalServer();
 const multiplayerServer = createMultiplayerServer();
+const debugServer = createDebugServer();
 const MULTIPLAYER_PATH = /^\/api\/projects\/\d+\/multiplayer$/;
 const TERMINAL_PATH = /^\/api\/projects\/\d+\/terminal$/;
+const DEBUG_PATH = /^\/api\/projects\/\d+\/debug$/;
 server.on("upgrade", (req, socket, head) => {
   const netSocket = socket as unknown as import("node:net").Socket;
   let pathname = "";
@@ -68,6 +71,8 @@ server.on("upgrade", (req, socket, head) => {
     multiplayerServer.handleUpgrade(req, netSocket, head);
   } else if (TERMINAL_PATH.test(pathname)) {
     terminalServer.handleUpgrade(req, netSocket, head);
+  } else if (DEBUG_PATH.test(pathname)) {
+    debugServer.handleUpgrade(req, netSocket, head);
   } else {
     socket.destroy();
   }

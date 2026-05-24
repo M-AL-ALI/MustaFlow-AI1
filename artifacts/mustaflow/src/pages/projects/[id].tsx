@@ -25,6 +25,8 @@ import {
 } from "@workspace/api-client-react";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { CodeEditorTab } from "./components/code-editor-tab";
+import { CommandPalette, pushRecentFile } from "./components/command-palette";
+import { KeyboardShortcuts } from "./components/keyboard-shortcuts";
 import {
   ChatHistory,
   StreamingText,
@@ -816,6 +818,8 @@ export default function ProjectWorkspacePage() {
   const [selectedCodeFileLine, setSelectedCodeFileLine] = useState<number | null>(null);
   const [scrollManageToMobileSettings, setScrollManageToMobileSettings] = useState(false);
   const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [creditsSuccess, setCreditsSuccess] = useState(() => {
     if (typeof window === "undefined") return false;
     const params = new URLSearchParams(window.location.search);
@@ -920,6 +924,32 @@ export default function ProjectWorkspacePage() {
       }
     }
   }, [activeTab, hasViewedPreview, projectId]);
+
+  // ── Global keyboard shortcuts ──────────────────────────────────────────────
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      // ⌘K — command palette
+      if (mod && e.key === "k") {
+        e.preventDefault();
+        setCommandPaletteOpen((v) => !v);
+        return;
+      }
+      // ⌘/ — keyboard shortcuts cheatsheet (when not in a text input / textarea / monaco)
+      if (mod && e.key === "/") {
+        const target = e.target as HTMLElement;
+        const inInput =
+          target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+        if (!inInput) {
+          e.preventDefault();
+          setKeyboardShortcutsOpen((v) => !v);
+        }
+        return;
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // Activate onboarding the first time we confirm this project has 0 builds.
   // This ensures the checklist never appears on existing projects.
@@ -1795,6 +1825,40 @@ export default function ProjectWorkspacePage() {
 
   return (
     <div className="flex flex-col h-full bg-background w-full overflow-hidden text-foreground">
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        files={files}
+        projectId={projectId}
+        onOpenFile={(fileId) => {
+          pushRecentFile(fileId);
+          setSelectedCodeFileId(fileId);
+          setActiveTab("code");
+        }}
+        onSendMessage={(text) => {
+          setPrompt(text);
+        }}
+        onNavigate={(target) => {
+          if (target === "shortcuts") {
+            setKeyboardShortcutsOpen(true);
+          } else if (
+            target === "git" ||
+            target === "packages" ||
+            target === "debugger" ||
+            target === "snippets"
+          ) {
+            // These are sidebar modes within the code editor — navigate to code tab
+            setActiveTab("code");
+          } else {
+            setActiveTab(target);
+          }
+        }}
+      />
+      <KeyboardShortcuts
+        open={keyboardShortcutsOpen}
+        onClose={() => setKeyboardShortcutsOpen(false)}
+      />
+
       <CreateProjectModal open={newProjectOpen} onOpenChange={setNewProjectOpen} />
 
       <LowCreditsBanner projectId={projectId} onBuyCredits={() => setBuyCreditsOpen(true)} />
@@ -2988,6 +3052,8 @@ export default function ProjectWorkspacePage() {
                 projectId={projectId}
                 initialFileId={selectedCodeFileId}
                 initialLine={selectedCodeFileLine}
+                containerStatus={containerStatus}
+                containerUrl={containerUrl}
                 onHtmlFileSaved={handleHtmlFileSaved}
                 onSnippetInsert={(prompt) => {
                   switchLeftPanel("chat");

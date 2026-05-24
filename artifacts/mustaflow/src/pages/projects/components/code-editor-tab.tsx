@@ -45,7 +45,14 @@ import {
   Lock,
   ChevronDown,
   Wand2,
+  Bug,
+  Zap,
+  Wrench,
+  RotateCcw,
+  TestTubeDiagonal,
+  MessageSquare,
 } from "lucide-react";
+import { DebuggerPanel } from "./debugger-panel";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { SNIPPETS, SNIPPET_CATEGORIES, type SnippetCategory } from "@/lib/snippets";
@@ -79,7 +86,7 @@ function FileIcon({ path }: { path: string }) {
   return <FileCode2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
 }
 
-type SidebarMode = "files" | "search" | "snippets" | "packages" | "git";
+type SidebarMode = "files" | "search" | "snippets" | "packages" | "git" | "debugger";
 
 type SearchResult = {
   fileId: number;
@@ -778,12 +785,15 @@ export function CodeEditorTab({
   initialLine,
   onHtmlFileSaved,
   onSnippetInsert,
+  containerStatus,
 }: {
   projectId: number;
   initialFileId?: number | null;
   initialLine?: number | null;
   onHtmlFileSaved?: () => void;
   onSnippetInsert?: (prompt: string) => void;
+  containerStatus?: string;
+  containerUrl?: string | null;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -806,6 +816,24 @@ export function CodeEditorTab({
   const [editorContent, setEditorContent] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
+
+  // ── Multi-tab state ──────────────────────────────────────────────────────────
+  const [openTabIds, setOpenTabIds] = useState<number[]>(() => {
+    const initial = resolveInitialFile();
+    return initial != null ? [initial] : [];
+  });
+
+  // ── Inline AI toolbar state ──────────────────────────────────────────────────
+  const [inlineAiSelection, setInlineAiSelection] = useState<string>("");
+  const [inlineAiToolbarPos, setInlineAiToolbarPos] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const [inlineAiLoading, setInlineAiLoading] = useState(false);
+  const [inlineAiResult, setInlineAiResult] = useState<{ action: string; text: string } | null>(
+    null,
+  );
+  const editorContainerRef = useRef<HTMLDivElement | null>(null);
 
   const [showNewFileInput, setShowNewFileInput] = useState(false);
   const [newFilePath, setNewFilePath] = useState("");
@@ -866,6 +894,8 @@ export function CodeEditorTab({
 
   function switchToFile(fileId: number, lineNumber?: number) {
     if (lineNumber) pendingRevealLineRef.current = lineNumber;
+    // Add to open tabs
+    setOpenTabIds((prev) => (prev.includes(fileId) ? prev : [...prev, fileId]));
     if (isDirty) {
       setPendingFileId(fileId);
       setShowUnsavedWarning(true);
@@ -881,6 +911,86 @@ export function CodeEditorTab({
       }
     }
     setSidebarMode("files");
+  }
+
+  function closeTab(fileId: number) {
+    setOpenTabIds((prev) => {
+      const next = prev.filter((id) => id !== fileId);
+      if (fileId === selectedFileId) {
+        const idx = prev.indexOf(fileId);
+        const nextActive = next[Math.max(0, idx - 1)] ?? null;
+        setSelectedFileId(nextActive);
+        setEditorContent(null);
+        setIsDirty(false);
+        setShowUnsavedWarning(false);
+        if (nextActive != null) {
+          try {
+            localStorage.setItem(EDITOR_LS_KEY(projectId), String(nextActive));
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      return next;
+    });
+  }
+
+  // ── Inline AI toolbar handler ─────────────────────────────────────────────
+  async function handleInlineAiAction(action: string) {
+    if (!inlineAiSelection.trim()) return;
+    setInlineAiLoading(true);
+    setInlineAiResult(null);
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/ai/inline-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          action,
+          selectedText: inlineAiSelection,
+          fileId: selectedFileId,
+          includeFileContext: true,
+        }),
+      });
+      if (!resp.ok) throw new Error(`Request failed: ${resp.status}`);
+      const data = (await resp.json()) as { result?: string };
+      setInlineAiResult({ action, text: data.result ?? "" });
+    } catch (err) {
+      toast({
+        title: "AI action failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setInlineAiLoading(false);
+    }
+  }
+
+  function applyInlineAiResult() {
+    if (!inlineAiResult || !editorRef.current) return;
+    const editor = editorRef.current;
+    const selection = editor.getSelection();
+    if (selection) {
+      editor.executeEdits("inline-ai", [{ range: selection, text: inlineAiResult.text }]);
+    } else {
+      const position = editor.getPosition();
+      if (position) {
+        editor.executeEdits("inline-ai", [
+          {
+            range: {
+              startLineNumber: position.lineNumber,
+              startColumn: position.column,
+              endLineNumber: position.lineNumber,
+              endColumn: position.column,
+            },
+            text: inlineAiResult.text,
+          },
+        ]);
+      }
+    }
+    setInlineAiResult(null);
+    setInlineAiToolbarPos(null);
+    setInlineAiSelection("");
   }
 
   useEffect(() => {
@@ -1492,6 +1602,18 @@ export function CodeEditorTab({
         >
           <Github className="h-4 w-4" />
         </button>
+        <button
+          onClick={() => setSidebarMode("debugger")}
+          title="Debugger"
+          className={cn(
+            "p-1.5 rounded transition-colors",
+            sidebarMode === "debugger"
+              ? "text-primary bg-primary/10"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted",
+          )}
+        >
+          <Bug className="h-4 w-4" />
+        </button>
       </div>
 
       {/* Sidebar panel */}
@@ -1734,10 +1856,76 @@ export function CodeEditorTab({
             </div>
           </>
         )}
+
+        {sidebarMode === "debugger" && (
+          <>
+            <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2">
+              <Bug className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex-1">
+                Debugger
+              </span>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <DebuggerPanel
+                projectId={projectId}
+                containerStatus={containerStatus}
+                onJumpToLine={(fileId, line) => {
+                  if (fileId) switchToFile(fileId, line);
+                  else if (editorRef.current) {
+                    editorRef.current.revealLineInCenter(line);
+                    editorRef.current.setPosition({ lineNumber: line, column: 1 });
+                  }
+                }}
+                files={files}
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {/* Monaco editor area */}
       <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-[#1e1e1e]">
+        {/* ── Multi-tab bar ─────────────────────────────────────────────────── */}
+        {openTabIds.length > 0 && (
+          <div className="shrink-0 flex items-stretch overflow-x-auto bg-[#2d2d2d] border-b border-white/10 min-h-[32px] max-h-[32px]">
+            {openTabIds.map((tabId) => {
+              const tabFile = files.find((f) => f.id === tabId);
+              if (!tabFile) return null;
+              const isActive = tabId === selectedFileId;
+              return (
+                <div
+                  key={tabId}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 text-[11px] whitespace-nowrap cursor-pointer border-r border-white/10 group shrink-0 min-w-0 max-w-[160px]",
+                    isActive
+                      ? "bg-[#1e1e1e] text-[#cccccc] border-t-2 border-t-primary"
+                      : "bg-[#2d2d2d] text-[#858585] hover:text-[#cccccc] hover:bg-[#252526] border-t-2 border-t-transparent",
+                  )}
+                  onClick={() => switchToFile(tabId)}
+                >
+                  <FileIcon path={tabFile.path} />
+                  <span className="truncate flex-1 min-w-0 font-mono">
+                    {tabFile.path.split("/").pop() ?? tabFile.path}
+                  </span>
+                  {isActive && isDirty && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0" />
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTab(tabId);
+                    }}
+                    className="shrink-0 opacity-0 group-hover:opacity-100 hover:text-white transition-opacity p-0.5 rounded"
+                    title="Close tab"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {selectedFile ? (
           <>
             {/* File breadcrumb bar */}
@@ -1823,7 +2011,109 @@ export function CodeEditorTab({
               </div>
             )}
 
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 relative" ref={editorContainerRef}>
+              {/* ── Inline AI floating toolbar ────────────────────────────── */}
+              {inlineAiToolbarPos && inlineAiSelection && !inlineAiResult && (
+                <div
+                  className="absolute z-30 flex items-center gap-0.5 bg-[#1e1e1e] border border-white/15 rounded-lg shadow-xl px-1.5 py-1"
+                  style={{
+                    top: inlineAiToolbarPos.top,
+                    left: Math.max(4, inlineAiToolbarPos.left),
+                  }}
+                >
+                  {inlineAiLoading ? (
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 text-[10px] text-[#858585]">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>Thinking…</span>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => void handleInlineAiAction("explain")}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-[#cccccc] hover:bg-white/10 transition-colors"
+                        title="Explain"
+                      >
+                        <MessageSquare className="h-3 w-3 text-blue-400" />
+                        Explain
+                      </button>
+                      <button
+                        onClick={() => void handleInlineAiAction("fix")}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-[#cccccc] hover:bg-white/10 transition-colors"
+                        title="Fix"
+                      >
+                        <Wrench className="h-3 w-3 text-yellow-400" />
+                        Fix
+                      </button>
+                      <button
+                        onClick={() => void handleInlineAiAction("rewrite")}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-[#cccccc] hover:bg-white/10 transition-colors"
+                        title="Rewrite"
+                      >
+                        <RotateCcw className="h-3 w-3 text-green-400" />
+                        Rewrite
+                      </button>
+                      <button
+                        onClick={() => void handleInlineAiAction("add-tests")}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-[#cccccc] hover:bg-white/10 transition-colors"
+                        title="Add tests"
+                      >
+                        <TestTubeDiagonal className="h-3 w-3 text-purple-400" />
+                        Tests
+                      </button>
+                      <div className="w-px h-3.5 bg-white/15 mx-0.5" />
+                      <button
+                        onClick={() => {
+                          setInlineAiToolbarPos(null);
+                          setInlineAiSelection("");
+                        }}
+                        className="p-0.5 rounded text-[#555] hover:text-[#cccccc] transition-colors"
+                        title="Dismiss"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* ── Inline AI result overlay ──────────────────────────────── */}
+              {inlineAiResult && (
+                <div className="absolute z-30 bottom-4 left-4 right-4 bg-[#252526] border border-white/15 rounded-lg shadow-2xl overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-[#2d2d2d]">
+                    <div className="flex items-center gap-1.5">
+                      <Zap className="h-3.5 w-3.5 text-primary" />
+                      <span className="text-[11px] font-medium text-[#cccccc] capitalize">
+                        AI {inlineAiResult.action}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {inlineAiResult.action !== "explain" && (
+                        <button
+                          onClick={applyInlineAiResult}
+                          className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                        >
+                          <Check className="h-2.5 w-2.5" />
+                          Apply
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          setInlineAiResult(null);
+                          setInlineAiToolbarPos(null);
+                          setInlineAiSelection("");
+                        }}
+                        className="p-0.5 rounded text-[#858585] hover:text-[#cccccc] transition-colors"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <pre className="text-[11px] font-mono text-[#cccccc] p-3 max-h-52 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                    {inlineAiResult.text}
+                  </pre>
+                </div>
+              )}
+
               <Editor
                 height="100%"
                 language={getLanguage(selectedFile.path)}
@@ -1833,6 +2123,7 @@ export function CodeEditorTab({
                 onMount={(ed, monaco) => {
                   editorRef.current = ed;
                   monacoRef.current = monaco;
+
                   // Register a single command id that Monaco quick-fix actions
                   // can invoke. The handler reads the rule id from arguments,
                   // calls the auto-fix endpoint scoped to that rule, and
@@ -1847,6 +2138,115 @@ export function CodeEditorTab({
                     },
                     "mustaflow.eslintFixRule",
                   );
+
+                  // ── Ghost-text inline completions ─────────────────────────
+                  // Registers a provider that, on request, calls the AI inline
+                  // complete endpoint and returns the suggestion as ghost text.
+                  const completionDisposable =
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    (monaco.languages as any).registerInlineCompletionsProvider(
+                      { pattern: "**" },
+                      {
+                        provideInlineCompletions: async (
+                          model: {
+                            getWordUntilPosition: (p: unknown) => { word: string };
+                            getLineContent: (n: number) => string;
+                            getValueInRange: (r: unknown) => string;
+                          },
+                          position: { lineNumber: number; column: number },
+                        ) => {
+                          const wordRange = model.getWordUntilPosition(position);
+                          if (!wordRange.word || wordRange.word.length < 3) {
+                            return { items: [] };
+                          }
+                          const lineContent = model.getLineContent(position.lineNumber);
+                          const textBefore = model.getValueInRange({
+                            startLineNumber: Math.max(1, position.lineNumber - 20),
+                            startColumn: 1,
+                            endLineNumber: position.lineNumber,
+                            endColumn: position.column,
+                          });
+                          try {
+                            const resp = await fetch(
+                              `/api/projects/${projectId}/ai/inline-action`,
+                              {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                credentials: "include",
+                                body: JSON.stringify({
+                                  action: "complete",
+                                  selectedText: textBefore.slice(-1200),
+                                  fileId: selectedFileId,
+                                  includeFileContext: false,
+                                }),
+                              },
+                            );
+                            if (!resp.ok) return { items: [] };
+                            const data = (await resp.json()) as { result?: string };
+                            const completion = (data.result ?? "").trimEnd();
+                            if (!completion) return { items: [] };
+                            return {
+                              items: [
+                                {
+                                  insertText: completion,
+                                  range: {
+                                    startLineNumber: position.lineNumber,
+                                    startColumn: position.column,
+                                    endLineNumber: position.lineNumber,
+                                    endColumn: lineContent.length + 1,
+                                  },
+                                },
+                              ],
+                            };
+                          } catch {
+                            return { items: [] };
+                          }
+                        },
+                        freeInlineCompletions: () => {},
+                      },
+                    );
+
+                  // ── Selection-change → inline AI toolbar ─────────────────
+                  const selectionDisposable = ed.onDidChangeCursorSelection((_e: unknown) => {
+                    const sel = ed.getSelection();
+                    if (!sel || sel.isEmpty()) {
+                      setInlineAiSelection("");
+                      setInlineAiToolbarPos(null);
+                      setInlineAiResult(null);
+                      return;
+                    }
+                    const selectedText = ed.getModel()?.getValueInRange(sel) ?? "";
+                    if (!selectedText.trim() || selectedText.length < 5) {
+                      setInlineAiSelection("");
+                      setInlineAiToolbarPos(null);
+                      return;
+                    }
+                    setInlineAiSelection(selectedText);
+                    // Position toolbar above the selection end
+                    if (editorContainerRef.current) {
+                      try {
+                        const scrolledVisiblePosition = ed.getScrolledVisiblePosition({
+                          lineNumber: sel.endLineNumber,
+                          column: sel.endColumn,
+                        });
+                        if (scrolledVisiblePosition) {
+                          const rect = editorContainerRef.current.getBoundingClientRect();
+                          setInlineAiToolbarPos({
+                            top: scrolledVisiblePosition.top - 42,
+                            left: Math.min(scrolledVisiblePosition.left, rect.width - 320),
+                          });
+                        }
+                      } catch {
+                        // position calculation can fail during resize
+                      }
+                    }
+                  });
+
+                  // Cleanup on unmount
+                  return () => {
+                    completionDisposable.dispose();
+                    selectionDisposable.dispose();
+                  };
                 }}
                 options={{
                   minimap: { enabled: false },

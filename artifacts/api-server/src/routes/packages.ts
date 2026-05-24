@@ -232,4 +232,110 @@ router.post(
   },
 );
 
+// ── GET /api/projects/:id/packages/search ─────────────────────────────────
+// Proxy search to npm or PyPI registries so the browser doesn't need CORS
+// workarounds. Results are cached in-memory for 5 minutes.
+
+interface NpmSearchResult {
+  package: {
+    name: string;
+    version: string;
+    description?: string;
+    links?: { npm?: string; repository?: string };
+    downloads?: { monthly?: number };
+  };
+  score: { final: number; detail: { quality: number; popularity: number; maintenance: number } };
+}
+
+interface PypiSearchResult {
+  name: string;
+  version: string;
+  description: string;
+}
+
+type SearchResultRow = {
+  name: string;
+  version: string;
+  description: string;
+  url?: string;
+  downloads?: number;
+  score?: number;
+};
+
+const searchCache = new Map<string, { ts: number; results: SearchResultRow[] }>();
+const CACHE_TTL = 5 * 60 * 1000;
+
+router.get(
+  "/projects/:id/packages/search",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const registry = req.query.registry === "pypi" ? "pypi" : "npm";
+
+    if (!q || q.length < 2) {
+      res.status(400).json({ error: "q must be at least 2 characters" });
+      return;
+    }
+
+    const cacheKey = `${registry}:${q}`;
+    const cached = searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < CACHE_TTL) {
+      res.json({ results: cached.results, registry });
+      return;
+    }
+
+    try {
+      let results: SearchResultRow[] = [];
+
+      if (registry === "npm") {
+        const url = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(q)}&size=10`;
+        const r = await fetch(url, {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) throw new Error(`npm registry returned ${r.status}`);
+        const data = (await r.json()) as { objects?: NpmSearchResult[] };
+        results = (data.objects ?? []).map((obj) => ({
+          name: obj.package.name,
+          version: obj.package.version,
+          description: obj.package.description ?? "",
+          url: obj.package.links?.npm ?? `https://www.npmjs.com/package/${obj.package.name}`,
+          score: Math.round((obj.score?.final ?? 0) * 100),
+        }));
+      } else {
+        // PyPI does not have a public JSON search API. We use the direct package
+        // lookup endpoint for exact-name queries. It reliably returns JSON.
+        const directUrl = `https://pypi.org/pypi/${encodeURIComponent(q)}/json`;
+        const dr = await fetch(directUrl, {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (dr.ok) {
+          const data = (await dr.json()) as {
+            info?: { name: string; version: string; summary?: string };
+          };
+          if (data.info) {
+            results = [
+              {
+                name: data.info.name,
+                version: data.info.version,
+                description: data.info.summary ?? "",
+                url: `https://pypi.org/project/${data.info.name}/`,
+              },
+            ];
+          }
+        }
+        // If the direct lookup misses (package not found by exact name), return
+        // an empty list — PyPI exposes no public JSON search API for fuzzy queries.
+      }
+
+      searchCache.set(cacheKey, { ts: Date.now(), results });
+      res.json({ results, registry });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Search failed";
+      res.status(500).json({ error: message });
+    }
+  },
+);
+
 export default router;
