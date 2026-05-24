@@ -12,10 +12,12 @@ import {
   useInstallPackage,
   useUninstallPackage,
   useGetCheckRuns,
+  useGetProjectFileDiagnostics,
   getListProjectFilesQueryKey,
   getGetProjectFileQueryKey,
   getGetCheckRunsQueryKey,
   type CheckRunFinding,
+  type ProjectFileDiagnostic,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -953,6 +955,138 @@ export function CodeEditorTab({
       monaco.editor.setModelMarkers(model, "mustaflow-eslint", []);
     };
   }, [eslintFindings, fileContent, selectedFileId]);
+
+  // ── Live LSP-style diagnostics from the project's container ──────────────
+  // Debounced after each successful save (or file switch): asks the API to
+  // run tsc / node --check / py_compile inside the container and renders
+  // the parsed diagnostics as Monaco markers (source = the tool name).
+  // Silently no-ops when no container is attached.
+  const [containerDiagnostics, setContainerDiagnostics] = useState<{
+    fileId: number;
+    tool: string;
+    diagnostics: ProjectFileDiagnostic[];
+  } | null>(null);
+  const diagnoseFile = useGetProjectFileDiagnostics();
+  // Monotonic request token; only the latest token's response is honored so
+  // a slow response for a previously-open file can't clobber markers for
+  // the file the user has since switched to.
+  const diagnosticsTokenRef = useRef(0);
+  const runDiagnostics = useCallback(
+    (fileId: number) => {
+      const token = ++diagnosticsTokenRef.current;
+      diagnoseFile.mutate(
+        { id: projectId, fileId },
+        {
+          onSuccess: (res) => {
+            if (token !== diagnosticsTokenRef.current) return;
+            if (res?.ok) {
+              setContainerDiagnostics({
+                fileId,
+                tool: res.tool,
+                diagnostics: res.diagnostics ?? [],
+              });
+            } else {
+              // No container running, or check failed to launch — clear stale markers.
+              setContainerDiagnostics(null);
+            }
+          },
+          onError: () => {
+            if (token !== diagnosticsTokenRef.current) return;
+            setContainerDiagnostics(null);
+          },
+        },
+      );
+    },
+    [diagnoseFile, projectId],
+  );
+
+  // Trigger a diagnostics run when the user opens a file or after a save lands.
+  useEffect(() => {
+    if (selectedFileId == null || !fileContent) return;
+    const ext = selectedFile?.path.split(".").pop()?.toLowerCase() ?? "";
+    if (!["ts", "tsx", "js", "mjs", "cjs", "py"].includes(ext)) {
+      setContainerDiagnostics(null);
+      return;
+    }
+    const t = setTimeout(() => runDiagnostics(selectedFileId), 600);
+    return () => clearTimeout(t);
+    // updatedAt changes after a save → re-run diagnostics with the new content.
+  }, [selectedFileId, fileContent?.updatedAt, selectedFile?.path, runDiagnostics, fileContent]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const tool = containerDiagnostics?.tool ?? "lsp";
+    // Ignore diagnostics that belong to a file other than the one currently open.
+    if (
+      !containerDiagnostics ||
+      containerDiagnostics.fileId !== selectedFileId ||
+      containerDiagnostics.diagnostics.length === 0
+    ) {
+      monaco.editor.setModelMarkers(model, `mustaflow-${tool}`, []);
+      return;
+    }
+    const lineCount = model.getLineCount();
+    const markers = containerDiagnostics.diagnostics.map((d) => {
+      const line = Math.max(1, Math.min(d.line ?? 1, lineCount));
+      const col = Math.max(1, d.column ?? 1);
+      const endCol = model.getLineMaxColumn(line);
+      const sev =
+        d.severity === "error"
+          ? monaco.MarkerSeverity.Error
+          : d.severity === "warning"
+            ? monaco.MarkerSeverity.Warning
+            : monaco.MarkerSeverity.Info;
+      return {
+        severity: sev,
+        startLineNumber: line,
+        startColumn: col,
+        endLineNumber: line,
+        endColumn: endCol,
+        message: d.message,
+        source: d.source ?? tool,
+      };
+    });
+    monaco.editor.setModelMarkers(model, `mustaflow-${tool}`, markers);
+    return () => {
+      monaco.editor.setModelMarkers(model, `mustaflow-${tool}`, []);
+    };
+  }, [containerDiagnostics, selectedFileId]);
+
+  // ── Agent-editor sync ────────────────────────────────────────────────────
+  // When the AI agent writes the currently-open file via a tool call, the
+  // file list refetches and `fileContent.updatedAt` advances. If the user
+  // has no unsaved local edits, swap in the new content automatically so
+  // they don't keep editing a stale buffer. If there ARE local edits, leave
+  // them alone — `isDirty` guards against clobbering user work.
+  const lastSyncedUpdatedAtRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!fileContent) {
+      lastSyncedUpdatedAtRef.current = null;
+      return;
+    }
+    const remoteUpdatedAt =
+      typeof fileContent.updatedAt === "string"
+        ? fileContent.updatedAt
+        : new Date(fileContent.updatedAt as unknown as string).toISOString();
+    if (lastSyncedUpdatedAtRef.current === null) {
+      lastSyncedUpdatedAtRef.current = remoteUpdatedAt;
+      return;
+    }
+    if (remoteUpdatedAt !== lastSyncedUpdatedAtRef.current) {
+      lastSyncedUpdatedAtRef.current = remoteUpdatedAt;
+      if (!isDirty) {
+        setEditorContent(null);
+        if (selectedFileId != null) {
+          // Re-run diagnostics against the new content the agent just wrote.
+          runDiagnostics(selectedFileId);
+        }
+      }
+    }
+  }, [fileContent, isDirty, selectedFileId, runDiagnostics]);
 
   // Whether the currently open file is auto-fixable by ESLint. HTML files are
   // supported by running ESLint on each inline <script> block and splicing

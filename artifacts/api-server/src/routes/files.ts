@@ -10,6 +10,7 @@ import { logger } from "../lib/logger";
 import { writeFileToContainer } from "../lib/container";
 import { runEslintFix } from "../lib/checks/eslint-runner";
 import { applyProjectEslintFixes } from "../lib/eslint-fix-all";
+import { readDiagnostics } from "../lib/agent-senses";
 
 const router: IRouter = Router();
 
@@ -425,6 +426,75 @@ router.post(
       remainingCount: fix.remainingCount,
       snapshotVersionId,
       results: fix.results,
+    });
+  },
+);
+
+// Live diagnostics for a single file. Runs tsc / node --check / py_compile
+// inside the project's container (auto-detected from the file extension) and
+// returns structured diagnostics that the editor can render as Monaco markers.
+// Returns ok=false with an explanation when no container is running.
+router.post(
+  "/projects/:id/files/:fileId/diagnostics",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const fileId = Number(req.params.fileId);
+    if (!Number.isFinite(fileId)) {
+      res.status(400).json({ error: "Invalid file id" });
+      return;
+    }
+    const [file] = await db
+      .select({
+        id: projectFilesTable.id,
+        path: projectFilesTable.path,
+        content: projectFilesTable.content,
+      })
+      .from(projectFilesTable)
+      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)));
+    if (!file) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    const [project] = await db
+      .select({
+        containerId: projectsTable.containerId,
+        containerStatus: projectsTable.containerStatus,
+      })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+    const containerId =
+      project?.containerId && project.containerStatus === "running" ? project.containerId : null;
+
+    // Guarantee the container sees the same bytes the DB has before we run
+    // tsc / py_compile. PATCH /files/:id only fires the container sync
+    // best-effort via setImmediate, so a diagnostics call that follows a
+    // save can otherwise race with the sync and lint stale content.
+    if (containerId) {
+      try {
+        await writeFileToContainer(containerId, file.path, file.content, projectId);
+      } catch {
+        // Non-fatal — readDiagnostics will surface the resulting failure.
+      }
+    }
+
+    const result = await readDiagnostics({
+      args: { path: file.path },
+      containerId,
+      projectId,
+      signal: new AbortController().signal,
+    });
+    res.json({
+      ok: result.ok,
+      tool: result.tool,
+      diagnostics: result.diagnostics.map((d) => ({
+        line: d.line,
+        column: d.col,
+        severity: d.severity,
+        message: d.message,
+        source: result.tool,
+      })),
+      error: result.error ?? null,
     });
   },
 );

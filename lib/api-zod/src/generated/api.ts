@@ -1679,6 +1679,29 @@ export const DeleteProjectFileResponse = zod.object({
 
 
 /**
+ * Runs tsc / node --check / py_compile inside the project's live container (auto-selected from file extension) and returns parsed diagnostics ready to render as Monaco markers. Requires the container to be running; returns ok=false with an error otherwise.
+ * @summary Run a syntax/type check on a single file in the project's container and return structured diagnostics
+ */
+export const GetProjectFileDiagnosticsParams = zod.object({
+  "id": zod.coerce.number(),
+  "fileId": zod.coerce.number()
+})
+
+export const GetProjectFileDiagnosticsResponse = zod.object({
+  "ok": zod.boolean(),
+  "tool": zod.string().describe('Diagnostic tool used (tsc, node, python, eslint)'),
+  "diagnostics": zod.array(zod.object({
+  "line": zod.number().nullish(),
+  "column": zod.number().nullish(),
+  "severity": zod.enum(['error', 'warning', 'info']),
+  "message": zod.string(),
+  "source": zod.string().nullish()
+})),
+  "error": zod.string().nullish()
+})
+
+
+/**
  * @summary Rename (move) a project file to a new path
  */
 export const RenameProjectFileParams = zod.object({

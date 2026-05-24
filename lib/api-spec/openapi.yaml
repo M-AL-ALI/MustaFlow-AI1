@@ -1175,6 +1175,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/files/{fileId}/diagnostics:
+    post:
+      operationId: getProjectFileDiagnostics
+      tags: [projects]
+      summary: Run a syntax/type check on a single file in the project's container and return structured diagnostics
+      description: >-
+        Runs tsc / node --check / py_compile inside the project's live
+        container (auto-selected from file extension) and returns parsed
+        diagnostics ready to render as Monaco markers. Requires the
+        container to be running; returns ok=false with an error otherwise.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: fileId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Diagnostics result (ok=false when the container is unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFileDiagnostics"
+        "404":
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/files/{fileId}/rename:
     patch:
       operationId: renameProjectFile
@@ -3832,6 +3859,29 @@ components:
       required: [path]
       properties:
         path: { type: string }
+
+    ProjectFileDiagnostic:
+      type: object
+      required: [severity, message]
+      properties:
+        line: { type: integer, nullable: true }
+        column: { type: integer, nullable: true }
+        severity:
+          type: string
+          enum: [error, warning, info]
+        message: { type: string }
+        source: { type: string, nullable: true }
+
+    ProjectFileDiagnostics:
+      type: object
+      required: [ok, tool, diagnostics]
+      properties:
+        ok: { type: boolean }
+        tool: { type: string, description: "Diagnostic tool used (tsc, node, python, eslint)" }
+        diagnostics:
+          type: array
+          items: { $ref: "#/components/schemas/ProjectFileDiagnostic" }
+        error: { type: string, nullable: true }
 
     RollbackInput:
       type: object

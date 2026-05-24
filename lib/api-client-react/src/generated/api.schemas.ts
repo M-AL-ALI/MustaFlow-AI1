@@ -1043,6 +1043,31 @@ export interface ProjectFileRename {
   path: string;
 }
 
+export type ProjectFileDiagnosticSeverity = typeof ProjectFileDiagnosticSeverity[keyof typeof ProjectFileDiagnosticSeverity];
+
+
+export const ProjectFileDiagnosticSeverity = {
+  error: 'error',
+  warning: 'warning',
+  info: 'info',
+} as const;
+
+export interface ProjectFileDiagnostic {
+  line?: number | null;
+  column?: number | null;
+  severity: ProjectFileDiagnosticSeverity;
+  message: string;
+  source?: string | null;
+}
+
+export interface ProjectFileDiagnostics {
+  ok: boolean;
+  /** Diagnostic tool used (tsc, node, python, eslint) */
+  tool: string;
+  diagnostics: ProjectFileDiagnostic[];
+  error?: string | null;
+}
+
 export interface RollbackInput {
   /** If true and the version has a linked database snapshot, restore it along with the files. */
   restoreDb?: boolean;

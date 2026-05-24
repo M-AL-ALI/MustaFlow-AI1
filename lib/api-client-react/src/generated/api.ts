@@ -135,6 +135,7 @@ import type {
   ProjectAuditResult,
   ProjectFileContent,
   ProjectFileCreate,
+  ProjectFileDiagnostics,
   ProjectFileRename,
   ProjectFileSummary,
   ProjectFileUpdate,
@@ -4393,6 +4394,79 @@ export const useDeleteProjectFile = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getDeleteProjectFileMutationOptions(options));
+    }
+
+export const getGetProjectFileDiagnosticsUrl = (id: number,
+    fileId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files/${fileId}/diagnostics`
+}
+
+/**
+ * Runs tsc / node --check / py_compile inside the project's live container (auto-selected from file extension) and returns parsed diagnostics ready to render as Monaco markers. Requires the container to be running; returns ok=false with an error otherwise.
+ * @summary Run a syntax/type check on a single file in the project's container and return structured diagnostics
+ */
+export const getProjectFileDiagnostics = async (id: number,
+    fileId: number, options?: RequestInit): Promise<ProjectFileDiagnostics> => {
+
+  return customFetch<ProjectFileDiagnostics>(getGetProjectFileDiagnosticsUrl(id,fileId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getGetProjectFileDiagnosticsMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getProjectFileDiagnostics>>, TError,{id: number;fileId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getProjectFileDiagnostics>>, TError,{id: number;fileId: number}, TContext> => {
+
+const mutationKey = ['getProjectFileDiagnostics'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getProjectFileDiagnostics>>, {id: number;fileId: number}> = (props) => {
+          const {id,fileId} = props ?? {};
+
+          return  getProjectFileDiagnostics(id,fileId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetProjectFileDiagnosticsMutationResult = NonNullable<Awaited<ReturnType<typeof getProjectFileDiagnostics>>>
+
+    export type GetProjectFileDiagnosticsMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Run a syntax/type check on a single file in the project's container and return structured diagnostics
+ */
+export const useGetProjectFileDiagnostics = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getProjectFileDiagnostics>>, TError,{id: number;fileId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getProjectFileDiagnostics>>,
+        TError,
+        {id: number;fileId: number},
+        TContext
+      > => {
+      return useMutation(getGetProjectFileDiagnosticsMutationOptions(options));
     }
 
 export const getRenameProjectFileUrl = (id: number,
