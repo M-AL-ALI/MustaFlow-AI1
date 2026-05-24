@@ -83,12 +83,20 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
-export type ComposerAttachment = {
-  kind: "image";
-  url: string;
-  alt?: string;
-  generated?: boolean;
-};
+export type ComposerAttachment =
+  | {
+      kind: "image";
+      url: string;
+      alt?: string;
+      generated?: boolean;
+    }
+  | {
+      kind: "file";
+      uploadId: number;
+      name: string;
+      mime: string;
+      size: number;
+    };
 
 interface QueueComposerProps {
   projectId: number;
@@ -186,40 +194,103 @@ export function QueueComposer({
   const [generatingImage, setGeneratingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const uploadFile = useCallback(async (file: File): Promise<ComposerAttachment | null> => {
-    if (!file.type.startsWith("image/")) return null;
-    setUploadingCount((c) => c + 1);
-    try {
-      const meta = await fetch("/api/storage/uploads/request-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
-      });
-      if (!meta.ok) throw new Error("Failed to request upload URL");
-      const { uploadURL, objectPath } = (await meta.json()) as {
-        uploadURL: string;
-        objectPath: string;
-      };
-      const put = await fetch(uploadURL, {
-        method: "PUT",
-        headers: { "Content-Type": file.type },
-        body: file,
-      });
-      if (!put.ok) throw new Error("Upload failed");
-      return { kind: "image", url: objectPath, alt: file.name };
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Image upload failed:", err);
-      return null;
-    } finally {
-      setUploadingCount((c) => Math.max(0, c - 1));
-    }
-  }, []);
+  const uploadFile = useCallback(
+    async (file: File): Promise<ComposerAttachment | null> => {
+      setUploadingCount((c) => c + 1);
+      try {
+        // Images keep the legacy /api/storage/uploads flow so the existing
+        // image attachment rendering keeps working.
+        if (file.type.startsWith("image/")) {
+          const meta = await fetch("/api/storage/uploads/request-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
+          });
+          if (!meta.ok) throw new Error("Failed to request upload URL");
+          const { uploadURL, objectPath } = (await meta.json()) as {
+            uploadURL: string;
+            objectPath: string;
+          };
+          const put = await fetch(uploadURL, {
+            method: "PUT",
+            headers: { "Content-Type": file.type },
+            body: file,
+          });
+          if (!put.ok) throw new Error("Upload failed");
+          return { kind: "image", url: objectPath, alt: file.name };
+        }
+
+        // Non-image files (CSV / PDF / TXT / JSON / etc.) → project-scoped
+        // uploads (Task #540). Two-step: request presigned URL, PUT, then
+        // register with the project so `list_uploads`/`read_upload` agent
+        // tools can see it.
+        const reqRes = await fetch(`/api/projects/${projectId}/uploads/request-url`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            name: file.name,
+            size: file.size,
+            contentType: file.type || "application/octet-stream",
+          }),
+        });
+        if (!reqRes.ok) {
+          const err = (await reqRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(err.error ?? "Failed to request upload URL");
+        }
+        const { uploadURL, objectPath } = (await reqRes.json()) as {
+          uploadURL: string;
+          objectPath: string;
+        };
+        const put = await fetch(uploadURL, {
+          method: "PUT",
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+        });
+        if (!put.ok) throw new Error("Upload failed");
+        const regRes = await fetch(`/api/projects/${projectId}/uploads`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            objectPath,
+            name: file.name,
+            size: file.size,
+            contentType: file.type || "application/octet-stream",
+          }),
+        });
+        if (!regRes.ok) {
+          const err = (await regRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(err.error ?? "Failed to register upload");
+        }
+        const row = (await regRes.json()) as {
+          id: number;
+          name: string;
+          mime: string;
+          size: number;
+        };
+        return {
+          kind: "file",
+          uploadId: row.id,
+          name: row.name,
+          mime: row.mime,
+          size: row.size,
+        };
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Upload failed:", err);
+        return null;
+      } finally {
+        setUploadingCount((c) => Math.max(0, c - 1));
+      }
+    },
+    [projectId],
+  );
 
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
-      const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      const arr = Array.from(files);
       if (arr.length === 0) return;
       const results = await Promise.all(arr.map((f) => uploadFile(f)));
       const ok = results.filter((r): r is ComposerAttachment => r !== null);
@@ -235,7 +306,7 @@ export function QueueComposer({
       for (const it of items) {
         if (it.kind === "file") {
           const f = it.getAsFile();
-          if (f && f.type.startsWith("image/")) files.push(f);
+          if (f) files.push(f);
         }
       }
       if (files.length > 0) {
@@ -696,7 +767,13 @@ export function QueueComposer({
       setRows([{ id: crypto.randomUUID(), text: "" }]);
       setAttachments([]);
       if (onPromptValueChange) onPromptValueChange("");
-      onSingleSend(text, undefined, pending.length > 0 ? pending : undefined);
+      // Only inline image attachments go on the message payload. File uploads
+      // (CSV/PDF/etc.) live in the project_uploads table and the agent reads
+      // them via list_uploads / read_upload tools.
+      const inlineImages = pending.filter(
+        (a): a is Extract<ComposerAttachment, { kind: "image" }> => a.kind === "image",
+      );
+      onSingleSend(text, undefined, inlineImages.length > 0 ? inlineImages : undefined);
       return;
     }
 
@@ -921,22 +998,47 @@ export function QueueComposer({
           {(attachments.length > 0 || uploadingCount > 0) && (
             <div className="px-3 pt-1.5 flex flex-wrap gap-1.5">
               {attachments.map((a, i) => {
-                const src = a.url.startsWith("/objects/") ? `/api/storage${a.url}` : a.url;
+                if (a.kind === "image") {
+                  const src = a.url.startsWith("/objects/") ? `/api/storage${a.url}` : a.url;
+                  return (
+                    <div
+                      key={`img-${a.url}-${i}`}
+                      className="relative group rounded-md overflow-hidden border border-border bg-background/60"
+                    >
+                      <img
+                        src={src}
+                        alt={a.alt ?? "attachment"}
+                        className="block h-14 w-14 object-cover"
+                      />
+                      {a.generated && (
+                        <span className="absolute bottom-0 left-0 right-0 text-[8px] font-bold text-center bg-primary/80 text-primary-foreground py-0.5 leading-none">
+                          AI
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(i)}
+                        className="absolute top-0 right-0 w-4 h-4 flex items-center justify-center bg-background/80 text-muted-foreground hover:text-destructive rounded-bl-md"
+                        title="Remove"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
+                  );
+                }
                 return (
                   <div
-                    key={`${a.url}-${i}`}
-                    className="relative group rounded-md overflow-hidden border border-border bg-background/60"
+                    key={`file-${a.uploadId}-${i}`}
+                    className="relative group rounded-md border border-border bg-background/60 px-2 py-1.5 max-w-[180px]"
+                    title={`${a.name} (${a.mime})`}
                   >
-                    <img
-                      src={src}
-                      alt={a.alt ?? "attachment"}
-                      className="block h-14 w-14 object-cover"
-                    />
-                    {a.generated && (
-                      <span className="absolute bottom-0 left-0 right-0 text-[8px] font-bold text-center bg-primary/80 text-primary-foreground py-0.5 leading-none">
-                        AI
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 pr-4">
+                      <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="text-[10px] text-foreground truncate">{a.name}</span>
+                    </div>
+                    <div className="text-[9px] text-muted-foreground mt-0.5">
+                      {(a.size / 1024).toFixed(1)} KB
+                    </div>
                     <button
                       type="button"
                       onClick={() => removeAttachment(i)}

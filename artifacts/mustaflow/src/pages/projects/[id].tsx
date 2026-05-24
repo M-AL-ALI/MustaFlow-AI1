@@ -2446,7 +2446,22 @@ export default function ProjectWorkspacePage() {
                       disabled={isBusy}
                       onSingleSend={(content, _intent, attachments) => {
                         setPrompt("");
-                        send(content, attachments ? { attachments } : undefined);
+                        const imageOnly = attachments?.filter(
+                          (
+                            a,
+                          ): a is {
+                            kind: "image";
+                            url: string;
+                            alt?: string;
+                            generated?: boolean;
+                          } => a.kind === "image",
+                        );
+                        send(
+                          content,
+                          imageOnly && imageOnly.length > 0
+                            ? { attachments: imageOnly }
+                            : undefined,
+                        );
                       }}
                       onBatchStarted={handleBatchStarted}
                       promptValue={prompt}
