@@ -860,6 +860,30 @@ export const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "analyze_image",
+      description:
+        "Run a vision pass on an image and return a structured layout brief (overall layout, components, copy, colours, typography, intended app type). Use when the user drops in a screenshot/mockup/Figma export and you need a concrete, text-form description to ground the build. Input is either a project-relative path (e.g. 'assets/mockup.png') OR a data: / https: image URL. Returns plain-text analysis (≤2400 chars). No credit cost.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description:
+              "Project-relative image path (PNG/JPEG/WebP). Mutually exclusive with `url`.",
+          },
+          url: {
+            type: "string",
+            description:
+              "Image URL — `data:` URI or https://. Used when the image is an uploaded attachment not yet in the project workspace.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "author_skill",
       description:
         "Draft a new reusable skill (SKILL.md instruction set) when you discover a pattern that would help future builds. The draft is queued for admin review and is NOT immediately available to load. Use sparingly — only for genuinely reusable, non-trivial patterns (a new framework, a tricky integration). Body must include an '## Examples' section with real code.",
@@ -3780,6 +3804,53 @@ export async function executeTool(ctx: ToolCtx): Promise<{
     case "generate_audio":
     case "remove_image_background":
       return executeCreativeTool(ctx);
+    case "analyze_image": {
+      // Task #665 — canonical analyze_image tool. Delegates to the shared
+      // analyzeImagesToLayout helper so the agent-loop, the up-front
+      // pre-pipeline analysis in jobs.ts, and any future caller all produce
+      // identical layout briefs. Accepts either a workspace path or a URL.
+      const path = typeof args.path === "string" ? sanitizePath(args.path) : null;
+      const url = typeof args.url === "string" ? args.url.trim() : "";
+      if (!path && !url) {
+        return { ok: false, observation: "ERROR: analyze_image requires either `path` or `url`" };
+      }
+      let dataUri: string | null = null;
+      if (path) {
+        const f = workspace.read(path);
+        if (!f) {
+          return { ok: false, observation: `ERROR: file not found in workspace: ${path}` };
+        }
+        const mime = f.mimeType || guessMime(path);
+        if (!/^image\/(png|jpeg|jpg|webp|gif)$/i.test(mime)) {
+          return {
+            ok: false,
+            observation: `ERROR: ${path} is not an image (mime=${mime})`,
+          };
+        }
+        // Workspace content is text-stored — if binary, the agent-loop encodes it
+        // as base64 string. Assume the bytes are already a base64 string when
+        // the mime is binary-image; otherwise utf-8 encode.
+        const isLikelyBase64 = /^[A-Za-z0-9+/=\s]+$/.test(f.content) && f.content.length > 100;
+        const b64 = isLikelyBase64
+          ? f.content.replace(/\s+/g, "")
+          : Buffer.from(f.content, "utf8").toString("base64");
+        dataUri = `data:${mime};base64,${b64}`;
+      } else if (url.startsWith("data:") || /^https?:\/\//i.test(url)) {
+        dataUri = url;
+      } else {
+        return { ok: false, observation: "ERROR: url must be a data: URI or http(s) URL" };
+      }
+      const { analyzeImagesToLayout } = await import("./builder");
+      const brief = await analyzeImagesToLayout([{ dataUri: dataUri! }], input.signal);
+      if (!brief) {
+        return {
+          ok: false,
+          observation: "ERROR: image analysis failed — vision call returned no content",
+        };
+      }
+      await safeEvent(input.onEvent, "narration", "Image analysis complete.");
+      return { ok: true, observation: brief };
+    }
     case "present_asset": {
       const path = sanitizePath(args.path);
       if (!path) return { ok: false, observation: "ERROR: invalid path" };

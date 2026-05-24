@@ -139,29 +139,41 @@ export default function BillingPage() {
       ]);
       if (balRes.ok) setBalance((await balRes.json()) as CreditsBalance);
       if (pkgRes.ok) setPackages((await pkgRes.json()) as PackagesResponse);
-      if (txRes.ok) setTransactions(((await txRes.json()) as { transactions: CreditTransaction[] }).transactions);
+      if (txRes.ok)
+        setTransactions(
+          ((await txRes.json()) as { transactions: CreditTransaction[] }).transactions,
+        );
       if (subRes.ok) setSubscription((await subRes.json()) as SubscriptionResponse);
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const fetchInvoices = useCallback(async () => {
     try {
       const res = await fetch("/api/billing/invoices");
       if (res.ok) setInvoices(((await res.json()) as { invoices: Invoice[] }).invoices);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const fetchUsage = useCallback(async () => {
     try {
       const res = await fetch("/api/billing/usage");
       if (res.ok) setUsage((await res.json()) as UsageData);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
-  useEffect(() => { void fetchData(); }, [fetchData]);
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData]);
 
-  async function handleManageSubscription() {
+  async function _handleManageSubscription() {
     if (workspaceId == null) return;
     setPortalLoading(true);
     try {
@@ -211,10 +223,11 @@ export default function BillingPage() {
     if (activeTab === "usage") void fetchUsage();
   }, [activeTab, fetchInvoices, fetchUsage]);
 
-  const successParam = typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search).get("success") ??
-      new URLSearchParams(window.location.search).get("subscribed")
-    : null;
+  const successParam =
+    typeof window !== "undefined"
+      ? (new URLSearchParams(window.location.search).get("success") ??
+        new URLSearchParams(window.location.search).get("subscribed"))
+      : null;
 
   // Low-credit warning
   const starterBalance = STARTER_CREDITS;
@@ -236,16 +249,27 @@ export default function BillingPage() {
           cancelUrl: `${window.location.origin}/billing`,
         }),
       });
-      const data = (await res.json()) as { setupRequired?: boolean; checkoutUrl?: string; error?: string };
+      const data = (await res.json()) as {
+        setupRequired?: boolean;
+        checkoutUrl?: string;
+        error?: string;
+      };
       if (data.setupRequired) {
-        toast({ title: "Billing not configured", description: "Stripe is not configured. Contact your administrator.", variant: "destructive" });
+        toast({
+          title: "Billing not configured",
+          description: "Stripe is not configured. Contact your administrator.",
+          variant: "destructive",
+        });
         return;
       }
       if (data.checkoutUrl) window.location.href = data.checkoutUrl;
-      else if (data.error) toast({ title: "Checkout error", description: data.error, variant: "destructive" });
+      else if (data.error)
+        toast({ title: "Checkout error", description: data.error, variant: "destructive" });
     } catch {
       toast({ title: "Checkout failed", description: "Please try again.", variant: "destructive" });
-    } finally { setCheckoutLoading(null); }
+    } finally {
+      setCheckoutLoading(null);
+    }
   }
 
   async function handleSubscribe(tier: string) {
@@ -260,33 +284,60 @@ export default function BillingPage() {
           cancelUrl: `${window.location.origin}/billing`,
         }),
       });
-      const data = (await res.json()) as { setupRequired?: boolean; checkoutUrl?: string; error?: string };
+      const data = (await res.json()) as {
+        setupRequired?: boolean;
+        checkoutUrl?: string;
+        error?: string;
+      };
       if (data.setupRequired) {
-        toast({ title: "Subscriptions not configured", description: data.error ?? "Contact your administrator.", variant: "destructive" });
+        toast({
+          title: "Subscriptions not configured",
+          description: data.error ?? "Contact your administrator.",
+          variant: "destructive",
+        });
         return;
       }
       if (data.checkoutUrl) window.location.href = data.checkoutUrl;
-      else if (data.error) toast({ title: "Subscribe error", description: data.error, variant: "destructive" });
+      else if (data.error)
+        toast({ title: "Subscribe error", description: data.error, variant: "destructive" });
     } catch {
-      toast({ title: "Subscribe failed", description: "Please try again.", variant: "destructive" });
-    } finally { setCheckoutLoading(null); }
+      toast({
+        title: "Subscribe failed",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setCheckoutLoading(null);
+    }
   }
 
   async function handleCancelSubscription() {
-    if (!confirm("Cancel your subscription? You'll keep access until the end of the current period.")) return;
+    if (
+      !confirm("Cancel your subscription? You'll keep access until the end of the current period.")
+    )
+      return;
     setCancelLoading(true);
     try {
       const res = await fetch("/api/billing/cancel-subscription", { method: "POST" });
       if (res.ok) {
-        toast({ title: "Subscription cancelled", description: "You'll retain access until your billing period ends." });
+        toast({
+          title: "Subscription cancelled",
+          description: "You'll retain access until your billing period ends.",
+        });
         void fetchData();
       } else {
         const d = (await res.json()) as { error?: string };
-        toast({ title: "Error", description: d.error ?? "Failed to cancel", variant: "destructive" });
+        toast({
+          title: "Error",
+          description: d.error ?? "Failed to cancel",
+          variant: "destructive",
+        });
       }
     } catch {
       toast({ title: "Error", description: "Please try again.", variant: "destructive" });
-    } finally { setCancelLoading(false); }
+    } finally {
+      setCancelLoading(false);
+    }
   }
 
   async function handlePortal() {
@@ -299,13 +350,24 @@ export default function BillingPage() {
       });
       const data = (await res.json()) as { url?: string; setupRequired?: boolean; error?: string };
       if (data.url) window.location.href = data.url;
-      else toast({ title: "Portal unavailable", description: data.error ?? "Contact support.", variant: "destructive" });
+      else
+        toast({
+          title: "Portal unavailable",
+          description: data.error ?? "Contact support.",
+          variant: "destructive",
+        });
     } catch {
       toast({ title: "Error", description: "Please try again.", variant: "destructive" });
-    } finally { setPortalLoading(false); }
+    } finally {
+      setPortalLoading(false);
+    }
   }
 
-  const TABS: { id: BillingTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  const TABS: {
+    id: BillingTab;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }[] = [
     { id: "overview", label: "Overview", icon: CreditCard },
     { id: "subscription", label: "Plans", icon: Crown },
     { id: "usage", label: "Usage", icon: BarChart3 },
@@ -332,7 +394,11 @@ export default function BillingPage() {
               disabled={portalLoading}
               className="flex items-center gap-1.5 text-xs border border-border px-3 py-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
             >
-              {portalLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Settings className="h-3 w-3" />}
+              {portalLoading ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : (
+                <Settings className="h-3 w-3" />
+              )}
               Manage billing
             </button>
           )}
@@ -361,10 +427,7 @@ export default function BillingPage() {
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
             <span className="font-semibold">You're out of credits.</span> Builds are paused.{" "}
-            <button
-              className="underline font-medium"
-              onClick={() => setActiveTab("overview")}
-            >
+            <button className="underline font-medium" onClick={() => setActiveTab("overview")}>
               Top up now
             </button>{" "}
             to continue building.
@@ -377,10 +440,7 @@ export default function BillingPage() {
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
             <span className="font-semibold">Credits running low ({balanceNum} remaining).</span>{" "}
-            <button
-              className="underline font-medium"
-              onClick={() => setActiveTab("overview")}
-            >
+            <button className="underline font-medium" onClick={() => setActiveTab("overview")}>
               Buy more credits
             </button>{" "}
             to keep building without interruption.
@@ -392,7 +452,8 @@ export default function BillingPage() {
         <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-yellow-600">
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
-            <span className="font-semibold">Payment failed.</span> Your subscription is in a grace period
+            <span className="font-semibold">Payment failed.</span> Your subscription is in a grace
+            period
             {subscription.gracePeriodEnd
               ? ` until ${new Date(subscription.gracePeriodEnd).toLocaleDateString()}`
               : ""}
@@ -409,7 +470,8 @@ export default function BillingPage() {
       {packages && !packages.stripeConfigured && (
         <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-yellow-600">
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-          <span className="font-semibold">Credit purchases are not yet available.</span>&nbsp;Stripe is not configured. Contact your administrator.
+          <span className="font-semibold">Credit purchases are not yet available.</span>&nbsp;Stripe
+          is not configured. Contact your administrator.
         </div>
       )}
 
@@ -486,8 +548,12 @@ function OverviewTab({
       {/* Balance card */}
       <div className="border border-border rounded-xl bg-card p-6 flex items-center justify-between">
         <div className="space-y-1">
-          <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Current balance</p>
-          <p className="text-4xl font-bold">{loading ? "…" : (balance?.balance ?? 0).toLocaleString()}</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
+            Current balance
+          </p>
+          <p className="text-4xl font-bold">
+            {loading ? "…" : (balance?.balance ?? 0).toLocaleString()}
+          </p>
           <p className="text-xs text-muted-foreground">build credits</p>
         </div>
         <Zap className="h-10 w-10 text-primary/20" />
@@ -496,7 +562,9 @@ function OverviewTab({
       {/* Credit cost reference */}
       <div className="border border-border rounded-xl bg-card overflow-hidden">
         <div className="px-4 py-2.5 bg-muted/40 border-b border-border">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Credit costs per build</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Credit costs per build
+          </h3>
         </div>
         <div className="divide-y divide-border">
           {[
@@ -506,8 +574,12 @@ function OverviewTab({
             { mode: "Pro", cost: 10, desc: "Maximum quality, extended context" },
           ].map((row) => (
             <div key={row.mode} className="flex items-center justify-between px-4 py-2.5 text-sm">
-              <span className="text-muted-foreground">{row.mode} — {row.desc}</span>
-              <span className="font-semibold">{row.cost} credit{row.cost !== 1 ? "s" : ""}</span>
+              <span className="text-muted-foreground">
+                {row.mode} — {row.desc}
+              </span>
+              <span className="font-semibold">
+                {row.cost} credit{row.cost !== 1 ? "s" : ""}
+              </span>
             </div>
           ))}
         </div>
@@ -527,7 +599,9 @@ function OverviewTab({
             />
           ))}
           {loading && !packages && (
-            <div className="col-span-3 text-center text-sm text-muted-foreground py-4">Loading…</div>
+            <div className="col-span-3 text-center text-sm text-muted-foreground py-4">
+              Loading…
+            </div>
           )}
         </div>
       </div>
@@ -536,11 +610,17 @@ function OverviewTab({
       <div className="border border-border rounded-xl bg-card overflow-hidden">
         <div className="px-4 py-2.5 bg-muted/40 border-b border-border flex items-center gap-2">
           <History className="h-3.5 w-3.5 text-muted-foreground" />
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Transaction history</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Transaction history
+          </h3>
         </div>
-        {loading && <div className="px-4 py-6 text-sm text-muted-foreground text-center">Loading…</div>}
+        {loading && (
+          <div className="px-4 py-6 text-sm text-muted-foreground text-center">Loading…</div>
+        )}
         {!loading && transactions.length === 0 && (
-          <div className="px-4 py-6 text-sm text-muted-foreground text-center">No transactions yet.</div>
+          <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+            No transactions yet.
+          </div>
         )}
         {transactions.length > 0 && (
           <div className="divide-y divide-border">
@@ -549,12 +629,16 @@ function OverviewTab({
                 <div className="min-w-0 flex-1 mr-4">
                   <p className="font-medium truncate">{tx.description ?? tx.type}</p>
                   <p className="text-xs text-muted-foreground">
-                    {new Date(tx.createdAt).toLocaleString()} · balance after: {tx.balanceAfter.toLocaleString()}
+                    {new Date(tx.createdAt).toLocaleString()} · balance after:{" "}
+                    {tx.balanceAfter.toLocaleString()}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className={`font-semibold ${tx.amount > 0 ? "text-green-500" : "text-muted-foreground"}`}>
-                    {tx.amount > 0 ? "+" : ""}{tx.amount}
+                  <span
+                    className={`font-semibold ${tx.amount > 0 ? "text-green-500" : "text-muted-foreground"}`}
+                  >
+                    {tx.amount > 0 ? "+" : ""}
+                    {tx.amount}
                   </span>
                   {tx.receiptUrl && (
                     <a
@@ -597,7 +681,8 @@ function SubscriptionTab({
   onPortal: () => void;
   portalLoading: boolean;
 }) {
-  if (loading) return <div className="text-center py-10 text-muted-foreground text-sm">Loading…</div>;
+  if (loading)
+    return <div className="text-center py-10 text-muted-foreground text-sm">Loading…</div>;
 
   const currentTier = subscription?.tier ?? "free";
 
@@ -619,16 +704,23 @@ function SubscriptionTab({
       {subscription && (
         <div className="border border-border rounded-xl bg-card px-5 py-4 flex items-center justify-between">
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-1">Current plan</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-1">
+              Current plan
+            </p>
             <div className="flex items-center gap-2">
               <span className="font-bold text-lg capitalize">{subscription.tier}</span>
-              <span className={cn(
-                "text-[10px] px-2 py-0.5 rounded-full font-semibold border",
-                subscription.status === "active" ? "bg-green-500/10 text-green-400 border-green-500/20" :
-                subscription.status === "grace_period" ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
-                subscription.status === "canceled" ? "bg-muted text-muted-foreground border-border" :
-                "bg-muted text-muted-foreground border-border",
-              )}>
+              <span
+                className={cn(
+                  "text-[10px] px-2 py-0.5 rounded-full font-semibold border",
+                  subscription.status === "active"
+                    ? "bg-green-500/10 text-green-400 border-green-500/20"
+                    : subscription.status === "grace_period"
+                      ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
+                      : subscription.status === "canceled"
+                        ? "bg-muted text-muted-foreground border-border"
+                        : "bg-muted text-muted-foreground border-border",
+                )}
+              >
                 {subscription.status}
               </span>
             </div>
@@ -642,7 +734,9 @@ function SubscriptionTab({
           <div className="text-right">
             <p className="text-xs text-muted-foreground">Monthly credits</p>
             <p className="font-bold">{subscription.monthlyCredits.toLocaleString()}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Max {subscription.maxConcurrentBuilds} concurrent builds</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Max {subscription.maxConcurrentBuilds} concurrent builds
+            </p>
           </div>
         </div>
       )}
@@ -657,7 +751,9 @@ function SubscriptionTab({
               key={tier.id}
               className={cn(
                 "border rounded-xl bg-card p-5 flex flex-col gap-3 relative",
-                isCurrent ? "border-primary/40 ring-1 ring-primary/20" : TIER_COLORS[tier.id] ?? "border-border",
+                isCurrent
+                  ? "border-primary/40 ring-1 ring-primary/20"
+                  : (TIER_COLORS[tier.id] ?? "border-border"),
               )}
             >
               {isCurrent && (
@@ -703,9 +799,13 @@ function SubscriptionTab({
                   ) : !tier.available ? (
                     "Coming soon"
                   ) : currentTier === "free" ? (
-                    <>Upgrade to {tier.name} <ArrowUpRight className="h-3 w-3" /></>
+                    <>
+                      Upgrade to {tier.name} <ArrowUpRight className="h-3 w-3" />
+                    </>
                   ) : (
-                    <>Switch to {tier.name} <ChevronRight className="h-3 w-3" /></>
+                    <>
+                      Switch to {tier.name} <ChevronRight className="h-3 w-3" />
+                    </>
                   )}
                 </button>
               )}
@@ -715,12 +815,19 @@ function SubscriptionTab({
                   disabled={cancelLoading}
                   className="w-full py-2 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-muted transition-colors"
                 >
-                  {cancelLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin mx-auto" /> : "Cancel plan"}
+                  {cancelLoading ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin mx-auto" />
+                  ) : (
+                    "Cancel plan"
+                  )}
                 </button>
               )}
               {isCurrent && subscription?.cancelAtPeriodEnd && (
                 <p className="text-xs text-center text-yellow-500">
-                  Cancels {subscription.currentPeriodEnd ? new Date(subscription.currentPeriodEnd).toLocaleDateString() : "at period end"}
+                  Cancels{" "}
+                  {subscription.currentPeriodEnd
+                    ? new Date(subscription.currentPeriodEnd).toLocaleDateString()
+                    : "at period end"}
                 </p>
               )}
             </div>
@@ -732,14 +839,19 @@ function SubscriptionTab({
         <div className="border border-border rounded-xl bg-card px-5 py-4">
           <h3 className="text-sm font-semibold mb-2">Payment & billing portal</h3>
           <p className="text-xs text-muted-foreground mb-3">
-            Update your payment method, download invoices, or change your billing details via the Stripe portal.
+            Update your payment method, download invoices, or change your billing details via the
+            Stripe portal.
           </p>
           <button
             onClick={() => void onPortal()}
             disabled={portalLoading}
             className="flex items-center gap-1.5 text-xs border border-border px-3 py-1.5 rounded-lg hover:bg-muted transition-colors"
           >
-            {portalLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <ExternalLink className="h-3 w-3" />}
+            {portalLoading ? (
+              <RefreshCw className="h-3 w-3 animate-spin" />
+            ) : (
+              <ExternalLink className="h-3 w-3" />
+            )}
             Open billing portal
           </button>
         </div>
@@ -774,8 +886,16 @@ function UsageTab({ usage }: { usage: UsageData | null }) {
       {/* Summary stats */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: "Credits spent (30d)", value: usage.totalCreditsSpent.toLocaleString(), sub: "debited" },
-          { label: "Credits purchased (30d)", value: usage.totalCreditsPurchased.toLocaleString(), sub: "topped up" },
+          {
+            label: "Credits spent (30d)",
+            value: usage.totalCreditsSpent.toLocaleString(),
+            sub: "debited",
+          },
+          {
+            label: "Credits purchased (30d)",
+            value: usage.totalCreditsPurchased.toLocaleString(),
+            sub: "topped up",
+          },
           { label: "Builds (30d)", value: totalBuilds.toLocaleString(), sub: "total" },
         ].map((s) => (
           <div key={s.label} className="border border-border rounded-xl bg-card p-4">
@@ -789,12 +909,16 @@ function UsageTab({ usage }: { usage: UsageData | null }) {
       {/* Credits spent per day */}
       {usage.byDay.length > 0 && (
         <div className="border border-border rounded-xl bg-card p-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Credits spent per day (30 days)</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+            Credits spent per day (30 days)
+          </h3>
           <ResponsiveContainer width="100%" height={140}>
             <AreaChart data={usage.byDay} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <XAxis
                 dataKey="day"
-                tickFormatter={(v: string) => new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                tickFormatter={(v: string) =>
+                  new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+                }
                 tick={{ fontSize: 10 }}
                 tickLine={false}
                 axisLine={false}
@@ -821,15 +945,28 @@ function UsageTab({ usage }: { usage: UsageData | null }) {
       {/* Spend by agent mode */}
       {usage.byModel.length > 0 && (
         <div className="border border-border rounded-xl bg-card p-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Builds by agent mode</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+            Builds by agent mode
+          </h3>
           <ResponsiveContainer width="100%" height={120}>
             <BarChart data={usage.byModel} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-              <XAxis dataKey="agentMode" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+              <XAxis
+                dataKey="agentMode"
+                tick={{ fontSize: 10 }}
+                tickLine={false}
+                axisLine={false}
+              />
               <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={{ fontSize: 11 }} formatter={(v: number) => [`${v} builds`, "Builds"]} />
+              <Tooltip
+                contentStyle={{ fontSize: 11 }}
+                formatter={(v: number) => [`${v} builds`, "Builds"]}
+              />
               <Bar dataKey="buildCount" radius={[4, 4, 0, 0]}>
                 {usage.byModel.map((entry) => (
-                  <Cell key={entry.agentMode} fill={MODE_COLORS[entry.agentMode] ?? "hsl(var(--primary))"} />
+                  <Cell
+                    key={entry.agentMode}
+                    fill={MODE_COLORS[entry.agentMode] ?? "hsl(var(--primary))"}
+                  />
                 ))}
               </Bar>
             </BarChart>
@@ -841,7 +978,9 @@ function UsageTab({ usage }: { usage: UsageData | null }) {
       {usage.topProjects.length > 0 && (
         <div className="border border-border rounded-xl bg-card overflow-hidden">
           <div className="px-4 py-2.5 bg-muted/40 border-b border-border">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Top projects by credits consumed (30d)</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Top projects by credits consumed (30d)
+            </h3>
           </div>
           <div className="divide-y divide-border">
             {usage.topProjects.map((p, i) => (
@@ -883,19 +1022,28 @@ function InvoicesTab({ invoices }: { invoices: Invoice[] }) {
     <div className="border border-border rounded-xl bg-card overflow-hidden">
       <div className="px-4 py-2.5 bg-muted/40 border-b border-border flex items-center gap-2">
         <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Invoice history</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Invoice history
+        </h3>
       </div>
       <div className="divide-y divide-border">
         {invoices.map((inv) => (
           <div key={inv.id} className="flex items-center justify-between px-4 py-3 text-sm">
             <div className="min-w-0 flex-1 mr-4">
               <p className="font-medium">{inv.number ?? inv.id}</p>
-              <p className="text-xs text-muted-foreground">{new Date(inv.created * 1000).toLocaleDateString()}</p>
+              <p className="text-xs text-muted-foreground">
+                {new Date(inv.created * 1000).toLocaleDateString()}
+              </p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
               <div className="text-right">
                 <p className="font-semibold">${(inv.amountPaid / 100).toFixed(2)}</p>
-                <p className={cn("text-[10px] font-medium", inv.status === "paid" ? "text-green-500" : "text-muted-foreground")}>
+                <p
+                  className={cn(
+                    "text-[10px] font-medium",
+                    inv.status === "paid" ? "text-green-500" : "text-muted-foreground",
+                  )}
+                >
                   {inv.status}
                 </p>
               </div>
@@ -970,7 +1118,9 @@ function PackageCard({
         ) : !stripeConfigured ? (
           "Coming soon"
         ) : (
-          <>Buy now <ExternalLink className="h-3 w-3" /></>
+          <>
+            Buy now <ExternalLink className="h-3 w-3" />
+          </>
         )}
       </button>
     </div>

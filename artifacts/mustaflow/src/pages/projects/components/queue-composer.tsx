@@ -867,6 +867,8 @@ export function QueueComposer({
 
   const isBusy = disabled || isSubmitting;
   const canSend = rows.some((r) => r.text.trim().length > 0) && !isBusy;
+  const [fileDragActive, setFileDragActive] = useState(false);
+  const fileDragDepthRef = useRef(0);
 
   return (
     <div
@@ -874,6 +876,8 @@ export function QueueComposer({
       onDragEnter={(e) => {
         if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) {
           e.preventDefault();
+          fileDragDepthRef.current += 1;
+          setFileDragActive(true);
         }
       }}
       onDragOver={(e) => {
@@ -882,14 +886,30 @@ export function QueueComposer({
           e.dataTransfer.dropEffect = "copy";
         }
       }}
+      onDragLeave={(e) => {
+        if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) {
+          fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+          if (fileDragDepthRef.current === 0) setFileDragActive(false);
+        }
+      }}
       onDrop={(e) => {
         const files = e.dataTransfer?.files;
+        fileDragDepthRef.current = 0;
+        setFileDragActive(false);
         if (files && files.length > 0) {
           e.preventDefault();
           void handleFiles(files);
         }
       }}
     >
+      {fileDragActive && (
+        <div className="pointer-events-none absolute inset-2 z-20 rounded-2xl border-2 border-dashed border-primary/60 bg-primary/10 backdrop-blur-[2px] flex items-center justify-center">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-background/80 border border-primary/40 text-primary text-xs font-semibold shadow-md">
+            <ImageIcon className="h-3.5 w-3.5" />
+            Drop screenshot to build from it
+          </div>
+        </div>
+      )}
       {isMultiRow && (
         <div className="flex items-center gap-2 mb-2">
           <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">

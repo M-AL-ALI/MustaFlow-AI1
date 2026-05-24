@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { X, Clock, ChevronDown, ChevronRight, BrainCircuit, ArrowLeft } from "lucide-react";
-import { cn } from "@/lib/utils";
 import type { StructuredPlan } from "./plan-card";
 
 type PlanHistoryEntry = {
@@ -58,13 +57,7 @@ function computePlanDiff(before: StructuredPlan, after: StructuredPlan): DiffSec
   return sections.filter((s) => s.before !== "" || s.after !== "");
 }
 
-function PlanDiffView({
-  before,
-  after,
-}: {
-  before: StructuredPlan;
-  after: StructuredPlan;
-}) {
+function PlanDiffView({ before, after }: { before: StructuredPlan; after: StructuredPlan }) {
   const diffs = computePlanDiff(before, after);
   const changed = diffs.filter((d) => d.changed);
   const unchanged = diffs.filter((d) => !d.changed && d.before !== "");
@@ -177,7 +170,9 @@ function PlanHistoryEntry({
         <div className="border-t border-border px-3 py-2 space-y-3 bg-muted/10">
           {/* Summary */}
           {entry.plan.summary && (
-            <p className="text-[11px] text-muted-foreground leading-relaxed">{entry.plan.summary}</p>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {entry.plan.summary}
+            </p>
           )}
 
           {/* Pages preview */}
@@ -201,7 +196,11 @@ function PlanHistoryEntry({
                 onClick={() => setShowDiff((v) => !v)}
                 className="text-[10px] text-primary/80 hover:text-primary flex items-center gap-1 transition-colors"
               >
-                {showDiff ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                {showDiff ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
                 {showDiff ? "Hide" : "Show"} diff from previous version
               </button>
               {showDiff && (

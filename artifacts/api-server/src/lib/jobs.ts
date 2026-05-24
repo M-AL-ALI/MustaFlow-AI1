@@ -661,7 +661,12 @@ async function loadKnowledgeContext(
     ].join("\n");
 
     const context = [integrationsNote, knowledgeSection].filter(Boolean).join("\n\n");
-    const applied = selected.map((e) => ({ id: e.id, title: e.title, type: e.type, category: e.category }));
+    const applied = selected.map((e) => ({
+      id: e.id,
+      title: e.title,
+      type: e.type,
+      category: e.category,
+    }));
 
     // Increment usageCount for all selected entries — best-effort, non-fatal.
     if (selected.length > 0) {
@@ -1217,6 +1222,12 @@ export async function runJob(input: JobInput): Promise<void> {
   } = input;
   let { userPrompt, agentMode } = input;
   const agentIdentity: AgentIdentity = input.agentIdentity ?? "main";
+  // Task #665 — image layout analysis. When the user drops in screenshots,
+  // we run a vision pass once and prepend a structured layout brief to the
+  // prompt so every downstream pipeline (including JSON-mode builders that
+  // can't natively consume image_url blocks) has something concrete to work
+  // with. Best-effort: failures fall back to the existing multimodal path.
+  let imageLayoutBrief: string | null = null;
 
   const jobStartTime = Date.now();
   let wasEscalated = false;
@@ -1415,6 +1426,34 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         // and fail one-by-one with the same insufficient-credits error.
         await pauseRemainingQueuedTasks(taskId, projectId);
         return;
+      }
+    }
+
+    // Task #665 — run image layout analysis once up front so every pipeline
+    // branch (build / refine, legacy / agentic, mobile / web) inherits the
+    // structured brief without re-paying the vision call.
+    if (imageAttachments && imageAttachments.length > 0) {
+      try {
+        await emitEvent(
+          taskId,
+          "narration",
+          `Analyzing ${imageAttachments.length === 1 ? "your screenshot" : `your ${imageAttachments.length} screenshots`}…`,
+        );
+        const { analyzeImagesToLayout } = await import("./builder");
+        imageLayoutBrief = await analyzeImagesToLayout(imageAttachments, signal);
+        if (imageLayoutBrief) {
+          await emitEvent(taskId, "narration", "Image analysis complete — using it as a brief.");
+          // Inject the brief into the prompt so even JSON-mode builders that
+          // can't natively consume image_url blocks ground their output in
+          // what the user actually attached. The image_url blocks are still
+          // passed through too (multimodal models will see both).
+          userPrompt = `${userPrompt}\n\n[ATTACHED IMAGE ANALYSIS — derived from the user's uploaded screenshot(s); treat as ground truth about the desired layout]\n${imageLayoutBrief}`;
+        }
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err), taskId },
+          "Image analysis step failed — continuing with multimodal-only path",
+        );
       }
     }
 

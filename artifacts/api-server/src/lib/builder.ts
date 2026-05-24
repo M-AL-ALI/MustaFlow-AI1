@@ -1579,6 +1579,76 @@ export interface BuilderImageAttachment {
 }
 
 /**
+ * Run a structured layout analysis on user-attached images before the build
+ * or refine pipeline starts. The result is a short, plain-text description
+ * (overall layout, components, colours, text, suspected intent) that the
+ * downstream pipeline injects into its prompt so even non-vision callers
+ * (and the structured-JSON build prompt) can ground their output in what
+ * the user actually dropped in.
+ *
+ * Best-effort: returns null on failure so the caller can fall back to the
+ * existing multimodal image_url path without aborting the job.
+ */
+export async function analyzeImagesToLayout(
+  imageAttachments: BuilderImageAttachment[],
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (!imageAttachments || imageAttachments.length === 0) return null;
+  try {
+    const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+    // Route via the existing "plan" stage at agentMode=lite — cheap, vision-capable.
+    const { provider, model } = resolveStageProvider("plan", "lite", "gpt-5-mini");
+
+    const parts: Array<
+      { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
+    > = [
+      {
+        type: "text",
+        text: `Analyse the attached screenshot(s) or mockup(s) as a layout brief for an app builder.
+For each image, describe:
+  • Overall layout structure (header / nav / hero / grid / sidebar / footer / modal etc.)
+  • Visible UI components (buttons, forms, cards, tables, charts, lists, images)
+  • Text content and headings (copy verbatim where short)
+  • Colour palette (background, primary, accent, text — name approximate hex if obvious)
+  • Typography feel (serif/sans, weight, size hierarchy)
+  • Likely user intent (what kind of app/page this represents)
+
+Return ONE plain-text brief (no markdown headings, no JSON). Be specific and short — aim for 120–250 words total across all images. Use a "Image N:" prefix when there are multiple.`,
+      },
+    ];
+    for (const att of imageAttachments) {
+      parts.push({ type: "image_url", image_url: { url: att.dataUri } });
+    }
+
+    const resp = await createChatCompletion({
+      provider,
+      model,
+      max_completion_tokens: 800,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a UI analyst. You produce concise, factual layout briefs from screenshots so a downstream code generator can rebuild what the user is showing. Never invent details that aren't visible.",
+        },
+        // Cast at this single boundary — Chat Completions accepts content parts arrays.
+        { role: "user", content: parts as unknown as string },
+      ],
+      signal,
+    });
+    const text = resp.choices[0]?.message?.content?.trim() ?? "";
+    if (!text) return null;
+    // Trim to a hard ceiling so we don't blow the downstream prompt budget.
+    return text.length > 2400 ? text.slice(0, 2400) + "…" : text;
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "analyzeImagesToLayout failed — falling back to multimodal-only path",
+    );
+    return null;
+  }
+}
+
+/**
  * Append a user-role message to the messages array. If image attachments are
  * provided, sends the prompt + images as multimodal content parts so vision
  * models can actually read uploaded screenshots/mockups.
