@@ -2225,9 +2225,7 @@ export default function ProjectWorkspacePage() {
             <>
               {/* Chat panel header */}
               <div className="shrink-0 px-4 py-2 border-b border-border/50 flex items-center gap-2">
-                <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center text-white">
-                  <AgentIcon size={10} state={isBusy ? "active" : "idle"} />
-                </div>
+                <AgentIcon size={16} state={isBusy ? "active" : "idle"} className="text-primary" />
                 <span className="text-xs font-semibold text-foreground">AI Builder</span>
                 <span
                   className={cn(
