@@ -362,28 +362,32 @@ const router: IRouter = Router();
 // Secrets list uses requireProjectAccess("viewer") so org members can reach
 // the route; per-secret minRole filtering is applied inside the handler via
 // getCallerProjectRole + callerCanSeeSecret.
-router.get("/projects/:id/secrets", requireProjectAccess("viewer"), async (req, res): Promise<void> => {
-  const params = ListSecretsParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const contextEnv = typeof req.query.env === "string" ? req.query.env : undefined;
+router.get(
+  "/projects/:id/secrets",
+  requireProjectAccess("viewer"),
+  async (req, res): Promise<void> => {
+    const params = ListSecretsParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    const contextEnv = typeof req.query.env === "string" ? req.query.env : undefined;
 
-  // Resolve caller's effective role so we can filter secrets by minRole.
-  const callerRole = await getCallerProjectRole(req.userId!, params.data.id);
+    // Resolve caller's effective role so we can filter secrets by minRole.
+    const callerRole = await getCallerProjectRole(req.userId!, params.data.id);
 
-  const rows = await db
-    .select()
-    .from(secretsTable)
-    .where(eq(secretsTable.projectId, params.data.id))
-    .orderBy(desc(secretsTable.createdAt));
+    const rows = await db
+      .select()
+      .from(secretsTable)
+      .where(eq(secretsTable.projectId, params.data.id))
+      .orderBy(desc(secretsTable.createdAt));
 
-  // Filter: only return secrets the caller has permission to see.
-  const visible = rows.filter((r) => callerCanSeeSecret(callerRole, r.minRole));
+    // Filter: only return secrets the caller has permission to see.
+    const visible = rows.filter((r) => callerCanSeeSecret(callerRole, r.minRole));
 
-  res.json(ListSecretsResponse.parse(visible.map((r) => toEntry(r, contextEnv))));
-});
+    res.json(ListSecretsResponse.parse(visible.map((r) => toEntry(r, contextEnv))));
+  },
+);
 
 router.post("/projects/:id/secrets", requireProjectOwnership, async (req, res): Promise<void> => {
   const params = CreateSecretParams.safeParse(req.params);

@@ -36,8 +36,15 @@ export const publicGalleryRouter: IRouter = Router();
 // ── GET /gallery-templates ────────────────────────────────────────────────────
 publicGalleryRouter.get("/gallery-templates", async (req, res): Promise<void> => {
   try {
-    const { category, search, featured, editorsPick, platform, limit: limitStr, offset: offsetStr } =
-      req.query as Record<string, string>;
+    const {
+      category,
+      search,
+      featured,
+      editorsPick,
+      platform,
+      limit: limitStr,
+      offset: offsetStr,
+    } = req.query as Record<string, string>;
 
     const limit = Math.min(parseInt(limitStr ?? "24", 10) || 24, 100);
     const offset = parseInt(offsetStr ?? "0", 10) || 0;
@@ -349,8 +356,18 @@ const submitSchema = z.object({
   description: z.string().min(10).max(500),
   readme: z.string().max(10000).optional(),
   category: z.enum([
-    "web", "mobile", "saas", "ecommerce", "portfolio", "landing",
-    "internal-tools", "ai-app", "dashboard", "blog", "social", "other",
+    "web",
+    "mobile",
+    "saas",
+    "ecommerce",
+    "portfolio",
+    "landing",
+    "internal-tools",
+    "ai-app",
+    "dashboard",
+    "blog",
+    "social",
+    "other",
   ]),
   tags: z.array(z.string().max(30)).max(10).default([]),
 });
@@ -375,7 +392,11 @@ router.post(
 
     try {
       const [project] = await db
-        .select({ name: projectsTable.name, platform: projectsTable.platform, stack: projectsTable.stack })
+        .select({
+          name: projectsTable.name,
+          platform: projectsTable.platform,
+          stack: projectsTable.stack,
+        })
         .from(projectsTable)
         .where(eq(projectsTable.id, projectId));
 
@@ -394,7 +415,10 @@ router.post(
         snapshot[f.path] = f.content ?? "";
       }
 
-      const slug = `${parsed.data.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${Date.now().toString(36)}`;
+      const slug = `${parsed.data.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")}-${Date.now().toString(36)}`;
 
       const [tpl] = await db
         .insert(galleryTemplatesTable)

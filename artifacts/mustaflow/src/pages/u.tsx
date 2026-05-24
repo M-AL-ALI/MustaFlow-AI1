@@ -75,7 +75,9 @@ function ProjectCard({ project }: { project: PublicProject }) {
             </p>
           )}
         </div>
-        {isPublished && <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />}
+        {isPublished && (
+          <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+        )}
       </div>
       <div className="flex items-center gap-2">
         <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
@@ -267,8 +269,7 @@ export default function UserProfilePage() {
                 rel="noopener noreferrer"
                 className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
               >
-                <Twitter className="h-3.5 w-3.5" />
-                @{profile.twitterHandle}
+                <Twitter className="h-3.5 w-3.5" />@{profile.twitterHandle}
               </a>
             )}
             {profile.githubHandle && (

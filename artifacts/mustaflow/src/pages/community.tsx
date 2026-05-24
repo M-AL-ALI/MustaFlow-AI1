@@ -1,13 +1,5 @@
 import { Link } from "wouter";
-import {
-  Users,
-  Globe,
-  Star,
-  GitFork,
-  ArrowRight,
-  Layers,
-  Share2,
-} from "lucide-react";
+import { Users, Globe, Star, GitFork, ArrowRight, Layers, Share2 } from "lucide-react";
 
 export default function CommunityPage() {
   const highlights = [
@@ -27,7 +19,8 @@ export default function CommunityPage() {
     },
     {
       title: "Your Profile",
-      description: "Create a public profile to showcase your published projects and follow other builders.",
+      description:
+        "Create a public profile to showcase your published projects and follow other builders.",
       href: "/settings",
       icon: Users,
       cta: "Set up profile",

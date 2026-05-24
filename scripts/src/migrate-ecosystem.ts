@@ -122,18 +122,14 @@ async function main(): Promise<void> {
       )
     `);
 
-    await client.query(
-      `CREATE INDEX IF NOT EXISTS extensions_status_idx ON extensions(status)`,
-    );
+    await client.query(`CREATE INDEX IF NOT EXISTS extensions_status_idx ON extensions(status)`);
     await client.query(
       `CREATE INDEX IF NOT EXISTS extensions_category_idx ON extensions(category)`,
     );
     await client.query(
       `CREATE INDEX IF NOT EXISTS extensions_featured_idx ON extensions(featured)`,
     );
-    await client.query(
-      `CREATE INDEX IF NOT EXISTS extensions_author_idx ON extensions(author_id)`,
-    );
+    await client.query(`CREATE INDEX IF NOT EXISTS extensions_author_idx ON extensions(author_id)`);
 
     // ── project_extensions ────────────────────────────────────────────────────
     await client.query(`

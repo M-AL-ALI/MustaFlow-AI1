@@ -120,7 +120,8 @@ const CATEGORIES: IntegrationCategory[] = [
     integrations: [
       {
         name: "Clerk",
-        description: "User sign-in, sign-up, session management. Managed by Replit's Clerk integration.",
+        description:
+          "User sign-in, sign-up, session management. Managed by Replit's Clerk integration.",
         status: "active",
         authType: "built-in",
         note: "Active. Managed Clerk tenant — no setup required for development.",
@@ -184,7 +185,8 @@ const CATEGORIES: IntegrationCategory[] = [
       },
       {
         name: "Paddle",
-        description: "Merchant of record for SaaS businesses. Handles VAT and global tax compliance.",
+        description:
+          "Merchant of record for SaaS businesses. Handles VAT and global tax compliance.",
         status: "setup-required",
         authType: "api-key",
         envVars: ["PADDLE_API_KEY", "PADDLE_WEBHOOK_SECRET"],
@@ -247,7 +249,8 @@ const CATEGORIES: IntegrationCategory[] = [
       },
       {
         name: "Slack",
-        description: "Send messages and notifications to Slack channels via webhooks or the Web API.",
+        description:
+          "Send messages and notifications to Slack channels via webhooks or the Web API.",
         status: "setup-required",
         authType: "oauth",
         envVars: ["SLACK_BOT_TOKEN", "SLACK_WEBHOOK_URL"],
@@ -278,7 +281,8 @@ const CATEGORIES: IntegrationCategory[] = [
     integrations: [
       {
         name: "OpenAI (via Replit AI Integration)",
-        description: "Powers the AI builder. Routed through Replit's managed integration — no API key needed.",
+        description:
+          "Powers the AI builder. Routed through Replit's managed integration — no API key needed.",
         status: "active",
         authType: "built-in",
         note: "Active. gpt-5-nano (Lite/Eco) and gpt-5.4 (Power/Pro) models in use.",
@@ -377,7 +381,12 @@ const CATEGORIES: IntegrationCategory[] = [
         description: "S3-compatible object storage with zero egress fees.",
         status: "active",
         authType: "api-key",
-        envVars: ["CF_ACCOUNT_ID", "CF_R2_ACCESS_KEY_ID", "CF_R2_SECRET_ACCESS_KEY", "CF_R2_BUCKET"],
+        envVars: [
+          "CF_ACCOUNT_ID",
+          "CF_R2_ACCESS_KEY_ID",
+          "CF_R2_SECRET_ACCESS_KEY",
+          "CF_R2_BUCKET",
+        ],
         note: "Active. Used for platform CDN. Configure per-project R2 bucket via the storage add-on.",
         tags: ["storage", "s3"],
       },
@@ -498,7 +507,12 @@ const CATEGORIES: IntegrationCategory[] = [
         description: "Purchase and manage custom domains directly inside MustaFlow.",
         status: "setup-required",
         authType: "api-key",
-        envVars: ["NAMECHEAP_API_USER", "NAMECHEAP_API_KEY", "NAMECHEAP_USERNAME", "NAMECHEAP_CLIENT_IP"],
+        envVars: [
+          "NAMECHEAP_API_USER",
+          "NAMECHEAP_API_KEY",
+          "NAMECHEAP_USERNAME",
+          "NAMECHEAP_CLIENT_IP",
+        ],
         note: "Domain marketplace available in the Publishing tab when Namecheap keys are configured.",
         tags: ["domains", "dns"],
       },
@@ -539,7 +553,7 @@ const CATEGORIES: IntegrationCategory[] = [
 
 const AUTH_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   "api-key": { label: "API Key", color: "text-yellow-500" },
-  "oauth": { label: "OAuth", color: "text-blue-500" },
+  oauth: { label: "OAuth", color: "text-blue-500" },
   "built-in": { label: "Built-in", color: "text-green-500" },
 };
 
@@ -603,9 +617,7 @@ function IntegrationRow({ integration }: { integration: Integration }) {
 
       {expanded && (
         <div className="px-4 pb-4 space-y-3 border-t border-border pt-3">
-          {integration.note && (
-            <p className="text-xs text-muted-foreground">{integration.note}</p>
-          )}
+          {integration.note && <p className="text-xs text-muted-foreground">{integration.note}</p>}
           {integration.tags && integration.tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {integration.tags.map((tag) => (
@@ -690,15 +702,16 @@ export default function IntegrationsPage() {
   const allIntegrations = CATEGORIES.flatMap((c) => c.integrations);
 
   const visibleCategories = CATEGORIES.filter((category) => {
-    const categoryTags = Object.entries(CATEGORY_TAG_MAP).find(([k]) => {
-      const catLabel = ALL_CATEGORY_VALUES.find((v) => v.value === k)?.label.toLowerCase();
-      return catLabel === category.title.toLowerCase().split(" ")[0];
-    })?.[1] ?? [];
+    const _categoryTags =
+      Object.entries(CATEGORY_TAG_MAP).find(([k]) => {
+        const catLabel = ALL_CATEGORY_VALUES.find((v) => v.value === k)?.label.toLowerCase();
+        return catLabel === category.title.toLowerCase().split(" ")[0];
+      })?.[1] ?? [];
 
     if (activeCategory !== "all") {
       const allowedTags = CATEGORY_TAG_MAP[activeCategory] ?? [];
-      const hasMatch = category.integrations.some(
-        (i) => i.tags?.some((t) => allowedTags.includes(t)),
+      const hasMatch = category.integrations.some((i) =>
+        i.tags?.some((t) => allowedTags.includes(t)),
       );
       if (!hasMatch) return false;
     }
@@ -742,8 +755,7 @@ export default function IntegrationsPage() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Integrations</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          {totalCount}+ first-class connectors for your generated apps and the MustaFlow platform.
-          {" "}
+          {totalCount}+ first-class connectors for your generated apps and the MustaFlow platform.{" "}
           <span className="text-green-500 font-medium">{activeCount} active</span>.
         </p>
       </div>

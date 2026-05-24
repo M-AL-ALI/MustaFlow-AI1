@@ -406,155 +406,155 @@ export default function BillingPage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <CreditCard className="h-6 w-6 text-primary" />
-          <div>
-            <h1 className="text-2xl font-bold">Billing & Credits</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              Manage your credits, subscriptions, and billing history.
-            </p>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <CreditCard className="h-6 w-6 text-primary" />
+            <div>
+              <h1 className="text-2xl font-bold">Billing & Credits</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Manage your credits, subscriptions, and billing history.
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {subscription?.stripeConfigured && subscription.tier !== "free" && (
-            <button
-              onClick={() => void handlePortal()}
-              disabled={portalLoading}
-              className="flex items-center gap-1.5 text-xs border border-border px-3 py-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
-            >
-              {portalLoading ? (
-                <RefreshCw className="h-3 w-3 animate-spin" />
-              ) : (
-                <Settings className="h-3 w-3" />
-              )}
-              Manage billing
-            </button>
-          )}
-          <button
-            onClick={() => void fetchData()}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      {/* Alerts */}
-      {successParam && (
-        <div className="border border-green-500/20 bg-green-500/10 rounded-xl px-4 py-3 flex items-center gap-2.5 text-sm text-green-600">
-          <CheckCircle className="h-4 w-4 shrink-0" />
-          {successParam === "subscribed" || successParam === "1"
-            ? "Payment successful! Your plan and credits have been updated."
-            : "Payment successful! Your credits have been added."}
-        </div>
-      )}
-
-      {showZeroWarning && (
-        <div className="border border-destructive/30 bg-destructive/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-destructive">
-          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-          <div>
-            <span className="font-semibold">You're out of credits.</span> Builds are paused.{" "}
-            <button className="underline font-medium" onClick={() => setActiveTab("overview")}>
-              Top up now
-            </button>{" "}
-            to continue building.
-          </div>
-        </div>
-      )}
-
-      {showLowCreditWarning && !showZeroWarning && (
-        <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-yellow-600">
-          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-          <div>
-            <span className="font-semibold">Credits running low ({balanceNum} remaining).</span>{" "}
-            <button className="underline font-medium" onClick={() => setActiveTab("overview")}>
-              Buy more credits
-            </button>{" "}
-            to keep building without interruption.
-          </div>
-        </div>
-      )}
-
-      {subscription?.status === "grace_period" && (
-        <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-yellow-600">
-          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-          <div>
-            <span className="font-semibold">Payment failed.</span> Your subscription is in a grace
-            period
-            {subscription.gracePeriodEnd
-              ? ` until ${new Date(subscription.gracePeriodEnd).toLocaleDateString()}`
-              : ""}
-            . Please update your payment method.
-            {subscription.stripeConfigured && (
-              <button onClick={() => void handlePortal()} className="ml-2 underline font-medium">
-                Update payment
+          <div className="flex items-center gap-2">
+            {subscription?.stripeConfigured && subscription.tier !== "free" && (
+              <button
+                onClick={() => void handlePortal()}
+                disabled={portalLoading}
+                className="flex items-center gap-1.5 text-xs border border-border px-3 py-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+              >
+                {portalLoading ? (
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Settings className="h-3 w-3" />
+                )}
+                Manage billing
               </button>
             )}
+            <button
+              onClick={() => void fetchData()}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Refresh
+            </button>
           </div>
         </div>
-      )}
 
-      {packages && !packages.stripeConfigured && (
-        <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-yellow-600">
-          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-          <span className="font-semibold">Credit purchases are not yet available.</span>&nbsp;Stripe
-          is not configured. Contact your administrator.
-        </div>
-      )}
+        {/* Alerts */}
+        {successParam && (
+          <div className="border border-green-500/20 bg-green-500/10 rounded-xl px-4 py-3 flex items-center gap-2.5 text-sm text-green-600">
+            <CheckCircle className="h-4 w-4 shrink-0" />
+            {successParam === "subscribed" || successParam === "1"
+              ? "Payment successful! Your plan and credits have been updated."
+              : "Payment successful! Your credits have been added."}
+          </div>
+        )}
 
-      {/* Tabs */}
-      <div className="flex border-b border-border gap-1">
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors",
-                activeTab === tab.id
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
+        {showZeroWarning && (
+          <div className="border border-destructive/30 bg-destructive/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            <div>
+              <span className="font-semibold">You're out of credits.</span> Builds are paused.{" "}
+              <button className="underline font-medium" onClick={() => setActiveTab("overview")}>
+                Top up now
+              </button>{" "}
+              to continue building.
+            </div>
+          </div>
+        )}
+
+        {showLowCreditWarning && !showZeroWarning && (
+          <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-yellow-600">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <div>
+              <span className="font-semibold">Credits running low ({balanceNum} remaining).</span>{" "}
+              <button className="underline font-medium" onClick={() => setActiveTab("overview")}>
+                Buy more credits
+              </button>{" "}
+              to keep building without interruption.
+            </div>
+          </div>
+        )}
+
+        {subscription?.status === "grace_period" && (
+          <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-yellow-600">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <div>
+              <span className="font-semibold">Payment failed.</span> Your subscription is in a grace
+              period
+              {subscription.gracePeriodEnd
+                ? ` until ${new Date(subscription.gracePeriodEnd).toLocaleDateString()}`
+                : ""}
+              . Please update your payment method.
+              {subscription.stripeConfigured && (
+                <button onClick={() => void handlePortal()} className="ml-2 underline font-medium">
+                  Update payment
+                </button>
               )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+            </div>
+          </div>
+        )}
 
-      {activeTab === "overview" && (
-        <OverviewTab
-          balance={balance}
-          packages={packages}
-          transactions={transactions}
-          loading={loading}
-          checkoutLoading={checkoutLoading}
-          onCheckout={handleCheckout}
-        />
-      )}
+        {packages && !packages.stripeConfigured && (
+          <div className="border border-yellow-500/20 bg-yellow-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-yellow-600">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span className="font-semibold">Credit purchases are not yet available.</span>
+            &nbsp;Stripe is not configured. Contact your administrator.
+          </div>
+        )}
 
-      {activeTab === "subscription" && (
-        <SubscriptionTab
-          subscription={subscription}
-          loading={loading}
-          checkoutLoading={checkoutLoading}
-          cancelLoading={cancelLoading}
-          onSubscribe={handleSubscribe}
-          onCancel={handleCancelSubscription}
-          onPortal={handlePortal}
-          portalLoading={portalLoading}
-          recommendedTier={recommendedTier}
-        />
-      )}
+        {/* Tabs */}
+        <div className="flex border-b border-border gap-1">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors",
+                  activeTab === tab.id
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
 
-      {activeTab === "usage" && <UsageTab usage={usage} />}
+        {activeTab === "overview" && (
+          <OverviewTab
+            balance={balance}
+            packages={packages}
+            transactions={transactions}
+            loading={loading}
+            checkoutLoading={checkoutLoading}
+            onCheckout={handleCheckout}
+          />
+        )}
 
-      {activeTab === "invoices" && <InvoicesTab invoices={invoices} />}
+        {activeTab === "subscription" && (
+          <SubscriptionTab
+            subscription={subscription}
+            loading={loading}
+            checkoutLoading={checkoutLoading}
+            cancelLoading={cancelLoading}
+            onSubscribe={handleSubscribe}
+            onCancel={handleCancelSubscription}
+            onPortal={handlePortal}
+            portalLoading={portalLoading}
+            recommendedTier={recommendedTier}
+          />
+        )}
+
+        {activeTab === "usage" && <UsageTab usage={usage} />}
+
+        {activeTab === "invoices" && <InvoicesTab invoices={invoices} />}
       </div>
     </div>
   );

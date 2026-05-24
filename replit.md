@@ -18,11 +18,12 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/db run push` — push DB schema (dev). Custom migration scripts live in `scripts/src/migrate-*.ts` and are registered in `scripts/package.json`.
 - `pnpm --filter @workspace/scripts run seed` — seed sample projects (no-op if any exist)
 
-
 ### Required env
+
 `DATABASE_URL`, `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `SESSION_SECRET`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `ENCRYPTION_KEY`
 
 ### Optional env (features gracefully no-op when missing)
+
 - **GitHub OAuth**: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT_URL`
 - **Namecheap (domain purchase)**: `NAMECHEAP_API_USER`, `NAMECHEAP_API_KEY`, `NAMECHEAP_USERNAME`, `NAMECHEAP_CLIENT_IP`, `NAMECHEAP_SANDBOX`, `NS1_HOSTNAME`, `NS2_HOSTNAME`, `DOMAIN_MARKUP_PERCENT`
 - **Cloudflare edge CDN**: `CF_ACCOUNT_ID`, `CF_R2_ACCESS_KEY_ID`, `CF_R2_SECRET_ACCESS_KEY`, `CF_R2_BUCKET`, `CF_KV_NAMESPACE_ID`, `EDGE_SERVING_ENABLED`
@@ -33,6 +34,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **Admin bootstrap**: `ADMIN_USER_IDS` (comma-separated Clerk user IDs)
 
 ### Migrations
+
 - `pnpm --filter @workspace/scripts run migrate-preferred-region` — adds `preferred_region` to `projects` (edge CDN geo-routing)
 - `pnpm --filter @workspace/scripts run migrate-runtime-breadth` — creates `scheduled_job_runs`, `managed_addons`, `project_environments`, `environment_promotions`, `usage_events` tables (Task #628)
 - `pnpm --filter @workspace/scripts run migrate-secret-scoping` — adds `min_role` column + check constraint to `project_secrets` (Task #632; run before deploy)

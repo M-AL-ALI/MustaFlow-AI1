@@ -7,8 +7,6 @@ import { BILLING_ENABLED } from "@/lib/billing-flag";
 const REFRESH_INTERVAL_MS = 60_000;
 
 export function CreditBalancePill() {
-  if (!BILLING_ENABLED) return null;
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const [balance, setBalance] = useState<number | null>(null);
 
   const fetchBalance = useCallback(async () => {
@@ -41,6 +39,7 @@ export function CreditBalancePill() {
     return () => window.removeEventListener("credits:refresh", handler);
   }, [fetchBalance]);
 
+  if (!BILLING_ENABLED) return null;
   if (balance === null) return null;
 
   const isZero = balance === 0;

@@ -344,150 +344,110 @@ export default function SecurityPage() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-    <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-foreground">Security Center</h1>
-            {critHighCount > 0 && (
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/30">
-                {critHighCount} critical/high
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-muted-foreground mt-1">
-            Persistent security findings across all your projects, sorted by exposure.
-          </p>
-        </div>
-        <ScanActions onRefresh={handleRefresh} loading={findingsLoading} />
-      </div>
-
-      {/* Summary bar */}
-      {!findingsLoading && !findingsError && statusFilter === "open" && (
-        <SummaryBar summary={summary} />
-      )}
-
-      {/* Cross-project findings */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">Project Findings</h2>
-            <span className="text-xs text-muted-foreground">Published projects appear first</span>
-          </div>
-          <div className="flex items-center gap-1 bg-muted/60 rounded-lg p-0.5">
-            {(["open", "dismissed", "fixed"] as FindingStatus[]).map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatusFilter(s)}
-                className={cn(
-                  "text-xs font-medium px-2.5 py-1 rounded-md transition-colors capitalize",
-                  statusFilter === s
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {findingsLoading && (
-          <div className="p-8 text-center text-sm text-muted-foreground">
-            <RefreshCw className="h-4 w-4 animate-spin mx-auto mb-2" />
-            Loading findings…
-          </div>
-        )}
-
-        {findingsError && (
-          <div className="p-8 text-center text-sm text-muted-foreground">
-            Failed to load findings. Try refreshing.
-          </div>
-        )}
-
-        {!findingsLoading && !findingsError && findings.length === 0 && (
-          <div className="p-8 text-center space-y-2">
-            <ShieldCheck className="h-8 w-8 text-muted-foreground mx-auto" />
-            <p className="text-sm text-muted-foreground">
-              {statusFilter === "open"
-                ? "No open findings across your projects."
-                : statusFilter === "dismissed"
-                  ? "No dismissed findings."
-                  : "No fixed findings yet."}
-            </p>
-            {statusFilter === "open" && (
-              <p className="text-xs text-muted-foreground">
-                Build a project and run security checks to see persistent findings here.
-              </p>
-            )}
-          </div>
-        )}
-
-        {!findingsLoading && !findingsError && findings.length > 0 && (
-          <div className="divide-y divide-border">
-            {findings.map((f) => (
-              <FindingRow key={f.id} finding={f} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Platform security checks */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center gap-2">
-          <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold text-foreground">Platform Security</h2>
-        </div>
-        <div className="divide-y divide-border">
-          {PLATFORM_CHECKS.map((check) => (
-            <div key={check.id} className="flex items-start gap-3 px-4 py-3">
-              <StatusIcon status={check.status} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-sm font-medium text-foreground">{check.label}</span>
-                  <StatusLabel status={check.status} />
-                </div>
-                {check.message && (
-                  <p className="text-xs text-muted-foreground mt-0.5">{check.message}</p>
-                )}
-              </div>
+      <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold text-foreground">Security Center</h1>
+              {critHighCount > 0 && (
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/30">
+                  {critHighCount} critical/high
+                </span>
+              )}
             </div>
-          ))}
+            <p className="text-sm text-muted-foreground mt-1">
+              Persistent security findings across all your projects, sorted by exposure.
+            </p>
+          </div>
+          <ScanActions onRefresh={handleRefresh} loading={findingsLoading} />
         </div>
-      </div>
 
-      {/* Admin launch-readiness */}
-      {isAdmin && readiness && (
+        {/* Summary bar */}
+        {!findingsLoading && !findingsError && statusFilter === "open" && (
+          <SummaryBar summary={summary} />
+        )}
+
+        {/* Cross-project findings */}
         <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">Launch Readiness</h2>
-            {readiness.canPublish ? (
-              <span className="text-xs text-green-500 font-semibold flex items-center gap-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Production ready
-              </span>
-            ) : (
-              <span className="text-xs text-destructive font-semibold flex items-center gap-1.5">
-                <XCircle className="h-3.5 w-3.5" /> Blocking issues present
-              </span>
-            )}
+          <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold text-foreground">Project Findings</h2>
+              <span className="text-xs text-muted-foreground">Published projects appear first</span>
+            </div>
+            <div className="flex items-center gap-1 bg-muted/60 rounded-lg p-0.5">
+              {(["open", "dismissed", "fixed"] as FindingStatus[]).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={cn(
+                    "text-xs font-medium px-2.5 py-1 rounded-md transition-colors capitalize",
+                    statusFilter === s
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {findingsLoading && (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              <RefreshCw className="h-4 w-4 animate-spin mx-auto mb-2" />
+              Loading findings…
+            </div>
+          )}
+
+          {findingsError && (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              Failed to load findings. Try refreshing.
+            </div>
+          )}
+
+          {!findingsLoading && !findingsError && findings.length === 0 && (
+            <div className="p-8 text-center space-y-2">
+              <ShieldCheck className="h-8 w-8 text-muted-foreground mx-auto" />
+              <p className="text-sm text-muted-foreground">
+                {statusFilter === "open"
+                  ? "No open findings across your projects."
+                  : statusFilter === "dismissed"
+                    ? "No dismissed findings."
+                    : "No fixed findings yet."}
+              </p>
+              {statusFilter === "open" && (
+                <p className="text-xs text-muted-foreground">
+                  Build a project and run security checks to see persistent findings here.
+                </p>
+              )}
+            </div>
+          )}
+
+          {!findingsLoading && !findingsError && findings.length > 0 && (
+            <div className="divide-y divide-border">
+              {findings.map((f) => (
+                <FindingRow key={f.id} finding={f} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Platform security checks */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">Platform Security</h2>
           </div>
           <div className="divide-y divide-border">
-            {readiness.checks.map((check) => (
+            {PLATFORM_CHECKS.map((check) => (
               <div key={check.id} className="flex items-start gap-3 px-4 py-3">
                 <StatusIcon status={check.status} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-sm font-medium text-foreground">{check.label}</span>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {check.severity === "blocking" && (
-                        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                          blocking
-                        </span>
-                      )}
-                      <StatusLabel status={check.status} />
-                    </div>
+                    <StatusLabel status={check.status} />
                   </div>
                   {check.message && (
                     <p className="text-xs text-muted-foreground mt-0.5">{check.message}</p>
@@ -497,18 +457,58 @@ export default function SecurityPage() {
             ))}
           </div>
         </div>
-      )}
 
-      {!isAdmin && (
-        <div className="rounded-xl border border-border bg-card p-5">
-          <h2 className="text-sm font-semibold text-foreground mb-2">Admin Launch Readiness</h2>
-          <p className="text-sm text-muted-foreground">
-            Full launch readiness checks (Stripe, Cloudflare, encryption key, admin RBAC, etc.) are
-            visible in the Admin dashboard. Contact your platform administrator for access.
-          </p>
-        </div>
-      )}
-    </div>
+        {/* Admin launch-readiness */}
+        {isAdmin && readiness && (
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-foreground">Launch Readiness</h2>
+              {readiness.canPublish ? (
+                <span className="text-xs text-green-500 font-semibold flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Production ready
+                </span>
+              ) : (
+                <span className="text-xs text-destructive font-semibold flex items-center gap-1.5">
+                  <XCircle className="h-3.5 w-3.5" /> Blocking issues present
+                </span>
+              )}
+            </div>
+            <div className="divide-y divide-border">
+              {readiness.checks.map((check) => (
+                <div key={check.id} className="flex items-start gap-3 px-4 py-3">
+                  <StatusIcon status={check.status} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-sm font-medium text-foreground">{check.label}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {check.severity === "blocking" && (
+                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                            blocking
+                          </span>
+                        )}
+                        <StatusLabel status={check.status} />
+                      </div>
+                    </div>
+                    {check.message && (
+                      <p className="text-xs text-muted-foreground mt-0.5">{check.message}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {!isAdmin && (
+          <div className="rounded-xl border border-border bg-card p-5">
+            <h2 className="text-sm font-semibold text-foreground mb-2">Admin Launch Readiness</h2>
+            <p className="text-sm text-muted-foreground">
+              Full launch readiness checks (Stripe, Cloudflare, encryption key, admin RBAC, etc.)
+              are visible in the Admin dashboard. Contact your platform administrator for access.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -531,7 +531,11 @@ function ScanActions({ onRefresh, loading }: { onRefresh: () => void; loading: b
       } else {
         const data = await res.json();
         const total = typeof data?.total === "number" ? data.total : 0;
-        setLastResult(total === 0 ? "Scan complete — no issues found." : `Scan complete — ${total} finding${total === 1 ? "" : "s"}.`);
+        setLastResult(
+          total === 0
+            ? "Scan complete — no issues found."
+            : `Scan complete — ${total} finding${total === 1 ? "" : "s"}.`,
+        );
         onRefresh();
       }
     } catch {
@@ -561,9 +565,7 @@ function ScanActions({ onRefresh, loading }: { onRefresh: () => void; loading: b
           {scanning ? "Scanning…" : "Run scan now"}
         </Button>
       </div>
-      {lastResult && (
-        <span className="text-[11px] text-muted-foreground">{lastResult}</span>
-      )}
+      {lastResult && <span className="text-[11px] text-muted-foreground">{lastResult}</span>}
     </div>
   );
 }

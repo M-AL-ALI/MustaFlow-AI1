@@ -47,8 +47,7 @@ const STARTER_LESSONS: Lesson[] = [
   },
   {
     title: "Connect a custom domain",
-    description:
-      "Add your own domain in the Publishing tab and follow the DNS steps to go live.",
+    description: "Add your own domain in the Publishing tab and follow the DNS steps to go live.",
     icon: Globe,
     minutes: 5,
   },
@@ -79,8 +78,7 @@ const DEEP_DIVES: Lesson[] = [
   },
   {
     title: "Credits and billing",
-    description:
-      "Understand how each build, refine, and scan spends credits, and how to top up.",
+    description: "Understand how each build, refine, and scan spends credits, and how to top up.",
     icon: CreditCard,
     minutes: 3,
     href: "/billing",
@@ -97,9 +95,7 @@ function LessonCard({ lesson }: { lesson: Lesson }) {
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-semibold text-foreground">{lesson.title}</h3>
-          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-            {lesson.description}
-          </p>
+          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{lesson.description}</p>
         </div>
       </div>
       <div className="mt-4 flex items-center justify-between text-[11px] text-muted-foreground">

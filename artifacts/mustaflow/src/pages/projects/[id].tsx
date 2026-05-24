@@ -57,7 +57,6 @@ import {
   ChevronDown,
   Monitor,
   Wrench,
-  Plus,
   MessageSquare,
   ExternalLink,
   BookOpen,
@@ -571,8 +570,6 @@ function LowCreditsBanner({
   projectId: number;
   onBuyCredits: () => void;
 }) {
-  if (!BILLING_ENABLED) return null;
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const { data, isLoading } = useGetUserCredits({
     query: {
       queryKey: getGetUserCreditsQueryKey(),
@@ -592,7 +589,13 @@ function LowCreditsBanner({
     }
   }, [projectId]);
 
-  if (isLoading || balance === null || balance >= LOW_CREDITS_THRESHOLD || dismissed) {
+  if (
+    !BILLING_ENABLED ||
+    isLoading ||
+    balance === null ||
+    balance >= LOW_CREDITS_THRESHOLD ||
+    dismissed
+  ) {
     return null;
   }
 

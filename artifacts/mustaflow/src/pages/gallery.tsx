@@ -111,7 +111,11 @@ function TemplateCard({
           />
         ) : (
           <div className="flex flex-col items-center gap-2 text-muted-foreground/40">
-            {categoryInfo ? <categoryInfo.icon className="h-8 w-8" /> : <Globe className="h-8 w-8" />}
+            {categoryInfo ? (
+              <categoryInfo.icon className="h-8 w-8" />
+            ) : (
+              <Globe className="h-8 w-8" />
+            )}
           </div>
         )}
         {template.editorsPick && (
@@ -369,12 +373,7 @@ export default function GalleryPage() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {editorsPicks.map((t) => (
-                  <TemplateCard
-                    key={t.id}
-                    template={t}
-                    onUse={handleUse}
-                    onFork={handleFork}
-                  />
+                  <TemplateCard key={t.id} template={t} onUse={handleUse} onFork={handleFork} />
                 ))}
               </div>
             </section>
@@ -391,12 +390,7 @@ export default function GalleryPage() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {featuredTemplates.map((t) => (
-                  <TemplateCard
-                    key={t.id}
-                    template={t}
-                    onUse={handleUse}
-                    onFork={handleFork}
-                  />
+                  <TemplateCard key={t.id} template={t} onUse={handleUse} onFork={handleFork} />
                 ))}
               </div>
             </section>
@@ -412,12 +406,7 @@ export default function GalleryPage() {
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {regularTemplates.map((t) => (
-                  <TemplateCard
-                    key={t.id}
-                    template={t}
-                    onUse={handleUse}
-                    onFork={handleFork}
-                  />
+                  <TemplateCard key={t.id} template={t} onUse={handleUse} onFork={handleFork} />
                 ))}
               </div>
             </section>
@@ -427,12 +416,7 @@ export default function GalleryPage() {
           {showEditorsPick && editorsPicks.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {editorsPicks.map((t) => (
-                <TemplateCard
-                  key={t.id}
-                  template={t}
-                  onUse={handleUse}
-                  onFork={handleFork}
-                />
+                <TemplateCard key={t.id} template={t} onUse={handleUse} onFork={handleFork} />
               ))}
             </div>
           )}

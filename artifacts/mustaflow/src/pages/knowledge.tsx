@@ -587,8 +587,12 @@ function ExportImportPanel({ onImportDone }: { onImportDone: () => void }) {
       a.click();
       URL.revokeObjectURL(url);
       toast({
-        title: count === 0 ? "Nothing to export" : `Exported ${count} entr${count === 1 ? "y" : "ies"}`,
-        description: count === 0 ? "Your vault is empty — build a project to start recording entries." : "Your download is ready.",
+        title:
+          count === 0 ? "Nothing to export" : `Exported ${count} entr${count === 1 ? "y" : "ies"}`,
+        description:
+          count === 0
+            ? "Your vault is empty — build a project to start recording entries."
+            : "Your download is ready.",
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Export failed";
@@ -631,7 +635,10 @@ function ExportImportPanel({ onImportDone }: { onImportDone: () => void }) {
       const data = (await res.json()) as { imported?: number };
       const imported = typeof data.imported === "number" ? data.imported : 0;
       toast({
-        title: imported === 0 ? "No entries imported" : `Imported ${imported} entr${imported === 1 ? "y" : "ies"}`,
+        title:
+          imported === 0
+            ? "No entries imported"
+            : `Imported ${imported} entr${imported === 1 ? "y" : "ies"}`,
         description:
           imported === 0
             ? "Entries need a title and content to import. Check the file format."

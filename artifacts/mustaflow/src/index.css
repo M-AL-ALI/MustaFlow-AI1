@@ -330,11 +330,16 @@
 
 @layer utilities {
   @keyframes agent-icon-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
   @keyframes agent-icon-pulse {
-    0%, 100% {
+    0%,
+    100% {
       filter: drop-shadow(0 0 0 currentColor);
       opacity: 1;
     }
@@ -353,7 +358,9 @@
     will-change: transform;
   }
   .agent-icon-spin-active {
-    animation: agent-icon-spin 2.4s linear infinite, agent-icon-pulse 1.6s ease-in-out infinite;
+    animation:
+      agent-icon-spin 2.4s linear infinite,
+      agent-icon-pulse 1.6s ease-in-out infinite;
     transform-origin: 50% 50%;
     will-change: transform, filter, opacity;
   }

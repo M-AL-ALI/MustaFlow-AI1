@@ -30,17 +30,17 @@ export function AgentIcon({ size, className, state = "idle", title }: AgentIconP
   const reducedMotion = usePrefersReducedMotion();
   const effectiveState: AgentIconState = reducedMotion ? "static" : state;
 
-  const style: React.CSSProperties =
-    typeof size === "number" ? { width: size, height: size } : {};
+  const style: React.CSSProperties = typeof size === "number" ? { width: size, height: size } : {};
 
   if (effectiveState === "static") {
     return <Atom className={className} style={style} aria-label={title} />;
   }
 
-  const spinClass =
-    effectiveState === "active" ? "agent-icon-spin-active" : "agent-icon-spin-idle";
+  const spinClass = effectiveState === "active" ? "agent-icon-spin-active" : "agent-icon-spin-idle";
   const wrapperClass =
-    effectiveState === "active" ? "agent-icon-wrapper agent-icon-wrapper-active" : "agent-icon-wrapper";
+    effectiveState === "active"
+      ? "agent-icon-wrapper agent-icon-wrapper-active"
+      : "agent-icon-wrapper";
 
   return (
     <span

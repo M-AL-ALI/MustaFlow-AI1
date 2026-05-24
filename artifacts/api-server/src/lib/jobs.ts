@@ -52,7 +52,12 @@ import { logger } from "./logger";
 import { writeKnowledge } from "./knowledge";
 import { generateEmbedding, cosineSimilarity } from "./embeddings";
 import type { DiffSummary } from "@workspace/db";
-import { getOrCreateCredits, deductCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../routes/credits";
+import {
+  getOrCreateCredits,
+  deductCredits,
+  refundCredits,
+  CREDITS_ENFORCEMENT_ENABLED,
+} from "../routes/credits";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
 import { runAudit } from "./auditor";

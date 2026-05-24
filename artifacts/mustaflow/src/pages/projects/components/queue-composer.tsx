@@ -131,7 +131,7 @@ export function QueueComposer({
   projectId,
   agentMode,
   onAgentModeChange,
-  subscriptionTier = "free",
+  subscriptionTier: _subscriptionTier = "free",
   planMode,
   onPlanModeChange,
   runInBackground: _runInBackground,

@@ -432,8 +432,7 @@ export default function HomePage() {
                 Meet your AI builder
               </div>
               <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-3">
-                Built for makers,{" "}
-                <span className="gradient-text">powered by AI</span>
+                Built for makers, <span className="gradient-text">powered by AI</span>
               </h2>
               <p className="text-muted-foreground max-w-2xl mx-auto">
                 A side-by-side preview, a chat that builds, and a one-click publish — all in your
@@ -586,7 +585,6 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
-
           </div>
         </div>
 

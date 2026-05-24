@@ -11,12 +11,7 @@
  */
 import { Router, type IRouter } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
-import {
-  db,
-  communityProfilesTable,
-  profileFollowsTable,
-  projectsTable,
-} from "@workspace/db";
+import { db, communityProfilesTable, profileFollowsTable, projectsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { z } from "zod";
 
@@ -125,7 +120,10 @@ publicProfilesRouter.get("/profiles/:username/projects", async (req, res): Promi
       .where(
         and(
           eq(projectsTable.ownerId, profile.userId),
-          sql`${projectsTable.id} = ANY(ARRAY[${sql.join(allIds.map((id) => sql`${id}`), sql`, `)}]::int[])`,
+          sql`${projectsTable.id} = ANY(ARRAY[${sql.join(
+            allIds.map((id) => sql`${id}`),
+            sql`, `,
+          )}]::int[])`,
           sql`${projectsTable.deletedAt} IS NULL`,
         ),
       )

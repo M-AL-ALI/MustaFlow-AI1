@@ -340,22 +340,20 @@ export default function ExtensionsPage() {
             <h3 className="text-sm font-semibold text-foreground">Extensions launching soon</h3>
           </div>
           <p className="text-xs text-muted-foreground">
-            The extensions marketplace is coming in a future update. In the meantime, you can
-            submit your extension for early review.
+            The extensions marketplace is coming in a future update. In the meantime, you can submit
+            your extension for early review.
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {["Code Copilot", "Figma Import", "PostHog Analytics", "Sentry Logger"].map(
-              (name) => (
-                <div
-                  key={name}
-                  className="rounded-lg border border-dashed border-border p-3 text-center"
-                >
-                  <Puzzle className="h-5 w-5 text-muted-foreground/40 mx-auto mb-1.5" />
-                  <p className="text-xs text-muted-foreground">{name}</p>
-                  <p className="text-[10px] text-muted-foreground/60 mt-0.5">Coming soon</p>
-                </div>
-              ),
-            )}
+            {["Code Copilot", "Figma Import", "PostHog Analytics", "Sentry Logger"].map((name) => (
+              <div
+                key={name}
+                className="rounded-lg border border-dashed border-border p-3 text-center"
+              >
+                <Puzzle className="h-5 w-5 text-muted-foreground/40 mx-auto mb-1.5" />
+                <p className="text-xs text-muted-foreground">{name}</p>
+                <p className="text-[10px] text-muted-foreground/60 mt-0.5">Coming soon</p>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -365,7 +363,9 @@ export default function ExtensionsPage() {
         <div className="px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Code2 className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">Extensions API — Developer Docs</h2>
+            <h2 className="text-sm font-semibold text-foreground">
+              Extensions API — Developer Docs
+            </h2>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
             Build extensions that integrate with MustaFlow projects.
@@ -446,9 +446,7 @@ export default function ExtensionsPage() {
                     type="text"
                     placeholder={field.placeholder}
                     value={submitData[field.key as keyof typeof submitData]}
-                    onChange={(e) =>
-                      setSubmitData((d) => ({ ...d, [field.key]: e.target.value }))
-                    }
+                    onChange={(e) => setSubmitData((d) => ({ ...d, [field.key]: e.target.value }))}
                     className="w-full px-3 py-2 text-sm bg-muted/50 border border-border rounded-lg focus:outline-none focus:border-primary"
                   />
                 </div>
@@ -478,11 +476,7 @@ export default function ExtensionsPage() {
                 disabled={submitting}
                 className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
-                {submitting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Submit for Review"
-                )}
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit for Review"}
               </button>
             </div>
           </div>

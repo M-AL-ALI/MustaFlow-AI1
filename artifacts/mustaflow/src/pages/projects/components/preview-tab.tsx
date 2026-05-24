@@ -1896,91 +1896,91 @@ export function PreviewTab({
             </button>
           </div>
           {readinessExpanded && (
-          <div className="px-3 pb-2 space-y-1.5">
-            <div className="flex items-start gap-2 bg-purple-500/10 border border-purple-500/30 rounded-lg px-2.5 py-2">
-              <Info className="h-3 w-3 text-purple-700 dark:text-purple-300 shrink-0 mt-0.5" />
-              <span className="flex-1 text-[11px] text-purple-900 dark:text-purple-200/90 leading-relaxed">
-                This window shows an <span className="font-semibold">interactive mockup</span> of
-                your mobile app rendered in the browser. Buttons give visual feedback so you can
-                walk the flow, but anything that needs the phone&apos;s camera, GPS, push, deep
-                links, or a backend only runs on a real device — scan the Expo Go QR above to test
-                for real.
-              </span>
-            </div>
-
-            {requiredSecretsFromReport.length > 0 && (
-              <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg px-2.5 py-2">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <Plug className="h-3 w-3 text-purple-700 dark:text-purple-300 shrink-0" />
-                  <span className="text-[11px] font-semibold text-purple-900 dark:text-purple-200">
-                    Secrets needed for full functionality (
-                    {setSecretNames.size > 0
-                      ? `${requiredSecretsFromReport.length - missingSecrets.length}/${requiredSecretsFromReport.length} set`
-                      : `0/${requiredSecretsFromReport.length} set`}
-                    )
-                  </span>
-                  {onJumpToSecrets && missingSecrets.length > 0 && (
-                    <button
-                      onClick={onJumpToSecrets}
-                      className="ml-auto shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-purple-500/25 border border-purple-500/40 text-purple-900 dark:text-purple-100 hover:bg-purple-500/40 transition-colors whitespace-nowrap"
-                    >
-                      Set up secrets
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {requiredSecretsFromReport.map((key) => {
-                    const isSet = setSecretNames.has(key);
-                    return (
-                      <span
-                        key={key}
-                        className={cn(
-                          "inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border",
-                          isSet
-                            ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300"
-                            : "bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-300",
-                        )}
-                        title={isSet ? "Set" : "Not set — buttons that use this will be no-ops"}
-                      >
-                        {isSet ? (
-                          <Check className="h-2.5 w-2.5" />
-                        ) : (
-                          <AlertTriangle className="h-2.5 w-2.5" />
-                        )}
-                        {key}
-                      </span>
-                    );
-                  })}
-                </div>
+            <div className="px-3 pb-2 space-y-1.5">
+              <div className="flex items-start gap-2 bg-purple-500/10 border border-purple-500/30 rounded-lg px-2.5 py-2">
+                <Info className="h-3 w-3 text-purple-700 dark:text-purple-300 shrink-0 mt-0.5" />
+                <span className="flex-1 text-[11px] text-purple-900 dark:text-purple-200/90 leading-relaxed">
+                  This window shows an <span className="font-semibold">interactive mockup</span> of
+                  your mobile app rendered in the browser. Buttons give visual feedback so you can
+                  walk the flow, but anything that needs the phone&apos;s camera, GPS, push, deep
+                  links, or a backend only runs on a real device — scan the Expo Go QR above to test
+                  for real.
+                </span>
               </div>
-            )}
 
-            {(latestReport?.nativeFeatures?.length ?? 0) > 0 && (
-              <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg px-2.5 py-2">
-                <div className="flex items-center gap-2 mb-1">
-                  <Smartphone className="h-3 w-3 text-purple-700 dark:text-purple-300 shrink-0" />
-                  <span className="text-[11px] font-semibold text-purple-900 dark:text-purple-200">
-                    Device-only features in this app
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {(latestReport?.nativeFeatures ?? []).map((f) => (
-                    <span
-                      key={f}
-                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border bg-blue-500/10 border-blue-500/40 text-blue-700 dark:text-blue-300"
-                    >
-                      <Smartphone className="h-2.5 w-2.5" />
-                      {f}
+              {requiredSecretsFromReport.length > 0 && (
+                <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg px-2.5 py-2">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Plug className="h-3 w-3 text-purple-700 dark:text-purple-300 shrink-0" />
+                    <span className="text-[11px] font-semibold text-purple-900 dark:text-purple-200">
+                      Secrets needed for full functionality (
+                      {setSecretNames.size > 0
+                        ? `${requiredSecretsFromReport.length - missingSecrets.length}/${requiredSecretsFromReport.length} set`
+                        : `0/${requiredSecretsFromReport.length} set`}
+                      )
                     </span>
-                  ))}
+                    {onJumpToSecrets && missingSecrets.length > 0 && (
+                      <button
+                        onClick={onJumpToSecrets}
+                        className="ml-auto shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-purple-500/25 border border-purple-500/40 text-purple-900 dark:text-purple-100 hover:bg-purple-500/40 transition-colors whitespace-nowrap"
+                      >
+                        Set up secrets
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {requiredSecretsFromReport.map((key) => {
+                      const isSet = setSecretNames.has(key);
+                      return (
+                        <span
+                          key={key}
+                          className={cn(
+                            "inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border",
+                            isSet
+                              ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300"
+                              : "bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-300",
+                          )}
+                          title={isSet ? "Set" : "Not set — buttons that use this will be no-ops"}
+                        >
+                          {isSet ? (
+                            <Check className="h-2.5 w-2.5" />
+                          ) : (
+                            <AlertTriangle className="h-2.5 w-2.5" />
+                          )}
+                          {key}
+                        </span>
+                      );
+                    })}
+                  </div>
                 </div>
-                <p className="text-[10px] text-purple-700/70 dark:text-purple-300/60 mt-1">
-                  These need a real phone — they will be simulated in the preview but only run on
-                  device through Expo Go.
-                </p>
-              </div>
-            )}
-          </div>
+              )}
+
+              {(latestReport?.nativeFeatures?.length ?? 0) > 0 && (
+                <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg px-2.5 py-2">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Smartphone className="h-3 w-3 text-purple-700 dark:text-purple-300 shrink-0" />
+                    <span className="text-[11px] font-semibold text-purple-900 dark:text-purple-200">
+                      Device-only features in this app
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {(latestReport?.nativeFeatures ?? []).map((f) => (
+                      <span
+                        key={f}
+                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border bg-blue-500/10 border-blue-500/40 text-blue-700 dark:text-blue-300"
+                      >
+                        <Smartphone className="h-2.5 w-2.5" />
+                        {f}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-purple-700/70 dark:text-purple-300/60 mt-1">
+                    These need a real phone — they will be simulated in the preview but only run on
+                    device through Expo Go.
+                  </p>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

@@ -1275,14 +1275,18 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
       },
     };
 
-    const buildParams = (lineItem: typeof inlineLineItem | { quantity: number; price: string }) => ({
+    const buildParams = (
+      lineItem: typeof inlineLineItem | { quantity: number; price: string },
+    ) => ({
       mode: "payment" as const,
       line_items: [lineItem],
       metadata: { userId, packageId: pkg.id, credits: String(pkg.credits) },
       automatic_tax: { enabled: Boolean(process.env.STRIPE_TAX_ENABLED === "true") },
     });
 
-    const createSession = (lineItem: typeof inlineLineItem | { quantity: number; price: string }) => {
+    const createSession = (
+      lineItem: typeof inlineLineItem | { quantity: number; price: string },
+    ) => {
       const baseParams = buildParams(lineItem);
       return stripeCircuit.call(() =>
         withRetry(
@@ -1300,7 +1304,12 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
                   success_url: successUrl!,
                   cancel_url: cancelUrl!,
                 }),
-          { maxAttempts: 2, baseDelayMs: 1_000, shouldRetry: isTransientError, label: "stripe:checkout.sessions.create" },
+          {
+            maxAttempts: 2,
+            baseDelayMs: 1_000,
+            shouldRetry: isTransientError,
+            label: "stripe:checkout.sessions.create",
+          },
         ),
       );
     };
@@ -1312,7 +1321,10 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
       } catch (priceErr) {
         const pmsg = priceErr instanceof Error ? priceErr.message : "";
         if (/no such price|resource_missing/i.test(pmsg)) {
-          req.log.warn({ priceId, packageId: pkg.id }, "Configured Stripe Price not found; falling back to inline price_data");
+          req.log.warn(
+            { priceId, packageId: pkg.id },
+            "Configured Stripe Price not found; falling back to inline price_data",
+          );
           session = await createSession(inlineLineItem);
         } else {
           throw priceErr;

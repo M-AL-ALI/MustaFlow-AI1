@@ -14,7 +14,13 @@
  */
 import { Router, type IRouter } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { db, extensionsTable, projectExtensionsTable, projectsTable, type ExtensionScope } from "@workspace/db";
+import {
+  db,
+  extensionsTable,
+  projectExtensionsTable,
+  projectsTable,
+  type ExtensionScope,
+} from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { requireAdmin } from "../lib/adminAuth";
 import { logger } from "../lib/logger";
@@ -79,10 +85,7 @@ publicExtensionsRouter.get("/extensions/:slug", async (req, res): Promise<void> 
       .select()
       .from(extensionsTable)
       .where(
-        and(
-          eq(extensionsTable.slug, req.params.slug),
-          eq(extensionsTable.status, "published"),
-        ),
+        and(eq(extensionsTable.slug, req.params.slug), eq(extensionsTable.status, "published")),
       );
 
     if (!row) {
@@ -92,14 +95,18 @@ publicExtensionsRouter.get("/extensions/:slug", async (req, res): Promise<void> 
 
     res.json(row);
   } catch (err) {
-    logger.error({ err }, "Failed to get extension" );
+    logger.error({ err }, "Failed to get extension");
     res.status(500).json({ error: "Failed to load extension" });
   }
 });
 
 // ── POST /extensions — submit ─────────────────────────────────────────────────
 const submitExtensionSchema = z.object({
-  slug: z.string().min(3).max(80).regex(/^[a-z0-9-]+$/),
+  slug: z
+    .string()
+    .min(3)
+    .max(80)
+    .regex(/^[a-z0-9-]+$/),
   name: z.string().min(3).max(100),
   description: z.string().min(10).max(500),
   longDescription: z.string().max(5000).optional(),
@@ -156,23 +163,19 @@ router.post("/extensions", async (req, res): Promise<void> => {
 });
 
 // ── GET /projects/:id/extensions ──────────────────────────────────────────────
-router.get(
-  "/projects/:id/extensions",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    try {
-      const rows = await db
-        .select()
-        .from(projectExtensionsTable)
-        .where(eq(projectExtensionsTable.projectId, projectId));
-      res.json(rows);
-    } catch (err) {
-      logger.error({ err }, "Failed to list project extensions");
-      res.status(500).json({ error: "Failed to load extensions" });
-    }
-  },
-);
+router.get("/projects/:id/extensions", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  try {
+    const rows = await db
+      .select()
+      .from(projectExtensionsTable)
+      .where(eq(projectExtensionsTable.projectId, projectId));
+    res.json(rows);
+  } catch (err) {
+    logger.error({ err }, "Failed to list project extensions");
+    res.status(500).json({ error: "Failed to load extensions" });
+  }
+});
 
 // ── POST /projects/:id/extensions/install ─────────────────────────────────────
 const installExtSchema = z.object({
@@ -195,7 +198,11 @@ router.post(
 
     try {
       const [ext] = await db
-        .select({ id: extensionsTable.id, slug: extensionsTable.slug, status: extensionsTable.status })
+        .select({
+          id: extensionsTable.id,
+          slug: extensionsTable.slug,
+          status: extensionsTable.status,
+        })
         .from(extensionsTable)
         .where(eq(extensionsTable.slug, parsed.data.slug));
 
