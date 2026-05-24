@@ -1,4 +1,4 @@
-import { useParams, Link } from "wouter";
+import { useParams, Link, useLocation } from "wouter";
 import { useWebContainer } from "@/hooks/use-web-container";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import {
@@ -144,6 +144,16 @@ import { GithubTab } from "./components/github-tab";
 import { RecipesTab } from "./components/recipes-tab";
 import { PlanCard, type StructuredPlan } from "./components/plan-card";
 import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-sheet";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
 import { WorkspaceTour } from "./components/workspace-tour";
 import { MemoryIndicator } from "./components/memory-indicator";
@@ -1233,6 +1243,57 @@ export default function ProjectWorkspacePage() {
   // Combined busy state — true when either the regular mutation or the streaming fetch is active.
   // Declared early so query refetchInterval options can reference it without a forward-reference.
   const isBusy = sendMessage.isPending || isStreaming;
+
+  // ── Navigation guard (Task #755) ───────────────────────────────────────────
+  // Warn users before they leave while a build is in progress.
+  const [, navigateTo] = useLocation();
+  const [navGuardOpen, setNavGuardOpen] = useState(false);
+  const [pendingNavTarget, setPendingNavTarget] = useState<string | null>(null);
+
+  // Keep a stable ref so event listeners always see the latest isBusy value.
+  const isBusyRef = useRef(isBusy);
+  useEffect(() => {
+    isBusyRef.current = isBusy;
+    // Auto-dismiss the guard dialog when the build finishes or is cancelled.
+    if (!isBusy && navGuardOpen) {
+      setNavGuardOpen(false);
+      setPendingNavTarget(null);
+    }
+  }, [isBusy, navGuardOpen]);
+
+  // 1. Browser-native warning when closing the tab or doing a hard navigation.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!isBusyRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
+
+  // 2. In-app SPA guard — intercept link clicks while a build is running.
+  //    Shows a confirmation dialog instead of navigating immediately.
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!isBusyRef.current) return;
+      const anchor = (e.target as Element).closest("a");
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href) return;
+      // Ignore external links — the beforeunload handler covers those.
+      if (href.startsWith("http") || href.startsWith("//") || href.startsWith("mailto:")) return;
+      // Ignore links that stay within the same project workspace.
+      if (href.startsWith(`/projects/${projectId}`)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setPendingNavTarget(href);
+      setNavGuardOpen(true);
+    };
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
+  }, [projectId]);
+  // ── End navigation guard ───────────────────────────────────────────────────
 
   const seenPageMapEventIdsRef = useRef<Set<number>>(new Set());
   // Whether chat was scrolled to (or near) the bottom — controls auto-scroll behaviour
@@ -3575,6 +3636,39 @@ export default function ProjectWorkspacePage() {
         returnUrl={`${window.location.origin}/projects/${projectId}?credits_success=1`}
       />
       <WorkspaceTour active={tourActive} onClose={closeTour} />
+
+      {/* Build-in-progress navigation guard (Task #755) */}
+      <AlertDialog open={navGuardOpen} onOpenChange={setNavGuardOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Build in progress</AlertDialogTitle>
+            <AlertDialogDescription>
+              A build is currently running. If you leave now, the build will continue in the
+              background but you won't see the result here. Are you sure you want to navigate away?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setNavGuardOpen(false);
+                setPendingNavTarget(null);
+              }}
+            >
+              Stay
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setNavGuardOpen(false);
+                const target = pendingNavTarget;
+                setPendingNavTarget(null);
+                if (target) navigateTo(target);
+              }}
+            >
+              Leave anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
