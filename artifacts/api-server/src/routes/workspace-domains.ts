@@ -830,6 +830,26 @@ router.get("/workspaces/:id/usage", requireWorkspaceMember, async (req, res): Pr
   const usedGb = totalBytes / (1024 * 1024 * 1024);
   const limitGb = quota.maxBandwidthGbPerMonth;
 
+  // Count custom domains across all projects in this workspace (Task #660).
+  // Surfaced so the workspace usage and per-project Domains UI can show
+  // "X of N domains used" inline with an upgrade affordance.
+  let customDomainsUsed = 0;
+  try {
+    const domainRows = await db
+      .select({ id: projectDomainsTable.id })
+      .from(projectDomainsTable)
+      .innerJoin(projectsTable, eq(projectDomainsTable.projectId, projectsTable.id))
+      .where(
+        and(eq(projectsTable.workspaceId, workspaceId), isNull(projectsTable.deletedAt)),
+      );
+    customDomainsUsed = domainRows.length;
+  } catch (err) {
+    logger.warn({ err, workspaceId }, "Custom domain count failed (non-fatal)");
+  }
+  const maxCustomDomains = quota.maxCustomDomains;
+  const domainsPercentUsed =
+    maxCustomDomains === Infinity ? 0 : Math.min(100, (customDomainsUsed / maxCustomDomains) * 100);
+
   // Per-domain breakdown. hostname='' means platform traffic (no custom domain).
   const byDomain: Record<string, { requests: number; bytes: number }> = {};
   for (const row of rows) {
@@ -851,6 +871,11 @@ router.get("/workspaces/:id/usage", requireWorkspaceMember, async (req, res): Pr
       usedGb,
       remainingGb: limitGb === Infinity ? Infinity : Math.max(0, limitGb - usedGb),
       percentUsed: limitGb === Infinity ? 0 : Math.min(100, (usedGb / limitGb) * 100),
+      maxCustomDomains,
+      customDomainsUsed,
+      customDomainsRemaining:
+        maxCustomDomains === Infinity ? Infinity : Math.max(0, maxCustomDomains - customDomainsUsed),
+      domainsPercentUsed,
     },
     byDomain: Object.entries(byDomain).map(([hostname, data]) => ({
       hostname,

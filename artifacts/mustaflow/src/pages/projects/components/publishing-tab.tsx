@@ -53,6 +53,7 @@ import { EmailSetupWizard } from "./email-setup-wizard";
 import { WebhooksPanel } from "./webhooks-panel";
 import { DomainAnalyticsCard } from "./domain-analytics-card";
 import { DomainPurchaseWidget } from "./domain-purchase-widget";
+import { useWorkspace } from "@/contexts/workspace-context";
 
 // ─── Post-publish health banner (Task #511) ─────────────────────────────────
 function HealthCheckBanner({
@@ -3024,6 +3025,34 @@ export function PublishingTab({
     txtValue: string;
   };
   const [domainsData, setDomainsData] = useState<DomainsResponse | null>(null);
+
+  // Workspace plan quota — surfaced inline in the Custom Domains section (Task #660).
+  const { currentWorkspace } = useWorkspace();
+  const workspaceIdForQuota = currentWorkspace?.id ?? null;
+  type DomainQuotaInfo = {
+    plan: string;
+    maxCustomDomains: number;
+    customDomainsUsed: number;
+    domainsPercentUsed: number;
+  };
+  const [domainQuota, setDomainQuota] = useState<DomainQuotaInfo | null>(null);
+
+  const fetchDomainQuota = useCallback(async () => {
+    if (!workspaceIdForQuota) return;
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceIdForQuota}/usage`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { quota?: DomainQuotaInfo };
+      if (data?.quota) setDomainQuota(data.quota);
+    } catch {
+      /* non-fatal */
+    }
+  }, [workspaceIdForQuota]);
+
+  useEffect(() => {
+    void fetchDomainQuota();
+  }, [fetchDomainQuota]);
+
   const [newDomainInput, setNewDomainInput] = useState("");
   const [addingDomain, setAddingDomain] = useState(false);
   const [domainAddError, setDomainAddError] = useState<string | null>(null);
@@ -4488,9 +4517,52 @@ export function PublishingTab({
 
                   {/* Multi-domain list */}
                   <div className="space-y-3">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Custom Domains
-                    </p>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        Custom Domains
+                      </p>
+                      {domainQuota && domainQuota.maxCustomDomains !== Infinity && (() => {
+                        const used = domainQuota.customDomainsUsed;
+                        const max = domainQuota.maxCustomDomains;
+                        const pct = domainQuota.domainsPercentUsed ?? 0;
+                        const atCap = used >= max;
+                        const nearCap = !atCap && pct > 80;
+                        const planLabel =
+                          domainQuota.plan.charAt(0).toUpperCase() + domainQuota.plan.slice(1);
+                        const recommended =
+                          domainQuota.plan === "free"
+                            ? "starter"
+                            : domainQuota.plan === "starter"
+                              ? "pro"
+                              : "enterprise";
+                        const showUpgrade = atCap || nearCap || domainQuota.plan === "free";
+                        return (
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                "text-xs px-2 py-1 rounded-md border",
+                                atCap
+                                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                                  : nearCap
+                                    ? "border-amber-500/40 bg-amber-500/10 text-amber-400"
+                                    : "border-border bg-muted/40 text-muted-foreground",
+                              )}
+                            >
+                              {used} of {max} used
+                              <span className="ml-1.5 opacity-70">({planLabel} plan)</span>
+                            </span>
+                            {showUpgrade && domainQuota.plan !== "enterprise" && (
+                              <Link
+                                href={`/billing?tier=${recommended}`}
+                                className="text-xs px-2 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                              >
+                                Upgrade
+                              </Link>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
 
                     {/* Add domain input */}
                     <div className="flex gap-2">

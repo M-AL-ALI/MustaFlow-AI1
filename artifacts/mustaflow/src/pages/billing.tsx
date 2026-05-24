@@ -31,6 +31,7 @@ import {
   Cell,
 } from "recharts";
 import { cn } from "@/lib/utils";
+import { useSearch } from "wouter";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -127,6 +128,32 @@ export default function BillingPage() {
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
+
+  // Recommended tier passed as ?tier= from inline upgrade CTAs (Task #660).
+  // Accepts the marketing tier names ("starter", "pro", "enterprise") and
+  // also forwards through to whichever tier IDs the subscription API exposes
+  // (e.g. "pro", "team") so SubscriptionTab can highlight + scroll into view.
+  const searchString = useSearch();
+  const recommendedTier = (() => {
+    const params = new URLSearchParams(searchString);
+    const t = params.get("tier");
+    if (!t) return null;
+    return t.toLowerCase();
+  })();
+
+  useEffect(() => {
+    if (!recommendedTier) return;
+    if (activeTab !== "subscription") {
+      setActiveTab("subscription");
+      return;
+    }
+    // Wait for SubscriptionTab to render then scroll the card into view.
+    const id = window.setTimeout(() => {
+      const el = document.getElementById(`plan-card-${recommendedTier}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
+    return () => window.clearTimeout(id);
+  }, [recommendedTier, activeTab, subscription]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -518,6 +545,7 @@ export default function BillingPage() {
           onCancel={handleCancelSubscription}
           onPortal={handlePortal}
           portalLoading={portalLoading}
+          recommendedTier={recommendedTier}
         />
       )}
 
@@ -671,6 +699,7 @@ function SubscriptionTab({
   onCancel,
   onPortal,
   portalLoading,
+  recommendedTier,
 }: {
   subscription: SubscriptionResponse | null;
   loading: boolean;
@@ -680,6 +709,7 @@ function SubscriptionTab({
   onCancel: () => void;
   onPortal: () => void;
   portalLoading: boolean;
+  recommendedTier: string | null;
 }) {
   if (loading)
     return <div className="text-center py-10 text-muted-foreground text-sm">Loading…</div>;
@@ -746,19 +776,28 @@ function SubscriptionTab({
         {(subscription?.tiers ?? []).map((tier) => {
           const Icon = TIER_ICONS[tier.id] ?? Zap;
           const isCurrent = tier.id === currentTier;
+          const isRecommended = !isCurrent && recommendedTier === tier.id;
           return (
             <div
               key={tier.id}
+              id={`plan-card-${tier.id}`}
               className={cn(
                 "border rounded-xl bg-card p-5 flex flex-col gap-3 relative",
                 isCurrent
                   ? "border-primary/40 ring-1 ring-primary/20"
-                  : (TIER_COLORS[tier.id] ?? "border-border"),
+                  : isRecommended
+                    ? "border-primary ring-2 ring-primary/40 shadow-lg"
+                    : (TIER_COLORS[tier.id] ?? "border-border"),
               )}
             >
               {isCurrent && (
                 <div className="absolute top-3 right-3 text-[10px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full font-semibold">
                   Current
+                </div>
+              )}
+              {isRecommended && (
+                <div className="absolute top-3 right-3 text-[10px] bg-primary text-primary-foreground border border-primary px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
+                  Recommended
                 </div>
               )}
               <div className="flex items-center gap-2">

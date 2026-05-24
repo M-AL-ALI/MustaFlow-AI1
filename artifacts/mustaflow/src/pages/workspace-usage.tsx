@@ -17,6 +17,10 @@ interface QuotaInfo {
   usedGb: number;
   remainingGb: number;
   percentUsed: number;
+  maxCustomDomains: number;
+  customDomainsUsed: number;
+  customDomainsRemaining: number;
+  domainsPercentUsed: number;
 }
 
 interface DomainRow {
@@ -50,6 +54,12 @@ function formatRequests(n: number): string {
 
 function getPlanLabel(plan: string): string {
   return plan.charAt(0).toUpperCase() + plan.slice(1);
+}
+
+function getRecommendedTier(plan: string): "starter" | "pro" | "enterprise" {
+  if (plan === "free") return "starter";
+  if (plan === "starter") return "pro";
+  return "enterprise";
 }
 
 export default function WorkspaceUsagePage() {
@@ -88,6 +98,20 @@ export default function WorkspaceUsagePage() {
     quota &&
     quota.maxBandwidthGbPerMonth !== Infinity &&
     quota.usedGb > quota.maxBandwidthGbPerMonth;
+  const isDomainsOverLimit =
+    quota &&
+    quota.maxCustomDomains !== Infinity &&
+    quota.customDomainsUsed >= quota.maxCustomDomains;
+  const shouldShowUpgrade =
+    quota &&
+    quota.plan !== "enterprise" &&
+    (quota.plan === "free" ||
+      quota.percentUsed > 80 ||
+      (quota.domainsPercentUsed ?? 0) > 80 ||
+      isOverLimit ||
+      isDomainsOverLimit);
+  const recommendedTier = quota ? getRecommendedTier(quota.plan) : "starter";
+  const upgradeHref = `/billing?tier=${recommendedTier}`;
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
@@ -193,23 +217,71 @@ export default function WorkspaceUsagePage() {
               </div>
             )}
 
+            {/* Domain quota bar */}
+            {quota && quota.maxCustomDomains !== Infinity && (
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm font-medium flex items-center gap-2">
+                    <Globe size={14} className="text-neutral-400" />
+                    Custom Domains
+                  </span>
+                  <span className="text-sm text-neutral-400">
+                    {quota.customDomainsUsed} of {quota.maxCustomDomains} used
+                    <span className="ml-2 text-neutral-500">
+                      ({getPlanLabel(quota.plan)} plan)
+                    </span>
+                  </span>
+                </div>
+                <div className="h-3 bg-neutral-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      isDomainsOverLimit
+                        ? "bg-red-500"
+                        : (quota.domainsPercentUsed ?? 0) > 80
+                          ? "bg-amber-500"
+                          : "bg-blue-500"
+                    }`}
+                    style={{ width: `${Math.min(100, quota.domainsPercentUsed ?? 0)}%` }}
+                  />
+                </div>
+                {isDomainsOverLimit && (
+                  <div className="mt-3 flex items-center gap-2 text-sm text-red-400">
+                    <AlertCircle size={14} />
+                    Domain limit reached. Upgrade your plan to add more custom domains.
+                  </div>
+                )}
+                {!isDomainsOverLimit && (quota.domainsPercentUsed ?? 0) > 80 && (
+                  <div className="mt-3 flex items-center gap-2 text-sm text-amber-400">
+                    <AlertCircle size={14} />
+                    Approaching domain limit. Consider upgrading before you run out.
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Upgrade CTA */}
-            {quota && quota.plan === "free" && (
+            {shouldShowUpgrade && (
               <div className="bg-gradient-to-r from-blue-950/60 to-indigo-950/60 border border-blue-800/40 rounded-xl p-5 flex items-center justify-between">
                 <div>
                   <div className="font-medium mb-1 flex items-center gap-2">
                     <Zap size={16} className="text-blue-400" />
-                    Unlock more bandwidth and domains
+                    {isOverLimit || isDomainsOverLimit
+                      ? `You've hit a ${getPlanLabel(quota!.plan)} plan limit`
+                      : `Upgrade to ${getPlanLabel(recommendedTier)}`}
                   </div>
                   <div className="text-sm text-neutral-400">
-                    Free plan includes 5 GB/month and 1 custom domain. Upgrade for more.
+                    {recommendedTier === "starter"
+                      ? "Starter: 5 custom domains, 50 GB / month."
+                      : recommendedTier === "pro"
+                        ? "Pro: 25 custom domains, 500 GB / month."
+                        : "Enterprise: unlimited domains and bandwidth."}
                   </div>
                 </div>
                 <Link
-                  href="/billing"
+                  href={upgradeHref}
                   className="shrink-0 ml-4 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors"
                 >
-                  Upgrade plan
+                  Upgrade to {getPlanLabel(recommendedTier)}
                 </Link>
               </div>
             )}
