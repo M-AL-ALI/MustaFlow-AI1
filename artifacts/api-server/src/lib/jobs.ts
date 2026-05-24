@@ -1422,21 +1422,32 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
     // --- Subscription tier gate: enforce model access per tier ---
     // Free → lite/eco only. Pro/Team → all modes (power/pro unlocked).
-    if (project.ownerId && (agentMode === "power" || agentMode === "pro")) {
-      const [sub] = await db
-        .select({ tier: userSubscriptionsTable.tier })
-        .from(userSubscriptionsTable)
-        .where(eq(userSubscriptionsTable.userId, project.ownerId))
-        .limit(1);
-      const tier = sub?.tier ?? "free";
-      if (tier === "free") {
-        const msg = `The ${agentMode === "pro" ? "Pro" : "Power"} mode is available on the Pro and Team plans. Upgrade your subscription in Billing to use this mode, or switch to Lite or Eco.`;
-        await emitEvent(taskId, "failed", msg);
-        await db
-          .update(agentTasksTable)
-          .set({ status: "failed", result: msg, completedAt: sql`now()` })
-          .where(eq(agentTasksTable.id, taskId));
-        return;
+    // Gated by CREDITS_ENFORCEMENT_ENABLED so we can run free/unlimited in dev
+    // and degrade gracefully when the user_subscriptions table is missing.
+    if (
+      CREDITS_ENFORCEMENT_ENABLED &&
+      project.ownerId &&
+      (agentMode === "power" || agentMode === "pro")
+    ) {
+      try {
+        const [sub] = await db
+          .select({ tier: userSubscriptionsTable.tier })
+          .from(userSubscriptionsTable)
+          .where(eq(userSubscriptionsTable.userId, project.ownerId))
+          .limit(1);
+        const tier = sub?.tier ?? "free";
+        if (tier === "free") {
+          const msg = `The ${agentMode === "pro" ? "Pro" : "Power"} mode is available on the Pro and Team plans. Upgrade your subscription in Billing to use this mode, or switch to Lite or Eco.`;
+          await emitEvent(taskId, "failed", msg);
+          await db
+            .update(agentTasksTable)
+            .set({ status: "failed", result: msg, completedAt: sql`now()` })
+            .where(eq(agentTasksTable.id, taskId));
+          return;
+        }
+      } catch (err) {
+        // Table missing or query failed → fail-open: don't block the build.
+        logger.warn({ err }, "Subscription tier gate skipped (query failed)");
       }
     }
 
