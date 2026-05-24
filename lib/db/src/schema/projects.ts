@@ -116,6 +116,9 @@ export const projectsTable = pgTable("projects", {
   // smoke E2E scenario set after every successful web build, and the `run_e2e` tool
   // is available to the model. Default true. Disable for speed-over-coverage builds.
   e2eEnabled: boolean("e2e_enabled").notNull().default(true),
+  // redirectWwwApex: when true, requests to www.<apex> are 301-redirected to apex (or vice versa).
+  // Only meaningful when both the apex and www subdomain are attached as project_domains rows.
+  redirectWwwApex: boolean("redirect_www_apex").notNull().default(false),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

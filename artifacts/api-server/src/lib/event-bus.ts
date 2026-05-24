@@ -9,6 +9,12 @@ export interface TaskEventPayload {
   createdAt: Date | string;
 }
 
+export interface DomainEventPayload {
+  type: "added" | "removed" | "verified" | "updated";
+  hostname: string;
+  projectId: number;
+}
+
 const bus = new EventEmitter();
 bus.setMaxListeners(200);
 
@@ -22,4 +28,13 @@ export function subscribeTaskEvents(
 ): () => void {
   bus.on(`task:${taskId}`, handler);
   return () => bus.off(`task:${taskId}`, handler);
+}
+
+export function publishDomainEvent(payload: DomainEventPayload): void {
+  bus.emit("domain:change", payload);
+}
+
+export function subscribeDomainEvents(handler: (payload: DomainEventPayload) => void): () => void {
+  bus.on("domain:change", handler);
+  return () => bus.off("domain:change", handler);
 }

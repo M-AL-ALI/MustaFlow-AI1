@@ -24,3 +24,4 @@ export { ListTestRunsParams } from "./generated/api";
 export { MoveBlockBetweenFilesBody } from "./generated/api";
 export { ReorderFileBlocksBody } from "./generated/api";
 export { ListBackgroundJobsResponse } from "./generated/api";
+export { SetProjectDomainWwwRedirectBody } from "./generated/api";

@@ -1767,6 +1767,181 @@ paths:
               schema:
                 $ref: "#/components/schemas/AnalyticsSummary"
 
+  /projects/{id}/domains:
+    get:
+      operationId: listProjectDomains
+      tags: [projects]
+      summary: List all custom domains attached to a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Domain list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDomainsResponse"
+    post:
+      operationId: addProjectDomain
+      tags: [projects]
+      summary: Attach a new custom domain to a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddDomainInput"
+      responses:
+        "201":
+          description: Domain attached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddDomainResponse"
+        "400":
+          description: Invalid hostname
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Domain already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/domains/{domainId}:
+    delete:
+      operationId: removeProjectDomain
+      tags: [projects]
+      summary: Detach a custom domain from a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted: { type: boolean }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/domains/{domainId}/primary:
+    patch:
+      operationId: setProjectDomainPrimary
+      tags: [projects]
+      summary: Mark a domain as the primary domain for the project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Primary updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [domainId, isPrimary]
+                properties:
+                  domainId: { type: integer }
+                  isPrimary: { type: boolean }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/domains/{domainId}/www-redirect:
+    patch:
+      operationId: setProjectDomainWwwRedirect
+      tags: [projects]
+      summary: Toggle www ↔ apex redirect for a domain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Setting updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [redirectWwwApex]
+                properties:
+                  redirectWwwApex: { type: boolean }
+
+  /projects/{id}/domains/{domainId}/verify:
+    post:
+      operationId: verifyProjectDomain
+      tags: [projects]
+      summary: Trigger DNS verification for a custom domain (rate-limited 10/min)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainVerifyResponse"
+        "404":
+          description: Domain not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/domains/{domainId}/diagnose:
+    get:
+      operationId: diagnoseProjectDomain
+      tags: [projects]
+      summary: Run live diagnostic checks for a custom domain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Diagnostic results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainDiagnoseResponse"
+        "404":
+          description: Domain not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/subdomain:
     post:
       operationId: setProjectSubdomain
@@ -3312,6 +3487,9 @@ components:
         e2eEnabled:
           type: boolean
           description: "When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true."
+        redirectWwwApex:
+          type: boolean
+          description: "When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -3375,6 +3553,7 @@ components:
           type: boolean
           description: "Toggle the architect review subagent for this project."
         e2eEnabled: { type: boolean }
+        redirectWwwApex: { type: boolean }
 
     MobileAppSettingsInput:
       type: object
@@ -4419,6 +4598,151 @@ components:
             properties:
               date: { type: string }
               views: { type: integer }
+
+    ProjectDomain:
+      type: object
+      required:
+        [
+          id,
+          projectId,
+          hostname,
+          isPrimary,
+          recordType,
+          verificationToken,
+          verificationStatus,
+          sslStatus,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        hostname: { type: string }
+        isPrimary: { type: boolean }
+        recordType:
+          type: string
+          enum: [a, cname]
+          description: "a = apex/root domain (A record); cname = subdomain (CNAME record)."
+        verificationToken: { type: string }
+        verificationStatus:
+          type: string
+          enum: [pending, verified, failed]
+        sslStatus:
+          type: string
+          enum: [pending, provisioning, active, failed]
+        verifiedAt: { type: ["string", "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ProjectDomainsResponse:
+      type: object
+      required: [domains, cnameTarget, platformDomain, redirectWwwApex]
+      properties:
+        domains:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectDomain"
+        subdomain: { type: ["string", "null"] }
+        subdomainUrl: { type: ["string", "null"] }
+        cnameTarget: { type: string }
+        platformDomain: { type: string }
+        redirectWwwApex: { type: boolean }
+
+    AddDomainInput:
+      type: object
+      required: [hostname]
+      properties:
+        hostname:
+          type: string
+          description: "Bare hostname (e.g. app.example.com or example.com). No protocol, no path."
+
+    AddDomainResponse:
+      type: object
+      required: [domain, cnameTarget, txtName, txtValue]
+      properties:
+        domain:
+          $ref: "#/components/schemas/ProjectDomain"
+        cnameTarget: { type: string }
+        txtName: { type: string }
+        txtValue: { type: string }
+
+    DomainVerifyResponse:
+      type: object
+      required: [verified, domainId, hostname, verificationStatus]
+      properties:
+        verified: { type: boolean }
+        domainId: { type: integer }
+        hostname: { type: string }
+        verificationStatus:
+          type: string
+          enum: [pending, verified, failed]
+        sslStatus: { type: ["string", "null"] }
+        method: { type: ["string", "null"] }
+        message: { type: ["string", "null"] }
+        cfProxied: { type: ["boolean", "null"] }
+        txtLookup: { type: ["string", "null"] }
+        txtExpected: { type: ["string", "null"] }
+        txtFound:
+          type: array
+          items: { type: string }
+          nullable: true
+        cnameLookup: { type: ["string", "null"] }
+        cnameFound:
+          type: array
+          items: { type: string }
+          nullable: true
+        cnameExpected: { type: ["string", "null"] }
+        aLookup: { type: ["string", "null"] }
+        aFound:
+          type: array
+          items: { type: string }
+          nullable: true
+
+    DomainDiagnosticCheck:
+      type: object
+      required: [id, label, passed, detail]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        passed: { type: ["boolean", "null"] }
+        detail: { type: string }
+        fixHint: { type: ["string", "null"] }
+
+    DomainDiagnoseResponse:
+      type: object
+      required:
+        [
+          hostname,
+          isApex,
+          recordType,
+          verificationStatus,
+          sslStatus,
+          checks,
+          allPassed,
+          cnameTarget,
+          txtName,
+          txtValue,
+        ]
+      properties:
+        hostname: { type: string }
+        isApex: { type: boolean }
+        recordType:
+          type: string
+          enum: [a, cname]
+        verificationStatus:
+          type: string
+          enum: [pending, verified, failed]
+        sslStatus:
+          type: string
+          enum: [pending, provisioning, active, failed]
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/DomainDiagnosticCheck"
+        allPassed: { type: boolean }
+        cnameTarget: { type: string }
+        txtName: { type: string }
+        txtValue: { type: string }
 
     SubdomainInput:
       type: object

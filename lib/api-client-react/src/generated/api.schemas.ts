@@ -311,6 +311,8 @@ export interface Project {
   architectReviewEnabled?: boolean;
   /** When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true. */
   e2eEnabled?: boolean;
+  /** When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains. */
+  redirectWwwApex?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -418,6 +420,7 @@ export interface ProjectUpdate {
   /** Toggle the architect review subagent for this project. */
   architectReviewEnabled?: boolean;
   e2eEnabled?: boolean;
+  redirectWwwApex?: boolean;
 }
 
 export interface MobileAppSettingsInput {
@@ -1576,6 +1579,162 @@ export interface AnalyticsSummary {
   dailyTrend: AnalyticsSummaryDailyTrendItem[];
 }
 
+/**
+ * a = apex/root domain (A record); cname = subdomain (CNAME record).
+ */
+export type ProjectDomainRecordType = typeof ProjectDomainRecordType[keyof typeof ProjectDomainRecordType];
+
+
+export const ProjectDomainRecordType = {
+  a: 'a',
+  cname: 'cname',
+} as const;
+
+export type ProjectDomainVerificationStatus = typeof ProjectDomainVerificationStatus[keyof typeof ProjectDomainVerificationStatus];
+
+
+export const ProjectDomainVerificationStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  failed: 'failed',
+} as const;
+
+export type ProjectDomainSslStatus = typeof ProjectDomainSslStatus[keyof typeof ProjectDomainSslStatus];
+
+
+export const ProjectDomainSslStatus = {
+  pending: 'pending',
+  provisioning: 'provisioning',
+  active: 'active',
+  failed: 'failed',
+} as const;
+
+export interface ProjectDomain {
+  id: number;
+  projectId: number;
+  hostname: string;
+  isPrimary: boolean;
+  /** a = apex/root domain (A record); cname = subdomain (CNAME record). */
+  recordType: ProjectDomainRecordType;
+  verificationToken: string;
+  verificationStatus: ProjectDomainVerificationStatus;
+  sslStatus: ProjectDomainSslStatus;
+  /** @nullable */
+  verifiedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectDomainsResponse {
+  domains: ProjectDomain[];
+  /** @nullable */
+  subdomain?: string | null;
+  /** @nullable */
+  subdomainUrl?: string | null;
+  cnameTarget: string;
+  platformDomain: string;
+  redirectWwwApex: boolean;
+}
+
+export interface AddDomainInput {
+  /** Bare hostname (e.g. app.example.com or example.com). No protocol, no path. */
+  hostname: string;
+}
+
+export interface AddDomainResponse {
+  domain: ProjectDomain;
+  cnameTarget: string;
+  txtName: string;
+  txtValue: string;
+}
+
+export type DomainVerifyResponseVerificationStatus = typeof DomainVerifyResponseVerificationStatus[keyof typeof DomainVerifyResponseVerificationStatus];
+
+
+export const DomainVerifyResponseVerificationStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  failed: 'failed',
+} as const;
+
+export interface DomainVerifyResponse {
+  verified: boolean;
+  domainId: number;
+  hostname: string;
+  verificationStatus: DomainVerifyResponseVerificationStatus;
+  /** @nullable */
+  sslStatus?: string | null;
+  /** @nullable */
+  method?: string | null;
+  /** @nullable */
+  message?: string | null;
+  /** @nullable */
+  cfProxied?: boolean | null;
+  /** @nullable */
+  txtLookup?: string | null;
+  /** @nullable */
+  txtExpected?: string | null;
+  txtFound?: string[] | null;
+  /** @nullable */
+  cnameLookup?: string | null;
+  cnameFound?: string[] | null;
+  /** @nullable */
+  cnameExpected?: string | null;
+  /** @nullable */
+  aLookup?: string | null;
+  aFound?: string[] | null;
+}
+
+export interface DomainDiagnosticCheck {
+  id: string;
+  label: string;
+  /** @nullable */
+  passed: boolean | null;
+  detail: string;
+  /** @nullable */
+  fixHint?: string | null;
+}
+
+export type DomainDiagnoseResponseRecordType = typeof DomainDiagnoseResponseRecordType[keyof typeof DomainDiagnoseResponseRecordType];
+
+
+export const DomainDiagnoseResponseRecordType = {
+  a: 'a',
+  cname: 'cname',
+} as const;
+
+export type DomainDiagnoseResponseVerificationStatus = typeof DomainDiagnoseResponseVerificationStatus[keyof typeof DomainDiagnoseResponseVerificationStatus];
+
+
+export const DomainDiagnoseResponseVerificationStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  failed: 'failed',
+} as const;
+
+export type DomainDiagnoseResponseSslStatus = typeof DomainDiagnoseResponseSslStatus[keyof typeof DomainDiagnoseResponseSslStatus];
+
+
+export const DomainDiagnoseResponseSslStatus = {
+  pending: 'pending',
+  provisioning: 'provisioning',
+  active: 'active',
+  failed: 'failed',
+} as const;
+
+export interface DomainDiagnoseResponse {
+  hostname: string;
+  isApex: boolean;
+  recordType: DomainDiagnoseResponseRecordType;
+  verificationStatus: DomainDiagnoseResponseVerificationStatus;
+  sslStatus: DomainDiagnoseResponseSslStatus;
+  checks: DomainDiagnosticCheck[];
+  allPassed: boolean;
+  cnameTarget: string;
+  txtName: string;
+  txtValue: string;
+}
+
 export interface SubdomainInput {
   /**
      * @minLength 3
@@ -2653,6 +2812,23 @@ export type AcceptSuggestionBody = {
 
 export type ListDeployments200 = {
   deployments: DeploymentLog[];
+};
+
+export type RemoveProjectDomain200 = {
+  deleted: boolean;
+};
+
+export type SetProjectDomainPrimary200 = {
+  domainId: number;
+  isPrimary: boolean;
+};
+
+export type SetProjectDomainWwwRedirectBody = {
+  enabled: boolean;
+};
+
+export type SetProjectDomainWwwRedirect200 = {
+  redirectWwwApex: boolean;
 };
 
 export type SetProjectSubdomain400 = {

@@ -108,6 +108,8 @@ export interface Project {
   architectReviewEnabled?: boolean;
   /** When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true. */
   e2eEnabled?: boolean;
+  /** When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains. */
+  redirectWwwApex?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

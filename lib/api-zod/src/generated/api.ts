@@ -630,6 +630,7 @@ export const ListProjectsResponseItem = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -698,6 +699,7 @@ export const GetProjectResponse = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -721,7 +723,8 @@ export const UpdateProjectBody = zod.object({
   "autoFixOnCheckFailure": zod.boolean().optional(),
   "autoFixWarningsAfterBuild": zod.boolean().optional(),
   "architectReviewEnabled": zod.boolean().optional().describe('Toggle the architect review subagent for this project.'),
-  "e2eEnabled": zod.boolean().optional()
+  "e2eEnabled": zod.boolean().optional(),
+  "redirectWwwApex": zod.boolean().optional()
 })
 
 export const updateProjectResponseHealthScoreMin = 0;
@@ -766,6 +769,7 @@ export const UpdateProjectResponse = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -821,6 +825,7 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -876,6 +881,7 @@ export const RestoreProjectResponse = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -930,6 +936,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "autoFixWarningsAfterBuild": zod.boolean().optional().describe('When true, the build pipeline runs project-wide ESLint auto-fix at the end of every successful build (before the version snapshot is taken). Default false.'),
   "architectReviewEnabled": zod.boolean().optional().describe('When true, a second-opinion architect review runs after every successful build\/refine. Critical or fail verdicts trigger one auto-fix turn. Charged as a separate flat fee (2 credits). Default true — opt-out per project.'),
   "e2eEnabled": zod.boolean().optional().describe('When true, the agentic builder automatically runs Playwright smoke E2E after every successful web build, and the run_e2e tool is available to the model. Default true.'),
+  "redirectWwwApex": zod.boolean().optional().describe('When true, requests to www.<apex> are 301-redirected to the apex domain (or vice versa). Only meaningful when both apex and www are attached as project domains.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))
@@ -2541,6 +2548,147 @@ export const GetAnalyticsSummaryResponse = zod.object({
   "date": zod.string(),
   "views": zod.number()
 }))
+})
+
+
+/**
+ * @summary List all custom domains attached to a project
+ */
+export const ListProjectDomainsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListProjectDomainsResponse = zod.object({
+  "domains": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "hostname": zod.string(),
+  "isPrimary": zod.boolean(),
+  "recordType": zod.enum(['a', 'cname']).describe('a = apex\/root domain (A record); cname = subdomain (CNAME record).'),
+  "verificationToken": zod.string(),
+  "verificationStatus": zod.enum(['pending', 'verified', 'failed']),
+  "sslStatus": zod.enum(['pending', 'provisioning', 'active', 'failed']),
+  "verifiedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})),
+  "subdomain": zod.string().nullish(),
+  "subdomainUrl": zod.string().nullish(),
+  "cnameTarget": zod.string(),
+  "platformDomain": zod.string(),
+  "redirectWwwApex": zod.boolean()
+})
+
+
+/**
+ * @summary Attach a new custom domain to a project
+ */
+export const AddProjectDomainParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const AddProjectDomainBody = zod.object({
+  "hostname": zod.string().describe('Bare hostname (e.g. app.example.com or example.com). No protocol, no path.')
+})
+
+
+/**
+ * @summary Detach a custom domain from a project
+ */
+export const RemoveProjectDomainParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const RemoveProjectDomainResponse = zod.object({
+  "deleted": zod.boolean()
+})
+
+
+/**
+ * @summary Mark a domain as the primary domain for the project
+ */
+export const SetProjectDomainPrimaryParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const SetProjectDomainPrimaryResponse = zod.object({
+  "domainId": zod.number(),
+  "isPrimary": zod.boolean()
+})
+
+
+/**
+ * @summary Toggle www ↔ apex redirect for a domain
+ */
+export const SetProjectDomainWwwRedirectParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const SetProjectDomainWwwRedirectBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const SetProjectDomainWwwRedirectResponse = zod.object({
+  "redirectWwwApex": zod.boolean()
+})
+
+
+/**
+ * @summary Trigger DNS verification for a custom domain (rate-limited 10/min)
+ */
+export const VerifyProjectDomainParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const VerifyProjectDomainResponse = zod.object({
+  "verified": zod.boolean(),
+  "domainId": zod.number(),
+  "hostname": zod.string(),
+  "verificationStatus": zod.enum(['pending', 'verified', 'failed']),
+  "sslStatus": zod.string().nullish(),
+  "method": zod.string().nullish(),
+  "message": zod.string().nullish(),
+  "cfProxied": zod.boolean().nullish(),
+  "txtLookup": zod.string().nullish(),
+  "txtExpected": zod.string().nullish(),
+  "txtFound": zod.array(zod.string()).nullish(),
+  "cnameLookup": zod.string().nullish(),
+  "cnameFound": zod.array(zod.string()).nullish(),
+  "cnameExpected": zod.string().nullish(),
+  "aLookup": zod.string().nullish(),
+  "aFound": zod.array(zod.string()).nullish()
+})
+
+
+/**
+ * @summary Run live diagnostic checks for a custom domain
+ */
+export const DiagnoseProjectDomainParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const DiagnoseProjectDomainResponse = zod.object({
+  "hostname": zod.string(),
+  "isApex": zod.boolean(),
+  "recordType": zod.enum(['a', 'cname']),
+  "verificationStatus": zod.enum(['pending', 'verified', 'failed']),
+  "sslStatus": zod.enum(['pending', 'provisioning', 'active', 'failed']),
+  "checks": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "passed": zod.boolean().nullable(),
+  "detail": zod.string(),
+  "fixHint": zod.string().nullish()
+})),
+  "allPassed": zod.boolean(),
+  "cnameTarget": zod.string(),
+  "txtName": zod.string(),
+  "txtValue": zod.string()
 })
 
 

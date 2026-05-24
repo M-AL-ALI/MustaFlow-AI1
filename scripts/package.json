@@ -28,6 +28,7 @@
     "migrate-builder-skills": "tsx ./src/migrate-builder-skills.ts",
     "migrate-builder-skills-drafts": "tsx ./src/migrate-builder-skills-drafts.ts",
     "migrate-project-embeddings": "tsx ./src/migrate-project-embeddings.ts",
+    "migrate-project-domains": "tsx ./src/migrate-project-domains.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

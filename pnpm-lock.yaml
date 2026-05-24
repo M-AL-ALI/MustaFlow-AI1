@@ -203,6 +203,9 @@ importers:
       '@google-cloud/storage':
         specifier: ^7.19.0
         version: 7.19.0
+      '@google/genai':
+        specifier: ^1.52.0
+        version: 1.52.0
       '@playwright/test':
         specifier: ^1.60.0
         version: 1.60.0

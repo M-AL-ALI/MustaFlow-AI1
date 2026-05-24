@@ -1,0 +1,42 @@
+import {
+  pgTable,
+  serial,
+  integer,
+  text,
+  boolean,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+import { projectsTable } from "./projects";
+
+export const DOMAIN_RECORD_TYPES = ["a", "cname"] as const;
+export type DomainRecordType = (typeof DOMAIN_RECORD_TYPES)[number];
+
+export const DOMAIN_VERIFICATION_STATUSES = ["pending", "verified", "failed"] as const;
+export type DomainVerificationStatus = (typeof DOMAIN_VERIFICATION_STATUSES)[number];
+
+export const projectDomainsTable = pgTable(
+  "project_domains",
+  {
+    id: serial("id").primaryKey(),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projectsTable.id, { onDelete: "cascade" }),
+    hostname: text("hostname").notNull(),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    // recordType: 'a' for apex domains (root domain, no subdomain prefix),
+    // 'cname' for subdomains. Determines which DNS record type is shown in instructions.
+    recordType: text("record_type").notNull().default("cname"),
+    verificationToken: text("verification_token").notNull(),
+    // verificationStatus: pending | verified | failed
+    verificationStatus: text("verification_status").notNull().default("pending"),
+    sslStatus: text("ssl_status").notNull().default("pending"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("project_domains_hostname_unique").on(t.hostname)],
+);
+
+export type ProjectDomain = typeof projectDomainsTable.$inferSelect;
+export type InsertProjectDomain = typeof projectDomainsTable.$inferInsert;

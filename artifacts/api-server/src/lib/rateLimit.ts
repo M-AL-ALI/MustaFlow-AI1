@@ -183,6 +183,9 @@ export const aiBuilderLimiter = (req: Request, res: Response, next: NextFunction
   // Do NOT call next() here — the request physically waits until releaseSlot() drains it.
 };
 
+// Domain verify — configurable limiter factory (used by domains.ts)
+export const createLimiterForDomainVerify = createLimiter;
+
 // Publish/unpublish — 10 per minute per IP
 export const publishLimiter = createLimiter({
   windowMs: 60_000,

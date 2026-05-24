@@ -172,6 +172,33 @@ function CopyUrlButton({ url }: { url: string }) {
   );
 }
 
+function DnsTable({ rows }: { rows: { type: string; name: string; value: string }[] }) {
+  return (
+    <div className="rounded-md bg-background border border-border overflow-hidden text-xs font-mono">
+      <div className="grid grid-cols-3 gap-px bg-border">
+        {["Type", "Name", "Value"].map((h) => (
+          <div key={h} className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
+            {h}
+          </div>
+        ))}
+      </div>
+      {rows.map((row, i) => (
+        <div key={i} className="grid grid-cols-3 gap-px bg-border">
+          <div className="bg-card px-2 py-1.5">{row.type}</div>
+          <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
+            <span className="truncate">{row.name}</span>
+            <CopyUrlButton url={row.name} />
+          </div>
+          <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
+            <span className="truncate">{row.value}</span>
+            <CopyUrlButton url={row.value} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EasCredVerifyButton({
   secretId,
   projectId,
@@ -2372,10 +2399,56 @@ export function PublishingTab({
     txtValue: string | null;
   };
   const [domainInfo, setDomainInfo] = useState<DomainInfo | null>(null);
-  const [customDomainInput, setCustomDomainInput] = useState("");
-  const [domainSaving, setDomainSaving] = useState(false);
-  const [domainVerifying, setDomainVerifying] = useState(false);
-  const [domainError, setDomainError] = useState<string | null>(null);
+
+  // Multi-domain collection state
+  type ProjectDomain = {
+    id: number;
+    projectId: number;
+    hostname: string;
+    isPrimary: boolean;
+    recordType: "a" | "cname";
+    verificationToken: string;
+    verificationStatus: "pending" | "verified" | "failed";
+    sslStatus: "pending" | "provisioning" | "active" | "failed";
+    verifiedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  type DomainsResponse = {
+    domains: ProjectDomain[];
+    subdomain: string | null;
+    subdomainUrl: string | null;
+    cnameTarget: string;
+    platformDomain: string;
+    redirectWwwApex: boolean;
+  };
+  type DiagnosticCheck = {
+    id: string;
+    label: string;
+    passed: boolean | null;
+    detail: string;
+    fixHint: string | null;
+  };
+  type DiagnoseResult = {
+    hostname: string;
+    isApex: boolean;
+    recordType: "a" | "cname";
+    verificationStatus: "pending" | "verified" | "failed";
+    sslStatus: "pending" | "provisioning" | "active" | "failed";
+    checks: DiagnosticCheck[];
+    allPassed: boolean;
+    cnameTarget: string;
+    txtName: string;
+    txtValue: string;
+  };
+  const [domainsData, setDomainsData] = useState<DomainsResponse | null>(null);
+  const [newDomainInput, setNewDomainInput] = useState("");
+  const [addingDomain, setAddingDomain] = useState(false);
+  const [domainAddError, setDomainAddError] = useState<string | null>(null);
+  const [verifyingDomainId, setVerifyingDomainId] = useState<number | null>(null);
+  const [diagnosingDomainId, setDiagnosingDomainId] = useState<number | null>(null);
+  const [diagnoseResults, setDiagnoseResults] = useState<Record<number, DiagnoseResult>>({});
+  const [expandedDomainId, setExpandedDomainId] = useState<number | null>(null);
 
   const fetchMobileBuilds = useCallback(async () => {
     if (!isMobile) return;
@@ -2602,62 +2675,116 @@ export function PublishingTab({
       if (res.ok) {
         const data = (await res.json()) as DomainInfo;
         setDomainInfo(data);
-        setCustomDomainInput(data.customDomain ?? "");
       }
     } catch {
       /* ignore */
     }
   }, [projectId]);
 
-  const saveDomain = async () => {
-    setDomainSaving(true);
-    setDomainError(null);
+  const fetchDomains = useCallback(async () => {
     try {
-      const cleaned = customDomainInput
-        .trim()
-        .toLowerCase()
-        .replace(/^https?:\/\//, "")
-        .replace(/\/.*$/, "");
-      const res = await fetch(`/api/projects/${projectId}/domain`, {
+      const res = await fetch(`/api/projects/${projectId}/domains`);
+      if (res.ok) {
+        const data = (await res.json()) as DomainsResponse;
+        setDomainsData(data);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [projectId]);
+
+  const addDomain = async () => {
+    const hostname = newDomainInput
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/\/.*$/, "");
+    if (!hostname) return;
+    setAddingDomain(true);
+    setDomainAddError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/domains`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hostname }),
+      });
+      const data = (await res.json()) as { error?: string; domain?: ProjectDomain };
+      if (!res.ok) {
+        setDomainAddError(data.error ?? "Failed to add domain.");
+      } else {
+        setNewDomainInput("");
+        await fetchDomains();
+      }
+    } catch {
+      setDomainAddError("Failed to add domain. Please try again.");
+    } finally {
+      setAddingDomain(false);
+    }
+  };
+
+  const removeDomainById = async (domainId: number) => {
+    try {
+      await fetch(`/api/projects/${projectId}/domains/${domainId}`, { method: "DELETE" });
+      await fetchDomains();
+      setDiagnoseResults((prev) => {
+        const next = { ...prev };
+        delete next[domainId];
+        return next;
+      });
+      if (expandedDomainId === domainId) setExpandedDomainId(null);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const setPrimaryDomain = async (domainId: number) => {
+    try {
+      await fetch(`/api/projects/${projectId}/domains/${domainId}/primary`, { method: "PATCH" });
+      await fetchDomains();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const verifyDomainById = async (domainId: number) => {
+    setVerifyingDomainId(domainId);
+    try {
+      await fetch(`/api/projects/${projectId}/domains/${domainId}/verify`, { method: "POST" });
+      await fetchDomains();
+    } catch {
+      /* ignore */
+    } finally {
+      setVerifyingDomainId(null);
+    }
+  };
+
+  const diagnosedomainById = async (domainId: number) => {
+    setDiagnosingDomainId(domainId);
+    setExpandedDomainId(domainId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/domains/${domainId}/diagnose`);
+      if (res.ok) {
+        const data = (await res.json()) as DiagnoseResult;
+        setDiagnoseResults((prev) => ({ ...prev, [domainId]: data }));
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setDiagnosingDomainId(null);
+    }
+  };
+
+  const toggleWwwRedirect = async (domainId: number, enabled: boolean) => {
+    try {
+      await fetch(`/api/projects/${projectId}/domains/${domainId}/www-redirect`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customDomain: cleaned || null }),
+        body: JSON.stringify({ enabled }),
       });
-      if (!res.ok) {
-        const err = (await res.json()) as { error?: string };
-        setDomainError(err.error ?? "Failed to save domain.");
-      } else {
-        await fetchDomain();
-      }
+      await fetchDomains();
     } catch {
-      setDomainError("Failed to save domain. Please try again.");
-    } finally {
-      setDomainSaving(false);
+      /* ignore */
     }
-  };
-
-  const verifyDomain = async () => {
-    setDomainVerifying(true);
-    setDomainError(null);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/domain/verify`, { method: "POST" });
-      const data = (await res.json()) as { message?: string; verified?: boolean };
-      if (!res.ok || data.verified === false) {
-        setDomainError(data.message ?? "DNS verification failed.");
-      }
-      await fetchDomain();
-    } catch {
-      setDomainError("Verification check failed. Please try again.");
-    } finally {
-      setDomainVerifying(false);
-    }
-  };
-
-  const removeDomain = async () => {
-    await fetch(`/api/projects/${projectId}/domain`, { method: "DELETE" });
-    setCustomDomainInput("");
-    setDomainError(null);
-    await fetchDomain();
   };
 
   const saveSiteSettings = async () => {
@@ -2761,6 +2888,7 @@ export function PublishingTab({
     void fetchDeployments();
     void fetchSiteSettings();
     void fetchDomain();
+    void fetchDomains();
     void fetchIosReadiness();
     void fetchAndReadiness();
   }, [
@@ -2768,6 +2896,7 @@ export function PublishingTab({
     fetchDeployments,
     fetchSiteSettings,
     fetchDomain,
+    fetchDomains,
     fetchIosReadiness,
     fetchAndReadiness,
   ]);
@@ -3181,7 +3310,7 @@ export function PublishingTab({
                 </p>
               </div>
 
-              {/* Custom subdomain picker — only shown after first publish */}
+              {/* Custom subdomain picker */}
               {domainInfo?.subdomain && (
                 <CustomSubdomainPicker
                   projectId={projectId}
@@ -3203,259 +3332,347 @@ export function PublishingTab({
 
               <div className="border-t border-border" />
 
-              {/* Custom domain */}
+              {/* Multi-domain list */}
               <div className="space-y-3">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Custom Domain
+                  Custom Domains
                 </p>
 
+                {/* Add domain input */}
                 <div className="flex gap-2">
                   <input
-                    value={customDomainInput}
-                    onChange={(e) => setCustomDomainInput(e.target.value)}
+                    value={newDomainInput}
+                    onChange={(e) => setNewDomainInput(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") void saveDomain();
+                      if (e.key === "Enter") void addDomain();
                     }}
-                    placeholder="app.yourdomain.com"
+                    placeholder="app.yourdomain.com or yourdomain.com"
                     className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => void saveDomain()}
-                    disabled={domainSaving}
+                    onClick={() => void addDomain()}
+                    disabled={addingDomain || !newDomainInput.trim()}
                     className="shrink-0"
                   >
-                    {domainSaving ? (
+                    {addingDomain ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      <Save className="h-3.5 w-3.5" />
+                      <Link2 className="h-3.5 w-3.5" />
                     )}
-                    <span className="ml-1.5">Save</span>
+                    <span className="ml-1.5">Add</span>
                   </Button>
-                  {domainInfo?.customDomain && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void removeDomain()}
-                      className="shrink-0 text-destructive hover:text-destructive"
-                    >
-                      <XCircle className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
                 </div>
 
-                {domainError && (
+                {domainAddError && (
                   <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>{domainError}</span>
+                    <span>{domainAddError}</span>
                   </div>
                 )}
 
-                {/* Status badges */}
-                {domainInfo?.customDomain && (
-                  <div className="flex items-center gap-3 flex-wrap">
-                    {/* Domain status */}
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium",
-                        domainInfo.domainStatus === "active" && "bg-green-500/15 text-green-400",
-                        domainInfo.domainStatus === "pending_verification" &&
-                          "bg-yellow-500/15 text-yellow-400",
-                        domainInfo.domainStatus === "error" && "bg-red-500/15 text-red-400",
-                        domainInfo.domainStatus === "unconfigured" &&
-                          "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {domainInfo.domainStatus === "active" && <CheckCircle2 className="h-3 w-3" />}
-                      {domainInfo.domainStatus === "pending_verification" && (
-                        <RefreshCw className="h-3 w-3" />
-                      )}
-                      {domainInfo.domainStatus === "error" && <XCircle className="h-3 w-3" />}
-                      {domainInfo.domainStatus === "unconfigured" && <Circle className="h-3 w-3" />}
-                      DNS{" "}
-                      {domainInfo.domainStatus === "active"
-                        ? "verified"
-                        : domainInfo.domainStatus === "error"
-                          ? "error"
-                          : "pending"}
-                    </span>
+                {/* Domain rows */}
+                {domainsData && domainsData.domains.length > 0 && (
+                  <div className="space-y-2">
+                    {domainsData.domains.map((domain) => {
+                      const isApex = domain.recordType === "a";
+                      const isVerified = domain.verificationStatus === "verified";
+                      const isSslActive = domain.sslStatus === "active";
+                      const isVerifying = verifyingDomainId === domain.id;
+                      const isDiagnosing = diagnosingDomainId === domain.id;
+                      const isExpanded = expandedDomainId === domain.id;
+                      const diagResult = diagnoseResults[domain.id];
 
-                    {/* SSL status badge */}
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium",
-                        domainInfo.sslStatus === "active" && "bg-green-500/15 text-green-400",
-                        (domainInfo.sslStatus === "provisioning" ||
-                          domainInfo.sslStatus === "pending") &&
-                          "bg-yellow-500/15 text-yellow-400",
-                        domainInfo.sslStatus === "failed" && "bg-red-500/15 text-red-400",
-                      )}
-                    >
-                      <Lock className="h-3 w-3" />
-                      {domainInfo.sslStatus === "active"
-                        ? "SSL active"
-                        : domainInfo.sslStatus === "failed"
-                          ? "SSL failed"
-                          : domainInfo.domainStatus === "active"
-                            ? "SSL manual setup required"
-                            : "SSL pending"}
-                    </span>
+                      return (
+                        <div
+                          key={domain.id}
+                          className="border border-border rounded-lg bg-muted/30 overflow-hidden"
+                        >
+                          {/* Domain row header */}
+                          <div className="flex items-center gap-2 px-3 py-2.5">
+                            {/* Status icon */}
+                            {isVerified && isSslActive ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
+                            ) : isVerified ? (
+                              <Lock className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
+                            ) : domain.verificationStatus === "failed" ? (
+                              <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
+                            ) : (
+                              <Circle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            )}
 
-                    {/* Verify / Re-check button */}
-                    {domainInfo.domainStatus !== "active" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void verifyDomain()}
-                        disabled={domainVerifying}
-                        className="h-7 text-xs"
-                      >
-                        {domainVerifying ? (
-                          <>
-                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                            Checking…
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="h-3 w-3 mr-1" />
-                            Check DNS
-                          </>
-                        )}
-                      </Button>
-                    )}
+                            {/* Hostname + badges */}
+                            <div className="flex items-center gap-1.5 flex-1 min-w-0 flex-wrap">
+                              <span className="text-sm font-mono truncate">{domain.hostname}</span>
+                              {domain.isPrimary && (
+                                <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-medium shrink-0">
+                                  primary
+                                </span>
+                              )}
+                              {isApex && (
+                                <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-medium shrink-0">
+                                  apex
+                                </span>
+                              )}
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0",
+                                  isVerified
+                                    ? "bg-green-500/15 text-green-400"
+                                    : domain.verificationStatus === "failed"
+                                      ? "bg-destructive/15 text-destructive"
+                                      : "bg-yellow-500/15 text-yellow-400",
+                                )}
+                              >
+                                {isVerified
+                                  ? "DNS verified"
+                                  : domain.verificationStatus === "failed"
+                                    ? "DNS failed"
+                                    : "DNS pending"}
+                              </span>
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0",
+                                  isSslActive
+                                    ? "bg-green-500/15 text-green-400"
+                                    : domain.sslStatus === "failed"
+                                      ? "bg-destructive/15 text-destructive"
+                                      : "bg-yellow-500/15 text-yellow-400",
+                                )}
+                              >
+                                <Lock className="h-2.5 w-2.5" />
+                                {isSslActive
+                                  ? "SSL"
+                                  : domain.sslStatus === "provisioning"
+                                    ? "SSL provisioning"
+                                    : domain.sslStatus === "failed"
+                                      ? "SSL failed"
+                                      : "SSL pending"}
+                              </span>
+                            </div>
+
+                            {/* Action buttons */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              {isVerified && (
+                                <a
+                                  href={`https://${domain.hostname}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                                  title="Open domain"
+                                >
+                                  <ArrowUpRight className="h-3.5 w-3.5" />
+                                </a>
+                              )}
+                              {!isVerified && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => void verifyDomainById(domain.id)}
+                                  disabled={isVerifying}
+                                  className="h-7 px-2 text-xs"
+                                  title="Check DNS"
+                                >
+                                  {isVerifying ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="h-3.5 w-3.5" />
+                                  )}
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  isExpanded && diagResult
+                                    ? setExpandedDomainId(null)
+                                    : void diagnosedomainById(domain.id)
+                                }
+                                disabled={isDiagnosing}
+                                className="h-7 px-2 text-xs"
+                                title="Diagnose"
+                              >
+                                {isDiagnosing ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : isExpanded ? (
+                                  <ChevronUp className="h-3.5 w-3.5" />
+                                ) : (
+                                  <ChevronDown className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
+                              {!domain.isPrimary && isVerified && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => void setPrimaryDomain(domain.id)}
+                                  className="h-7 px-2 text-[10px]"
+                                  title="Make primary"
+                                >
+                                  Set primary
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => void removeDomainById(domain.id)}
+                                className="h-7 px-2 text-destructive hover:text-destructive"
+                                title="Remove"
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* DNS setup instructions (unverified domains) */}
+                          {!isVerified && (
+                            <div className="px-3 pb-3 space-y-2.5 border-t border-border/60 pt-2.5">
+                              {/* TXT verification record */}
+                              <div className="space-y-1.5">
+                                <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+                                  <Info className="h-3 w-3" />
+                                  {isApex
+                                    ? "Option A — TXT ownership record"
+                                    : "Option A — TXT ownership record (preferred)"}
+                                </p>
+                                <DnsTable
+                                  rows={[
+                                    {
+                                      type: "TXT",
+                                      name: `_mustaflow-verify.${domain.hostname}`,
+                                      value: domain.verificationToken,
+                                    },
+                                  ]}
+                                />
+                              </div>
+
+                              {/* Routing record (CNAME for subdomains, A for apex) */}
+                              <div className="space-y-1.5">
+                                <p className="text-xs text-muted-foreground font-medium">
+                                  {isApex
+                                    ? "Option B — A record routing (apex)"
+                                    : "Option B — CNAME routing record"}
+                                </p>
+                                {isApex ? (
+                                  <div className="space-y-1">
+                                    <DnsTable
+                                      rows={[
+                                        { type: "A", name: "@", value: "76.76.21.21" },
+                                        { type: "A", name: "@", value: "76.76.21.22" },
+                                      ]}
+                                    />
+                                    <p className="text-[11px] text-muted-foreground">
+                                      Apex domains require A records (not CNAME). Add both IPs.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <DnsTable
+                                    rows={[
+                                      {
+                                        type: "CNAME",
+                                        name: domain.hostname,
+                                        value: domainsData.cnameTarget,
+                                      },
+                                    ]}
+                                  />
+                                )}
+                              </div>
+
+                              <p className="text-[11px] text-muted-foreground">
+                                DNS propagation can take up to 48 h. Click the refresh button once
+                                records are in place.
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Diagnostic panel */}
+                          {isExpanded && diagResult && (
+                            <div className="px-3 pb-3 border-t border-border/60 pt-2.5 space-y-2">
+                              <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                                <Activity className="h-3.5 w-3.5" />
+                                Diagnostic results
+                              </p>
+                              <div className="space-y-1">
+                                {diagResult.checks.map((check) => (
+                                  <div
+                                    key={check.id}
+                                    className="flex items-start gap-2 text-xs py-1"
+                                  >
+                                    {check.passed === true ? (
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0 mt-0.5" />
+                                    ) : check.passed === false ? (
+                                      <XCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                                    ) : (
+                                      <Circle className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                      <p
+                                        className={cn(
+                                          "font-medium",
+                                          check.passed === true
+                                            ? "text-green-400"
+                                            : check.passed === false
+                                              ? "text-destructive"
+                                              : "text-muted-foreground",
+                                        )}
+                                      >
+                                        {check.label}
+                                      </p>
+                                      <p className="text-muted-foreground">{check.detail}</p>
+                                      {check.fixHint && check.passed === false && (
+                                        <p className="text-yellow-400 mt-0.5">{check.fixHint}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex justify-end">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => void diagnosedomainById(domain.id)}
+                                  disabled={isDiagnosing}
+                                  className="h-7 text-xs gap-1"
+                                >
+                                  <RefreshCw className="h-3 w-3" />
+                                  Re-run
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* www-redirect toggle (apex domains only, when verified) */}
+                          {isApex && isVerified && (
+                            <div className="flex items-center justify-between px-3 py-2 border-t border-border/60 bg-muted/20">
+                              <span className="text-xs text-muted-foreground">
+                                Redirect www.{domain.hostname} → {domain.hostname}
+                              </span>
+                              <button
+                                onClick={() =>
+                                  void toggleWwwRedirect(domain.id, !domainsData.redirectWwwApex)
+                                }
+                                className="shrink-0 flex items-center"
+                                title="Toggle www redirect"
+                              >
+                                {domainsData.redirectWwwApex ? (
+                                  <ToggleRight className="h-5 w-5 text-primary" />
+                                ) : (
+                                  <ToggleLeft className="h-5 w-5 text-muted-foreground" />
+                                )}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
-                {/* SSL gate warning — DNS verified but SSL is not yet active */}
-                {domainInfo?.customDomain &&
-                  domainInfo.domainStatus === "active" &&
-                  domainInfo.sslStatus !== "active" && (
-                    <div className="flex items-start gap-2 text-xs bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2.5">
-                      <AlertTriangle className="h-3.5 w-3.5 text-yellow-400 shrink-0 mt-0.5" />
-                      <span className="text-yellow-300/90">
-                        DNS is verified, but SSL certificate automation is not connected yet. This
-                        domain may not be safely available over HTTPS until SSL is configured
-                        manually.
-                      </span>
-                    </div>
-                  )}
-
-                {/* DNS instructions — shown when a custom domain is saved but not yet verified */}
-                {domainInfo?.customDomain && domainInfo.domainStatus !== "active" && (
-                  <div className="bg-muted/60 border border-border rounded-lg p-3 space-y-3">
-                    <p className="text-xs font-medium flex items-center gap-1.5">
-                      <Info className="h-3.5 w-3.5 text-muted-foreground" />
-                      DNS configuration required
-                    </p>
-
-                    {/* CNAME option */}
-                    <div className="space-y-1.5">
-                      <p className="text-xs text-muted-foreground font-medium">
-                        Option A — CNAME record
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Add this CNAME record in your DNS provider (Cloudflare, Route53, Namecheap,
-                        etc.):
-                      </p>
-                      <div className="rounded-md bg-background border border-border overflow-hidden text-xs font-mono">
-                        <div className="grid grid-cols-3 gap-px bg-border">
-                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
-                            Type
-                          </div>
-                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
-                            Name
-                          </div>
-                          <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
-                            Value
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-px bg-border">
-                          <div className="bg-card px-2 py-1.5">CNAME</div>
-                          <div className="bg-card px-2 py-1.5 truncate">
-                            {domainInfo.customDomain}
-                          </div>
-                          <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
-                            <span className="truncate">{domainInfo.cnameTarget}</span>
-                            <CopyUrlButton url={domainInfo.cnameTarget} />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* TXT option */}
-                    {domainInfo.verificationToken && domainInfo.txtName && (
-                      <div className="space-y-1.5">
-                        <p className="text-xs text-muted-foreground font-medium">
-                          Option B — TXT ownership record (preferred for security)
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Add a TXT record to prove domain ownership without changing your routing:
-                        </p>
-                        <div className="rounded-md bg-background border border-border overflow-hidden text-xs font-mono">
-                          <div className="grid grid-cols-3 gap-px bg-border">
-                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
-                              Type
-                            </div>
-                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
-                              Name
-                            </div>
-                            <div className="bg-muted px-2 py-1.5 text-muted-foreground font-sans font-medium">
-                              Value
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-3 gap-px bg-border">
-                            <div className="bg-card px-2 py-1.5">TXT</div>
-                            <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
-                              <span className="truncate">{domainInfo.txtName}</span>
-                              <CopyUrlButton url={domainInfo.txtName} />
-                            </div>
-                            <div className="bg-card px-2 py-1.5 flex items-center gap-1 min-w-0">
-                              <span className="truncate">{domainInfo.txtValue}</span>
-                              <CopyUrlButton url={domainInfo.txtValue ?? ""} />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    <p className="text-xs text-muted-foreground">
-                      DNS changes can take up to 48 hours to propagate. Click "Check DNS" once
-                      you've added either record.
-                    </p>
-                  </div>
+                {domainsData && domainsData.domains.length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-3">
+                    No custom domains yet. Add one above to get started.
+                  </p>
                 )}
-
-                {/* Active domain link — shown in green only when both DNS and SSL are confirmed */}
-                {domainInfo?.customDomain &&
-                  domainInfo.domainStatus === "active" &&
-                  domainInfo.sslStatus === "active" && (
-                    <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2.5">
-                      <CheckCircle2 className="h-4 w-4 text-green-400 shrink-0" />
-                      <a
-                        href={`https://${domainInfo.customDomain}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm font-mono text-green-400 hover:underline flex-1 truncate"
-                      >
-                        https://{domainInfo.customDomain}
-                      </a>
-                      <CopyUrlButton url={`https://${domainInfo.customDomain}`} />
-                    </div>
-                  )}
-
-                {/* Active domain link (DNS ok, SSL not yet confirmed) */}
-                {domainInfo?.customDomain &&
-                  domainInfo.domainStatus === "active" &&
-                  domainInfo.sslStatus !== "active" && (
-                    <div className="flex items-center gap-2 bg-muted border border-border rounded-lg px-3 py-2.5">
-                      <Lock className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm font-mono text-muted-foreground flex-1 truncate">
-                        https://{domainInfo.customDomain}
-                      </span>
-                      <CopyUrlButton url={`https://${domainInfo.customDomain}`} />
-                    </div>
-                  )}
               </div>
             </div>
 

@@ -77,6 +77,7 @@ const KNOWN_PREFIXES = [
   "/events",
   "/credits",
   "/domain",
+  "/domains",
   "/admin",
   "/billing",
   "/queue",
