@@ -351,8 +351,30 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
     if (!launched || !browser) {
       return { ok: false, error: "no chromium binary available" };
     }
-    const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+    const ctx = await browser.newContext({
+      viewport: { width: w, height: h },
+      // Block JS in inline-HTML snapshots: the model controls the HTML and
+      // could otherwise issue fetch/XHR to internal IPs from within the
+      // browser process (SSRF). For external URL captures we keep JS enabled
+      // since per-request interception (below) enforces the same allow-list.
+      javaScriptEnabled: !input.inlineHtml,
+    });
+    // SSRF guard: intercept every subresource/redirect the page tries to load
+    // (images, fonts, fetch, redirects, iframes, etc.) and abort any request
+    // whose resolved address is private/internal. Applies to BOTH inline HTML
+    // and URL-based captures so neither path can pivot through the browser
+    // process to a metadata/loopback target.
     const page = await ctx.newPage();
+    await page.route("**/*", async (route) => {
+      const reqUrl = route.request().url();
+      if (reqUrl.startsWith("data:") || reqUrl.startsWith("about:")) {
+        return route.continue();
+      }
+      if (!(await isSafeResolvedUrl(reqUrl))) {
+        return route.abort("blockedbyclient");
+      }
+      return route.continue();
+    });
     if (input.inlineHtml) {
       await page.setContent(input.inlineHtml, { waitUntil: "load", timeout: 15_000 });
     } else {
