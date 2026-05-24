@@ -4037,6 +4037,15 @@ export async function executeTool(ctx: ToolCtx): Promise<{
               }
             : undefined,
         });
+        // Mirror DB-installed blueprint files into the in-memory FileWorkspace
+        // so the loop's end-of-job replace-all (writeFiles from workspace.all())
+        // doesn't clobber files installBlueprint just wrote to project_files.
+        const writtenSet = new Set(result.filesWritten);
+        for (const f of bp.files) {
+          if (!writtenSet.has(f.path)) continue;
+          const mime = f.mimeType ?? "text/plain";
+          ctx.workspace.write(f.path, f.content, mime);
+        }
         return {
           ok: true,
           observation: JSON.stringify({
