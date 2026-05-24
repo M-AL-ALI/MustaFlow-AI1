@@ -404,7 +404,8 @@ export default function BillingPage() {
   ];
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -554,6 +555,7 @@ export default function BillingPage() {
       {activeTab === "usage" && <UsageTab usage={usage} />}
 
       {activeTab === "invoices" && <InvoicesTab invoices={invoices} />}
+      </div>
     </div>
   );
 }
