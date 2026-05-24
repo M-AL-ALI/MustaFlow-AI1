@@ -1463,7 +1463,11 @@ export default function ProjectWorkspacePage() {
             const plan = data?.assistantMessage?.plan as Record<string, unknown> | null | undefined;
             const tid =
               plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
-            if (tid) setActiveTaskId(tid);
+            // For background tasks, don't pin an inline thinking bubble in the chat —
+            // progress lives in the Background panel. Otherwise the spinner appears
+            // stuck even though the chat is free.
+            const wasBackground = opts?.background ?? runInBackground;
+            if (tid && !wasBackground) setActiveTaskId(tid);
           },
           onError: () => {
             setPendingBuildStartedAt(null);
