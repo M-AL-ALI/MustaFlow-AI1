@@ -3035,16 +3035,18 @@ export async function executeTool(
         options: kind === "choice" ? options : [],
         allowMultiple,
       };
-      // Cap prompt timeout by the loop's remaining wall-clock budget so a
-      // pause can never exceed the per-task ceiling from #509.
+      // Skip window: min(5 min spec, remaining loop budget from #509). Short
+      // prompt never strands a long-running task; long loop never extends
+      // beyond the per-task wall-clock ceiling.
       const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+      const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
       const { promptId, promise } = createPrompt({
         taskId: input.taskId,
         projectId: input.projectId,
         kind: "user_query",
         payload,
         signal: input.signal,
-        timeoutMs: remainingMs,
+        timeoutMs: promptTimeoutMs,
       });
       await safeEvent(
         input.onEvent,
@@ -3086,14 +3088,16 @@ export async function executeTool(
       }
       const { createPrompt } = await import("./agent-prompts");
       const payload = { name, category, helpUrl, reason };
+      // Same min(5 min, remaining loop budget) cap as user_query.
       const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+      const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
       const { promptId, promise } = createPrompt({
         taskId: input.taskId,
         projectId: input.projectId,
         kind: "request_secret",
         payload,
         signal: input.signal,
-        timeoutMs: remainingMs,
+        timeoutMs: promptTimeoutMs,
       });
       await safeEvent(
         input.onEvent,
