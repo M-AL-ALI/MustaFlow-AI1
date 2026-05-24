@@ -282,11 +282,17 @@ async function pgvectorTopK(
   if (embeddedPaths.size === 0) return [];
   try {
     const literal = formatVectorLiteral(queryVec);
+    // Constrain the query to *current* embedded paths so stale rows (e.g.
+    // post-rollback before eager invalidation lands, or files that were
+    // deleted between ensureIndex and this call) cannot occupy LIMIT slots
+    // and silently drop relevant current files from the result.
+    const pathList = Array.from(embeddedPaths);
     const rows = (await db.execute(sql`
       SELECT file_path, snippet,
              1 - (embedding <=> ${literal}::vector) AS score
       FROM ${projectEmbeddingsTable}
       WHERE project_id = ${projectId}
+        AND file_path = ANY(${pathList}::text[])
       ORDER BY embedding <=> ${literal}::vector
       LIMIT ${limit}
     `)) as unknown as { rows?: Array<{ file_path: string; snippet: string; score: number }> };
@@ -294,13 +300,11 @@ async function pgvectorTopK(
       rows.rows ??
       (rows as unknown as Array<{ file_path: string; snippet: string; score: number }>);
     if (!Array.isArray(list)) return null;
-    return list
-      .filter((r) => embeddedPaths.has(r.file_path))
-      .map((r) => ({
-        path: r.file_path,
-        score: typeof r.score === "string" ? Number(r.score) : r.score,
-        snippet: r.snippet,
-      }));
+    return list.map((r) => ({
+      path: r.file_path,
+      score: typeof r.score === "string" ? Number(r.score) : r.score,
+      snippet: r.snippet,
+    }));
   } catch (err) {
     logger.debug({ err, projectId }, "project-search: pgvector top-k query failed");
     return null;

@@ -306,6 +306,18 @@ router.post(
       );
     }
 
+    // Invalidate the per-project semantic-search index — restored files may
+    // have stale embeddings keyed to the prior content hashes. Best-effort,
+    // non-fatal: the next semantic_search call would re-hash and re-embed
+    // anyway, but eager invalidation prevents stale top-k rows from briefly
+    // crowding out current results.
+    try {
+      const { invalidateProjectEmbeddings } = await import("../lib/project-search");
+      await invalidateProjectEmbeddings(projectId);
+    } catch (err) {
+      req.log.warn({ err, projectId }, "rollback: invalidate embeddings failed (non-fatal)");
+    }
+
     await emitRollbackEvent(taskId, "updating_preview", "Refreshing preview with restored files…");
 
     await db.insert(chatMessagesTable).values({
