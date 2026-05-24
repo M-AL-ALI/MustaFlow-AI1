@@ -25,7 +25,6 @@ import {
   Zap,
   Navigation,
   Layers,
-  Terminal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -52,37 +51,107 @@ type EventType =
 
 const EVENT_META: Record<
   EventType,
-  { icon: React.ElementType; color: string; label: string; pillStyle: "terminal" | "brain" | "check" | "save" | "done" | "fail" | "narrate" }
+  {
+    icon: React.ElementType;
+    color: string;
+    label: string;
+    pillStyle: "terminal" | "brain" | "check" | "save" | "done" | "fail" | "narrate";
+  }
 > = {
-  queued:           { icon: Clock,         color: "text-muted-foreground", label: "Queued",            pillStyle: "narrate"   },
-  analyzing_request:{ icon: Search,        color: "text-violet-400",       label: "Analysing",         pillStyle: "brain"     },
-  loading_context:  { icon: BookOpen,      color: "text-blue-300",         label: "Loading context",   pillStyle: "brain"     },
-  planning:         { icon: BrainCircuit,  color: "text-violet-400",       label: "Planning",          pillStyle: "brain"     },
-  planning_changes: { icon: GitBranch,     color: "text-violet-300",       label: "Planning changes",  pillStyle: "brain"     },
-  reading_files:    { icon: FolderOpen,    color: "text-blue-400",         label: "Reading files",     pillStyle: "terminal"  },
-  generating_code:  { icon: Code2,         color: "text-primary",          label: "Generating code",   pillStyle: "terminal"  },
-  editing_files:    { icon: FilePen,       color: "text-yellow-400",       label: "Editing files",     pillStyle: "terminal"  },
-  validating_output:{ icon: ShieldCheck,   color: "text-cyan-300",         label: "Validating",        pillStyle: "check"     },
-  testing:          { icon: FlaskConical,  color: "text-cyan-400",         label: "Testing",           pillStyle: "check"     },
-  fixing_errors:    { icon: Wrench,        color: "text-orange-400",       label: "Fixing errors",     pillStyle: "terminal"  },
-  saving_files:     { icon: Database,      color: "text-yellow-300",       label: "Saving files",      pillStyle: "save"      },
-  updating_preview: { icon: RefreshCw,     color: "text-sky-400",          label: "Updating preview",  pillStyle: "save"      },
-  saving_version:   { icon: Save,          color: "text-secondary",        label: "Saving version",    pillStyle: "save"      },
-  writing_lessons:  { icon: GraduationCap, color: "text-emerald-400",      label: "Writing lessons",   pillStyle: "save"      },
-  architecture_chosen: { icon: Layers,     color: "text-violet-400",       label: "Architecture",      pillStyle: "brain"     },
-  narration:        { icon: Zap,           color: "text-primary",          label: "Update",            pillStyle: "narrate"   },
-  completed:        { icon: CheckCircle2,  color: "text-green-400",        label: "Completed",         pillStyle: "done"      },
-  failed:           { icon: XCircle,       color: "text-destructive",      label: "Failed",            pillStyle: "fail"      },
+  queued: { icon: Clock, color: "text-muted-foreground", label: "Queued", pillStyle: "narrate" },
+  analyzing_request: {
+    icon: Search,
+    color: "text-violet-400",
+    label: "Analysing",
+    pillStyle: "brain",
+  },
+  loading_context: {
+    icon: BookOpen,
+    color: "text-blue-300",
+    label: "Loading context",
+    pillStyle: "brain",
+  },
+  planning: { icon: BrainCircuit, color: "text-violet-400", label: "Planning", pillStyle: "brain" },
+  planning_changes: {
+    icon: GitBranch,
+    color: "text-violet-300",
+    label: "Planning changes",
+    pillStyle: "brain",
+  },
+  reading_files: {
+    icon: FolderOpen,
+    color: "text-blue-400",
+    label: "Reading files",
+    pillStyle: "terminal",
+  },
+  generating_code: {
+    icon: Code2,
+    color: "text-primary",
+    label: "Generating code",
+    pillStyle: "terminal",
+  },
+  editing_files: {
+    icon: FilePen,
+    color: "text-yellow-400",
+    label: "Editing files",
+    pillStyle: "terminal",
+  },
+  validating_output: {
+    icon: ShieldCheck,
+    color: "text-cyan-300",
+    label: "Validating",
+    pillStyle: "check",
+  },
+  testing: { icon: FlaskConical, color: "text-cyan-400", label: "Testing", pillStyle: "check" },
+  fixing_errors: {
+    icon: Wrench,
+    color: "text-orange-400",
+    label: "Fixing errors",
+    pillStyle: "terminal",
+  },
+  saving_files: {
+    icon: Database,
+    color: "text-yellow-300",
+    label: "Saving files",
+    pillStyle: "save",
+  },
+  updating_preview: {
+    icon: RefreshCw,
+    color: "text-sky-400",
+    label: "Updating preview",
+    pillStyle: "save",
+  },
+  saving_version: {
+    icon: Save,
+    color: "text-secondary",
+    label: "Saving version",
+    pillStyle: "save",
+  },
+  writing_lessons: {
+    icon: GraduationCap,
+    color: "text-emerald-400",
+    label: "Writing lessons",
+    pillStyle: "save",
+  },
+  architecture_chosen: {
+    icon: Layers,
+    color: "text-violet-400",
+    label: "Architecture",
+    pillStyle: "brain",
+  },
+  narration: { icon: Zap, color: "text-primary", label: "Update", pillStyle: "narrate" },
+  completed: { icon: CheckCircle2, color: "text-green-400", label: "Completed", pillStyle: "done" },
+  failed: { icon: XCircle, color: "text-destructive", label: "Failed", pillStyle: "fail" },
 };
 
 const PILL_STYLE_CLASSES: Record<string, string> = {
   terminal: "bg-muted/60 border-border text-muted-foreground",
-  brain:    "bg-violet-500/10 border-violet-500/20 text-violet-400",
-  check:    "bg-cyan-500/10 border-cyan-500/20 text-cyan-400",
-  save:     "bg-emerald-500/10 border-emerald-500/20 text-emerald-400",
-  done:     "bg-green-500/10 border-green-500/20 text-green-400",
-  fail:     "bg-destructive/10 border-destructive/20 text-destructive",
-  narrate:  "bg-muted/40 border-border text-muted-foreground",
+  brain: "bg-violet-500/10 border-violet-500/20 text-violet-400",
+  check: "bg-cyan-500/10 border-cyan-500/20 text-cyan-400",
+  save: "bg-emerald-500/10 border-emerald-500/20 text-emerald-400",
+  done: "bg-green-500/10 border-green-500/20 text-green-400",
+  fail: "bg-destructive/10 border-destructive/20 text-destructive",
+  narrate: "bg-muted/40 border-border text-muted-foreground",
 };
 
 const TERMINAL_STATUSES = new Set(["completed", "failed"]);
@@ -115,7 +184,7 @@ const AGENT_BADGE: Record<string, { label: string; icon: React.ElementType; clas
 
 export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, onDismiss }: Props) {
   const pillRowRef = useRef<HTMLDivElement>(null);
-  const detailRef  = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [autoDismissed, setAutoDismissed] = useState(false);
 
@@ -132,10 +201,10 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
     },
   });
 
-  const lastEvent   = events[events.length - 1];
-  const isTerminal  = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
-  const isDone      = lastEvent?.eventType === "completed";
-  const isFailed    = lastEvent?.eventType === "failed";
+  const lastEvent = events[events.length - 1];
+  const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
+  const isDone = lastEvent?.eventType === "completed";
+  const isFailed = lastEvent?.eventType === "failed";
   const isNeedsReview = taskStatus === "needs_review";
 
   // Auto-scroll pill row to the right as new events arrive
@@ -168,25 +237,21 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
   // if over cap, show first FEW + ellipsis + last FEW.
   const MAX_PILLS = 18;
   const pills = events.map((e, idx) => {
-    const meta    = EVENT_META[e.eventType as EventType] ?? EVENT_META.queued;
-    const Icon    = meta.icon;
-    const isLast  = idx === events.length - 1;
+    const meta = EVENT_META[e.eventType as EventType] ?? EVENT_META.queued;
+    const Icon = meta.icon;
+    const isLast = idx === events.length - 1;
     const isActive = isLast && !isTerminal;
     return { id: e.id, Icon, meta, isActive, isLast, eventType: e.eventType };
   });
 
   // Decide what subset of pills to render
   let visiblePills: typeof pills;
-  let showEllipsis = false;
   if (pills.length <= MAX_PILLS) {
     visiblePills = pills;
   } else {
     const head = pills.slice(0, 4);
-    const tail = pills.slice(pills.length - (MAX_PILLS - 4 - 1));
-    visiblePills = [...head, { id: -1, Icon: Terminal, meta: EVENT_META.queued, isActive: false, isLast: false, eventType: "queued" }];
-    showEllipsis = true;
+    const tail = pills.slice(pills.length - (MAX_PILLS - 4));
     visiblePills = [...head, ...tail];
-    void showEllipsis;
   }
 
   const statusText = isNeedsReview
@@ -272,30 +337,43 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
             {events.length} {events.length === 1 ? "action" : "actions"}
           </span>
 
-          {agentIdentity && AGENT_BADGE[agentIdentity] && (() => {
-            const badge = AGENT_BADGE[agentIdentity]!;
-            const BadgeIcon = badge.icon;
-            return (
-              <span
-                className={cn(
-                  "flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded border font-medium",
-                  badge.className,
-                )}
-              >
-                <BadgeIcon className="h-2 w-2" />
-                {badge.label}
-              </span>
-            );
-          })()}
+          {agentIdentity &&
+            AGENT_BADGE[agentIdentity] &&
+            (() => {
+              const badge = AGENT_BADGE[agentIdentity]!;
+              const BadgeIcon = badge.icon;
+              return (
+                <span
+                  className={cn(
+                    "flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded border font-medium",
+                    badge.className,
+                  )}
+                >
+                  <BadgeIcon className="h-2 w-2" />
+                  {badge.label}
+                </span>
+              );
+            })()}
 
           <button
-            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
             className="p-0.5 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
           >
-            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-200", expanded && "rotate-180")} />
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 transition-transform duration-200",
+                expanded && "rotate-180",
+              )}
+            />
           </button>
           <button
-            onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDismiss();
+            }}
             className="p-0.5 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
           >
             <X className="h-3.5 w-3.5" />
@@ -305,11 +383,14 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
 
       {/* ── Expanded detail list ── */}
       {expanded && (
-        <div ref={detailRef} className="overflow-y-auto max-h-52 px-2 pb-2 space-y-0.5 border-t border-border pt-2 hide-scrollbar">
+        <div
+          ref={detailRef}
+          className="overflow-y-auto max-h-52 px-2 pb-2 space-y-0.5 border-t border-border pt-2 hide-scrollbar"
+        >
           {events.map((event, idx) => {
             const meta = EVENT_META[event.eventType as EventType] ?? EVENT_META.queued;
             const Icon = meta.icon;
-            const isLast   = idx === events.length - 1;
+            const isLast = idx === events.length - 1;
             const isActive = isLast && !isTerminal;
             return (
               <div
@@ -327,10 +408,12 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <span className={cn(
-                    "leading-tight",
-                    isActive ? "text-foreground font-medium" : "text-muted-foreground",
-                  )}>
+                  <span
+                    className={cn(
+                      "leading-tight",
+                      isActive ? "text-foreground font-medium" : "text-muted-foreground",
+                    )}
+                  >
                     {event.message}
                   </span>
                   {event.filePath && (
@@ -393,10 +476,10 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
     },
   });
 
-  const lastEvent  = events[events.length - 1];
+  const lastEvent = events[events.length - 1];
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
-  const isDone     = lastEvent?.eventType === "completed";
-  const isFailed   = lastEvent?.eventType === "failed";
+  const isDone = lastEvent?.eventType === "completed";
+  const isFailed = lastEvent?.eventType === "failed";
 
   // Auto-scroll pill row right
   useEffect(() => {
@@ -430,7 +513,6 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
   return (
     <div className="flex justify-start max-w-[96%]">
       <div className="bg-muted/60 border border-border rounded-xl rounded-bl-sm px-2.5 py-2 flex items-center gap-2 min-w-0 w-full">
-
         {/* Icon trail */}
         <div
           ref={pillRowRef}
@@ -438,13 +520,14 @@ export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
           style={{ maxWidth: "55%", scrollbarWidth: "none" }}
         >
           {pillsToShow.map((event, idx) => {
-            const meta   = EVENT_META[event.eventType as EventType] ?? EVENT_META.queued;
-            const Icon   = meta.icon;
+            const meta = EVENT_META[event.eventType as EventType] ?? EVENT_META.queued;
+            const Icon = meta.icon;
             const isLast = idx === pillsToShow.length - 1;
             const isActive = isLast && !isTerminal;
             const styleClass = PILL_STYLE_CLASSES[meta.pillStyle] ?? PILL_STYLE_CLASSES.terminal;
             const age = pillsToShow.length - 1 - idx;
-            const ageOpacity = age === 0 ? "" : age === 1 ? "opacity-60" : age === 2 ? "opacity-40" : "opacity-20";
+            const ageOpacity =
+              age === 0 ? "" : age === 1 ? "opacity-60" : age === 2 ? "opacity-40" : "opacity-20";
 
             return (
               <span

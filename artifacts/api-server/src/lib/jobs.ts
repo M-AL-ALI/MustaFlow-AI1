@@ -3561,11 +3561,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             if (project.stack === "node-api") {
               await execInContainer(
                 containerId,
-                [
-                  "/bin/sh",
-                  "-c",
-                  "pkill -f 'node ' 2>/dev/null; nohup npm start &>/tmp/app.log &",
-                ],
+                ["/bin/sh", "-c", "pkill -f 'node ' 2>/dev/null; nohup npm start &>/tmp/app.log &"],
                 projectId,
               );
               await emitEvent(taskId, "narration", "Server started.");
