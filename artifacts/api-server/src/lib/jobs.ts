@@ -1351,6 +1351,16 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
                   );
                 },
+                onBillableCreativeCall: (credits, tool) => {
+                  if (!project.ownerId) return;
+                  void deductCredits(project.ownerId, credits, {
+                    type: "creative",
+                    description: `Agent ${tool} — project ${projectId}`,
+                    projectId,
+                  }).catch((err) =>
+                    logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
+                  );
+                },
               });
               return loopResultToBuildResult(loopRes, userPrompt, project.name);
             })()
@@ -1711,6 +1721,16 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     projectId,
                   }).catch((err) =>
                     logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
+                  );
+                },
+                onBillableCreativeCall: (credits, tool) => {
+                  if (!project.ownerId) return;
+                  void deductCredits(project.ownerId, credits, {
+                    type: "creative",
+                    description: `Agent ${tool} — project ${projectId}`,
+                    projectId,
+                  }).catch((err) =>
+                    logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
                   );
                 },
               });

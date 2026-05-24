@@ -32,6 +32,7 @@ import {
   Camera,
   Globe,
   Palette,
+  Sparkles,
   AlertCircle,
   Timer,
   Bookmark,
@@ -85,6 +86,10 @@ const STEP_ICON: Record<string, React.ElementType> = {
   web_search: Search,
   extract_branding: Palette,
   read_diagnostics: AlertCircle,
+  generate_image: Sparkles,
+  generate_video: Sparkles,
+  generate_audio: Sparkles,
+  remove_image_background: Sparkles,
 };
 
 const STEP_COLOR: Record<string, string> = {

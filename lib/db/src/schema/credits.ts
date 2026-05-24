@@ -15,6 +15,7 @@ export const CREDIT_TRANSACTION_TYPES = [
   "plan",
   "architect",
   "senses",
+  "creative",
   "manual_adjustment",
   "purchase",
 ] as const;

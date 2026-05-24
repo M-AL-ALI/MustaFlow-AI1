@@ -108,6 +108,18 @@ export interface AgentLoopInput {
    * deduct for THIS batch (always 1 in current pricing).
    */
   onBillableSenseBatch?: (credits: number, totalWebCalls: number) => void;
+  /**
+   * Optional billing hook (Task #530 "Agent Creative Pack"): invoked after
+   * every successful media-generation tool call. Receives the credit cost
+   * for THIS call (image=1, video=3, audio=2, bgRemoval=1) and the tool
+   * name. Charged in-loop so usage is metered even on cancel/failure paths
+   * (only successful calls bill — failed calls return an error without
+   * charging).
+   */
+  onBillableCreativeCall?: (
+    credits: number,
+    tool: "generate_image" | "generate_video" | "generate_audio" | "remove_image_background",
+  ) => void;
 }
 
 export type ToolCallRecord = {
@@ -163,6 +175,13 @@ export type AgentLoopReport = {
     webSearch: number;
     branding: number;
     diagnostics: number;
+  };
+  /** Counts of "agent creative pack" tool invocations (Task #530). */
+  creativeCalls?: {
+    image: number;
+    video: number;
+    audio: number;
+    bgRemoval: number;
   };
 };
 
@@ -618,6 +637,97 @@ const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "generate_image",
+      description:
+        "Generate a PNG image from a text prompt via gpt-image-1. Writes the result into the project at the given path (must end in .png). Use for app icons, hero illustrations, placeholder photography, generated logos. Costs 1 credit per call. Total combined creative-pack budget is 5 calls per task.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Project-relative output path ending in .png (e.g. 'assets/hero.png').",
+          },
+          prompt: { type: "string", description: "Detailed description of the image to generate." },
+          size: {
+            type: "string",
+            enum: ["256x256", "512x512", "1024x1024"],
+            description: "Output resolution; defaults to 1024x1024.",
+          },
+        },
+        required: ["path", "prompt"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_video",
+      description:
+        "Generate a short MP4 video from a text prompt. NOTE: video generation is not currently configured server-side — this returns a structured 'not configured' error. Prefer animated CSS/JS over calling this tool. Costs 3 credits per successful call (none today). Counts against the per-task creative-pack budget.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Project-relative output path ending in .mp4." },
+          prompt: { type: "string" },
+        },
+        required: ["path", "prompt"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_audio",
+      description:
+        "Synthesize speech from short text (≤30s) via OpenAI TTS. Use for onboarding voiceover, notification chimes, accessibility audio cues. Writes an MP3 (default) into the project at the given path. Costs 2 credits per call. Total combined creative-pack budget is 5 calls per task.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Project-relative output path ending in .mp3, .wav, or .ogg.",
+          },
+          text: { type: "string", description: "Text to read aloud (≤2000 chars / ~30s)." },
+          voice: {
+            type: "string",
+            description: "Voice id (default 'alloy'). Examples: alloy, nova, shimmer.",
+          },
+          format: {
+            type: "string",
+            enum: ["mp3", "wav", "opus"],
+            description: "Output audio format; defaults to mp3.",
+          },
+        },
+        required: ["path", "text"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "remove_image_background",
+      description:
+        "Remove the background of an existing image already in the project workspace. Input must be PNG, JPEG, or WebP. Output is a transparent PNG written to `out_path` (or overwrites `path` when `out_path` is omitted). Costs 1 credit per call. Counts against the per-task creative-pack budget.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Existing image path in the project workspace." },
+          out_path: {
+            type: "string",
+            description: "Optional output path ending in .png; defaults to overwriting `path`.",
+          },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "load_skill",
       description:
         "Load the full instructions for a named skill from the registry. Call this BEFORE generating code for a stack/feature listed in the 'Available skills' section. Returns the SKILL.md body. Loading the same skill twice in one run is free — it returns the cached content.",
@@ -823,6 +933,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // 20 calls / task — keeps cost predictable and bounds total egress.
   const fetchBudget = { remaining: 20 };
   const senseCounts = { screenshot: 0, webFetch: 0, webSearch: 0, branding: 0, diagnostics: 0 };
+  // Task #530: per-task creative-pack budget (5 calls total across all 4 tools).
+  const creativeBudget = { remaining: 5 };
+  const creativeCounts = { image: 0, video: 0, audio: 0, bgRemoval: 0 };
   let totalTokens = 0;
 
   const startedAt = Date.now();
@@ -961,6 +1074,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         screenshotBudget,
         fetchBudget,
         senseCounts,
+        creativeBudget,
+        creativeCounts,
       });
       const durationMs = Date.now() - tStart;
 
@@ -1144,6 +1259,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         skillsLoaded: Array.from(loadedSkills.keys()),
         e2eResults: e2eResults[e2eResults.length - 1] ?? null,
         senseCalls: { ...senseCounts },
+        creativeCalls: { ...creativeCounts },
       },
     };
   }
@@ -1287,6 +1403,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               screenshotBudget,
               fetchBudget,
               senseCounts,
+              creativeBudget,
+              creativeCounts,
             });
             toolCalls.push({
               step: step + 1,
@@ -1375,6 +1493,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       skillsLoaded: Array.from(loadedSkills.keys()),
       e2eResults: lastE2e,
       senseCalls: { ...senseCounts },
+      creativeCalls: { ...creativeCounts },
     },
   };
 }
@@ -1522,6 +1641,18 @@ export interface ToolCtx {
     webSearch: number;
     branding: number;
     diagnostics: number;
+  };
+  /** Per-task budget for combined creative-pack calls (generate_image +
+   *  generate_video + generate_audio + remove_image_background). Default 5.
+   *  Calls past the budget return an ERROR observation without making the
+   *  API request, mirroring fetchBudget. */
+  creativeBudget: { remaining: number };
+  /** Mutable counters for Task #530 "Agent Creative Pack" tools. */
+  creativeCounts: {
+    image: number;
+    video: number;
+    audio: number;
+    bgRemoval: number;
   };
 }
 
@@ -2438,12 +2569,158 @@ export async function executeTool(
         }),
       };
     }
+    case "generate_image":
+    case "generate_video":
+    case "generate_audio":
+    case "remove_image_background":
+      return executeCreativeTool(ctx);
     case "finalize": {
       return { ok: true, observation: "finalized" };
     }
     default:
       return { ok: false, observation: `ERROR: unknown tool: ${name}` };
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Creative Pack (Task #530) — generate_image / video / audio / remove_image_background
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CREATIVE_CREDIT_COST: Record<
+  "generate_image" | "generate_video" | "generate_audio" | "remove_image_background",
+  number
+> = {
+  generate_image: 1,
+  generate_video: 3,
+  generate_audio: 2,
+  remove_image_background: 1,
+};
+
+async function executeCreativeTool(
+  ctx: ToolCtx,
+): Promise<{ ok: boolean; observation: string; noTruncate?: boolean }> {
+  const { name, args, workspace, input, containerState } = ctx;
+  const tool = name as
+    | "generate_image"
+    | "generate_video"
+    | "generate_audio"
+    | "remove_image_background";
+
+  if (ctx.creativeBudget.remaining <= 0) {
+    return {
+      ok: false,
+      observation:
+        "ERROR: creative-pack budget exhausted (5 calls per task across generate_image + generate_video + generate_audio + remove_image_background).",
+    };
+  }
+
+  const outPath = sanitizePath(args.path);
+  if (!outPath) return { ok: false, observation: "ERROR: invalid path" };
+
+  const { generateImageAsset, generateVideoAsset, generateAudioAsset, removeImageBackgroundAsset } =
+    await import("./agent-creative");
+
+  // Lazy budget decrement: only counted when we actually start the call.
+  ctx.creativeBudget.remaining -= 1;
+  await safeEvent(input.onEvent, tool, `${tool.replace(/_/g, " ")} → ${outPath}`);
+
+  let result: Awaited<ReturnType<typeof generateImageAsset>>;
+  let counterKey: "image" | "video" | "audio" | "bgRemoval";
+
+  switch (tool) {
+    case "generate_image": {
+      const prompt = typeof args.prompt === "string" ? args.prompt : "";
+      const size =
+        args.size === "256x256" || args.size === "512x512" || args.size === "1024x1024"
+          ? args.size
+          : "1024x1024";
+      result = await generateImageAsset({ prompt, size, signal: input.signal });
+      counterKey = "image";
+      break;
+    }
+    case "generate_video": {
+      const prompt = typeof args.prompt === "string" ? args.prompt : "";
+      result = await generateVideoAsset({ prompt, signal: input.signal });
+      counterKey = "video";
+      break;
+    }
+    case "generate_audio": {
+      const text = typeof args.text === "string" ? args.text : "";
+      const voice = typeof args.voice === "string" ? args.voice : undefined;
+      const format =
+        args.format === "wav" || args.format === "opus" || args.format === "mp3"
+          ? args.format
+          : "mp3";
+      result = await generateAudioAsset({ text, voice, format, signal: input.signal });
+      counterKey = "audio";
+      break;
+    }
+    case "remove_image_background": {
+      const source = workspace.read(outPath);
+      if (!source) {
+        return { ok: false, observation: `ERROR: source image not found: ${outPath}` };
+      }
+      const srcMime = source.mimeType ?? guessMime(outPath);
+      result = await removeImageBackgroundAsset({
+        imageBase64: source.content,
+        imageMimeType: srcMime,
+        filename: outPath.split("/").pop() ?? "input.png",
+        signal: input.signal,
+      });
+      counterKey = "bgRemoval";
+      break;
+    }
+  }
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      observation: `ERROR: ${tool} failed: ${result.error}${result.notConfigured ? " (notConfigured)" : ""}`,
+    };
+  }
+
+  // Decide where to write. generate_image writes to args.path. generate_audio
+  // writes to args.path. remove_image_background writes to args.out_path (or
+  // overwrites args.path when omitted). generate_video would write to
+  // args.path — but it always fails today.
+  let writePath = outPath;
+  if (tool === "remove_image_background" && typeof args.out_path === "string") {
+    const sanitized = sanitizePath(args.out_path);
+    if (sanitized) writePath = sanitized;
+  }
+
+  workspace.write(writePath, result.base64, result.mimeType);
+  // NOTE: container sync intentionally skipped for binary creative writes.
+  // `writeFileToContainer` re-encodes its `content` argument via
+  // `Buffer.from(content, "utf8")`, which mangles non-UTF-8 bytes. Persistence
+  // for binary creative assets happens through the snapshot path
+  // (`serveSnapshot` decodes base64 when `isBinaryMime(mime)` is true), so the
+  // generated asset is still served correctly by the published preview — only
+  // the *live* container disk lacks the file until the next full sync. If a
+  // container-side binary write is needed in the future, add a dedicated
+  // `writeBinaryFileToContainer` helper rather than reusing the UTF-8 path.
+
+  ctx.creativeCounts[counterKey] += 1;
+  const credits = CREATIVE_CREDIT_COST[tool];
+  if (input.onBillableCreativeCall) {
+    try {
+      input.onBillableCreativeCall(credits, tool);
+    } catch {
+      // billing must not break the loop
+    }
+  }
+
+  return {
+    ok: true,
+    observation: JSON.stringify({
+      tool,
+      path: writePath,
+      mimeType: result.mimeType,
+      bytes: result.bytes,
+      creditsCharged: credits,
+      budgetRemaining: ctx.creativeBudget.remaining,
+    }),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

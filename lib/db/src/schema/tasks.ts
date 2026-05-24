@@ -210,6 +210,18 @@ export type TaskReport = {
       branding: number;
       diagnostics: number;
     };
+    /**
+     * Per-task "Agent Creative Pack" usage counters (Task #530). Tracks how
+     * many times the agent invoked each media-generation tool. Each
+     * successful call is metered as one `credit_transactions.type="creative"`
+     * row (image=1, video=3, audio=2, bgRemoval=1).
+     */
+    creativeCalls?: {
+      image: number;
+      video: number;
+      audio: number;
+      bgRemoval: number;
+    };
   } | null;
   /**
    * Populated when Playwright end-to-end scenarios ran against the live preview
