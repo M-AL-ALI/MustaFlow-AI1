@@ -456,7 +456,7 @@ export function MarkdownMessage({
   return (
     <div
       className={cn(
-        "prose prose-invert max-w-none",
+        "prose prose-sm dark:prose-invert max-w-none text-foreground",
         "[&_p]:text-xs [&_p]:leading-relaxed [&_p:last-child]:mb-0 [&_p]:my-1",
         "[&_h1]:text-sm [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1",
         "[&_h2]:text-xs [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1",
