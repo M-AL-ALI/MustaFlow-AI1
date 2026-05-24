@@ -37,6 +37,7 @@ import {
   MousePointerClick,
   Type as TypeIcon,
   Palette,
+  Code2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -860,6 +861,42 @@ export function PreviewTab({
             <span className="text-[10px] text-zinc-500 truncate flex-1">
               {veSelection.text.slice(0, 40) || "(no text)"}
             </span>
+            {onOpenFileInEditor && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!veSelection?.text) return;
+                  try {
+                    const res = await fetch(
+                      `/api/projects/${project.id}/visual-edit/resolve`,
+                      {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        credentials: "include",
+                        body: JSON.stringify({ text: veSelection.text }),
+                      },
+                    );
+                    if (res.ok) {
+                      const j = (await res.json()) as { fileId?: number; filePath?: string };
+                      if (typeof j.fileId === "number") {
+                        onOpenFileInEditor(j.fileId);
+                        closeVe();
+                        return;
+                      }
+                    }
+                    setVeToast("Couldn't find a unique source location");
+                    setTimeout(() => setVeToast(null), 2500);
+                  } catch {
+                    setVeToast("Deep-link failed");
+                    setTimeout(() => setVeToast(null), 2500);
+                  }
+                }}
+                className="text-zinc-400 hover:text-violet-300 p-0.5"
+                title="View in Code"
+              >
+                <Code2 className="h-3 w-3" />
+              </button>
+            )}
             <button
               type="button"
               onClick={closeVe}
@@ -994,14 +1031,36 @@ export function PreviewTab({
           )}
           {vePanel === "padding" && (
             <div className="px-1 pb-1 flex flex-col gap-1.5">
-              <input
-                type="text"
-                value={veDraftPadding}
-                onChange={(e) => setVeDraftPadding(e.target.value)}
-                placeholder="e.g. 16px 24px"
-                className="w-full text-[12px] px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 focus:outline-none focus:border-violet-500 font-mono"
-                autoFocus
-              />
+              {(() => {
+                const m = /^(\d+)px$/.exec(veDraftPadding.trim());
+                const numeric = m ? Number(m[1]) : 0;
+                return (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={64}
+                        step={1}
+                        value={numeric}
+                        onChange={(e) => setVeDraftPadding(`${e.target.value}px`)}
+                        className="flex-1 accent-violet-500"
+                        aria-label="Padding"
+                      />
+                      <span className="text-[11px] text-zinc-300 font-mono min-w-[44px] text-right">
+                        {numeric}px
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={veDraftPadding}
+                      onChange={(e) => setVeDraftPadding(e.target.value)}
+                      placeholder="e.g. 16px or 16px 24px"
+                      className="w-full text-[12px] px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 focus:outline-none focus:border-violet-500 font-mono"
+                    />
+                  </>
+                );
+              })()}
               <div className="flex items-center gap-1">
                 <button
                   type="button"
