@@ -27,15 +27,16 @@ export function OrgSwitcher({ onOrgChange, currentOrgId }: OrgSwitcherProps) {
   useEffect(() => {
     setLoading(true);
     fetch("/api/orgs")
-      .then((r) => r.json())
-      .then((data: Org[]) => setOrgs(data))
-      .catch(() => {})
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: unknown) => setOrgs(Array.isArray(data) ? (data as Org[]) : []))
+      .catch(() => setOrgs([]))
       .finally(() => setLoading(false));
   }, []);
 
-  const activeOrg = orgs.find((o) => o.id === currentOrgId) ?? null;
-  const teamOrgs = orgs.filter((o) => o.type === "team");
-  const personalOrg = orgs.find((o) => o.type === "personal") ?? null;
+  const safeOrgs = Array.isArray(orgs) ? orgs : [];
+  const activeOrg = safeOrgs.find((o) => o.id === currentOrgId) ?? null;
+  const teamOrgs = safeOrgs.filter((o) => o.type === "team");
+  const personalOrg = safeOrgs.find((o) => o.type === "personal") ?? null;
 
   const selectOrg = (orgId: number | null) => {
     setOpen(false);

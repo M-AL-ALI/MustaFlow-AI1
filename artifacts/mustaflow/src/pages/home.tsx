@@ -41,6 +41,11 @@ import { type TemplateDefinition } from "@/lib/templates";
 import { INDUSTRY_PERSONAS } from "@/lib/templates";
 import { cn } from "@/lib/utils";
 import { DemoAnimation } from "@/components/demo-animation";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Show } from "@clerk/react";
+import heroShot from "@assets/image_1779643547464.png";
+import logosStrip from "@assets/image_1779643571872.png";
+import featureStrip from "@assets/image_1779643590270.png";
 
 const PERSONA_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "real-estate": Building2,
@@ -178,8 +183,83 @@ export default function HomePage() {
   return (
     <>
       <div className="flex-1 overflow-y-auto pb-24">
+        {/* Top navigation bar */}
+        <header className="sticky top-0 z-30 backdrop-blur-xl bg-background/80 border-b border-border">
+          <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+            <a
+              href={import.meta.env.BASE_URL || "/"}
+              className="flex items-center gap-2.5 group"
+              aria-label="MustaFlow AI home"
+            >
+              <img
+                src={`${import.meta.env.BASE_URL}logo.png`}
+                alt="MustaFlow AI"
+                className="h-9 w-9 rounded-lg shadow-sm group-hover:scale-105 transition-transform"
+              />
+              <span className="text-lg font-bold tracking-tight hidden sm:inline">
+                MustaFlow <span className="text-primary">AI</span>
+              </span>
+            </a>
+            <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
+              <button onClick={() => setLocation("/pricing")} className="hover:text-foreground transition-colors">
+                Pricing
+              </button>
+              <button onClick={() => setLocation("/integrations")} className="hover:text-foreground transition-colors">
+                Integrations
+              </button>
+              <button onClick={() => setLocation("/security")} className="hover:text-foreground transition-colors">
+                Security
+              </button>
+              <button onClick={() => setLocation("/help")} className="hover:text-foreground transition-colors">
+                Help
+              </button>
+            </nav>
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <Show when="signed-out">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-sm"
+                  onClick={() => setLocation("/sign-in")}
+                >
+                  Log in
+                </Button>
+                <Button
+                  size="sm"
+                  className="rounded-full px-4 text-sm shadow-md"
+                  onClick={() => setLocation("/sign-up")}
+                >
+                  Create account
+                </Button>
+              </Show>
+              <Show when="signed-in">
+                <Button
+                  size="sm"
+                  className="rounded-full px-4 text-sm"
+                  onClick={() => setLocation("/projects")}
+                >
+                  My projects
+                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                </Button>
+              </Show>
+            </div>
+          </div>
+        </header>
+
         {/* Hero Section */}
-        <div className="max-w-4xl mx-auto pt-20 px-6">
+        <div className="max-w-4xl mx-auto pt-16 px-6">
+          {/* Big logo treatment */}
+          <div className="flex justify-center mb-8">
+            <div className="relative">
+              <div className="absolute -inset-4 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.25)_0%,transparent_70%)] blur-2xl pointer-events-none" />
+              <img
+                src={`${import.meta.env.BASE_URL}logo.png`}
+                alt="MustaFlow AI"
+                className="relative h-20 w-20 rounded-2xl shadow-2xl ring-1 ring-border"
+              />
+            </div>
+          </div>
           <div className="text-center mb-6">
             <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-6">
               <Sparkles className="h-3 w-3" />
@@ -325,6 +405,182 @@ export default function HomePage() {
                 {item}
               </span>
             ))}
+          </div>
+        </div>
+
+        {/* Trusted-by logos strip */}
+        <div className="border-t border-border bg-card/40">
+          <div className="max-w-5xl mx-auto px-6 py-10">
+            <p className="text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70 mb-5">
+              Trusted by makers building on the modern stack
+            </p>
+            <div className="relative rounded-2xl overflow-hidden border border-border bg-background/40">
+              <img
+                src={logosStrip}
+                alt="Logos of companies and tools makers use"
+                className="w-full h-auto object-cover opacity-90 dark:opacity-80"
+                loading="lazy"
+              />
+              <div className="absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-background to-transparent pointer-events-none" />
+              <div className="absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-background to-transparent pointer-events-none" />
+            </div>
+          </div>
+        </div>
+
+        {/* Big feature showcase — Meet Your AI Builder */}
+        <div className="border-t border-border bg-background">
+          <div className="max-w-6xl mx-auto px-6 py-20">
+            <div className="text-center mb-12">
+              <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-4">
+                <Sparkles className="h-3 w-3" />
+                Meet your AI builder
+              </div>
+              <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight mb-3">
+                Creativity runs on{" "}
+                <span className="gradient-text">MustaFlow</span>
+              </h2>
+              <p className="text-muted-foreground max-w-2xl mx-auto">
+                A side-by-side preview, a chat that builds, and a one-click publish — all in your
+                browser. No installs, no servers to babysit.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+              {/* Big hero card with reference image */}
+              <div className="lg:col-span-3 relative rounded-3xl border border-border bg-card overflow-hidden shadow-xl group">
+                <div className="absolute inset-0 bg-gradient-to-br from-primary/15 via-transparent to-transparent pointer-events-none" />
+                <div className="p-8 sm:p-10">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+                    Infinite Canvas
+                  </p>
+                  <h3 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
+                    Design freely. Refine visually.
+                  </h3>
+                  <p className="text-sm text-muted-foreground max-w-md leading-relaxed mb-6">
+                    Generate variations side-by-side, tweak with the visual editor, and graduate
+                    the winner straight into your app. No design tools required.
+                  </p>
+                  <Button
+                    size="sm"
+                    className="gap-1.5 rounded-full"
+                    onClick={() => setLocation("/sign-up")}
+                  >
+                    Try it free
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <div className="px-6 pb-6">
+                  <div className="rounded-2xl overflow-hidden border border-border bg-background/60 shadow-inner">
+                    <img
+                      src={heroShot}
+                      alt="MustaFlow builder preview"
+                      className="w-full h-auto block group-hover:scale-[1.01] transition-transform duration-700"
+                      loading="lazy"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Side stack */}
+              <div className="lg:col-span-2 grid grid-cols-1 gap-5">
+                <div className="relative rounded-3xl border border-border bg-gradient-to-br from-primary/15 via-primary/5 to-transparent p-7 overflow-hidden">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+                    Parallel Agents
+                  </p>
+                  <h3 className="text-2xl font-bold tracking-tight mb-2">Move faster</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    Run multiple agents in parallel — one drafts, one reviews, one tests. Builds
+                    in seconds, not minutes.
+                  </p>
+                  <Zap className="absolute -bottom-4 -right-4 h-32 w-32 text-primary/10" />
+                </div>
+                <div className="relative rounded-3xl border border-border bg-card p-7 overflow-hidden">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+                    Knowledge Vault
+                  </p>
+                  <h3 className="text-2xl font-bold tracking-tight mb-2">Learns as you go</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    Every build teaches MustaFlow something new — your style, your stack, your
+                    preferences.
+                  </p>
+                  <BookOpen className="absolute -bottom-4 -right-4 h-28 w-28 text-primary/10" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 4-card feature strip */}
+        <div className="border-t border-border bg-muted/10">
+          <div className="max-w-6xl mx-auto px-6 py-20">
+            <div className="text-center mb-10">
+              <h2 className="text-2xl sm:text-4xl font-bold tracking-tight mb-3">
+                Everything you need, nothing you don't
+              </h2>
+              <p className="text-muted-foreground max-w-xl mx-auto text-sm">
+                From the first prompt to a published, secured, scaled app — MustaFlow handles
+                the whole stack.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                {
+                  label: "Agent Chat",
+                  title: "Describe it. Publish it.",
+                  desc: "Plain-language conversation with an agent that codes, plans, and ships.",
+                  icon: MessageSquare,
+                  tone: "from-primary/15 to-primary/0 border-primary/20",
+                },
+                {
+                  label: "Full Stack Infrastructure",
+                  title: "Build & scale easily.",
+                  desc: "Auth, database, hosting, monitoring — wired up with zero setup.",
+                  icon: Database,
+                  tone: "from-zinc-500/10 to-transparent border-zinc-500/15",
+                },
+                {
+                  label: "Integrations",
+                  title: "Connect to AI & services.",
+                  desc: "Stripe, GitHub, Slack, OpenAI and dozens more — one click each.",
+                  icon: Zap,
+                  tone: "from-amber-500/15 to-transparent border-amber-500/20",
+                },
+                {
+                  label: "Enterprise Control",
+                  title: "Secure as you scale.",
+                  desc: "RBAC, audit logs, SSO-ready, GDPR-aware — built for teams.",
+                  icon: CheckCircle2,
+                  tone: "from-emerald-500/15 to-transparent border-emerald-500/20",
+                },
+              ].map((card) => (
+                <div
+                  key={card.label}
+                  className={cn(
+                    "group relative rounded-3xl border bg-gradient-to-br p-6 overflow-hidden hover:-translate-y-1 transition-transform duration-200",
+                    card.tone,
+                  )}
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                    {card.label}
+                  </p>
+                  <h3 className="text-xl font-bold tracking-tight mb-2 leading-snug">
+                    {card.title}
+                  </h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{card.desc}</p>
+                  <card.icon className="absolute -bottom-3 -right-3 h-20 w-20 text-foreground/[0.04] group-hover:text-primary/20 transition-colors" />
+                </div>
+              ))}
+            </div>
+
+            {/* Reference montage */}
+            <div className="mt-10 rounded-2xl overflow-hidden border border-border bg-card shadow-lg">
+              <img
+                src={featureStrip}
+                alt="Feature highlights — Agent Chat, Full Stack, Integrations, Enterprise"
+                className="w-full h-auto block"
+                loading="lazy"
+              />
+            </div>
           </div>
         </div>
 
