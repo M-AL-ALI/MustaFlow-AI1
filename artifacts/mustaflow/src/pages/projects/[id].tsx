@@ -2069,6 +2069,22 @@ export default function ProjectWorkspacePage() {
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => {
+              setLeftPanelTab("chat");
+              if (isMobileLayout) setChatDrawerOpen(true);
+            }}
+            className={cn(
+              "flex items-center justify-center h-7 w-7 rounded-lg border transition-colors",
+              isBusy
+                ? "bg-primary/10 border-primary/30 text-primary hover:bg-primary/15"
+                : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+            title={isBusy ? "AI Builder is working — open chat" : "AI Builder idle — open chat"}
+            aria-label={isBusy ? "AI Builder is working" : "AI Builder idle"}
+          >
+            <AgentIcon size={14} state={isBusy ? "active" : "idle"} />
+          </button>
           <SubscriptionTierBadge tier={subscriptionTier} />
           <NotificationsBell />
           <CreditBalancePill />
