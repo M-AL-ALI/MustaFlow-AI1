@@ -1426,6 +1426,37 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
   const model = MODEL_FOR_MODE[input.agentMode] ?? "gpt-5-mini";
   const containerState = { id: input.containerId ?? null, installed: false };
+
+  // Task #542: discover MCP server tools at loop start so the model can call
+  // them as `mcp__<server>__<tool>` alongside built-ins. Best-effort — if
+  // discovery fails or no servers are registered, the loop runs with just
+  // built-in tools. Capped at 30 tools total to keep token usage bounded.
+  let mcpToolsCatalog: import("./mcp").McpTool[] = [];
+  let toolsForLoop: ChatCompletionTool[] = TOOLS;
+  try {
+    const { discoverMcpTools } = await import("./mcp");
+    mcpToolsCatalog = (await discoverMcpTools()).slice(0, 30);
+    if (mcpToolsCatalog.length > 0) {
+      toolsForLoop = [
+        ...TOOLS,
+        ...mcpToolsCatalog.map(
+          (t): ChatCompletionTool => ({
+            type: "function",
+            function: {
+              name: t.agentName,
+              description: `[MCP:${t.serverName}] ${t.description}`.slice(0, 1000),
+              parameters: (t.inputSchema ?? {
+                type: "object",
+                properties: {},
+              }) as Record<string, unknown>,
+            },
+          }),
+        ),
+      ];
+    }
+  } catch (err) {
+    logger.warn({ err }, "agent-loop: MCP tool discovery failed");
+  }
   // Task #533: when a take_screenshot tool call returns an image, the next
   // LLM turn switches to the provider's VISION_MODEL so the screenshot is
   // actually inspected by a vision-capable model.
@@ -1474,7 +1505,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         provider,
         model: effectiveModel,
         messages,
-        tools: TOOLS,
+        tools: toolsForLoop,
         tool_choice: "auto",
         signal: input.signal,
       });
@@ -1720,6 +1751,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               presentedAssets,
               loopStartedAt: startedAt,
               loopWallClockMs: wallClockMs,
+              mcpToolsCatalog,
             })
               .then((r) => ({
                 ok: r.ok,
@@ -1781,6 +1813,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         presentedAssets,
         loopStartedAt: startedAt,
         loopWallClockMs: wallClockMs,
+        mcpToolsCatalog,
       });
       const durationMs = Date.now() - tStart;
 
@@ -2095,7 +2128,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             provider: fixProv,
             model: fixModel,
             messages,
-            tools: TOOLS,
+            tools: toolsForLoop,
             tool_choice: "auto",
             signal: input.signal,
           });
@@ -2140,6 +2173,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               presentedAssets,
               loopStartedAt: startedAt,
               loopWallClockMs: wallClockMs,
+              mcpToolsCatalog,
             });
             toolCalls.push({
               step: step + 1,
@@ -2357,6 +2391,9 @@ export interface ToolCtx {
   /** Per-loop cache of loaded skills — guarantees no double-count and a free
    *  cache hit if the model re-loads the same skill mid-run. */
   loadedSkills: Map<string, SkillManifest>;
+  /** Task #542: MCP tool catalog discovered at loop start. Used by the
+   *  `mcp__<server>__<tool>` dispatch case to find endpoint + auth header. */
+  mcpToolsCatalog?: import("./mcp").McpTool[];
   /** Accumulator for run_e2e tool invocations. */
   e2eResults: E2eRunSummary[];
   /**
@@ -2632,6 +2669,25 @@ export async function executeTool(ctx: ToolCtx): Promise<{
   const { name, args, workspace, stack, input, commandsRun, step, containerState } = ctx;
   if (input.signal.aborted) {
     return { ok: false, observation: "ERROR: aborted by user" };
+  }
+  // Task #542: MCP tool dispatch. Names take the form `mcp__<server>__<tool>`
+  // and are looked up in the per-loop catalog so we can proxy the call via
+  // JSON-RPC to the registered MCP server.
+  if (name.startsWith("mcp__")) {
+    const tool = ctx.mcpToolsCatalog?.find((t) => t.agentName === name);
+    if (!tool) {
+      return { ok: false, observation: `ERROR: MCP tool '${name}' not registered` };
+    }
+    try {
+      const { callMcpTool } = await import("./mcp");
+      const r = await callMcpTool(tool, args);
+      if (!r.ok) {
+        return { ok: false, observation: `ERROR: MCP call failed — ${r.error ?? "unknown"}` };
+      }
+      return { ok: true, observation: JSON.stringify(r.result).slice(0, 8000) };
+    } catch (err) {
+      return { ok: false, observation: `ERROR: MCP dispatch failed — ${(err as Error).message}` };
+    }
   }
   switch (name) {
     case "list_uploads": {
@@ -3898,11 +3954,88 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           observation: `ERROR: blueprint '${bp.id}' is web-only; cannot install into a mobile project`,
         };
       }
+      const isContainerStack = !(stack === "static-html" || stack === "mobile-cross");
       try {
         const result = await installBlueprint(bp, {
           projectId: input.projectId,
           actor: null,
           overwrite,
+          installPackages: isContainerStack
+            ? async (pkgs) => {
+                if (!containerState.id) {
+                  const prov = await ensureContainerProvisioned(ctx);
+                  if (!prov.ok) return;
+                }
+                const nodePkgs = pkgs.filter((p) => p.runtime === "node");
+                if (nodePkgs.length === 0 || !containerState.id) return;
+                const argv = [
+                  "npm",
+                  "install",
+                  ...nodePkgs.map((p) => (p.version ? `${p.name}@${p.version}` : p.name)),
+                ];
+                await safeEvent(
+                  input.onEvent,
+                  "narration",
+                  `Installing blueprint packages: ${nodePkgs.map((p) => p.name).join(", ")}`,
+                );
+                const t = Date.now();
+                const r = await execWithTimeout(
+                  containerState.id,
+                  argv,
+                  input.projectId,
+                  PKG_INSTALL_TIMEOUT_MS,
+                  input.signal,
+                );
+                commandsRun.push({
+                  step,
+                  argv,
+                  exitCode: r.timedOut ? 124 : r.ok ? 0 : 1,
+                  durationMs: Date.now() - t,
+                  stdoutPreview: r.ok ? r.output.slice(0, 400) : "",
+                  stderrPreview: r.ok ? "" : r.output.slice(0, 400),
+                });
+              }
+            : undefined,
+          requestSecrets: input.taskId
+            ? async (secrets) => {
+                const { createPrompt } = await import("./agent-prompts");
+                const provided: string[] = [];
+                for (const s of secrets) {
+                  if (input.signal.aborted) break;
+                  const remainingMs = Math.max(
+                    1_000,
+                    ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt),
+                  );
+                  const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
+                  const payload = {
+                    name: s.name,
+                    category: s.category ?? "api_key",
+                    helpUrl: s.helpUrl ?? null,
+                    reason: s.reason ?? `Required by blueprint ${bp.id}`,
+                  };
+                  const { promptId, promise } = createPrompt({
+                    taskId: input.taskId!,
+                    projectId: input.projectId,
+                    kind: "request_secret",
+                    payload,
+                    signal: input.signal,
+                    timeoutMs: promptTimeoutMs,
+                  });
+                  await safeEvent(
+                    input.onEvent,
+                    "agent_prompt",
+                    JSON.stringify({ promptId, kind: "request_secret", payload }),
+                  );
+                  try {
+                    const resp = (await promise) as { provided?: boolean };
+                    if (resp?.provided) provided.push(s.name);
+                  } catch {
+                    /* skip on cancel/timeout */
+                  }
+                }
+                return provided;
+              }
+            : undefined,
         });
         return {
           ok: true,

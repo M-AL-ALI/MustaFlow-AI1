@@ -7,7 +7,7 @@
  *
  * No emojis — lucide-react icons only.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ShieldCheck,
   CreditCard,
@@ -21,6 +21,8 @@ import {
   Trash2,
   Package,
   Key,
+  Search,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +77,8 @@ export default function IntegrationsTab({ projectId }: { projectId: number }) {
   const [installing, setInstalling] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [filterCategory, setFilterCategory] = useState<Category | "all">("all");
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -157,6 +161,20 @@ export default function IntegrationsTab({ projectId }: { projectId: number }) {
     [projectId, refresh],
   );
 
+  const filteredCatalog = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return catalog.filter((bp) => {
+      if (filterCategory !== "all" && bp.category !== filterCategory) return false;
+      if (!q) return true;
+      return (
+        bp.name.toLowerCase().includes(q) ||
+        bp.description.toLowerCase().includes(q) ||
+        bp.id.toLowerCase().includes(q) ||
+        bp.requiredSecrets.some((s) => s.toLowerCase().includes(q))
+      );
+    });
+  }, [catalog, search, filterCategory]);
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground p-6">
@@ -174,7 +192,7 @@ export default function IntegrationsTab({ projectId }: { projectId: number }) {
     mcp: [],
     other: [],
   };
-  for (const bp of catalog) grouped[bp.category]?.push(bp);
+  for (const bp of filteredCatalog) grouped[bp.category]?.push(bp);
 
   return (
     <div className="flex flex-col gap-6 p-6 overflow-auto h-full">
@@ -188,9 +206,73 @@ export default function IntegrationsTab({ projectId }: { projectId: number }) {
         </p>
       </div>
 
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search blueprints by name, description, or required secret…"
+            className="w-full pl-9 pr-9 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            aria-label="Search integrations"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1">
+          <button
+            type="button"
+            onClick={() => setFilterCategory("all")}
+            className={cn(
+              "px-2.5 py-1 text-xs rounded-md border",
+              filterCategory === "all"
+                ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300"
+                : "border-border text-muted-foreground hover:text-foreground",
+            )}
+          >
+            All
+          </button>
+          {CATEGORY_ORDER.filter((c) => c !== "other").map((cat) => {
+            const meta = CATEGORY_META[cat];
+            const Icon = meta.icon;
+            const active = filterCategory === cat;
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setFilterCategory(cat)}
+                className={cn(
+                  "px-2.5 py-1 text-xs rounded-md border flex items-center gap-1.5",
+                  active
+                    ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300"
+                    : "border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className={cn("h-3 w-3", active ? "" : meta.tint)} />
+                {meta.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {error && (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 text-red-300 text-xs p-3">
           {error}
+        </div>
+      )}
+      {filteredCatalog.length === 0 && (
+        <div className="rounded-md border border-border bg-muted/20 text-xs text-muted-foreground p-4 text-center">
+          No blueprints match your search.
         </div>
       )}
       {lastResult && (
