@@ -41,6 +41,7 @@ import {
   X,
   ExternalLink,
   Square,
+  BrainCircuit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -596,6 +597,68 @@ function CheckpointRow({
   );
 }
 
+function KnowledgeAppliedRow({
+  entries,
+}: {
+  entries: Array<{ id: number; title: string; category: string }>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const count = entries.length;
+  const label = `${count} ${count === 1 ? "memory" : "memories"} applied`;
+  const ids = entries.map((e) => e.id).join(",");
+
+  return (
+    <div className="space-y-1 animate-in fade-in slide-in-from-bottom-1 duration-300">
+      <div className="flex items-center gap-2 py-0.5 rounded">
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-2 flex-1 min-w-0 group text-left hover:bg-background/30 rounded px-1 -mx-1 py-0.5 transition-colors"
+          title="See which saved preferences the agent used"
+        >
+          <div className="shrink-0 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors">
+            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </div>
+          <BrainCircuit className="h-3 w-3 shrink-0 text-violet-400" />
+          <span className="text-[11px] font-medium text-foreground/85 truncate">{label}</span>
+        </button>
+        <a
+          href={`/knowledge?ids=${ids}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 flex items-center gap-0.5 text-[10px] text-primary/60 hover:text-primary transition-colors"
+          title="Open in Knowledge Vault"
+        >
+          <ExternalLink className="h-2.5 w-2.5" />
+          <span>Vault</span>
+        </a>
+      </div>
+
+      {expanded && (
+        <div className="ml-5 space-y-0.5 border-l border-border/40 pl-2">
+          {entries.map((entry) => (
+            <a
+              key={entry.id}
+              href={`/knowledge?ids=${entry.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 py-0.5 group hover:bg-background/40 rounded px-1 -mx-1 transition-colors"
+              title={entry.title}
+            >
+              <span className="text-[9px] font-medium text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0">
+                {entry.category}
+              </span>
+              <span className="text-[11px] text-foreground/80 truncate flex-1 group-hover:text-foreground transition-colors">
+                {entry.title}
+              </span>
+              <ExternalLink className="h-2.5 w-2.5 shrink-0 text-muted-foreground/30 group-hover:text-primary transition-colors" />
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   projectId: number;
   taskId: number;
@@ -659,8 +722,15 @@ export function AgentThinkingBubble({
   });
 
   const completedTask = tasks?.find((t) => t.id === taskId);
-  const versionId =
-    (completedTask?.report as { versionId?: number | null } | null | undefined)?.versionId ?? null;
+  const completedReport = completedTask?.report as
+    | {
+        versionId?: number | null;
+        knowledgeApplied?: Array<{ id: number; title: string; category: string }>;
+      }
+    | null
+    | undefined;
+  const versionId = completedReport?.versionId ?? null;
+  const knowledgeApplied = completedReport?.knowledgeApplied ?? [];
 
   const { data: versions } = useListVersions(projectId, {
     query: {
@@ -811,6 +881,13 @@ export function AgentThinkingBubble({
                 <span className="text-[11px]">Waiting for first event…</span>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Memory indicator (Task #664) — surface user memories that were applied */}
+        {isTerminal && isDone && knowledgeApplied.length > 0 && (
+          <div className="px-3 pb-2 border-t border-border/40 pt-1.5">
+            <KnowledgeAppliedRow entries={knowledgeApplied} />
           </div>
         )}
 
