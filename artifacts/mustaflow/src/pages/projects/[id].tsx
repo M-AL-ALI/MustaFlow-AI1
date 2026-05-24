@@ -2065,12 +2065,6 @@ export default function ProjectWorkspacePage() {
             <Map style={{ width: 11, height: 11 }} />
           </button>
           <button
-            onClick={() => setNewProjectOpen(true)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-border text-muted-foreground text-xs font-medium hover:bg-muted hover:text-foreground transition-colors"
-          >
-            <Plus style={{ width: 11, height: 11 }} /> New
-          </button>
-          <button
             onClick={() => setActiveTab("publishing")}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold hover:bg-green-500/15 transition-colors"
           >
