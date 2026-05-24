@@ -68,6 +68,9 @@ import bandwidthRouter from "./bandwidth";
 import runtimeRouter from "./runtime";
 import v1Router from "./v1/index";
 import abuseRouter from "./abuse";
+import galleryTemplatesRouter, { publicGalleryRouter } from "./templates";
+import ecosystemExtensionsRouter, { publicExtensionsRouter } from "./ecosystem-extensions";
+import profilesRouter, { publicProfilesRouter } from "./profiles";
 import metricsRouter from "./metrics";
 import statusRouter from "./status";
 import healthProjectRouter from "./health-project";
@@ -93,6 +96,9 @@ router.use(analyticsRouter); // POST /p/:slug/analytics/ping (public ping)
 router.use(publicProdLogRouter); // POST /p/:slug/log (public browser error beacon)
 router.use(sslWebhookRouter); // POST /domain/ssl-webhook (Cloudflare → us)
 router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
+router.use(publicGalleryRouter); // GET /gallery-templates[/:slug] — public browsing
+router.use(publicExtensionsRouter); // GET /extensions[/:slug] — public browsing
+router.use(publicProfilesRouter); // GET /profiles/:username[/projects] — public profiles
 router.use(v1Router); // POST/GET /v1/* — PAT-authed public REST API (own auth middleware)
 router.use(abuseRouter); // POST /abuse-reports (public intake, no auth)
 router.use(publicCanvasRouter); // GET /canvas/share/:token, /canvas/ab/:testId — public variant previews
@@ -145,6 +151,9 @@ const KNOWN_PREFIXES = [
   "/addons",
   "/usage",
   "/canvas",
+  "/gallery-templates",
+  "/extensions",
+  "/profiles",
 ];
 
 router.use((req, res, next) => {
@@ -243,6 +252,9 @@ router.use(commentsRouter);
 router.use(sharingRouter);
 router.use(notificationsCollabRouter);
 router.use(projectActivityRouter);
+router.use(galleryTemplatesRouter);
+router.use(ecosystemExtensionsRouter);
+router.use(profilesRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

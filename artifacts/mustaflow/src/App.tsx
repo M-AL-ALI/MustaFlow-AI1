@@ -38,6 +38,10 @@ import WorkspaceDomainsPage from "./pages/workspace-domains";
 import OrgSettingsPage from "./pages/org-settings";
 import OrgNewPage from "./pages/org-new";
 import OrgInviteAcceptPage from "./pages/org-invite-accept";
+import GalleryPage from "./pages/gallery";
+import ExtensionsPage from "./pages/extensions";
+import CommunityPage from "./pages/community";
+import UserProfilePage from "./pages/u";
 
 // Components
 import { AppLayout } from "./components/layout/app-layout";
@@ -472,6 +476,28 @@ function ClerkProviderWithRoutes() {
                     <OrgSettingsPage />
                   </AppLayout>
                 </Protected>
+              </Route>
+
+              {/* ── Ecosystem pages ── */}
+              <Route path="/gallery">
+                <AppLayout>
+                  <GalleryPage />
+                </AppLayout>
+              </Route>
+              <Route path="/extensions">
+                <AppLayout>
+                  <ExtensionsPage />
+                </AppLayout>
+              </Route>
+              <Route path="/community">
+                <AppLayout>
+                  <CommunityPage />
+                </AppLayout>
+              </Route>
+              <Route path="/u/:username">
+                <AppLayout>
+                  <UserProfilePage />
+                </AppLayout>
               </Route>
 
               {/* ── Public info pages ── */}

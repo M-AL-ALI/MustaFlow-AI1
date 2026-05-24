@@ -59,6 +59,7 @@
     "migrate-subscriptions": "tsx ./src/migrate-subscriptions.ts",
     "migrate-runtime-breadth": "tsx ./src/migrate-runtime-breadth.ts",
     "migrate-collaboration": "tsx ./src/migrate-collaboration.ts",
+    "migrate-ecosystem": "tsx ./src/migrate-ecosystem.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

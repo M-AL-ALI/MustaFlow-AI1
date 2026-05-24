@@ -59,3 +59,6 @@ export * from "./project-comments";
 export * from "./notifications";
 export * from "./project-activity";
 export * from "./share-links";
+export * from "./gallery-templates";
+export * from "./extensions";
+export * from "./community-profiles";

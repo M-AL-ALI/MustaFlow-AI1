@@ -23,6 +23,9 @@ import {
   Trash2,
   ShoppingCart,
   Building2,
+  Layers,
+  Puzzle,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser, useClerk } from "@clerk/react";
@@ -51,6 +54,12 @@ const SECONDARY_NAV_ITEMS = [
   { name: "Integrations", href: "/integrations", icon: Blocks },
   { name: "Billing", href: "/billing", icon: CreditCard },
   { name: "Organizations", href: "/orgs/new", icon: Building2 },
+];
+
+const ECOSYSTEM_NAV_ITEMS = [
+  { name: "Template Gallery", href: "/gallery", icon: Layers },
+  { name: "Extensions", href: "/extensions", icon: Puzzle },
+  { name: "Community", href: "/community", icon: Users },
 ];
 
 const TERTIARY_NAV_ITEMS = [
@@ -360,6 +369,7 @@ function SidebarInner({
       {/* Nav */}
       <div className="flex-1 space-y-4">
         <NavGroup items={NAV_ITEMS} />
+        <NavGroup items={ECOSYSTEM_NAV_ITEMS} title="Ecosystem" />
         <div>
           <NavGroup items={SECONDARY_NAV_ITEMS} title="Platform" />
           <SecurityNavItem />
