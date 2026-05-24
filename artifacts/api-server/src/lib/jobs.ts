@@ -519,6 +519,17 @@ async function loadKnowledgeContext(
   try {
     const retrievalEnabled = process.env.KNOWLEDGE_RETRIEVAL_ENABLED !== "false";
 
+    // Look up the project owner so we can also pull in their user-scope
+    // entries (e.g. brand profile, inferred style preferences).
+    const [ownerRow] = retrievalEnabled
+      ? await db
+          .select({ ownerId: projectsTable.ownerId })
+          .from(projectsTable)
+          .where(eq(projectsTable.id, projectId))
+          .limit(1)
+      : [undefined];
+    const ownerId = ownerRow?.ownerId ?? null;
+
     const [entries, integrationsNote] = await Promise.all([
       retrievalEnabled
         ? db
@@ -529,6 +540,12 @@ async function loadKnowledgeContext(
                 or(
                   eq(knowledgeEntriesTable.approvedForReuse, true),
                   eq(knowledgeEntriesTable.projectId, projectId),
+                  ownerId
+                    ? and(
+                        eq(knowledgeEntriesTable.userId, ownerId),
+                        eq(knowledgeEntriesTable.scope, "user"),
+                      )
+                    : sql`false`,
                 ),
                 isNull(knowledgeEntriesTable.archivedAt),
               ),

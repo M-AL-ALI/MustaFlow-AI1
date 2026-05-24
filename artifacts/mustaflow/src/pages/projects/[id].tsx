@@ -140,6 +140,7 @@ import { BuyCreditsSheet, CreditsSuccessBanner } from "@/components/buy-credits-
 import { GettingStartedChecklist } from "./components/getting-started-checklist";
 import { WorkspaceTour } from "./components/workspace-tour";
 import { MemoryIndicator } from "./components/memory-indicator";
+import { BrandPill } from "./components/brand-pill";
 import { AgentPromptCardsList, type AgentPromptCard } from "./components/agent-prompt-cards";
 import { cn } from "@/lib/utils";
 
@@ -2246,6 +2247,9 @@ export default function ProjectWorkspacePage() {
 
               {/* Memory indicator — shown when the AI has a conversation summary */}
               {!showChatHistory && <MemoryIndicator projectId={projectId} />}
+
+              {/* Brand profile pill — shown when the user has saved a brand profile */}
+              {!showChatHistory && <BrandPill />}
 
               {/* Chat History overlay */}
               {showChatHistory && (

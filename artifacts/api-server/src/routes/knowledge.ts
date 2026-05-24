@@ -612,6 +612,165 @@ Extract 3–8 distinct, confident preferences. Only include preferences you can 
   }
 });
 
+// GET /api/knowledge/brand-profile — return the current user's saved brand profile,
+// or null if they haven't set one. The brand profile is stored as a single
+// type=style_memory, category=brand_profile, scope=user entry per user.
+router.get("/knowledge/brand-profile", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  const [row] = await db
+    .select()
+    .from(knowledgeEntriesTable)
+    .where(
+      and(
+        eq(knowledgeEntriesTable.userId, userId),
+        eq(knowledgeEntriesTable.type, "style_memory"),
+        eq(knowledgeEntriesTable.category, "brand_profile"),
+        isNull(knowledgeEntriesTable.archivedAt),
+      ),
+    )
+    .orderBy(desc(knowledgeEntriesTable.createdAt))
+    .limit(1);
+
+  if (!row) {
+    res.json({ profile: null });
+    return;
+  }
+
+  let parsed: {
+    primaryColor?: string;
+    accentColor?: string;
+    fontPairing?: string;
+    tone?: string;
+  } = {};
+  try {
+    if (row.annotation) parsed = JSON.parse(row.annotation) as typeof parsed;
+  } catch {
+    parsed = {};
+  }
+
+  res.json({
+    profile: {
+      id: row.id,
+      primaryColor: parsed.primaryColor ?? "",
+      accentColor: parsed.accentColor ?? "",
+      fontPairing: parsed.fontPairing ?? "",
+      tone: parsed.tone ?? "",
+      content: row.content,
+      updatedAt: row.createdAt,
+    },
+  });
+});
+
+// PUT /api/knowledge/brand-profile — upsert the current user's brand profile.
+// Body: { primaryColor?, accentColor?, fontPairing?, tone? }
+// All fields are optional individually but at least one must be non-empty.
+router.put("/knowledge/brand-profile", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  const body = req.body as {
+    primaryColor?: string;
+    accentColor?: string;
+    fontPairing?: string;
+    tone?: string;
+  };
+
+  const clean = {
+    primaryColor: (body.primaryColor ?? "").trim().slice(0, 32),
+    accentColor: (body.accentColor ?? "").trim().slice(0, 32),
+    fontPairing: (body.fontPairing ?? "").trim().slice(0, 120),
+    tone: (body.tone ?? "").trim().slice(0, 60),
+  };
+
+  if (!clean.primaryColor && !clean.accentColor && !clean.fontPairing && !clean.tone) {
+    res.status(400).json({ error: "At least one brand field must be provided" });
+    return;
+  }
+
+  const lines: string[] = ["User-declared brand profile (apply this to every new build):"];
+  if (clean.primaryColor) lines.push(`- Primary colour: ${clean.primaryColor}`);
+  if (clean.accentColor) lines.push(`- Accent colour: ${clean.accentColor}`);
+  if (clean.fontPairing) lines.push(`- Font pairing: ${clean.fontPairing}`);
+  if (clean.tone) lines.push(`- Writing tone: ${clean.tone}`);
+  const content = lines.join("\n");
+  const annotation = JSON.stringify(clean);
+
+  const [existing] = await db
+    .select({ id: knowledgeEntriesTable.id })
+    .from(knowledgeEntriesTable)
+    .where(
+      and(
+        eq(knowledgeEntriesTable.userId, userId),
+        eq(knowledgeEntriesTable.type, "style_memory"),
+        eq(knowledgeEntriesTable.category, "brand_profile"),
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    const [updated] = await db
+      .update(knowledgeEntriesTable)
+      .set({
+        title: "Brand Profile",
+        content,
+        annotation,
+        archivedAt: null,
+        approvedForReuse: false,
+      })
+      .where(eq(knowledgeEntriesTable.id, existing.id))
+      .returning();
+    res.json({ profile: { ...clean, id: updated?.id, content } });
+    return;
+  }
+
+  const [row] = await db
+    .insert(knowledgeEntriesTable)
+    .values({
+      title: "Brand Profile",
+      content,
+      category: "brand_profile",
+      type: "style_memory",
+      scope: "user",
+      severity: "info",
+      userId,
+      projectId: null,
+      annotation,
+      approvedForReuse: false,
+    })
+    .returning();
+
+  res.json({ profile: { ...clean, id: row?.id, content } });
+});
+
+// DELETE /api/knowledge/brand-profile — clear the user's brand profile.
+router.delete("/knowledge/brand-profile", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  await db
+    .delete(knowledgeEntriesTable)
+    .where(
+      and(
+        eq(knowledgeEntriesTable.userId, userId),
+        eq(knowledgeEntriesTable.type, "style_memory"),
+        eq(knowledgeEntriesTable.category, "brand_profile"),
+      ),
+    );
+
+  res.json({ deleted: true });
+});
+
 // GET /api/knowledge/public — public community library (no auth required).
 // Returns entries that are isPublic=true and approvedForReuse=true, anonymized.
 router.get("/knowledge/public", async (req, res): Promise<void> => {
