@@ -15,6 +15,8 @@ import {
   RefreshCw,
   Info,
   Globe,
+  Download,
+  CloudUpload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -32,6 +34,8 @@ interface CfDnsRecord {
   data?: Record<string, unknown>;
   comment?: string;
   modified_on?: string;
+  /** "local" = drafted in MustaFlow DB (no CF push yet). "cloudflare" = live in CF. */
+  source?: "local" | "cloudflare";
 }
 
 interface DnsHistoryEntry {
@@ -736,6 +740,12 @@ export function DnsRecordsPanel({
   const [loading, setLoading] = useState(false);
   const [enabled, setEnabled] = useState(true);
   const [disabledMessage, setDisabledMessage] = useState("");
+  // Backend "source" — "local" when CF isn't connected, "cloudflare" otherwise.
+  // In local mode the panel still lets users add/edit/delete records (stored in DB).
+  const [backendSource, setBackendSource] = useState<"local" | "cloudflare">("cloudflare");
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
 
   // Form state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -791,18 +801,68 @@ export function DnsRecordsPanel({
       if (!r.ok) throw new Error("Failed to load DNS records");
       const data = (await r.json()) as {
         enabled: boolean;
+        source?: "local" | "cloudflare";
         records: CfDnsRecord[];
         message?: string;
+        pendingSyncCount?: number;
       };
       setEnabled(data.enabled);
+      setBackendSource(data.source ?? "cloudflare");
       setRecords(data.records ?? []);
-      if (!data.enabled) setDisabledMessage(data.message ?? "Cloudflare not configured.");
+      setPendingSyncCount(data.pendingSyncCount ?? 0);
+      if (data.source === "local") {
+        setDisabledMessage(data.message ?? "");
+      } else if (!data.enabled) {
+        setDisabledMessage(data.message ?? "Cloudflare not configured.");
+      } else {
+        setDisabledMessage("");
+      }
     } catch {
       setError("Could not load DNS records.");
     } finally {
       setLoading(false);
     }
   }, [projectId, domain.id]);
+
+  const handleExport = useCallback(() => {
+    // Stream the zone file from the server so CF + local records are merged.
+    const url = `/api/projects/${projectId}/domains/${domain.id}/dns/export`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${domain.hostname}.zone`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [projectId, domain.id, domain.hostname]);
+
+  const handleSyncToCloudflare = useCallback(async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    setError(null);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/dns/sync`, {
+        method: "POST",
+      });
+      const data = (await r.json()) as {
+        ok?: boolean;
+        syncedCount?: number;
+        failedCount?: number;
+        error?: string;
+      };
+      if (!r.ok) {
+        setError(data.error ?? "Sync failed.");
+        return;
+      }
+      setSyncResult(
+        `Pushed ${data.syncedCount ?? 0} record${(data.syncedCount ?? 0) === 1 ? "" : "s"} to Cloudflare${
+          data.failedCount ? ` (${data.failedCount} failed)` : ""
+        }.`,
+      );
+      await load();
+    } finally {
+      setSyncing(false);
+    }
+  }, [projectId, domain.id, load]);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -1072,9 +1132,43 @@ export function DnsRecordsPanel({
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <Database className="h-4 w-4 text-muted-foreground shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold truncate">DNS Records</p>
+          <p className="text-sm font-semibold truncate flex items-center gap-1.5">
+            DNS Records
+            {backendSource === "local" && (
+              <span
+                className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400"
+                title="Cloudflare not connected — records stored locally"
+              >
+                LOCAL
+              </span>
+            )}
+          </p>
           <p className="text-[10px] text-muted-foreground font-mono truncate">{domain.hostname}</p>
         </div>
+        {pendingSyncCount > 0 && backendSource === "cloudflare" && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-[11px] gap-1"
+            onClick={() => void handleSyncToCloudflare()}
+            disabled={syncing}
+            title={`Push ${pendingSyncCount} local record${pendingSyncCount === 1 ? "" : "s"} to Cloudflare`}
+          >
+            {syncing ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <CloudUpload className="h-3 w-3" />
+            )}
+            Sync ({pendingSyncCount})
+          </Button>
+        )}
+        <button
+          onClick={handleExport}
+          className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          title="Export as BIND zone file"
+        >
+          <Download className="h-3.5 w-3.5" />
+        </button>
         <button
           onClick={() => void load()}
           disabled={loading}
@@ -1084,6 +1178,13 @@ export function DnsRecordsPanel({
           <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
         </button>
       </div>
+
+      {syncResult && (
+        <div className="px-4 py-2 border-b border-border bg-green-500/5 text-[11px] text-green-400 flex items-center gap-2">
+          <Check className="h-3.5 w-3.5" />
+          {syncResult}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-border text-xs overflow-x-auto">
@@ -1112,7 +1213,7 @@ export function DnsRecordsPanel({
       {/* Tab: Records */}
       {tab === "records" && (
         <div className="p-4 space-y-3">
-          {!enabled && (
+          {(disabledMessage || backendSource === "local") && (
             <div className="flex items-start gap-2 text-xs bg-muted border border-border rounded-lg px-3 py-2.5">
               <Info className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
               <span className="text-muted-foreground">{disabledMessage}</span>

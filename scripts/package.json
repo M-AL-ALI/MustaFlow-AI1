@@ -44,6 +44,7 @@
     "migrate-domain-cert-fields": "tsx ./src/migrate-domain-cert-fields.ts",
     "migrate-webhooks-pat": "tsx ./src/migrate-webhooks-pat.ts",
     "migrate-domain-security": "tsx ./src/migrate-domain-security.ts",
+    "migrate-dns-records": "tsx ./src/migrate-dns-records.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

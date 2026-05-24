@@ -28,6 +28,7 @@ export * from "./tool-audit";
 export * from "./builder-skills";
 export * from "./project-embeddings";
 export * from "./domains";
+export * from "./dns-records";
 export * from "./canvas-variants";
 export * from "./blueprints";
 export * from "./deployment-schedules";
