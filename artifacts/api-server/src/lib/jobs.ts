@@ -2536,18 +2536,35 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       if (assistantSummary) changelogLines.push(assistantSummary.slice(0, 180));
       const changelogEntry = changelogLines.join("\n");
 
-      const [version] = await db
-        .insert(projectVersionsTable)
-        .values({
-          projectId,
-          label: nextVersionLabel,
-          note: assistantSummary.slice(0, 200),
-          changelogEntry: changelogEntry.slice(0, 500),
-          filesSnapshot: snapshot,
-          planSnapshot: planSnapshot ?? undefined,
-          validationStatus: versionValidationStatus,
-        })
-        .returning();
+      let version: { id: number } | undefined;
+      try {
+        const inserted = await db
+          .insert(projectVersionsTable)
+          .values({
+            projectId,
+            label: (nextVersionLabel ?? "").slice(0, 200) || "Refinement",
+            note: (assistantSummary ?? "").slice(0, 200),
+            changelogEntry: (changelogEntry ?? "").slice(0, 500),
+            filesSnapshot: snapshot,
+            planSnapshot: planSnapshot ?? undefined,
+            validationStatus: versionValidationStatus,
+          })
+          .returning({ id: projectVersionsTable.id });
+        version = inserted[0];
+      } catch (snapErr) {
+        // Non-fatal: the actual file writes already landed in project_files.
+        // Losing the rollback checkpoint should not fail the whole task —
+        // otherwise the user sees "task failed" even though their app updated.
+        logger.warn(
+          { err: snapErr, projectId, taskId },
+          "Failed to save project version snapshot (non-fatal — files already persisted)",
+        );
+        await emitEvent(
+          taskId,
+          "narration",
+          "Couldn't save rollback checkpoint — your changes are still applied.",
+        );
+      }
       report.versionId = version?.id ?? null;
 
       // Task #538 — Unified Checkpoints: capture a database snapshot tied to
@@ -3898,18 +3915,27 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   // Save version snapshot
   const snapshot = await snapshotFilesForVersion(projectId);
   const planSnapshot = await loadLatestPlanSnapshot(projectId);
-  const changelogEntry = `**Task Agent Apply**\n${assistantSummary.slice(0, 180)}`;
-  const [version] = await db
-    .insert(projectVersionsTable)
-    .values({
-      projectId,
-      label: `Apply Task #${taskId}`,
-      note: assistantSummary.slice(0, 200),
-      changelogEntry: changelogEntry.slice(0, 500),
-      filesSnapshot: snapshot,
-      planSnapshot: planSnapshot ?? undefined,
-    })
-    .returning();
+  const changelogEntry = `**Task Agent Apply**\n${(assistantSummary ?? "").slice(0, 180)}`;
+  let version: { id: number } | undefined;
+  try {
+    const inserted = await db
+      .insert(projectVersionsTable)
+      .values({
+        projectId,
+        label: `Apply Task #${taskId}`.slice(0, 200),
+        note: (assistantSummary ?? "").slice(0, 200),
+        changelogEntry: changelogEntry.slice(0, 500),
+        filesSnapshot: snapshot,
+        planSnapshot: planSnapshot ?? undefined,
+      })
+      .returning({ id: projectVersionsTable.id });
+    version = inserted[0];
+  } catch (snapErr) {
+    logger.warn(
+      { err: snapErr, projectId, taskId },
+      "Failed to save apply-stage version snapshot (non-fatal — files already persisted)",
+    );
+  }
 
   // Task #538 — Unified Checkpoints: capture DB snapshot tied to apply version.
   if (version) {
