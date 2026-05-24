@@ -18,6 +18,8 @@ export const CREDIT_TRANSACTION_TYPES = [
   "creative",
   "manual_adjustment",
   "purchase",
+  "subscription_grant",
+  "refund",
 ] as const;
 export type CreditTransactionType = (typeof CREDIT_TRANSACTION_TYPES)[number];
 

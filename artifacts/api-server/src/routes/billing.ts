@@ -1,16 +1,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Billing routes — Stripe checkout + credit top-up
+// Billing routes — Stripe checkout, subscriptions, usage analytics, invoices
 //
-//   GET  /api/billing/packages       — list available credit packages (auth required)
-//   POST /api/billing/checkout       — create Stripe checkout session (auth required)
-//   POST /api/billing/webhook        — Stripe webhook (PUBLIC — Stripe calls this)
+//   GET  /api/billing/packages          — list credit packages (auth required)
+//   POST /api/billing/checkout          — create Stripe checkout session (auth required)
+//   GET  /api/billing/subscription      — current subscription tier + status
+//   POST /api/billing/subscribe         — start a paid subscription
+//   POST /api/billing/cancel-subscription — cancel subscription
+//   POST /api/billing/portal            — create Stripe Customer Portal session
+//   GET  /api/billing/invoices          — list past Stripe invoices
+//   GET  /api/billing/usage             — per-user usage analytics
+//   POST /api/billing/webhook           — Stripe webhook (PUBLIC)
 //
-// If STRIPE_SECRET_KEY is not set, checkout returns { setupRequired: true }.
 // billingWebhookRouter is exported separately and mounted BEFORE the auth wall.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { eq, desc, sql, and, like, isNull } from "drizzle-orm";
+import { eq, desc, sql, and, like, isNull, gte } from "drizzle-orm";
 import {
   db,
   creditTransactionsTable,
@@ -18,8 +23,15 @@ import {
   userCreditsTable,
   workspaceSubscriptionsTable,
   workspacesTable,
+  buildAnalyticsTable,
+  projectsTable,
+  userSubscriptionsTable,
 } from "@workspace/db";
-import { getOrCreateCredits } from "./credits";
+import {
+  TIER_MONTHLY_CREDITS,
+  TIER_PRICE_USD,
+} from "@workspace/db";
+import { getOrCreateCredits, grantCredits } from "./credits";
 import {
   stripeAvailable,
   getUncachableStripeClient,
@@ -34,11 +46,10 @@ import {
 } from "../lib/plans";
 import { logger } from "../lib/logger";
 
-// Stripe credentials come from the Replit Stripe connector at runtime
-// (via lib/stripeClient.ts). Falls back to STRIPE_SECRET_KEY env var if
-// the connector is not present (e.g. local dev outside Replit).
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+const IS_PRODUCTION = process.env.REPLIT_DEPLOYMENT === "1";
 
+// ── Credit packages (one-time top-up) ────────────────────────────────────────
 export const CREDIT_PACKAGES = [
   {
     id: "starter",
@@ -66,24 +77,112 @@ export const CREDIT_PACKAGES = [
   },
 ] as const;
 
-// Resolve a pack's Stripe Price ID from env. When unset, the checkout falls
-// back to inline price_data so dev/test still works without seeded prices.
+// ── Subscription tier definitions ─────────────────────────────────────────────
+export const SUBSCRIPTION_TIERS_META = [
+  {
+    id: "free" as const,
+    name: "Free",
+    monthlyCredits: TIER_MONTHLY_CREDITS.free,
+    priceUsd: TIER_PRICE_USD.free,
+    maxConcurrentBuilds: 1,
+    priceIdEnv: null,
+    features: ["100 credits / month", "1 concurrent build", "Community support"],
+  },
+  {
+    id: "pro" as const,
+    name: "Pro",
+    monthlyCredits: TIER_MONTHLY_CREDITS.pro,
+    priceUsd: TIER_PRICE_USD.pro,
+    maxConcurrentBuilds: 3,
+    priceIdEnv: "STRIPE_PRICE_PRO_MONTHLY",
+    features: [
+      "2,000 credits / month",
+      "3 concurrent builds",
+      "Priority queue",
+      "Email support",
+      "Stripe Tax support",
+    ],
+  },
+  {
+    id: "team" as const,
+    name: "Team",
+    monthlyCredits: TIER_MONTHLY_CREDITS.team,
+    priceUsd: TIER_PRICE_USD.team,
+    maxConcurrentBuilds: 10,
+    priceIdEnv: "STRIPE_PRICE_TEAM_MONTHLY",
+    features: [
+      "5,000 credits / month",
+      "10 concurrent builds",
+      "Priority queue",
+      "10 team seats",
+      "Dedicated support",
+      "Custom domain bandwidth",
+    ],
+  },
+] as const;
+
 function priceIdForPack(pkg: (typeof CREDIT_PACKAGES)[number]): string | undefined {
   const id = process.env[pkg.priceIdEnv];
   return id && id.trim() ? id.trim() : undefined;
 }
 
-// ── Stripe webhook handler (shared between router and billingWebhookRouter) ───
-//
-// Security contract:
-// - In production (REPLIT_DEPLOYMENT=1): STRIPE_WEBHOOK_SECRET MUST be set and
-//   the signature MUST verify. Unverified or unsigned payloads are rejected.
-// - In dev: when STRIPE_WEBHOOK_SECRET is unset we log a warning and accept
-//   the payload (so local Stripe CLI testing without a secret still works).
-// - Every accepted event.id is recorded in stripe_processed_events with a
-//   unique primary key. Duplicate deliveries (Stripe retries / replays) skip
-//   the credit grant idempotently.
-const IS_PRODUCTION = process.env.REPLIT_DEPLOYMENT === "1";
+function priceIdForTier(tier: { priceIdEnv: string | null }): string | undefined {
+  if (!tier.priceIdEnv) return undefined;
+  const id = process.env[tier.priceIdEnv];
+  return id && id.trim() ? id.trim() : undefined;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function getOrCreateSubscription(userId: string) {
+  const [existing] = await db
+    .select()
+    .from(userSubscriptionsTable)
+    .where(eq(userSubscriptionsTable.userId, userId));
+  if (existing) return existing;
+  const [created] = await db
+    .insert(userSubscriptionsTable)
+    .values({ userId, tier: "free", status: "active" })
+    .returning();
+  return created!;
+}
+
+async function ensureStripeCustomer(userId: string, stripe: NonNullable<Awaited<ReturnType<typeof getUncachableStripeClient>>>): Promise<string> {
+  const sub = await getOrCreateSubscription(userId);
+  if (sub.stripeCustomerId) return sub.stripeCustomerId;
+  const customer = await stripe.customers.create({
+    metadata: { userId },
+  });
+  await db
+    .update(userSubscriptionsTable)
+    .set({ stripeCustomerId: customer.id, updatedAt: sql`now()` })
+    .where(eq(userSubscriptionsTable.userId, userId));
+  return customer.id;
+}
+
+// Grant monthly credits on subscription renewal (invoice.paid).
+// Idempotent — skips if already granted in the current period.
+async function maybeGrantMonthlyCredits(userId: string, periodEnd: Date): Promise<void> {
+  const sub = await getOrCreateSubscription(userId);
+  const tier = (sub.tier ?? "free") as keyof typeof TIER_MONTHLY_CREDITS;
+  const monthlyAmount = TIER_MONTHLY_CREDITS[tier] ?? TIER_MONTHLY_CREDITS.free;
+  if (monthlyAmount <= 0) return;
+
+  // Check if already granted for this period
+  if (sub.lastMonthlyGrantAt && sub.lastMonthlyGrantAt >= new Date(periodEnd.getTime() - 35 * 24 * 60 * 60 * 1000)) {
+    logger.info({ userId, tier }, "Monthly credit grant already issued — skipping");
+    return;
+  }
+
+  await grantCredits(userId, monthlyAmount, `Monthly ${tier} grant (${monthlyAmount} credits)`);
+  await db
+    .update(userSubscriptionsTable)
+    .set({ lastMonthlyGrantAt: sql`now()`, updatedAt: sql`now()` })
+    .where(eq(userSubscriptionsTable.userId, userId));
+  logger.info({ userId, tier, monthlyAmount }, "Monthly credits granted");
+}
+
+// ── Stripe webhook handler ────────────────────────────────────────────────────
 
 // ── Subscription event handler (Task #644) ───────────────────────────────────
 // Syncs Stripe subscription state into workspace_subscriptions so that
@@ -224,8 +323,6 @@ async function handleStripeWebhook(
 ): Promise<void> {
   const stripe = await getUncachableStripeClient();
   if (!stripe) {
-    // Return 5xx (NOT 200) so Stripe retries the delivery. Acking here would
-    // silently drop billable events during transient credential outages.
     logger.error("Stripe client unavailable in webhook — returning 503 so Stripe retries");
     res.status(503).json({ error: "Stripe client unavailable", willRetry: true });
     return;
@@ -244,17 +341,14 @@ async function handleStripeWebhook(
         payment_intent?: string | null;
         customer?: string | null;
         amount_total?: number | null;
-        // checkout.session.completed (subscription mode) fields
         mode?: string;
         subscription?: string | null;
-        // customer.subscription.* fields
         id?: string;
         status?: string;
         current_period_end?: number;
         cancel_at_period_end?: boolean;
-        items?: {
-          data?: Array<{ price?: { id?: string } }>;
-        };
+        items?: { data?: Array<{ price?: { id?: string } }> };
+        [key: string]: unknown;
       };
     };
   };
@@ -292,10 +386,9 @@ async function handleStripeWebhook(
     return;
   }
 
-  // ── Subscription lifecycle events (Task #644) ───────────────────────────────
-  // customer.subscription.{created,updated,deleted} sync the workspace plan
-  // tier into workspace_subscriptions so resolveWorkspacePlan() returns the
-  // correct quotas without operator overrides.
+  // ── Subscription lifecycle events ───────────────────────────────────────────
+  // customer.subscription.{created,updated,deleted} — sync workspace plan tier
+  // (Task #644) and user subscription state.
   if (
     event.type === "customer.subscription.created" ||
     event.type === "customer.subscription.updated" ||
@@ -316,238 +409,340 @@ async function handleStripeWebhook(
     return;
   }
 
-  // Non-credit events: record idempotency, ack, done.
-  if (event.type !== "checkout.session.completed") {
-    await db
-      .insert(stripeProcessedEventsTable)
-      .values({ eventId: event.id, type: event.type })
-      .onConflictDoNothing();
-    res.json({ ok: true, type: event.type, processed: false });
+  // Idempotency: mark event as processed.
+  const deduped = await db
+    .insert(stripeProcessedEventsTable)
+    .values({ eventId: event.id, type: event.type })
+    .onConflictDoNothing()
+    .returning({ eventId: stripeProcessedEventsTable.eventId });
+
+  if (deduped.length === 0) {
+    logger.info({ eventId: event.id, type: event.type }, "Stripe webhook duplicate — skipping");
+    res.json({ ok: true, duplicate: true });
     return;
   }
 
-  const session = event.data?.object;
+  // ── checkout.session.completed — workspace metadata attachment + domain purchase + credit grant
+  if (event.type === "checkout.session.completed") {
+    const session = event.data?.object;
 
-  // Subscription-mode checkout sessions: the session itself doesn't grant
-  // plan access — that comes from customer.subscription.created. We just
-  // attach the workspaceId metadata onto the subscription so the follow-up
-  // event can resolve which workspace to upgrade.
-  if (session?.mode === "subscription") {
-    const workspaceIdStr = session?.metadata?.workspaceId;
-    const subscriptionId = session?.subscription;
-    if (workspaceIdStr && subscriptionId && typeof subscriptionId === "string") {
-      try {
-        await stripe.subscriptions.update(subscriptionId, {
-          metadata: {
-            workspaceId: workspaceIdStr,
-            planTier: session?.metadata?.planTier ?? "",
-          },
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "unknown";
-        logger.warn(
-          { err: msg, subscriptionId, eventId: event.id },
-          "Failed to attach workspaceId metadata to subscription — handler will fall back to customer lookup",
-        );
+    // Workspace subscription mode: attach workspaceId metadata so the follow-up
+    // customer.subscription.created event can resolve which workspace to upgrade.
+    if (session?.mode === "subscription" && session?.metadata?.workspaceId) {
+      const subscriptionId = session?.subscription;
+      if (subscriptionId && typeof subscriptionId === "string") {
+        try {
+          await stripe.subscriptions.update(subscriptionId, {
+            metadata: {
+              workspaceId: session.metadata.workspaceId,
+              planTier: session?.metadata?.planTier ?? "",
+            },
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "unknown";
+          logger.warn(
+            { err: msg, subscriptionId, eventId: event.id },
+            "Failed to attach workspaceId metadata to subscription — handler will fall back to customer lookup",
+          );
+        }
       }
     }
-    await db
-      .insert(stripeProcessedEventsTable)
-      .values({ eventId: event.id, type: event.type })
-      .onConflictDoNothing();
-    res.json({ ok: true, type: event.type, mode: "subscription", processed: true });
-    return;
-  }
 
-  if (session?.payment_status !== "paid") {
-    await db
-      .insert(stripeProcessedEventsTable)
-      .values({ eventId: event.id, type: event.type })
-      .onConflictDoNothing();
-    res.json({ ok: true, processed: false, reason: "payment_status not paid" });
-    return;
-  }
+    const sessionType = session?.metadata?.type;
 
-  const sessionType = session?.metadata?.type;
+    // Domain purchase / transfer fulfillment
+    if (sessionType === "domain_purchase" || sessionType === "domain_transfer") {
+      const domainUserId = session?.metadata?.userId;
+      const hostname = session?.metadata?.hostname;
 
-  // ── Domain purchase / transfer fulfillment ──────────────────────────────────
-  // Provides server-side idempotent fulfillment so Namecheap registration
-  // succeeds even if the user closes the tab before the browser confirm call.
-  if (sessionType === "domain_purchase" || sessionType === "domain_transfer") {
-    const domainUserId = session?.metadata?.userId;
-    const hostname = session?.metadata?.hostname;
+      if (!domainUserId || !hostname) {
+        logger.warn({ eventId: event.id, sessionType }, "Domain webhook: missing userId or hostname in metadata");
+        res.status(400).json({ error: "Missing userId or hostname in session metadata" });
+        return;
+      }
 
-    if (!domainUserId || !hostname) {
-      logger.warn(
-        { eventId: event.id, sessionType },
-        "Domain webhook: missing userId or hostname in metadata",
-      );
-      res.status(400).json({ error: "Missing userId or hostname in session metadata" });
+      if (sessionType === "domain_purchase") {
+        try {
+          const { fulfillDomainPurchase } = await import("../lib/domain-fulfillment");
+          const pricePaidUsd = session?.amount_total
+            ? String(session.amount_total / 100)
+            : (session?.metadata?.priceUsd ?? "12.99");
+          const stripeCustomerId =
+            typeof session?.customer === "string" ? session.customer : null;
+          const projectIdStr = session?.metadata?.projectId;
+          const projectId = projectIdStr ? (parseInt(projectIdStr, 10) || undefined) : undefined;
+          const years = session?.metadata?.years ? parseInt(session.metadata.years, 10) || 1 : 1;
+
+          const { alreadyRegistered } = await fulfillDomainPurchase({
+            hostname,
+            userId: domainUserId,
+            years,
+            pricePaidUsd,
+            stripeCustomerId,
+            stripePaymentIntentId: null,
+            projectId,
+          });
+          logger.info({ eventId: event.id, hostname, alreadyRegistered }, "Domain purchase webhook fulfillment complete");
+          res.json({ ok: true, eventId: event.id, hostname, alreadyRegistered });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown";
+          logger.error({ err: msg, eventId: event.id, hostname }, "Domain purchase webhook fulfillment failed — Stripe will retry");
+          res.status(500).json({ error: "Domain fulfillment failed", willRetry: true });
+        }
+      } else {
+        logger.info({ eventId: event.id, hostname }, "Domain transfer webhook: payment acknowledged");
+        res.json({ ok: true, eventId: event.id, hostname, type: "domain_transfer", acknowledged: true });
+      }
       return;
     }
 
-    // Record idempotency + fulfill (non-credit path — uses its own dedup on purchased_domains)
-    await db
-      .insert(stripeProcessedEventsTable)
-      .values({ eventId: event.id, type: event.type })
-      .onConflictDoNothing();
-
-    if (sessionType === "domain_purchase") {
-      try {
-        const { fulfillDomainPurchase } = await import("../lib/domain-fulfillment");
-        const pricePaidUsd = session?.amount_total
-          ? String(session.amount_total / 100)
-          : (session?.metadata?.priceUsd ?? "12.99");
-        const stripeCustomerId = typeof session?.customer === "string" ? session.customer : null;
-        const projectIdStr = session?.metadata?.projectId;
-        const projectId = projectIdStr ? parseInt(projectIdStr, 10) || undefined : undefined;
-        const years = session?.metadata?.years ? parseInt(session.metadata.years, 10) || 1 : 1;
-
-        const { alreadyRegistered } = await fulfillDomainPurchase({
-          hostname,
-          userId: domainUserId,
-          years,
-          pricePaidUsd,
-          stripeCustomerId,
-          stripePaymentIntentId: null,
-          projectId,
-        });
-
-        logger.info(
-          { eventId: event.id, hostname, alreadyRegistered },
-          "Domain purchase webhook fulfillment complete",
-        );
-        res.json({ ok: true, eventId: event.id, hostname, alreadyRegistered });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown";
-        logger.error(
-          { err: msg, eventId: event.id, hostname },
-          "Domain purchase webhook fulfillment failed — Stripe will retry",
-        );
-        // 500 so Stripe retries. Idempotency row was already inserted, so
-        // on retry we need to check if the domain was already fulfilled first.
-        // The fulfillDomainPurchase idempotency check handles this correctly.
-        res.status(500).json({ error: "Domain fulfillment failed", willRetry: true });
-      }
-    } else {
-      // domain_transfer: the transfer-in/confirm endpoint handles Namecheap
-      // transfer initiation.  Webhook acknowledges payment only; the client
-      // confirm endpoint is responsible for the full transfer flow.
-      logger.info(
-        { eventId: event.id, hostname },
-        "Domain transfer webhook: payment acknowledged, client confirm handles transfer initiation",
-      );
-      res.json({
-        ok: true,
-        eventId: event.id,
-        hostname,
-        type: "domain_transfer",
-        acknowledged: true,
-      });
-    }
-    return;
-  }
-
-  const userId = session?.metadata?.userId;
-  const creditsStr = session?.metadata?.credits;
-  const packageId = session?.metadata?.packageId;
-
-  if (!userId || !creditsStr) {
-    res.status(400).json({ error: "Missing userId or credits in session metadata" });
-    return;
-  }
-
-  const credits = parseInt(creditsStr, 10);
-  if (isNaN(credits) || credits <= 0) {
-    res.status(400).json({ error: "Invalid credits value in session metadata" });
-    return;
-  }
-
-  // Best-effort: fetch the Stripe-hosted receipt URL from the payment_intent's
-  // latest_charge so we can show users a "View receipt" link in billing history.
-  // Failures here are non-fatal — credits should always grant even if the
-  // receipt fetch fails (network blip, expanded API change, etc.).
-  let receiptUrl: string | null = null;
-  const paymentIntentId = session?.payment_intent;
-  if (paymentIntentId && typeof paymentIntentId === "string") {
+    // User subscription activation + one-time credit pack purchase
     try {
-      const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
-        expand: ["latest_charge"],
-      });
-      const latestCharge = (pi as { latest_charge?: unknown }).latest_charge;
-      if (latestCharge && typeof latestCharge === "object") {
-        const url = (latestCharge as { receipt_url?: string | null }).receipt_url;
-        if (typeof url === "string" && url.length > 0) receiptUrl = url;
-      }
+      await handleCheckoutCompleted(stripe, event);
+      res.json({ ok: true, type: event.type });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "unknown";
-      logger.warn(
-        { err: msg, paymentIntentId, eventId: event.id },
-        "Failed to fetch receipt_url from Stripe — proceeding without it",
-      );
+      const msg = err instanceof Error ? err.message : "Unexpected error";
+      logger.error({ err: msg, eventId: event.id }, "Checkout completed handler threw — Stripe will retry");
+      await db.delete(stripeProcessedEventsTable).where(eq(stripeProcessedEventsTable.eventId, event.id));
+      res.status(500).json({ error: "Handler failed", willRetry: true });
     }
+    return;
   }
 
-  // Atomic: insert event row + grant credits + write transaction in one tx.
-  // If anything throws, the event row rolls back so Stripe's retry can succeed.
-  // If event was already processed (concurrent retry won earlier), the insert
-  // returns 0 rows and we short-circuit to a duplicate ack.
+  // Route to the correct handler based on event type.
   try {
-    const result = await db.transaction(async (tx) => {
-      const inserted = await tx
-        .insert(stripeProcessedEventsTable)
-        .values({ eventId: event.id, type: event.type })
-        .onConflictDoNothing()
-        .returning({ eventId: stripeProcessedEventsTable.eventId });
-
-      if (inserted.length === 0) return { duplicate: true as const };
-
-      // Ensure user_credits row exists (uses outer db, but the upsert is
-      // idempotent and any failure here will throw out of the transaction).
-      await getOrCreateCredits(userId);
-
-      const [updated] = await tx
-        .update(userCreditsTable)
-        .set({ balance: sql`${userCreditsTable.balance} + ${credits}`, updatedAt: sql`now()` })
-        .where(eq(userCreditsTable.userId, userId))
-        .returning({ balance: userCreditsTable.balance });
-
-      const newBalance = updated?.balance ?? 0;
-
-      await tx.insert(creditTransactionsTable).values({
-        userId,
-        type: "purchase",
-        amount: credits,
-        description: `Stripe purchase: ${packageId ?? "unknown"} pack (${credits} credits) [event ${event.id}]`,
-        balanceAfter: newBalance,
-        receiptUrl,
-      });
-
-      return { duplicate: false as const, newBalance };
-    });
-
-    if (result.duplicate) {
-      logger.info({ eventId: event.id, type: event.type }, "Stripe webhook duplicate — skipping");
-      res.json({ ok: true, duplicate: true, eventId: event.id });
-      return;
+    switch (event.type) {
+      case "checkout.session.completed":
+        await handleCheckoutCompleted(stripe, event);
+        break;
+      case "invoice.paid":
+        await handleInvoicePaid(event);
+        break;
+      case "invoice.payment_failed":
+        await handleInvoicePaymentFailed(event);
+        break;
+      case "customer.subscription.updated":
+        await handleSubscriptionUpdated(event);
+        break;
+      case "customer.subscription.deleted":
+        await handleSubscriptionDeleted(event);
+        break;
+      default:
+        logger.info({ eventId: event.id, type: event.type }, "Stripe webhook unhandled event type");
     }
-
-    res.json({
-      ok: true,
-      userId,
-      creditsGranted: credits,
-      newBalance: result.newBalance,
-      eventId: event.id,
-    });
+    res.json({ ok: true, type: event.type });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
-    logger.error(
-      { err: msg, eventId: event.id, userId, credits },
-      "Stripe webhook credit grant failed — transaction rolled back, Stripe will retry",
-    );
-    // 500 so Stripe retries. The idempotency row was rolled back so retry can succeed.
-    res.status(500).json({ error: "Credit grant failed", willRetry: true });
+    logger.error({ err: msg, eventId: event.id, type: event.type }, "Stripe webhook handler threw — Stripe will retry");
+    // Roll back idempotency mark so retry can reprocess
+    await db
+      .delete(stripeProcessedEventsTable)
+      .where(eq(stripeProcessedEventsTable.eventId, event.id));
+    res.status(500).json({ error: "Handler failed", willRetry: true });
   }
+}
+
+async function handleCheckoutCompleted(
+  stripe: NonNullable<Awaited<ReturnType<typeof getUncachableStripeClient>>>,
+  event: { id: string; type: string; data: { object: Record<string, unknown> } },
+): Promise<void> {
+  const session = event.data.object;
+  const mode = session.mode as string;
+
+  if (mode === "subscription") {
+    // Subscription checkout — provision the subscription row
+    const userId = (session.metadata as Record<string, string> | undefined)?.userId;
+    const tier = (session.metadata as Record<string, string> | undefined)?.tier ?? "pro";
+    const customerId = session.customer as string | null;
+    const subscriptionId = session.subscription as string | null;
+    if (!userId || !customerId || !subscriptionId) {
+      logger.warn({ eventId: event.id }, "Subscription checkout missing userId/customerId/subscriptionId");
+      return;
+    }
+    // Fetch current period from Stripe
+    const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
+    const currentPeriodEnd = new Date((stripeSub as unknown as { current_period_end: number }).current_period_end * 1000);
+
+    await db
+      .update(userSubscriptionsTable)
+      .set({
+        stripeCustomerId: customerId,
+        stripeSubscriptionId: subscriptionId,
+        tier,
+        status: "active",
+        currentPeriodEnd,
+        cancelAtPeriodEnd: false,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(userSubscriptionsTable.userId, userId));
+
+    // Grant first monthly credits immediately
+    await maybeGrantMonthlyCredits(userId, currentPeriodEnd);
+    logger.info({ userId, tier, subscriptionId }, "Subscription activated via checkout");
+    return;
+  }
+
+  // One-time credit pack purchase
+  const paymentStatus = session.payment_status as string;
+  if (paymentStatus !== "paid") return;
+
+  const userId = (session.metadata as Record<string, string> | undefined)?.userId;
+  const creditsStr = (session.metadata as Record<string, string> | undefined)?.credits;
+  const packageId = (session.metadata as Record<string, string> | undefined)?.packageId;
+  if (!userId || !creditsStr) return;
+
+  const credits = parseInt(creditsStr, 10);
+  if (isNaN(credits) || credits <= 0) return;
+
+  // Fetch receipt URL
+  let receiptUrl: string | null = null;
+  const paymentIntentId = session.payment_intent as string | null;
+  if (paymentIntentId) {
+    try {
+      const pi = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ["latest_charge"] });
+      const charge = (pi as unknown as { latest_charge?: { receipt_url?: string } }).latest_charge;
+      if (charge?.receipt_url) receiptUrl = charge.receipt_url;
+    } catch { /* non-fatal */ }
+  }
+
+  await getOrCreateCredits(userId);
+  await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(userCreditsTable)
+      .set({ balance: sql`${userCreditsTable.balance} + ${credits}`, updatedAt: sql`now()` })
+      .where(eq(userCreditsTable.userId, userId))
+      .returning({ balance: userCreditsTable.balance });
+    const newBalance = updated?.balance ?? 0;
+    await tx.insert(creditTransactionsTable).values({
+      userId,
+      type: "purchase",
+      amount: credits,
+      description: `Stripe purchase: ${packageId ?? "unknown"} pack (${credits} credits) [event ${event.id}]`,
+      balanceAfter: newBalance,
+      receiptUrl,
+    });
+  });
+  logger.info({ userId, credits, packageId }, "One-time credits granted via checkout");
+}
+
+async function handleInvoicePaid(event: { id: string; data: { object: Record<string, unknown> } }): Promise<void> {
+  const invoice = event.data.object;
+  const customerId = invoice.customer as string | null;
+  const subscriptionId = invoice.subscription as string | null;
+  const lines = invoice.lines as { data?: Array<{ period?: { end?: number } }> } | undefined;
+  const periodEnd = lines?.data?.[0]?.period?.end;
+  if (!customerId || !subscriptionId) return;
+
+  const [sub] = await db
+    .select()
+    .from(userSubscriptionsTable)
+    .where(eq(userSubscriptionsTable.stripeCustomerId, customerId));
+  if (!sub) return;
+
+  // Update subscription to active
+  const currentPeriodEnd = periodEnd ? new Date(periodEnd * 1000) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  await db
+    .update(userSubscriptionsTable)
+    .set({ status: "active", currentPeriodEnd, gracePeriodEnd: null, updatedAt: sql`now()` })
+    .where(eq(userSubscriptionsTable.userId, sub.userId));
+
+  // Grant monthly credits
+  await maybeGrantMonthlyCredits(sub.userId, currentPeriodEnd);
+  logger.info({ userId: sub.userId, customerId }, "invoice.paid: subscription renewed, credits granted");
+}
+
+async function handleInvoicePaymentFailed(event: { id: string; data: { object: Record<string, unknown> } }): Promise<void> {
+  const invoice = event.data.object;
+  const customerId = invoice.customer as string | null;
+  const attemptCount = (invoice.attempt_count as number | null) ?? 1;
+  if (!customerId) return;
+
+  const [sub] = await db
+    .select()
+    .from(userSubscriptionsTable)
+    .where(eq(userSubscriptionsTable.stripeCustomerId, customerId));
+  if (!sub) return;
+
+  const GRACE_PERIOD_DAYS = 7;
+  const gracePeriodEnd = new Date(Date.now() + GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+
+  if (attemptCount >= 3) {
+    // Final failure: downgrade to free
+    await db
+      .update(userSubscriptionsTable)
+      .set({
+        tier: "free",
+        status: "canceled",
+        stripeSubscriptionId: null,
+        gracePeriodEnd: null,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(userSubscriptionsTable.userId, sub.userId));
+    logger.warn({ userId: sub.userId, attemptCount }, "invoice.payment_failed: max retries hit — downgraded to free");
+  } else {
+    await db
+      .update(userSubscriptionsTable)
+      .set({ status: "grace_period", gracePeriodEnd, updatedAt: sql`now()` })
+      .where(eq(userSubscriptionsTable.userId, sub.userId));
+    logger.warn({ userId: sub.userId, attemptCount, gracePeriodEnd }, "invoice.payment_failed: grace period started");
+  }
+}
+
+async function handleSubscriptionUpdated(event: { id: string; data: { object: Record<string, unknown> } }): Promise<void> {
+  const stripeSub = event.data.object;
+  const subscriptionId = stripeSub.id as string;
+  const status = stripeSub.status as string;
+  const cancelAtPeriodEnd = (stripeSub.cancel_at_period_end as boolean) ?? false;
+  const currentPeriodEnd = stripeSub.current_period_end
+    ? new Date((stripeSub.current_period_end as number) * 1000)
+    : null;
+
+  const [sub] = await db
+    .select()
+    .from(userSubscriptionsTable)
+    .where(eq(userSubscriptionsTable.stripeSubscriptionId, subscriptionId));
+  if (!sub) return;
+
+  const mappedStatus =
+    status === "active" ? "active" :
+    status === "trialing" ? "trialing" :
+    status === "past_due" ? "past_due" :
+    status === "canceled" ? "canceled" :
+    "grace_period";
+
+  await db
+    .update(userSubscriptionsTable)
+    .set({
+      status: mappedStatus,
+      cancelAtPeriodEnd,
+      ...(currentPeriodEnd ? { currentPeriodEnd } : {}),
+      updatedAt: sql`now()`,
+    })
+    .where(eq(userSubscriptionsTable.userId, sub.userId));
+  logger.info({ userId: sub.userId, status: mappedStatus, cancelAtPeriodEnd }, "Subscription updated");
+}
+
+async function handleSubscriptionDeleted(event: { id: string; data: { object: Record<string, unknown> } }): Promise<void> {
+  const stripeSub = event.data.object;
+  const subscriptionId = stripeSub.id as string;
+
+  const [sub] = await db
+    .select()
+    .from(userSubscriptionsTable)
+    .where(eq(userSubscriptionsTable.stripeSubscriptionId, subscriptionId));
+  if (!sub) return;
+
+  await db
+    .update(userSubscriptionsTable)
+    .set({
+      tier: "free",
+      status: "canceled",
+      stripeSubscriptionId: null,
+      cancelAtPeriodEnd: false,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(userSubscriptionsTable.userId, sub.userId));
+  logger.info({ userId: sub.userId, subscriptionId }, "Subscription deleted — downgraded to free");
 }
 
 // ── Public webhook router — mount BEFORE auth wall ────────────────────────────
@@ -557,24 +752,18 @@ billingWebhookRouter.post("/billing/webhook", handleStripeWebhook);
 // ── Auth-required billing router ──────────────────────────────────────────────
 const router: IRouter = Router();
 
-// GET /api/billing/credits — current credit balance (alias for /api/credits)
+// GET /api/billing/credits — current credit balance
 router.get("/billing/credits", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthenticated" });
-    return;
-  }
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
   const credits = await getOrCreateCredits(userId);
   res.json({ userId: credits.userId, balance: credits.balance, updatedAt: credits.updatedAt });
 });
 
-// GET /api/billing/transactions — transaction history (alias for /api/credits/transactions)
+// GET /api/billing/transactions — transaction history
 router.get("/billing/transactions", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthenticated" });
-    return;
-  }
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
   const rows = await db
     .select()
     .from(creditTransactionsTable)
@@ -587,8 +776,6 @@ router.get("/billing/transactions", async (req, res): Promise<void> => {
 // GET /api/billing/packages
 router.get("/billing/packages", async (_req, res): Promise<void> => {
   const configured = await stripeAvailable();
-  // Publishable key is safe to expose to the browser (it's the pk_ key designed
-  // for client-side use). Needed for the embedded checkout flow.
   const publishableKey = configured ? ((await getStripePublishableKey()) ?? "") : "";
   res.json({
     stripeConfigured: configured,
@@ -605,45 +792,23 @@ router.get("/billing/packages", async (_req, res): Promise<void> => {
 });
 
 // GET /api/billing/checkout/:sessionId — backup signal for slow webhooks.
-// Returns the Stripe session.status + payment_status plus whether the credits
-// for this session have already been recorded in credit_transactions.
 router.get("/billing/checkout/:sessionId", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthenticated" });
-    return;
-  }
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
 
   const sessionId = req.params.sessionId;
   if (!sessionId || typeof sessionId !== "string") {
-    res.status(400).json({ error: "Missing sessionId" });
-    return;
+    res.status(400).json({ error: "Missing sessionId" }); return;
   }
 
   const stripe = await getUncachableStripeClient();
-  if (!stripe) {
-    res.json({ sessionId, status: "unknown", error: "Stripe not configured" });
-    return;
-  }
+  if (!stripe) { res.json({ sessionId, status: "unknown", error: "Stripe not configured" }); return; }
 
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-
-    // Ownership check: only the user who created the session can read it.
-    // Strict — sessions without a userId in metadata are treated as not-yours.
     const sessionUserId = session.metadata?.userId;
-    if (sessionUserId !== userId) {
-      res.status(403).json({ error: "Session belongs to a different user" });
-      return;
-    }
+    if (sessionUserId !== userId) { res.status(403).json({ error: "Session belongs to a different user" }); return; }
 
-    // Detect whether the webhook has already credited this session by
-    // looking for our purchase transaction that embeds the (unique) event id
-    // for this session — fallback: match on the session metadata pack + recent
-    // transactions. We rely on the description tag we write in handleStripeWebhook:
-    // "Stripe purchase: ... [event evt_xxx]". Since we don't store the session
-    // id directly, we approximate by checking for a recent purchase of the same
-    // package after the session was created.
     let creditsGranted = false;
     const createdAtMs = (session.created ?? 0) * 1000;
     if (createdAtMs > 0) {
@@ -662,36 +827,292 @@ router.get("/billing/checkout/:sessionId", async (req, res): Promise<void> => {
         .limit(1);
       creditsGranted = recent.length > 0;
     }
-
-    res.json({
-      sessionId: session.id,
-      status: session.status ?? "unknown",
-      paymentStatus: session.payment_status ?? undefined,
-      creditsGranted,
-    });
+    res.json({ sessionId: session.id, status: session.status ?? "unknown", paymentStatus: session.payment_status ?? undefined, creditsGranted });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
-    if (/api key|authentication|invalid_api_key/i.test(msg)) {
-      invalidateStripeCredentialCache();
-    }
+    if (/api key|authentication|invalid_api_key/i.test(msg)) invalidateStripeCredentialCache();
     res.status(502).json({ sessionId, status: "unknown", error: `Stripe API error: ${msg}` });
   }
 });
 
-// POST /api/billing/checkout
-router.post("/billing/checkout", async (req, res): Promise<void> => {
+// GET /api/billing/subscription — current tier + status
+router.get("/billing/subscription", async (req, res): Promise<void> => {
   const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthenticated" });
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+  const sub = await getOrCreateSubscription(userId);
+  const tierMeta = SUBSCRIPTION_TIERS_META.find((t) => t.id === sub.tier) ?? SUBSCRIPTION_TIERS_META[0];
+  const configured = await stripeAvailable();
+  const publishableKey = configured ? ((await getStripePublishableKey()) ?? "") : "";
+  res.json({
+    tier: sub.tier,
+    status: sub.status,
+    currentPeriodEnd: sub.currentPeriodEnd,
+    gracePeriodEnd: sub.gracePeriodEnd,
+    cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
+    monthlyCredits: tierMeta.monthlyCredits,
+    maxConcurrentBuilds: tierMeta.maxConcurrentBuilds,
+    stripeConfigured: configured,
+    publishableKey,
+    tiers: SUBSCRIPTION_TIERS_META.map((t) => ({
+      id: t.id,
+      name: t.name,
+      priceUsd: t.priceUsd,
+      monthlyCredits: t.monthlyCredits,
+      maxConcurrentBuilds: t.maxConcurrentBuilds,
+      features: t.features,
+      available: configured || t.id === "free",
+      current: sub.tier === t.id,
+    })),
+  });
+});
+
+// POST /api/billing/subscribe — start or upgrade subscription
+router.post("/billing/subscribe", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) {
+    res.json({ setupRequired: true, message: "Stripe is not configured." });
     return;
   }
+
+  const { tier, successUrl, cancelUrl } = req.body as {
+    tier?: string;
+    successUrl?: string;
+    cancelUrl?: string;
+  };
+
+  const tierMeta = SUBSCRIPTION_TIERS_META.find((t) => t.id === tier);
+  if (!tierMeta || tier === "free") {
+    res.status(400).json({ error: "Invalid tier. Choose 'pro' or 'team'." });
+    return;
+  }
+
+  const priceId = priceIdForTier(tierMeta);
+  if (!priceId) {
+    res.json({
+      setupRequired: true,
+      message: `Stripe Price ID for '${tier}' is not configured. Set ${tierMeta.priceIdEnv} env var.`,
+    });
+    return;
+  }
+
+  try {
+    const customerId = await ensureStripeCustomer(userId, stripe);
+    const platformBase = process.env.PLATFORM_DOMAIN ? `https://${process.env.PLATFORM_DOMAIN}` : "";
+    const successUrlFinal: string = successUrl ?? `${platformBase}/billing?subscribed=1`;
+    const cancelUrlFinal: string = cancelUrl ?? `${platformBase}/billing`;
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription" as const,
+      customer: customerId,
+      line_items: [{ price: priceId, quantity: 1 }],
+      metadata: { userId, tier: tier as string },
+      success_url: successUrlFinal,
+      cancel_url: cancelUrlFinal,
+      allow_promotion_codes: true,
+      automatic_tax: { enabled: process.env.STRIPE_TAX_ENABLED === "true" },
+    });
+    res.json({ sessionId: session.id, checkoutUrl: session.url });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    if (/api key|authentication/i.test(msg)) invalidateStripeCredentialCache();
+    res.status(502).json({ error: `Stripe error: ${msg}` });
+  }
+});
+
+// POST /api/billing/cancel-subscription
+router.post("/billing/cancel-subscription", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) { res.status(503).json({ error: "Stripe not configured" }); return; }
+
+  const sub = await getOrCreateSubscription(userId);
+  if (!sub.stripeSubscriptionId) {
+    res.status(400).json({ error: "No active subscription" });
+    return;
+  }
+
+  try {
+    await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+      cancel_at_period_end: true,
+    });
+    await db
+      .update(userSubscriptionsTable)
+      .set({ cancelAtPeriodEnd: true, updatedAt: sql`now()` })
+      .where(eq(userSubscriptionsTable.userId, userId));
+    res.json({ ok: true, cancelAtPeriodEnd: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    res.status(502).json({ error: `Stripe error: ${msg}` });
+  }
+});
+
+// POST /api/billing/portal — Stripe Customer Portal
+router.post("/billing/portal", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) { res.json({ setupRequired: true }); return; }
+
+  const sub = await getOrCreateSubscription(userId);
+  if (!sub.stripeCustomerId) {
+    res.status(400).json({ error: "No Stripe customer record. Subscribe first." });
+    return;
+  }
+
+  const { returnUrl } = req.body as { returnUrl?: string };
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: sub.stripeCustomerId,
+      return_url: returnUrl ?? (process.env.PLATFORM_DOMAIN ? `https://${process.env.PLATFORM_DOMAIN}/billing` : "/billing"),
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    res.status(502).json({ error: `Stripe error: ${msg}` });
+  }
+});
+
+// GET /api/billing/invoices — list Stripe invoices
+router.get("/billing/invoices", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) { res.json({ invoices: [] }); return; }
+
+  const sub = await getOrCreateSubscription(userId);
+  if (!sub.stripeCustomerId) { res.json({ invoices: [] }); return; }
+
+  try {
+    const list = await stripe.invoices.list({
+      customer: sub.stripeCustomerId,
+      limit: 24,
+    });
+    const invoices = list.data.map((inv) => ({
+      id: inv.id,
+      number: inv.number,
+      status: inv.status,
+      amountPaid: inv.amount_paid,
+      currency: inv.currency,
+      created: inv.created,
+      pdfUrl: inv.invoice_pdf,
+      hostedUrl: inv.hosted_invoice_url,
+      description: inv.description,
+    }));
+    res.json({ invoices });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    logger.warn({ err: msg, userId }, "Failed to fetch Stripe invoices");
+    res.json({ invoices: [], error: msg });
+  }
+});
+
+// GET /api/billing/usage — per-user usage analytics
+router.get("/billing/usage", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
+
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  // Spend by model (agentMode) from build_analytics
+  const byModel = await db
+    .select({
+      agentMode: buildAnalyticsTable.agentMode,
+      model: buildAnalyticsTable.model,
+      buildCount: sql<number>`count(*)::int`,
+    })
+    .from(buildAnalyticsTable)
+    .where(
+      and(
+        eq(buildAnalyticsTable.userId, userId),
+        gte(buildAnalyticsTable.createdAt, since),
+      ),
+    )
+    .groupBy(buildAnalyticsTable.agentMode, buildAnalyticsTable.model);
+
+  // Builds per day (last 30 days)
+  const byDay = await db
+    .select({
+      day: sql<string>`date_trunc('day', created_at)::date::text`,
+      buildCount: sql<number>`count(*)::int`,
+      creditsSpent: sql<number>`coalesce(sum(case when amount < 0 then abs(amount) else 0 end), 0)::int`,
+    })
+    .from(creditTransactionsTable)
+    .where(
+      and(
+        eq(creditTransactionsTable.userId, userId),
+        gte(creditTransactionsTable.createdAt, since),
+      ),
+    )
+    .groupBy(sql`date_trunc('day', created_at)::date`)
+    .orderBy(sql`date_trunc('day', created_at)::date`);
+
+  // Top projects by credits consumed
+  const topProjects = await db
+    .select({
+      projectId: creditTransactionsTable.projectId,
+      projectName: projectsTable.name,
+      creditsConsumed: sql<number>`sum(case when amount < 0 then abs(amount) else 0 end)::int`,
+    })
+    .from(creditTransactionsTable)
+    .leftJoin(projectsTable, eq(creditTransactionsTable.projectId, projectsTable.id))
+    .where(
+      and(
+        eq(creditTransactionsTable.userId, userId),
+        gte(creditTransactionsTable.createdAt, since),
+      ),
+    )
+    .groupBy(creditTransactionsTable.projectId, projectsTable.name)
+    .orderBy(sql`sum(case when amount < 0 then abs(amount) else 0 end) desc`)
+    .limit(5);
+
+  // Current balance
+  const credits = await getOrCreateCredits(userId);
+
+  // Total spend in period
+  const [totalSpend] = await db
+    .select({
+      total: sql<number>`coalesce(sum(case when amount < 0 then abs(amount) else 0 end), 0)::int`,
+      totalPurchased: sql<number>`coalesce(sum(case when amount > 0 then amount else 0 end), 0)::int`,
+    })
+    .from(creditTransactionsTable)
+    .where(
+      and(
+        eq(creditTransactionsTable.userId, userId),
+        gte(creditTransactionsTable.createdAt, since),
+      ),
+    );
+
+  res.json({
+    currentBalance: credits.balance,
+    period: { from: since.toISOString(), to: new Date().toISOString() },
+    totalCreditsSpent: totalSpend?.total ?? 0,
+    totalCreditsPurchased: totalSpend?.totalPurchased ?? 0,
+    byModel,
+    byDay,
+    topProjects: topProjects.map((p) => ({
+      projectId: p.projectId,
+      projectName: p.projectName ?? `Project #${p.projectId ?? "?"}`,
+      creditsConsumed: p.creditsConsumed,
+    })),
+  });
+});
+
+// POST /api/billing/checkout — one-time credit pack
+router.post("/billing/checkout", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) { res.status(401).json({ error: "Unauthenticated" }); return; }
 
   const stripe = await getUncachableStripeClient();
   if (!stripe) {
     res.json({
       setupRequired: true,
-      message:
-        "Stripe is not configured. Connect the Stripe integration (or set STRIPE_SECRET_KEY) to enable credit purchases.",
+      message: "Stripe is not configured. Connect the Stripe integration to enable credit purchases.",
       packages: CREDIT_PACKAGES,
     });
     return;
@@ -707,14 +1128,11 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
 
   const pkg = CREDIT_PACKAGES.find((p) => p.id === packageId);
   if (!pkg) {
-    res.status(400).json({
-      error: `Unknown package. Valid options: ${CREDIT_PACKAGES.map((p) => p.id).join(", ")}`,
-    });
+    res.status(400).json({ error: `Unknown package. Valid options: ${CREDIT_PACKAGES.map((p) => p.id).join(", ")}` });
     return;
   }
 
   const mode = uiMode === "embedded" ? "embedded" : "hosted";
-
   if (mode === "hosted" && (!successUrl || !cancelUrl)) {
     res.status(400).json({ error: "successUrl and cancelUrl are required for hosted checkout" });
     return;
@@ -722,9 +1140,6 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
 
   try {
     const { stripeCircuit, withRetry, isTransientError } = await import("../lib/resilience");
-    // Prefer pre-created Stripe Price IDs (set via `pnpm --filter @workspace/scripts
-    // run seed:stripe`, then stored as STRIPE_PRICE_STARTER/BUILDER/POWER secrets).
-    // Falls back to inline price_data so dev/test still works without seeding.
     const priceId = priceIdForPack(pkg);
     const lineItem = priceId
       ? { quantity: 1, price: priceId }
@@ -743,11 +1158,8 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
     const baseParams = {
       mode: "payment" as const,
       line_items: [lineItem],
-      metadata: {
-        userId,
-        packageId: pkg.id,
-        credits: String(pkg.credits),
-      },
+      metadata: { userId, packageId: pkg.id, credits: String(pkg.credits) },
+      automatic_tax: { enabled: Boolean(process.env.STRIPE_TAX_ENABLED === "true") },
     };
 
     const session = await stripeCircuit.call(() =>
@@ -757,9 +1169,6 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
             ? stripe.checkout.sessions.create({
                 ...baseParams,
                 ui_mode: "embedded",
-                // When no return_url is provided, configure the session so the
-                // embedded form stays in place after payment and the client polls
-                // (via session status / webhook + credit refetch) for completion.
                 ...(returnUrl
                   ? { return_url: returnUrl }
                   : { redirect_on_completion: "never" as const }),
@@ -769,12 +1178,7 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
                 success_url: successUrl!,
                 cancel_url: cancelUrl!,
               }),
-        {
-          maxAttempts: 2,
-          baseDelayMs: 1_000,
-          shouldRetry: isTransientError,
-          label: "stripe:checkout.sessions.create",
-        },
+        { maxAttempts: 2, baseDelayMs: 1_000, shouldRetry: isTransientError, label: "stripe:checkout.sessions.create" },
       ),
     );
 
@@ -782,20 +1186,11 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
       sessionId: session.id,
       checkoutUrl: session.url ?? undefined,
       clientSecret: session.client_secret ?? undefined,
-      package: {
-        id: pkg.id,
-        label: pkg.label,
-        credits: pkg.credits,
-        priceUsd: pkg.priceUsd,
-      },
+      package: { id: pkg.id, label: pkg.label, credits: pkg.credits, priceUsd: pkg.priceUsd },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
-    // If Stripe rejects with auth error, drop the cached secret so the next
-    // request refetches from the connector (handles key rotation).
-    if (/api key|authentication|invalid_api_key/i.test(msg)) {
-      invalidateStripeCredentialCache();
-    }
+    if (/api key|authentication|invalid_api_key/i.test(msg)) invalidateStripeCredentialCache();
     res.status(502).json({ error: `Stripe API error: ${msg}` });
   }
 });

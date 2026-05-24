@@ -24,6 +24,7 @@ import {
   getListSuggestionsQueryKey,
 } from "@workspace/api-client-react";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
+import { CreditBalancePill } from "@/components/credit-balance-pill";
 import { CodeEditorTab } from "./components/code-editor-tab";
 import { CommandPalette, pushRecentFile } from "./components/command-palette";
 import { KeyboardShortcuts } from "./components/keyboard-shortcuts";
@@ -1993,6 +1994,7 @@ export default function ProjectWorkspacePage() {
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <CreditBalancePill />
           <button
             onClick={startTour}
             className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border text-muted-foreground text-xs hover:bg-muted hover:text-foreground transition-colors"

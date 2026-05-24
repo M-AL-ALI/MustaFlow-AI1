@@ -111,6 +111,10 @@ async function buildAll() {
       "electron",
       "ws",
       "openai",
+      "pg-boss",
+      "prom-client",
+      "@sentry/node",
+      "@sentry/tracing",
     ],
     // Source maps blow up bundle size (26 MB on top of 16 MB code) and have
     // tripped Replit's deploy bundler with "Socket closed 4500" during the

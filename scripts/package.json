@@ -53,6 +53,7 @@
     "migrate-workspace-subscriptions": "tsx ./src/migrate-workspace-subscriptions.ts",
     "migrate-plan-templates": "tsx ./src/migrate-plan-templates.ts",
     "migrate-cdn-perfection": "tsx ./src/migrate-cdn-perfection.ts",
+    "migrate-subscriptions": "tsx ./src/migrate-subscriptions.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

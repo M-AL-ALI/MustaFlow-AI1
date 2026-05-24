@@ -27,6 +27,9 @@ import {
   projectWebhooksTable,
 } from "@workspace/db";
 import { and, gte } from "drizzle-orm";
+import { grantCredits } from "./credits";
+import { getUncachableStripeClient } from "../lib/stripeClient";
+import { logger } from "../lib/logger";
 import { requireAdmin } from "../lib/adminAuth";
 import { errorsPerDay } from "../lib/prodLogs";
 import { getCfHostnameSummary } from "../lib/cf-scheduler";
@@ -934,6 +937,120 @@ router.get("/admin/security/dashboard", async (_req, res): Promise<void> => {
     },
     cloudflare: cfSummary,
   });
+});
+
+// ── POST /api/admin/billing/refund ────────────────────────────────────────────
+// Issue a full or partial Stripe refund and reverse the credit grant.
+router.post("/admin/billing/refund", async (req, res): Promise<void> => {
+  const { transactionId, amountUsd, reason } = req.body as {
+    transactionId?: number;
+    amountUsd?: number;
+    reason?: string;
+  };
+
+  if (!transactionId) {
+    res.status(400).json({ error: "transactionId is required" });
+    return;
+  }
+
+  // Load the original transaction
+  const [tx] = await db
+    .select()
+    .from(creditTransactionsTable)
+    .where(eq(creditTransactionsTable.id, transactionId));
+
+  if (!tx) {
+    res.status(404).json({ error: "Transaction not found" });
+    return;
+  }
+
+  if (tx.type !== "purchase") {
+    res.status(400).json({ error: "Only 'purchase' transactions can be refunded via Stripe" });
+    return;
+  }
+
+  const stripe = await getUncachableStripeClient();
+  let stripeRefundId: string | null = null;
+
+  if (stripe && amountUsd && amountUsd > 0) {
+    // Attempt Stripe refund if we have a payment intent or charge from the receipt URL.
+    // Receipt URL format: https://pay.stripe.com/receipts/... — we fetch via charge.
+    try {
+      if (tx.receiptUrl) {
+        // Extract charge ID from receipt URL or fall back to charge search
+        const chargeSearch = await stripe.charges.search({
+          query: `metadata['userId']:'${tx.userId}'`,
+          limit: 10,
+        });
+        const matchingCharge = chargeSearch.data.find((c) => c.receipt_url === tx.receiptUrl);
+        if (matchingCharge) {
+          const refundAmountCents = Math.round(amountUsd * 100);
+          const ref = await stripe.refunds.create({
+            charge: matchingCharge.id,
+            amount: refundAmountCents,
+            reason: "requested_by_customer",
+            metadata: { adminRefund: "true", transactionId: String(transactionId), reason: reason ?? "" },
+          });
+          stripeRefundId = ref.id;
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown";
+      logger.warn({ err: msg, transactionId }, "Stripe refund attempt failed — proceeding with credit reversal only");
+    }
+  }
+
+  // Reverse the credit grant regardless of Stripe outcome
+  const creditsToReverse = tx.amount > 0 ? tx.amount : 0;
+  if (creditsToReverse > 0) {
+    const [creditRow] = await db
+      .select()
+      .from(userCreditsTable)
+      .where(eq(userCreditsTable.userId, tx.userId));
+
+    const currentBalance = creditRow?.balance ?? 0;
+    const newBalance = Math.max(0, currentBalance - creditsToReverse);
+
+    await db
+      .update(userCreditsTable)
+      .set({ balance: newBalance, updatedAt: sql`now()` })
+      .where(eq(userCreditsTable.userId, tx.userId));
+
+    await db.insert(creditTransactionsTable).values({
+      userId: tx.userId,
+      type: "refund",
+      amount: -creditsToReverse,
+      description: `Admin refund: transaction #${transactionId}${stripeRefundId ? ` (Stripe refund ${stripeRefundId})` : ""}${reason ? ` — ${reason}` : ""}`,
+      balanceAfter: newBalance,
+    });
+  }
+
+  logger.info(
+    { adminUserId: req.userId, transactionId, creditsToReverse, stripeRefundId },
+    "Admin issued refund",
+  );
+
+  res.json({
+    ok: true,
+    creditsReversed: creditsToReverse,
+    stripeRefundId,
+    userId: tx.userId,
+  });
+});
+
+// ── GET /api/admin/billing/users — credit balance overview ────────────────────
+router.get("/admin/billing/users", async (_req, res): Promise<void> => {
+  const rows = await db
+    .select({
+      userId: userCreditsTable.userId,
+      balance: userCreditsTable.balance,
+      updatedAt: userCreditsTable.updatedAt,
+    })
+    .from(userCreditsTable)
+    .orderBy(desc(userCreditsTable.balance))
+    .limit(100);
+
+  res.json({ users: rows });
 });
 
 export default router;
