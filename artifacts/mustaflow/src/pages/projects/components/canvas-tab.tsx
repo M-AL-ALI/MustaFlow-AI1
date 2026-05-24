@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,11 @@ import {
   Layers,
   Monitor,
   Wand2,
+  Grid3x3,
+  Trash2,
+  Upload,
+  ArrowDownToLine,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -23,7 +28,25 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
-type TabMode = "design" | "brand-studio";
+type TabMode = "design" | "brand-studio" | "variants";
+
+type CanvasVariant = {
+  id: number;
+  projectId: number;
+  explorationId: string;
+  label: string;
+  prompt: string;
+  status: "pending" | "generating" | "ready" | "failed";
+  assistantSummary: string | null;
+  errorMessage: string | null;
+  rank: number;
+  source: "explore" | "extract";
+  fileCount: number;
+  createdAt: string;
+  updatedAt: string;
+  lastViewedAt: string;
+  previewUrl: string;
+};
 type StyleOption = "minimal" | "bold" | "playful" | "corporate" | "modern" | "classic";
 
 const STYLE_OPTIONS: { value: StyleOption; label: string; desc: string }[] = [
@@ -106,6 +129,438 @@ function BrandEmptyState() {
             {item.label}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Single iframe tile for one variant. Uses IntersectionObserver to swap the
+ * src to `about:blank` when offscreen so we don't burn CPU on hidden iframes
+ * when the user has many variants in a grid.
+ */
+function VariantTile({
+  variant,
+  onGraduate,
+  onDelete,
+  refreshKey,
+}: {
+  variant: CanvasVariant;
+  onGraduate: (v: CanvasVariant) => void;
+  onDelete: (v: CanvasVariant) => void;
+  refreshKey: number;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) setVisible(entry.isIntersecting);
+      },
+      { threshold: 0.05 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  // Touch the variant when visible so it survives the 24h idle sweep.
+  useEffect(() => {
+    if (!visible || variant.status !== "ready") return;
+    const url = `/api/projects/${variant.projectId}/canvas/variants/${variant.id}/touch`;
+    fetch(url, { method: "POST" }).catch(() => {
+      /* non-fatal */
+    });
+  }, [visible, variant.id, variant.projectId, variant.status]);
+
+  const isReady = variant.status === "ready";
+  const previewSrc = visible && isReady ? `${variant.previewUrl}?k=${refreshKey}` : "about:blank";
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex flex-col rounded-lg border border-border bg-card overflow-hidden min-h-0"
+    >
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="text-xs font-semibold text-foreground truncate">{variant.label}</div>
+          <span
+            className={cn(
+              "text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide",
+              variant.status === "ready" && "bg-green-500/10 text-green-400",
+              variant.status === "generating" && "bg-amber-500/10 text-amber-400",
+              variant.status === "pending" && "bg-muted text-muted-foreground",
+              variant.status === "failed" && "bg-red-500/10 text-red-400",
+            )}
+          >
+            {variant.status}
+          </span>
+          {variant.source === "extract" && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 uppercase tracking-wide">
+              extract
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2"
+            onClick={() => onGraduate(variant)}
+            disabled={!isReady}
+            title="Merge this variant into the main app"
+          >
+            <ArrowDownToLine className="h-3.5 w-3.5 mr-1" /> Graduate
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-muted-foreground hover:text-red-400"
+            onClick={() => onDelete(variant)}
+            title="Delete this variant"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+      <div className="flex-1 min-h-[240px] bg-muted/10 relative">
+        {!isReady && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-4">
+            {variant.status === "failed" ? (
+              <>
+                <AlertCircle className="h-6 w-6 text-red-400" />
+                <div className="text-xs text-red-400 font-medium">Generation failed</div>
+                {variant.errorMessage && (
+                  <div className="text-[11px] text-muted-foreground max-w-xs line-clamp-3">
+                    {variant.errorMessage}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-5 w-5 text-muted-foreground animate-spin" />
+                <div className="text-xs text-muted-foreground">
+                  {variant.status === "pending" ? "Queued…" : "Generating variant…"}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        {isReady && (
+          <iframe
+            src={previewSrc}
+            title={variant.label}
+            className="w-full h-full border-0"
+            sandbox="allow-scripts allow-forms allow-popups"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function VariantsMode({ projectId }: { projectId: number }) {
+  const { data: files } = useListProjectFiles(projectId, {
+    query: { enabled: !!projectId, queryKey: getListProjectFilesQueryKey(projectId) },
+  });
+  const [variants, setVariants] = useState<CanvasVariant[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [variantCount, setVariantCount] = useState(3);
+  const [exploring, setExploring] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [extractOpen, setExtractOpen] = useState(false);
+  const [extractPaths, setExtractPaths] = useState<Set<string>>(new Set());
+  const [extractLabel, setExtractLabel] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const loadVariants = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/canvas/variants`);
+      if (!res.ok) return;
+      const json = (await res.json()) as { variants: CanvasVariant[] };
+      setVariants(json.variants ?? []);
+    } catch {
+      /* non-fatal */
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    setLoading(true);
+    loadVariants().finally(() => setLoading(false));
+  }, [loadVariants]);
+
+  // Poll while any variant is still generating so the UI flips to ready
+  // automatically without a manual refresh.
+  useEffect(() => {
+    const pending = variants.some((v) => v.status === "pending" || v.status === "generating");
+    if (!pending) return;
+    const t = setInterval(() => {
+      loadVariants().then(() => setRefreshKey((k) => k + 1));
+    }, 3000);
+    return () => clearInterval(t);
+  }, [variants, loadVariants]);
+
+  const explore = async () => {
+    if (!prompt.trim() || exploring) return;
+    setExploring(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/canvas/explore`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: prompt.trim(), variantCount }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `Explore failed (${res.status})`);
+      }
+      const json = (await res.json()) as { variants: CanvasVariant[] };
+      setVariants((prev) => [...json.variants, ...prev]);
+      setPrompt("");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExploring(false);
+    }
+  };
+
+  const graduate = async (v: CanvasVariant) => {
+    if (
+      !confirm(
+        `Merge "${v.label}" into the main app? A pre-graduation snapshot will be saved so you can roll back.`,
+      )
+    )
+      return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/canvas/variants/${v.id}/graduate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `Graduate failed (${res.status})`);
+      }
+      const json = (await res.json()) as { inserted: number; updated: number };
+      alert(
+        `Merged ${json.inserted + json.updated} file(s) into the main app (${json.inserted} new, ${json.updated} updated). Open the Preview tab to see the result.`,
+      );
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const deleteVariant = async (v: CanvasVariant) => {
+    if (!confirm(`Delete variant "${v.label}"? This cannot be undone.`)) return;
+    try {
+      await fetch(`/api/projects/${projectId}/canvas/variants/${v.id}`, { method: "DELETE" });
+      setVariants((prev) => prev.filter((x) => x.id !== v.id));
+    } catch {
+      /* non-fatal */
+    }
+  };
+
+  const runExtract = async () => {
+    const paths = Array.from(extractPaths);
+    if (paths.length === 0) return;
+    setExtracting(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/canvas/extract`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ paths, label: extractLabel.trim() || undefined }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `Extract failed (${res.status})`);
+      }
+      const v = (await res.json()) as CanvasVariant;
+      setVariants((prev) => [v, ...prev]);
+      setExtractOpen(false);
+      setExtractPaths(new Set());
+      setExtractLabel("");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const togglePath = (path: string) => {
+    setExtractPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+      {/* Toolbar */}
+      <div className="shrink-0 border-b border-border bg-card p-3 space-y-2">
+        <div className="flex gap-2 items-center">
+          <Input
+            placeholder="Describe what to explore (e.g. Redesign the hero with a bolder layout)…"
+            className="flex-1 h-8 text-sm"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                explore();
+              }
+            }}
+            disabled={exploring}
+          />
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span>Variants</span>
+            <select
+              className="h-8 rounded-md border border-border bg-background text-sm px-2"
+              value={variantCount}
+              onChange={(e) => setVariantCount(Number(e.target.value))}
+              disabled={exploring}
+            >
+              {[2, 3, 4].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button
+            size="sm"
+            className="h-8 shrink-0"
+            onClick={explore}
+            disabled={exploring || !prompt.trim()}
+          >
+            {exploring ? (
+              <>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Exploring…
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-3.5 w-3.5 mr-1.5" /> Explore
+              </>
+            )}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 shrink-0"
+            onClick={() => setExtractOpen((v) => !v)}
+            title="Pull an existing component from the main app into the sandbox"
+          >
+            <Upload className="h-3.5 w-3.5 mr-1.5" /> Extract
+          </Button>
+        </div>
+        {errorMsg && (
+          <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-2 py-1.5">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span className="flex-1">{errorMsg}</span>
+            <button
+              onClick={() => setErrorMsg(null)}
+              className="text-red-400 hover:text-red-300 text-[11px]"
+            >
+              dismiss
+            </button>
+          </div>
+        )}
+        {extractOpen && (
+          <div className="rounded-md border border-border bg-muted/30 p-2 space-y-2">
+            <div className="text-[11px] font-semibold text-foreground">
+              Extract files from main app
+            </div>
+            <Input
+              placeholder="Label (optional)"
+              className="h-7 text-xs"
+              value={extractLabel}
+              onChange={(e) => setExtractLabel(e.target.value)}
+            />
+            <div className="max-h-40 overflow-y-auto border border-border rounded-md bg-background">
+              {(files ?? []).map((f) => (
+                <label
+                  key={f.id}
+                  className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-muted cursor-pointer border-b border-border last:border-b-0"
+                >
+                  <input
+                    type="checkbox"
+                    checked={extractPaths.has(f.path)}
+                    onChange={() => togglePath(f.path)}
+                  />
+                  <span className="font-mono truncate">{f.path}</span>
+                </label>
+              ))}
+              {(files?.length ?? 0) === 0 && (
+                <div className="text-xs text-muted-foreground italic p-2">
+                  No files in this project yet.
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7"
+                onClick={() => {
+                  setExtractOpen(false);
+                  setExtractPaths(new Set());
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="h-7"
+                onClick={runExtract}
+                disabled={extracting || extractPaths.size === 0}
+              >
+                {extracting ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <>Extract {extractPaths.size > 0 ? `(${extractPaths.size})` : ""}</>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Variant grid */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 bg-muted/10">
+        {loading ? (
+          <div className="text-xs text-muted-foreground text-center py-12">Loading variants…</div>
+        ) : variants.length === 0 ? (
+          <div className="max-w-md mx-auto text-center py-12 space-y-3">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+              <Grid3x3 className="h-7 w-7 text-primary/60" />
+            </div>
+            <div className="text-sm font-semibold text-foreground">No variants yet</div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Type a design exploration above (e.g. &ldquo;Try 3 alternative homepage hero
+              styles&rdquo;) and click Explore. The AI will generate 2–4 self-contained variants in
+              parallel so you can compare side-by-side. Use Graduate to merge your favourite back
+              into the main app.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 auto-rows-[460px]">
+            {variants.map((v) => (
+              <VariantTile
+                key={v.id}
+                variant={v}
+                onGraduate={graduate}
+                onDelete={deleteVariant}
+                refreshKey={refreshKey}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -238,6 +693,17 @@ The app should feel visually consistent with the brand identity shown in brand/p
             <Monitor className="h-3.5 w-3.5" /> Design
           </button>
           <button
+            onClick={() => setMode("variants")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+              mode === "variants"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Grid3x3 className="h-3.5 w-3.5" /> Variants
+          </button>
+          <button
             onClick={() => setMode("brand-studio")}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
@@ -317,6 +783,9 @@ The app should feel visually consistent with the brand identity shown in brand/p
           </div>
         </div>
       )}
+
+      {/* ── VARIANTS MODE ── */}
+      {mode === "variants" && <VariantsMode projectId={projectId} />}
 
       {/* ── BRAND STUDIO MODE ── */}
       {mode === "brand-studio" && (

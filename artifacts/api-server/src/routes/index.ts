@@ -51,6 +51,7 @@ import backgroundJobsRouter from "./background-jobs";
 import previewSnapshotsRouter from "./preview-snapshots";
 import uploadsRouter from "./uploads";
 import transcribeRouter from "./transcribe";
+import canvasRouter from "./canvas";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -177,6 +178,7 @@ router.use(backgroundJobsRouter);
 router.use(previewSnapshotsRouter);
 router.use(uploadsRouter);
 router.use(transcribeRouter);
+router.use(canvasRouter);
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

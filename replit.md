@@ -136,6 +136,24 @@ The intended user journey is: Login → create project → build app → preview
 - **Domain management**: `projects.customDomain` (unique), `projects.domainStatus`, `projects.sslStatus` columns. `GET/PATCH/DELETE /api/projects/:id/domain` + `POST /api/projects/:id/domain/verify` (DNS CNAME check via `dns.promises.resolveCname`). Auto-subdomain: `{publicSlug}.mustaflow.app`. Custom-domain hostname middleware mounted in `app.ts` before `/api` — intercepts GET requests whose `Host` header matches a stored `customDomain` and serves the published snapshot directly (active in production once DNS is configured; no-op in Replit dev). Snapshot serving logic extracted to `artifacts/api-server/src/lib/serveSnapshot.ts` (shared by public route + custom domain middleware). Publishing tab "Domains" section: read-only subdomain display, custom domain input, DNS CNAME instructions table, domain/SSL status badges, "Check DNS" button.
 - Env vars: `PLATFORM_DOMAIN` (default `mustaflow.app`), `PLATFORM_CNAME_TARGET` (default `hosted.mustaflow.app`) — set these in production to match real infrastructure.
 
+## Task #541 — Live mockup sandbox on Canvas
+
+- **New Canvas tab mode**: "Variants" — generate 2–4 self-contained UI variants in parallel from one prompt. Each variant gets its own iframe tile in a responsive grid with per-tile Graduate / Delete controls.
+- **Iframe lifecycle**: `IntersectionObserver` swaps offscreen iframes to `about:blank` so a grid of 4 variants doesn't pin 4 worth of CPU. Visible tiles call `POST /canvas/variants/:vid/touch` to bump `lastViewedAt`; rows idle > 24h are pruned by a throttled sweep on every list call.
+- **DB**: `canvas_variants` table (project_id, exploration_id, label, prompt, status, files jsonb, assistantSummary, errorMessage, rank, source, createdAt, updatedAt, lastViewedAt). Apply with `pnpm --filter @workspace/scripts run migrate-canvas-variants` (idempotent).
+- **API routes** (all in `artifacts/api-server/src/routes/canvas.ts`, all `requireProjectOwnership`):
+  - `POST /api/projects/:id/canvas/explore` — body `{ prompt, variantCount: 2–4 }`. Inserts N pending rows, kicks off N parallel `runRefinePipeline` calls via `setImmediate`. Each variant gets a different style direction (bold / minimal / playful / sleek) injected into its system prompt so the outputs are genuinely distinct.
+  - `GET /api/projects/:id/canvas/variants` — list (runs throttled 24h prune sweep).
+  - `GET /api/projects/:id/canvas/variants/:vid` — single row metadata.
+  - `POST /api/projects/:id/canvas/variants/:vid/touch` — bumps lastViewedAt.
+  - `DELETE /api/projects/:id/canvas/variants/:vid` — permanent delete.
+  - `GET /api/projects/:id/canvas/variants/:vid/preview/{*splat}` — serves files from the variant's frozen snapshot (HTML gets `injectBridge` + `MOCK_FLAG_SCRIPT`, binary mime → base64 buffer, SPA fallback to index.html). 202 with status placeholder while pending/generating.
+  - `POST /api/projects/:id/canvas/variants/:vid/graduate` — snapshots current `project_files` into a `project_versions` row labelled "Pre-graduation: <variant>", then upserts variant files into `project_files`. Additive (never deletes files not in the variant). Writes a knowledge_vault `lesson` entry.
+  - `POST /api/projects/:id/canvas/extract` — body `{ paths: string[], label? }`. Copies chosen files from main project into a new `source=extract` variant (auto-includes `index.html` for the iframe to land on if not in the chosen set).
+- **Files added/changed**: `lib/db/src/schema/canvas-variants.ts` (+ barrel export), `artifacts/api-server/src/routes/canvas.ts`, `artifacts/api-server/src/routes/index.ts` (import + `router.use`), `scripts/src/migrate-canvas-variants.ts` (+ scripts/package.json entry), `artifacts/mustaflow/src/pages/projects/components/canvas-tab.tsx` (new `VariantsMode` + `VariantTile`, third tab button).
+- **Iframe sandbox**: `allow-scripts allow-forms allow-popups` (no `allow-same-origin`) — matches preview-tab posture so a malicious AI-generated variant can't reach the parent's cookies/storage.
+- **Drift**: Canvas routes are not yet in `lib/api-spec/openapi.yaml`; the frontend uses raw `fetch()` for these endpoints (same pattern as visual-edit / verify-secret / push-github calls already in the codebase). Adding Orval hooks is a clean future task once the contract stabilises.
+
 ## Known limitations (honest status)
 
 - **Mobile generation**: Intentionally absent from the UI. The builder only produces static HTML/CSS/JS. Expo/React Native support is a future milestone.

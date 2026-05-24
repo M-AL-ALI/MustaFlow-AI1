@@ -28,3 +28,4 @@ export * from "./tool-audit";
 export * from "./builder-skills";
 export * from "./project-embeddings";
 export * from "./domains";
+export * from "./canvas-variants";
