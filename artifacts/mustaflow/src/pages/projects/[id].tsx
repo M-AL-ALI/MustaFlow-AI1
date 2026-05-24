@@ -53,6 +53,7 @@ import {
   Activity,
   Rocket,
   Sparkles,
+  ChevronDown,
   Monitor,
   Wrench,
   Plus,
@@ -884,6 +885,7 @@ export default function ProjectWorkspacePage() {
   const [selectedCodeFileLine, setSelectedCodeFileLine] = useState<number | null>(null);
   const [scrollManageToMobileSettings, setScrollManageToMobileSettings] = useState(false);
   const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [creditsSuccess, setCreditsSuccess] = useState(() => {
@@ -2688,18 +2690,40 @@ export default function ProjectWorkspacePage() {
                     </>
                   </div>
 
-                  {/* Quick action chips */}
+                  {/* Quick action chips — collapsed behind a toggle to save vertical space */}
                   {!isBusy && !activeBatchId && prompt === "" && (
-                    <div className="shrink-0 px-3 pt-2 pb-1 flex flex-wrap gap-1.5">
-                      {QUICK_ACTIONS.map((chip) => (
-                        <button
-                          key={chip}
-                          onClick={() => send(chip)}
-                          className="px-2.5 py-1 rounded-full border border-border bg-muted/40 text-[10px] text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
-                        >
-                          {chip}
-                        </button>
-                      ))}
+                    <div className="shrink-0 px-3 pt-2 pb-1">
+                      <button
+                        type="button"
+                        onClick={() => setQuickActionsOpen((v) => !v)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-border bg-muted/40 text-[10px] text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                        aria-expanded={quickActionsOpen}
+                      >
+                        <Sparkles className="h-2.5 w-2.5" />
+                        Quick ideas
+                        <ChevronDown
+                          className={cn(
+                            "h-2.5 w-2.5 transition-transform",
+                            quickActionsOpen && "rotate-180",
+                          )}
+                        />
+                      </button>
+                      {quickActionsOpen && (
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {QUICK_ACTIONS.map((chip) => (
+                            <button
+                              key={chip}
+                              onClick={() => {
+                                setQuickActionsOpen(false);
+                                send(chip);
+                              }}
+                              className="px-2.5 py-1 rounded-full border border-border bg-muted/40 text-[10px] text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                            >
+                              {chip}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 
