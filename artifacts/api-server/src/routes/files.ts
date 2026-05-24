@@ -139,12 +139,24 @@ router.post("/projects/:id/files", requireProjectOwnership, async (req, res): Pr
 
   const normalizedPath = filePath.trim();
 
+  // Resolve artifactId first (Task #544) so the conflict check is scoped per
+  // artifact — two artifacts in the same project may each own a `package.json`.
+  const { resolveArtifactId } = await import("../lib/artifacts");
+  const artifactIdRaw = typeof req.query.artifactId === "string" ? req.query.artifactId : "";
+  const hint = artifactIdRaw ? Number(artifactIdRaw) : null;
+  const resolvedArtifactId = await resolveArtifactId(projectId, hint);
+
+  const conflictConds = [
+    eq(projectFilesTable.projectId, projectId),
+    eq(projectFilesTable.path, normalizedPath),
+  ];
+  if (resolvedArtifactId !== null) {
+    conflictConds.push(eq(projectFilesTable.artifactId, resolvedArtifactId));
+  }
   const existing = await db
     .select({ id: projectFilesTable.id })
     .from(projectFilesTable)
-    .where(
-      and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, normalizedPath)),
-    );
+    .where(and(...conflictConds));
 
   if (existing.length > 0) {
     res.status(409).json({ error: "A file with that path already exists" });
@@ -152,12 +164,6 @@ router.post("/projects/:id/files", requireProjectOwnership, async (req, res): Pr
   }
 
   const mimeType = guessMime(normalizedPath);
-  // Stamp artifact_id (Task #544). Use explicit ?artifactId query param when
-  // present, otherwise resolve to the project's primary artifact.
-  const { resolveArtifactId } = await import("../lib/artifacts");
-  const artifactIdRaw = typeof req.query.artifactId === "string" ? req.query.artifactId : "";
-  const hint = artifactIdRaw ? Number(artifactIdRaw) : null;
-  const resolvedArtifactId = await resolveArtifactId(projectId, hint);
   const [created] = await db
     .insert(projectFilesTable)
     .values({
@@ -333,12 +339,19 @@ router.patch(
       return;
     }
 
+    // Conflict check is scoped to the file's own artifact (Task #544) so a
+    // rename to a path that exists in a sibling artifact is allowed.
+    const renameConflictConds = [
+      eq(projectFilesTable.projectId, projectId),
+      eq(projectFilesTable.path, normalizedPath),
+    ];
+    if (existing.artifactId !== null) {
+      renameConflictConds.push(eq(projectFilesTable.artifactId, existing.artifactId));
+    }
     const conflict = await db
       .select({ id: projectFilesTable.id })
       .from(projectFilesTable)
-      .where(
-        and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, normalizedPath)),
-      );
+      .where(and(...renameConflictConds));
     if (conflict.length > 0) {
       res.status(409).json({ error: "A file with that path already exists" });
       return;

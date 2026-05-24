@@ -220,6 +220,38 @@ router.post("/projects", async (req, res): Promise<void> => {
     return;
   }
 
+  // Task #544: every new project gets a primary artifact mirroring its
+  // kind/platform/format/stack. This preserves the "project owns ≥1 artifact"
+  // invariant so resolveArtifactId() always finds a target and the artifact
+  // tab strip auto-selects on load.
+  {
+    const { projectArtifactsTable } = await import("@workspace/db");
+    const primaryKind = projectInput.kind;
+    const slug =
+      primaryKind === "web"
+        ? "web"
+        : primaryKind.startsWith("mobile")
+          ? "mobile"
+          : primaryKind || "app";
+    const artifactName =
+      primaryKind === "web"
+        ? "Web app"
+        : primaryKind.startsWith("mobile")
+          ? "Mobile app"
+          : slug[0]!.toUpperCase() + slug.slice(1);
+    await db.insert(projectArtifactsTable).values({
+      projectId: project.id,
+      kind: primaryKind,
+      platform,
+      projectFormat,
+      stack: resolvedStack,
+      name: artifactName,
+      slug,
+      isPrimary: true,
+      status: "draft",
+    });
+  }
+
   // Seed a minimal scaffold so the code editor shows a real file tree
   // immediately — before the first AI build runs.
   // Stack-specific scaffolds are handled below (node-api, python-flask, python-fastapi).
