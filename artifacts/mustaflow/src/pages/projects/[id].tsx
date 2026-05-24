@@ -888,6 +888,8 @@ export default function ProjectWorkspacePage() {
     return (stored as "planning" | "task" | "main" | null) ?? "main";
   });
   const [showChatHistory, setShowChatHistory] = useState(false);
+  const [showAllRecent, setShowAllRecent] = useState(false);
+  const [chatScrolledUp, setChatScrolledUp] = useState(false);
   const [historyFocusVersionId, setHistoryFocusVersionId] = useState<number | null>(null);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
   const [selectedCodeFileLine, setSelectedCodeFileLine] = useState<number | null>(null);
@@ -1323,7 +1325,9 @@ export default function ProjectWorkspacePage() {
           const top = Number.isFinite(Number(saved)) ? Number(saved) : 0;
           el.scrollTop = top;
           if (leftPanelTab === "chat") {
-            chatAtBottomRef.current = el.scrollHeight - top - el.clientHeight < 80;
+            const atBottom = el.scrollHeight - top - el.clientHeight < 80;
+            chatAtBottomRef.current = atBottom;
+            setChatScrolledUp(!atBottom);
           }
         }
       } catch {
@@ -2460,15 +2464,18 @@ export default function ProjectWorkspacePage() {
                       />
                     </div>
                   )}
+                  <div className="flex-1 min-h-0 relative">
                   <div
                     ref={scrollRef}
                     onScroll={() => {
                       const el = scrollRef.current;
                       if (!el) return;
-                      chatAtBottomRef.current =
+                      const atBottom =
                         el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                      chatAtBottomRef.current = atBottom;
+                      setChatScrolledUp(!atBottom);
                     }}
-                    className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 min-h-0 hide-scrollbar"
+                    className="h-full overflow-y-auto px-4 py-3 space-y-2.5 hide-scrollbar"
                   >
                     {creditsSuccess && (
                       <div className="sticky top-0 z-10 pb-1">
@@ -2476,7 +2483,55 @@ export default function ProjectWorkspacePage() {
                       </div>
                     )}
                     {(() => {
-                      const visibleMsgs = messages?.slice(-20) ?? [];
+                      const RECENT_DEFAULT = 6;
+                      const allRecent = messages?.slice(-20) ?? [];
+                      const hiddenCount = showAllRecent
+                        ? 0
+                        : Math.max(0, allRecent.length - RECENT_DEFAULT);
+                      return (
+                        <>
+                          {hiddenCount > 0 && (
+                            <div className="flex items-center justify-center gap-2 pb-1">
+                              <button
+                                type="button"
+                                onClick={() => setShowAllRecent(true)}
+                                className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                              >
+                                <ChevronDown className="h-3 w-3 rotate-180" />
+                                Show {hiddenCount} older message
+                                {hiddenCount === 1 ? "" : "s"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setShowChatHistory(true)}
+                                className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                              >
+                                <History className="h-3 w-3" />
+                                Full history
+                              </button>
+                            </div>
+                          )}
+                          {showAllRecent && allRecent.length > RECENT_DEFAULT && (
+                            <div className="flex items-center justify-center pb-1">
+                              <button
+                                type="button"
+                                onClick={() => setShowAllRecent(false)}
+                                className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                              >
+                                <ChevronDown className="h-3 w-3" />
+                                Collapse older
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                    {(() => {
+                      const RECENT_DEFAULT = 6;
+                      const allRecent = messages?.slice(-20) ?? [];
+                      const visibleMsgs = showAllRecent
+                        ? allRecent
+                        : allRecent.slice(-RECENT_DEFAULT);
                       const lastReportIdx = visibleMsgs.reduce<number>((acc, msg, idx) => {
                         const p = msg.plan as ChatPlanPayload | null | undefined;
                         const k =
@@ -2732,6 +2787,21 @@ export default function ProjectWorkspacePage() {
                         }}
                       />
                     ) : null}
+                  </div>
+                  {chatScrolledUp && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const el = scrollRef.current;
+                        if (el) el.scrollTop = el.scrollHeight;
+                      }}
+                      className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-medium shadow-lg hover:opacity-90 transition-opacity"
+                      title="Jump to latest message"
+                    >
+                      <ChevronDown className="h-3 w-3" />
+                      Jump to latest
+                    </button>
+                  )}
                   </div>
 
                   {/* Status bar */}
