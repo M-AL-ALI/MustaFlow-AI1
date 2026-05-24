@@ -40,6 +40,7 @@
     "migrate-security-scanners": "tsx ./src/migrate-security-scanners.ts",
     "migrate-agent-inbox": "tsx ./src/migrate-agent-inbox.ts",
     "eval-prompts": "tsx ./src/eval-prompts.ts",
+    "migrate-domain-cert-fields": "tsx ./src/migrate-domain-cert-fields.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

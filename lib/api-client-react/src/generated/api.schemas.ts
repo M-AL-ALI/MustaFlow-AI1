@@ -2896,6 +2896,67 @@ export interface SecurityBadgeCountsByProject {
   counts: SecurityBadgeCountsByProjectCounts;
 }
 
+/**
+ * Structured data for SRV/CAA/MX records
+ */
+export type DnsRecordData = { [key: string]: unknown } | null;
+
+export interface DnsRecord {
+  id: string;
+  type: string;
+  name: string;
+  content?: string | null;
+  priority?: number | null;
+  ttl: number;
+  proxied?: boolean | null;
+  /** Structured data for SRV/CAA/MX records */
+  data?: DnsRecordData;
+}
+
+/**
+ * Structured data for SRV/CAA records
+ */
+export type DnsRecordInputData = { [key: string]: unknown } | null;
+
+export interface DnsRecordInput {
+  type: string;
+  name: string;
+  content?: string;
+  priority?: number;
+  ttl?: number;
+  proxied?: boolean;
+  /** Structured data for SRV/CAA records */
+  data?: DnsRecordInputData;
+}
+
+export type DnsRecordDiffAction = typeof DnsRecordDiffAction[keyof typeof DnsRecordDiffAction];
+
+
+export const DnsRecordDiffAction = {
+  create: 'create',
+  update: 'update',
+  unchanged: 'unchanged',
+} as const;
+
+export type DnsRecordDiffAfter = { [key: string]: unknown };
+
+export interface DnsRecordDiff {
+  action: DnsRecordDiffAction;
+  name: string;
+  type: string;
+  before?: DnsRecord | null;
+  after?: DnsRecordDiffAfter;
+}
+
+export interface DnsHistoryEntry {
+  id: number;
+  action: string;
+  hostname: string;
+  cfRecordId?: string | null;
+  note?: string | null;
+  createdAt: string;
+}
+
 export type RequestProjectUploadUrlBody = {
   name: string;
   contentType?: string;
@@ -3158,6 +3219,71 @@ export type SetProjectDomainWwwRedirectBody = {
 
 export type SetProjectDomainWwwRedirect200 = {
   redirectWwwApex: boolean;
+};
+
+export type ListProjectDomainDnsRecords200 = {
+  records: DnsRecord[];
+};
+
+export type CreateProjectDomainDnsRecord201 = {
+  record: DnsRecord;
+};
+
+export type DryRunProjectDomainDnsChangesBody = {
+  changes: DnsRecordInput[];
+};
+
+export type DryRunProjectDomainDnsChanges200 = {
+  enabled: boolean;
+  hostname?: string;
+  diff: DnsRecordDiff[];
+};
+
+export type GetProjectDomainDnsHistoryParams = {
+limit?: number;
+};
+
+export type GetProjectDomainDnsHistory200 = {
+  hostname: string;
+  history: DnsHistoryEntry[];
+};
+
+export type RollbackProjectDomainDnsChangeBody = {
+  logId: number;
+};
+
+export type RollbackProjectDomainDnsChange200 = {
+  ok: boolean;
+  rolled?: string;
+  cfRecordId?: string | null;
+};
+
+export type UpdateProjectDomainDnsRecord200 = {
+  record: DnsRecord;
+};
+
+export type DeleteProjectDomainDnsRecord200 = {
+  deleted: boolean;
+};
+
+export type UploadProjectDomainCertificateBody = {
+  /** PEM certificate bundle (leaf + intermediates) */
+  certificate: string;
+  /** PEM private key */
+  privateKey: string;
+};
+
+export type UploadProjectDomainCertificate200 = {
+  ok: boolean;
+  cfUploaded?: boolean;
+  byoCertExpiresAt?: string | null;
+  byoCertSubject?: string | null;
+  sslStatus?: string | null;
+  message?: string | null;
+};
+
+export type RemoveProjectDomainCertificate200 = {
+  ok: boolean;
 };
 
 export type SetProjectSubdomain400 = {

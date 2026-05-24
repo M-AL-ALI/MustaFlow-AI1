@@ -3026,6 +3026,216 @@ export const DiagnoseProjectDomainResponse = zod.object({
 
 
 /**
+ * @summary List Cloudflare DNS records for a custom domain
+ */
+export const ListProjectDomainDnsRecordsParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const ListProjectDomainDnsRecordsResponse = zod.object({
+  "records": zod.array(zod.object({
+  "id": zod.string(),
+  "type": zod.string(),
+  "name": zod.string(),
+  "content": zod.string().nullish(),
+  "priority": zod.number().nullish(),
+  "ttl": zod.number(),
+  "proxied": zod.boolean().nullish(),
+  "data": zod.record(zod.string(), zod.unknown()).nullish().describe('Structured data for SRV\/CAA\/MX records')
+}))
+})
+
+
+/**
+ * @summary Create a DNS record for a custom domain
+ */
+export const CreateProjectDomainDnsRecordParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const CreateProjectDomainDnsRecordBody = zod.object({
+  "type": zod.string(),
+  "name": zod.string(),
+  "content": zod.string().optional(),
+  "priority": zod.number().optional(),
+  "ttl": zod.number().optional(),
+  "proxied": zod.boolean().optional(),
+  "data": zod.record(zod.string(), zod.unknown()).nullish().describe('Structured data for SRV\/CAA records')
+})
+
+
+/**
+ * @summary Preview DNS diff without applying changes
+ */
+export const DryRunProjectDomainDnsChangesParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const DryRunProjectDomainDnsChangesBody = zod.object({
+  "changes": zod.array(zod.object({
+  "type": zod.string(),
+  "name": zod.string(),
+  "content": zod.string().optional(),
+  "priority": zod.number().optional(),
+  "ttl": zod.number().optional(),
+  "proxied": zod.boolean().optional(),
+  "data": zod.record(zod.string(), zod.unknown()).nullish().describe('Structured data for SRV\/CAA records')
+}))
+})
+
+export const DryRunProjectDomainDnsChangesResponse = zod.object({
+  "enabled": zod.boolean(),
+  "hostname": zod.string().optional(),
+  "diff": zod.array(zod.object({
+  "action": zod.enum(['create', 'update', 'unchanged']),
+  "name": zod.string(),
+  "type": zod.string(),
+  "before": zod.object({
+  "id": zod.string(),
+  "type": zod.string(),
+  "name": zod.string(),
+  "content": zod.string().nullish(),
+  "priority": zod.number().nullish(),
+  "ttl": zod.number(),
+  "proxied": zod.boolean().nullish(),
+  "data": zod.record(zod.string(), zod.unknown()).nullish().describe('Structured data for SRV\/CAA\/MX records')
+}).nullish(),
+  "after": zod.record(zod.string(), zod.unknown()).optional()
+}))
+})
+
+
+/**
+ * @summary Fetch DNS change history for a custom domain
+ */
+export const GetProjectDomainDnsHistoryParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const GetProjectDomainDnsHistoryQueryParams = zod.object({
+  "limit": zod.coerce.number().optional()
+})
+
+export const GetProjectDomainDnsHistoryResponse = zod.object({
+  "hostname": zod.string(),
+  "history": zod.array(zod.object({
+  "id": zod.number(),
+  "action": zod.string(),
+  "hostname": zod.string(),
+  "cfRecordId": zod.string().nullish(),
+  "note": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Revert a DNS change using a history log entry ID (passed in body)
+ */
+export const RollbackProjectDomainDnsChangeParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const RollbackProjectDomainDnsChangeBody = zod.object({
+  "logId": zod.number()
+})
+
+export const RollbackProjectDomainDnsChangeResponse = zod.object({
+  "ok": zod.boolean(),
+  "rolled": zod.string().optional(),
+  "cfRecordId": zod.string().nullish()
+})
+
+
+/**
+ * @summary Update a DNS record (full replacement)
+ */
+export const UpdateProjectDomainDnsRecordParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number(),
+  "recordId": zod.coerce.string()
+})
+
+export const UpdateProjectDomainDnsRecordBody = zod.object({
+  "type": zod.string(),
+  "name": zod.string(),
+  "content": zod.string().optional(),
+  "priority": zod.number().optional(),
+  "ttl": zod.number().optional(),
+  "proxied": zod.boolean().optional(),
+  "data": zod.record(zod.string(), zod.unknown()).nullish().describe('Structured data for SRV\/CAA records')
+})
+
+export const UpdateProjectDomainDnsRecordResponse = zod.object({
+  "record": zod.object({
+  "id": zod.string(),
+  "type": zod.string(),
+  "name": zod.string(),
+  "content": zod.string().nullish(),
+  "priority": zod.number().nullish(),
+  "ttl": zod.number(),
+  "proxied": zod.boolean().nullish(),
+  "data": zod.record(zod.string(), zod.unknown()).nullish().describe('Structured data for SRV\/CAA\/MX records')
+})
+})
+
+
+/**
+ * @summary Delete a DNS record
+ */
+export const DeleteProjectDomainDnsRecordParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number(),
+  "recordId": zod.coerce.string()
+})
+
+export const DeleteProjectDomainDnsRecordResponse = zod.object({
+  "deleted": zod.boolean()
+})
+
+
+/**
+ * @summary Upload a BYO TLS certificate and private key
+ */
+export const UploadProjectDomainCertificateParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const UploadProjectDomainCertificateBody = zod.object({
+  "certificate": zod.string().describe('PEM certificate bundle (leaf + intermediates)'),
+  "privateKey": zod.string().describe('PEM private key')
+})
+
+export const UploadProjectDomainCertificateResponse = zod.object({
+  "ok": zod.boolean(),
+  "cfUploaded": zod.boolean().optional(),
+  "byoCertExpiresAt": zod.string().nullish(),
+  "byoCertSubject": zod.string().nullish(),
+  "sslStatus": zod.string().nullish(),
+  "message": zod.string().nullish()
+})
+
+
+/**
+ * @summary Remove the BYO TLS certificate and revert to Cloudflare-managed SSL
+ */
+export const RemoveProjectDomainCertificateParams = zod.object({
+  "id": zod.coerce.number(),
+  "domainId": zod.coerce.number()
+})
+
+export const RemoveProjectDomainCertificateResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
  * @summary Set a custom subdomain (publicSlug) for a project
  */
 export const SetProjectSubdomainParams = zod.object({

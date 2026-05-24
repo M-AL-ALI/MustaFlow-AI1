@@ -2240,6 +2240,273 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  # ── DNS record management ────────────────────────────────────────────────────
+
+  /projects/{id}/domains/{domainId}/dns:
+    get:
+      operationId: listProjectDomainDnsRecords
+      tags: [projects]
+      summary: List Cloudflare DNS records for a custom domain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: DNS record list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [records]
+                properties:
+                  records:
+                    type: array
+                    items: { $ref: "#/components/schemas/DnsRecord" }
+        "404":
+          description: Domain not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    post:
+      operationId: createProjectDomainDnsRecord
+      tags: [projects]
+      summary: Create a DNS record for a custom domain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DnsRecordInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [record]
+                properties:
+                  record: { $ref: "#/components/schemas/DnsRecord" }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /projects/{id}/domains/{domainId}/dns/dry-run:
+    post:
+      operationId: dryRunProjectDomainDnsChanges
+      tags: [projects]
+      summary: Preview DNS diff without applying changes
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [changes]
+              properties:
+                changes:
+                  type: array
+                  items: { $ref: "#/components/schemas/DnsRecordInput" }
+      responses:
+        "200":
+          description: Dry-run diff
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, diff]
+                properties:
+                  enabled: { type: boolean }
+                  hostname: { type: string }
+                  diff:
+                    type: array
+                    items: { $ref: "#/components/schemas/DnsRecordDiff" }
+
+  /projects/{id}/domains/{domainId}/dns/history:
+    get:
+      operationId: getProjectDomainDnsHistory
+      tags: [projects]
+      summary: Fetch DNS change history for a custom domain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: Change history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [hostname, history]
+                properties:
+                  hostname: { type: string }
+                  history:
+                    type: array
+                    items: { $ref: "#/components/schemas/DnsHistoryEntry" }
+
+  /projects/{id}/domains/{domainId}/dns/rollback:
+    post:
+      operationId: rollbackProjectDomainDnsChange
+      tags: [projects]
+      summary: Revert a DNS change using a history log entry ID (passed in body)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [logId]
+              properties:
+                logId: { type: integer }
+      responses:
+        "200":
+          description: Rolled back
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  rolled: { type: string }
+                  cfRecordId: { type: string, nullable: true }
+        "404":
+          description: Log entry or record not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "502":
+          description: Cloudflare rejected the rollback operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /projects/{id}/domains/{domainId}/dns/{recordId}:
+    put:
+      operationId: updateProjectDomainDnsRecord
+      tags: [projects]
+      summary: Update a DNS record (full replacement)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+        - { name: recordId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DnsRecordInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [record]
+                properties:
+                  record: { $ref: "#/components/schemas/DnsRecord" }
+        "404":
+          description: Record not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    delete:
+      operationId: deleteProjectDomainDnsRecord
+      tags: [projects]
+      summary: Delete a DNS record
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+        - { name: recordId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted: { type: boolean }
+        "404":
+          description: Record not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /projects/{id}/domains/{domainId}/certificate:
+    post:
+      operationId: uploadProjectDomainCertificate
+      tags: [projects]
+      summary: Upload a BYO TLS certificate and private key
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [certificate, privateKey]
+              properties:
+                certificate:
+                  { type: string, description: PEM certificate bundle (leaf + intermediates) }
+                privateKey: { type: string, description: PEM private key }
+      responses:
+        "200":
+          description: Certificate uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  cfUploaded: { type: boolean }
+                  byoCertExpiresAt: { type: string, nullable: true }
+                  byoCertSubject: { type: string, nullable: true }
+                  sslStatus: { type: string, nullable: true }
+                  message: { type: string, nullable: true }
+        "400":
+          description: Invalid certificate or key
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "502":
+          description: Cloudflare rejected the certificate upload
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    delete:
+      operationId: removeProjectDomainCertificate
+      tags: [projects]
+      summary: Remove the BYO TLS certificate and revert to Cloudflare-managed SSL
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: domainId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Certificate removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+
   /projects/{id}/subdomain:
     post:
       operationId: setProjectSubdomain
@@ -6151,3 +6418,65 @@ components:
           type: object
           description: Map of projectId (as string) → open critical+high finding count.
           additionalProperties: { type: integer }
+
+    # ── DNS record schemas ──────────────────────────────────────────────────────
+
+    DnsRecord:
+      type: object
+      required: [id, type, name, ttl]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        name: { type: string }
+        content: { type: string, nullable: true }
+        priority: { type: integer, nullable: true }
+        ttl: { type: integer }
+        proxied: { type: boolean, nullable: true }
+        data:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Structured data for SRV/CAA/MX records
+
+    DnsRecordInput:
+      type: object
+      required: [type, name]
+      properties:
+        type: { type: string }
+        name: { type: string }
+        content: { type: string }
+        priority: { type: integer }
+        ttl: { type: integer }
+        proxied: { type: boolean }
+        data:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Structured data for SRV/CAA records
+
+    DnsRecordDiff:
+      type: object
+      required: [action, name, type]
+      properties:
+        action:
+          type: string
+          enum: [create, update, unchanged]
+        name: { type: string }
+        type: { type: string }
+        before:
+          $ref: "#/components/schemas/DnsRecord"
+          nullable: true
+        after:
+          type: object
+          additionalProperties: true
+
+    DnsHistoryEntry:
+      type: object
+      required: [id, action, hostname, createdAt]
+      properties:
+        id: { type: integer }
+        action: { type: string }
+        hostname: { type: string }
+        cfRecordId: { type: string, nullable: true }
+        note: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }

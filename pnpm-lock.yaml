@@ -273,13 +273,13 @@ importers:
         specifier: ^4.0.0
         version: 4.0.0
       lib0:
-        specifier: ^0.2.99
+        specifier: ^0.2.117
         version: 0.2.117
       openai:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@3.25.76)
       pdf-parse:
-        specifier: ^1.1.1
+        specifier: ^1.1.4
         version: 1.1.4
       pg:
         specifier: ^8.20.0
@@ -297,10 +297,10 @@ importers:
         specifier: ^8.20.1
         version: 8.20.1
       y-protocols:
-        specifier: ^1.0.6
+        specifier: ^1.0.7
         version: 1.0.7(yjs@13.6.30)
       yjs:
-        specifier: ^13.6.20
+        specifier: ^13.6.30
         version: 13.6.30
       zod:
         specifier: 'catalog:'

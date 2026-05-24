@@ -30,3 +30,7 @@ export { RequestProjectUploadUrlBody } from "./generated/api";
 export { ListAgentInboxParams } from "./generated/api";
 export { SearchMessagesParams } from "./generated/api";
 export { UpdateAgentInboxItemBody } from "./generated/api";
+export { DryRunProjectDomainDnsChangesBody } from "./generated/api";
+export { UploadProjectDomainCertificateBody } from "./generated/api";
+export { GetProjectDomainDnsHistoryParams } from "./generated/api";
+export { RollbackProjectDomainDnsChangeBody } from "./generated/api";

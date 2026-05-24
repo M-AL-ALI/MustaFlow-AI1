@@ -60,6 +60,7 @@ import type {
   ContainerStatus,
   CreateDbSnapshotInput,
   CreateGithubBranch200,
+  CreateProjectDomainDnsRecord201,
   CveFinding,
   CveScanResult,
   CveScanStatus,
@@ -73,6 +74,7 @@ import type {
   DeleteAgentInboxItem200,
   DeleteDbSnapshot200,
   DeleteKnowledge200,
+  DeleteProjectDomainDnsRecord200,
   DeleteProjectFile200,
   DeleteProjectUpload200,
   DeleteSecret200,
@@ -81,8 +83,11 @@ import type {
   DeprovisionDatabase200,
   DestroyContainer200,
   DisconnectGithub200,
+  DnsRecordInput,
   DomainDiagnoseResponse,
   DomainVerifyResponse,
+  DryRunProjectDomainDnsChanges200,
+  DryRunProjectDomainDnsChangesBody,
   DuplicateProjectResult,
   FileBlocksResponse,
   FileSearchResult,
@@ -95,6 +100,8 @@ import type {
   GetCheckRunTrendsParams,
   GetCheckRunsParams,
   GetContainerLogsParams,
+  GetProjectDomainDnsHistory200,
+  GetProjectDomainDnsHistoryParams,
   GetPublishReadinessParams,
   GetSecretAuditLogParams,
   GithubCommitsResult,
@@ -126,6 +133,7 @@ import type {
   ListGithubRepositoriesParams,
   ListKnowledgeParams,
   ListMobileBuilds200,
+  ListProjectDomainDnsRecords200,
   ListProjectUploads200,
   ListProjectsParams,
   ListSecurityFindingsParams,
@@ -169,6 +177,7 @@ import type {
   ReadinessResult,
   RegisterProjectUploadBody,
   RemoveProjectDomain200,
+  RemoveProjectDomainCertificate200,
   ReorderBlocksResponse,
   ReorderFileBlocksBody,
   RequestProjectUploadUrl200,
@@ -176,6 +185,8 @@ import type {
   RerunTestsResult,
   RevokeAdminRole200,
   RollbackInput,
+  RollbackProjectDomainDnsChange200,
+  RollbackProjectDomainDnsChangeBody,
   RollbackResult,
   SbomDocument,
   SearchMessagesParams,
@@ -205,7 +216,10 @@ import type {
   UnpublishProject200,
   UpdateAgentInboxItemBody,
   UpdatePreferencesBody,
+  UpdateProjectDomainDnsRecord200,
   UpdateTaskBody,
+  UploadProjectDomainCertificate200,
+  UploadProjectDomainCertificateBody,
   UploadUrlRequest,
   UploadUrlResponse,
   UserCredit,
@@ -8160,6 +8174,700 @@ export function useDiagnoseProjectDomain<TData = Awaited<ReturnType<typeof diagn
 
 
 
+
+export const getListProjectDomainDnsRecordsUrl = (id: number,
+    domainId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/domains/${domainId}/dns`
+}
+
+/**
+ * @summary List Cloudflare DNS records for a custom domain
+ */
+export const listProjectDomainDnsRecords = async (id: number,
+    domainId: number, options?: RequestInit): Promise<ListProjectDomainDnsRecords200> => {
+
+  return customFetch<ListProjectDomainDnsRecords200>(getListProjectDomainDnsRecordsUrl(id,domainId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListProjectDomainDnsRecordsQueryKey = (id: number,
+    domainId: number,) => {
+    return [
+    `/api/projects/${id}/domains/${domainId}/dns`
+    ] as const;
+    }
+
+
+export const getListProjectDomainDnsRecordsQueryOptions = <TData = Awaited<ReturnType<typeof listProjectDomainDnsRecords>>, TError = ErrorType<ApiError>>(id: number,
+    domainId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProjectDomainDnsRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListProjectDomainDnsRecordsQueryKey(id,domainId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listProjectDomainDnsRecords>>> = ({ signal }) => listProjectDomainDnsRecords(id,domainId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && domainId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listProjectDomainDnsRecords>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListProjectDomainDnsRecordsQueryResult = NonNullable<Awaited<ReturnType<typeof listProjectDomainDnsRecords>>>
+export type ListProjectDomainDnsRecordsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List Cloudflare DNS records for a custom domain
+ */
+
+export function useListProjectDomainDnsRecords<TData = Awaited<ReturnType<typeof listProjectDomainDnsRecords>>, TError = ErrorType<ApiError>>(
+ id: number,
+    domainId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProjectDomainDnsRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListProjectDomainDnsRecordsQueryOptions(id,domainId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateProjectDomainDnsRecordUrl = (id: number,
+    domainId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/domains/${domainId}/dns`
+}
+
+/**
+ * @summary Create a DNS record for a custom domain
+ */
+export const createProjectDomainDnsRecord = async (id: number,
+    domainId: number,
+    dnsRecordInput: DnsRecordInput, options?: RequestInit): Promise<CreateProjectDomainDnsRecord201> => {
+
+  return customFetch<CreateProjectDomainDnsRecord201>(getCreateProjectDomainDnsRecordUrl(id,domainId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      dnsRecordInput,)
+  }
+);}
+
+
+
+
+export const getCreateProjectDomainDnsRecordMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createProjectDomainDnsRecord>>, TError,{id: number;domainId: number;data: BodyType<DnsRecordInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createProjectDomainDnsRecord>>, TError,{id: number;domainId: number;data: BodyType<DnsRecordInput>}, TContext> => {
+
+const mutationKey = ['createProjectDomainDnsRecord'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createProjectDomainDnsRecord>>, {id: number;domainId: number;data: BodyType<DnsRecordInput>}> = (props) => {
+          const {id,domainId,data} = props ?? {};
+
+          return  createProjectDomainDnsRecord(id,domainId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateProjectDomainDnsRecordMutationResult = NonNullable<Awaited<ReturnType<typeof createProjectDomainDnsRecord>>>
+    export type CreateProjectDomainDnsRecordMutationBody = BodyType<DnsRecordInput>
+    export type CreateProjectDomainDnsRecordMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Create a DNS record for a custom domain
+ */
+export const useCreateProjectDomainDnsRecord = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createProjectDomainDnsRecord>>, TError,{id: number;domainId: number;data: BodyType<DnsRecordInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createProjectDomainDnsRecord>>,
+        TError,
+        {id: number;domainId: number;data: BodyType<DnsRecordInput>},
+        TContext
+      > => {
+      return useMutation(getCreateProjectDomainDnsRecordMutationOptions(options));
+    }
+
+export const getDryRunProjectDomainDnsChangesUrl = (id: number,
+    domainId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/domains/${domainId}/dns/dry-run`
+}
+
+/**
+ * @summary Preview DNS diff without applying changes
+ */
+export const dryRunProjectDomainDnsChanges = async (id: number,
+    domainId: number,
+    dryRunProjectDomainDnsChangesBody: DryRunProjectDomainDnsChangesBody, options?: RequestInit): Promise<DryRunProjectDomainDnsChanges200> => {
+
+  return customFetch<DryRunProjectDomainDnsChanges200>(getDryRunProjectDomainDnsChangesUrl(id,domainId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      dryRunProjectDomainDnsChangesBody,)
+  }
+);}
+
+
+
+
+export const getDryRunProjectDomainDnsChangesMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dryRunProjectDomainDnsChanges>>, TError,{id: number;domainId: number;data: BodyType<DryRunProjectDomainDnsChangesBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof dryRunProjectDomainDnsChanges>>, TError,{id: number;domainId: number;data: BodyType<DryRunProjectDomainDnsChangesBody>}, TContext> => {
+
+const mutationKey = ['dryRunProjectDomainDnsChanges'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof dryRunProjectDomainDnsChanges>>, {id: number;domainId: number;data: BodyType<DryRunProjectDomainDnsChangesBody>}> = (props) => {
+          const {id,domainId,data} = props ?? {};
+
+          return  dryRunProjectDomainDnsChanges(id,domainId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DryRunProjectDomainDnsChangesMutationResult = NonNullable<Awaited<ReturnType<typeof dryRunProjectDomainDnsChanges>>>
+    export type DryRunProjectDomainDnsChangesMutationBody = BodyType<DryRunProjectDomainDnsChangesBody>
+    export type DryRunProjectDomainDnsChangesMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Preview DNS diff without applying changes
+ */
+export const useDryRunProjectDomainDnsChanges = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dryRunProjectDomainDnsChanges>>, TError,{id: number;domainId: number;data: BodyType<DryRunProjectDomainDnsChangesBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof dryRunProjectDomainDnsChanges>>,
+        TError,
+        {id: number;domainId: number;data: BodyType<DryRunProjectDomainDnsChangesBody>},
+        TContext
+      > => {
+      return useMutation(getDryRunProjectDomainDnsChangesMutationOptions(options));
+    }
+
+export const getGetProjectDomainDnsHistoryUrl = (id: number,
+    domainId: number,
+    params?: GetProjectDomainDnsHistoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/domains/${domainId}/dns/history?${stringifiedParams}` : `/api/projects/${id}/domains/${domainId}/dns/history`
+}
+
+/**
+ * @summary Fetch DNS change history for a custom domain
+ */
+export const getProjectDomainDnsHistory = async (id: number,
+    domainId: number,
+    params?: GetProjectDomainDnsHistoryParams, options?: RequestInit): Promise<GetProjectDomainDnsHistory200> => {
+
+  return customFetch<GetProjectDomainDnsHistory200>(getGetProjectDomainDnsHistoryUrl(id,domainId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectDomainDnsHistoryQueryKey = (id: number,
+    domainId: number,
+    params?: GetProjectDomainDnsHistoryParams,) => {
+    return [
+    `/api/projects/${id}/domains/${domainId}/dns/history`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetProjectDomainDnsHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getProjectDomainDnsHistory>>, TError = ErrorType<unknown>>(id: number,
+    domainId: number,
+    params?: GetProjectDomainDnsHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectDomainDnsHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectDomainDnsHistoryQueryKey(id,domainId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectDomainDnsHistory>>> = ({ signal }) => getProjectDomainDnsHistory(id,domainId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && domainId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectDomainDnsHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectDomainDnsHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectDomainDnsHistory>>>
+export type GetProjectDomainDnsHistoryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Fetch DNS change history for a custom domain
+ */
+
+export function useGetProjectDomainDnsHistory<TData = Awaited<ReturnType<typeof getProjectDomainDnsHistory>>, TError = ErrorType<unknown>>(
+ id: number,
+    domainId: number,
+    params?: GetProjectDomainDnsHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectDomainDnsHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectDomainDnsHistoryQueryOptions(id,domainId,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getRollbackProjectDomainDnsChangeUrl = (id: number,
+    domainId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/domains/${domainId}/dns/rollback`
+}
+
+/**
+ * @summary Revert a DNS change using a history log entry ID (passed in body)
+ */
+export const rollbackProjectDomainDnsChange = async (id: number,
+    domainId: number,
+    rollbackProjectDomainDnsChangeBody: RollbackProjectDomainDnsChangeBody, options?: RequestInit): Promise<RollbackProjectDomainDnsChange200> => {
+
+  return customFetch<RollbackProjectDomainDnsChange200>(getRollbackProjectDomainDnsChangeUrl(id,domainId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      rollbackProjectDomainDnsChangeBody,)
+  }
+);}
+
+
+
+
+export const getRollbackProjectDomainDnsChangeMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackProjectDomainDnsChange>>, TError,{id: number;domainId: number;data: BodyType<RollbackProjectDomainDnsChangeBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rollbackProjectDomainDnsChange>>, TError,{id: number;domainId: number;data: BodyType<RollbackProjectDomainDnsChangeBody>}, TContext> => {
+
+const mutationKey = ['rollbackProjectDomainDnsChange'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rollbackProjectDomainDnsChange>>, {id: number;domainId: number;data: BodyType<RollbackProjectDomainDnsChangeBody>}> = (props) => {
+          const {id,domainId,data} = props ?? {};
+
+          return  rollbackProjectDomainDnsChange(id,domainId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RollbackProjectDomainDnsChangeMutationResult = NonNullable<Awaited<ReturnType<typeof rollbackProjectDomainDnsChange>>>
+    export type RollbackProjectDomainDnsChangeMutationBody = BodyType<RollbackProjectDomainDnsChangeBody>
+    export type RollbackProjectDomainDnsChangeMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Revert a DNS change using a history log entry ID (passed in body)
+ */
+export const useRollbackProjectDomainDnsChange = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackProjectDomainDnsChange>>, TError,{id: number;domainId: number;data: BodyType<RollbackProjectDomainDnsChangeBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rollbackProjectDomainDnsChange>>,
+        TError,
+        {id: number;domainId: number;data: BodyType<RollbackProjectDomainDnsChangeBody>},
+        TContext
+      > => {
+      return useMutation(getRollbackProjectDomainDnsChangeMutationOptions(options));
+    }
+
+export const getUpdateProjectDomainDnsRecordUrl = (id: number,
+    domainId: number,
+    recordId: string,) => {
+
+
+
+
+  return `/api/projects/${id}/domains/${domainId}/dns/${recordId}`
+}
+
+/**
+ * @summary Update a DNS record (full replacement)
+ */
+export const updateProjectDomainDnsRecord = async (id: number,
+    domainId: number,
+    recordId: string,
+    dnsRecordInput: DnsRecordInput, options?: RequestInit): Promise<UpdateProjectDomainDnsRecord200> => {
+
+  return customFetch<UpdateProjectDomainDnsRecord200>(getUpdateProjectDomainDnsRecordUrl(id,domainId,recordId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      dnsRecordInput,)
+  }
+);}
+
+
+
+
+export const getUpdateProjectDomainDnsRecordMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProjectDomainDnsRecord>>, TError,{id: number;domainId: number;recordId: string;data: BodyType<DnsRecordInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateProjectDomainDnsRecord>>, TError,{id: number;domainId: number;recordId: string;data: BodyType<DnsRecordInput>}, TContext> => {
+
+const mutationKey = ['updateProjectDomainDnsRecord'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProjectDomainDnsRecord>>, {id: number;domainId: number;recordId: string;data: BodyType<DnsRecordInput>}> = (props) => {
+          const {id,domainId,recordId,data} = props ?? {};
+
+          return  updateProjectDomainDnsRecord(id,domainId,recordId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateProjectDomainDnsRecordMutationResult = NonNullable<Awaited<ReturnType<typeof updateProjectDomainDnsRecord>>>
+    export type UpdateProjectDomainDnsRecordMutationBody = BodyType<DnsRecordInput>
+    export type UpdateProjectDomainDnsRecordMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Update a DNS record (full replacement)
+ */
+export const useUpdateProjectDomainDnsRecord = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProjectDomainDnsRecord>>, TError,{id: number;domainId: number;recordId: string;data: BodyType<DnsRecordInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateProjectDomainDnsRecord>>,
+        TError,
+        {id: number;domainId: number;recordId: string;data: BodyType<DnsRecordInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateProjectDomainDnsRecordMutationOptions(options));
+    }
+
+export const getDeleteProjectDomainDnsRecordUrl = (id: number,
+    domainId: number,
+    recordId: string,) => {
+
+
+
+
+  return `/api/projects/${id}/domains/${domainId}/dns/${recordId}`
+}
+
+/**
+ * @summary Delete a DNS record
+ */
+export const deleteProjectDomainDnsRecord = async (id: number,
+    domainId: number,
+    recordId: string, options?: RequestInit): Promise<DeleteProjectDomainDnsRecord200> => {
+
+  return customFetch<DeleteProjectDomainDnsRecord200>(getDeleteProjectDomainDnsRecordUrl(id,domainId,recordId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteProjectDomainDnsRecordMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProjectDomainDnsRecord>>, TError,{id: number;domainId: number;recordId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteProjectDomainDnsRecord>>, TError,{id: number;domainId: number;recordId: string}, TContext> => {
+
+const mutationKey = ['deleteProjectDomainDnsRecord'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteProjectDomainDnsRecord>>, {id: number;domainId: number;recordId: string}> = (props) => {
+          const {id,domainId,recordId} = props ?? {};
+
+          return  deleteProjectDomainDnsRecord(id,domainId,recordId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteProjectDomainDnsRecordMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProjectDomainDnsRecord>>>
+
+    export type DeleteProjectDomainDnsRecordMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Delete a DNS record
+ */
+export const useDeleteProjectDomainDnsRecord = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProjectDomainDnsRecord>>, TError,{id: number;domainId: number;recordId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteProjectDomainDnsRecord>>,
+        TError,
+        {id: number;domainId: number;recordId: string},
+        TContext
+      > => {
+      return useMutation(getDeleteProjectDomainDnsRecordMutationOptions(options));
+    }
+
+export const getUploadProjectDomainCertificateUrl = (id: number,
+    domainId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/domains/${domainId}/certificate`
+}
+
+/**
+ * @summary Upload a BYO TLS certificate and private key
+ */
+export const uploadProjectDomainCertificate = async (id: number,
+    domainId: number,
+    uploadProjectDomainCertificateBody: UploadProjectDomainCertificateBody, options?: RequestInit): Promise<UploadProjectDomainCertificate200> => {
+
+  return customFetch<UploadProjectDomainCertificate200>(getUploadProjectDomainCertificateUrl(id,domainId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      uploadProjectDomainCertificateBody,)
+  }
+);}
+
+
+
+
+export const getUploadProjectDomainCertificateMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadProjectDomainCertificate>>, TError,{id: number;domainId: number;data: BodyType<UploadProjectDomainCertificateBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadProjectDomainCertificate>>, TError,{id: number;domainId: number;data: BodyType<UploadProjectDomainCertificateBody>}, TContext> => {
+
+const mutationKey = ['uploadProjectDomainCertificate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadProjectDomainCertificate>>, {id: number;domainId: number;data: BodyType<UploadProjectDomainCertificateBody>}> = (props) => {
+          const {id,domainId,data} = props ?? {};
+
+          return  uploadProjectDomainCertificate(id,domainId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadProjectDomainCertificateMutationResult = NonNullable<Awaited<ReturnType<typeof uploadProjectDomainCertificate>>>
+    export type UploadProjectDomainCertificateMutationBody = BodyType<UploadProjectDomainCertificateBody>
+    export type UploadProjectDomainCertificateMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Upload a BYO TLS certificate and private key
+ */
+export const useUploadProjectDomainCertificate = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadProjectDomainCertificate>>, TError,{id: number;domainId: number;data: BodyType<UploadProjectDomainCertificateBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uploadProjectDomainCertificate>>,
+        TError,
+        {id: number;domainId: number;data: BodyType<UploadProjectDomainCertificateBody>},
+        TContext
+      > => {
+      return useMutation(getUploadProjectDomainCertificateMutationOptions(options));
+    }
+
+export const getRemoveProjectDomainCertificateUrl = (id: number,
+    domainId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/domains/${domainId}/certificate`
+}
+
+/**
+ * @summary Remove the BYO TLS certificate and revert to Cloudflare-managed SSL
+ */
+export const removeProjectDomainCertificate = async (id: number,
+    domainId: number, options?: RequestInit): Promise<RemoveProjectDomainCertificate200> => {
+
+  return customFetch<RemoveProjectDomainCertificate200>(getRemoveProjectDomainCertificateUrl(id,domainId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getRemoveProjectDomainCertificateMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeProjectDomainCertificate>>, TError,{id: number;domainId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeProjectDomainCertificate>>, TError,{id: number;domainId: number}, TContext> => {
+
+const mutationKey = ['removeProjectDomainCertificate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeProjectDomainCertificate>>, {id: number;domainId: number}> = (props) => {
+          const {id,domainId} = props ?? {};
+
+          return  removeProjectDomainCertificate(id,domainId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveProjectDomainCertificateMutationResult = NonNullable<Awaited<ReturnType<typeof removeProjectDomainCertificate>>>
+
+    export type RemoveProjectDomainCertificateMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove the BYO TLS certificate and revert to Cloudflare-managed SSL
+ */
+export const useRemoveProjectDomainCertificate = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeProjectDomainCertificate>>, TError,{id: number;domainId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof removeProjectDomainCertificate>>,
+        TError,
+        {id: number;domainId: number},
+        TContext
+      > => {
+      return useMutation(getRemoveProjectDomainCertificateMutationOptions(options));
+    }
 
 export const getSetProjectSubdomainUrl = (id: number,) => {
 

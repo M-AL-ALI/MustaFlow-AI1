@@ -44,6 +44,13 @@ export const projectDomainsTable = pgTable(
     sslLastCheckedAt: timestamp("ssl_last_checked_at", { withTimezone: true }),
     sslExpiresAt: timestamp("ssl_expires_at", { withTimezone: true }),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    // BYO cert fields (Task #554).
+    // sslSource: 'cloudflare' (default, Cloudflare-issued DV cert) | 'byo' (user-uploaded cert).
+    // byoCertExpiresAt: parsed expiry from the uploaded cert.
+    // byoCertSubject: CN / SAN from the uploaded cert for display.
+    sslSource: text("ssl_source").notNull().default("cloudflare"),
+    byoCertExpiresAt: timestamp("byo_cert_expires_at", { withTimezone: true }),
+    byoCertSubject: text("byo_cert_subject"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

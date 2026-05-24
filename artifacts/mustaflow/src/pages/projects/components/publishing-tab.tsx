@@ -48,6 +48,8 @@ import {
   getGetProjectQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { DnsRecordsPanel, RegistrarGuideSection } from "./dns-records-panel";
+import { EmailSetupWizard } from "./email-setup-wizard";
 
 // ─── Post-publish health banner (Task #511) ─────────────────────────────────
 function HealthCheckBanner({
@@ -2831,6 +2833,11 @@ export function PublishingTab({
     verifiedAt: string | null;
     createdAt: string;
     updatedAt: string;
+    // BYO cert + CF fields (Task #554)
+    cfHostnameId?: string | null;
+    sslSource?: string;
+    byoCertExpiresAt?: string | null;
+    byoCertSubject?: string | null;
   };
   type DomainsResponse = {
     domains: ProjectDomain[];
@@ -4287,6 +4294,11 @@ export function PublishingTab({
                                     DNS propagation can take up to 48 h. Click the refresh button
                                     once records are in place.
                                   </p>
+
+                                  {/* Registrar-specific setup steps */}
+                                  <div className="border-t border-border/40 pt-2.5">
+                                    <RegistrarGuideSection />
+                                  </div>
                                 </div>
                               )}
 
@@ -4370,6 +4382,30 @@ export function PublishingTab({
                                       <ToggleLeft className="h-5 w-5 text-muted-foreground" />
                                     )}
                                   </button>
+                                </div>
+                              )}
+
+                              {/* DNS Records editor + Email wizard (expanded, verified domains) */}
+                              {isExpanded && isVerified && (
+                                <div className="px-3 pb-3 border-t border-border/60 pt-3 space-y-3">
+                                  <DnsRecordsPanel
+                                    projectId={projectId}
+                                    domain={{
+                                      id: domain.id,
+                                      hostname: domain.hostname,
+                                      cfHostnameId: domain.cfHostnameId ?? null,
+                                      sslSource: domain.sslSource ?? "cloudflare",
+                                      byoCertExpiresAt: domain.byoCertExpiresAt ?? null,
+                                      byoCertSubject: domain.byoCertSubject ?? null,
+                                      sslStatus: domain.sslStatus,
+                                      verificationToken: domain.verificationToken ?? null,
+                                    }}
+                                  />
+                                  <EmailSetupWizard
+                                    projectId={projectId}
+                                    domainId={domain.id}
+                                    hostname={domain.hostname}
+                                  />
                                 </div>
                               )}
                             </div>
