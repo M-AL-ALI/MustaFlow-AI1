@@ -2394,13 +2394,15 @@ export function ChatHistory({
     };
   }, [debouncedQuery, projectId]);
 
-  // When a server search is active, intersect results with loaded messages by id
-  // so the rendered MessageRow components retain their rich rendering (plans, reports, etc).
+  // When a server search is active, render messages in relevance-rank order
+  // (as returned by ts_rank) instead of chronological order, so the most
+  // relevant hits appear first. We still use the loaded MessageRow records
+  // (keyed by id) to preserve rich rendering of plans, reports, etc.
   const filtered =
     serverHits !== null
       ? (() => {
-          const hitIds = new Set(serverHits.map((h) => h.id));
-          return (messages ?? []).filter((m) => hitIds.has(m.id));
+          const byId = new Map((messages ?? []).map((m) => [m.id, m]));
+          return serverHits.map((h) => byId.get(h.id)).filter((m): m is Message => m !== undefined);
         })()
       : (messages ?? []);
 

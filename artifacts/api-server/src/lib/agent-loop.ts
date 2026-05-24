@@ -1453,25 +1453,50 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     { role: "system", content: buildSystemPrompt(input, stack, profile, skillsIndex) },
   ];
 
-  // Seed context: current file manifest + unread feedback count (Task #546)
+  // Seed context: current file manifest + unread feedback items (Task #546).
+  // Per requirement: surface unread inbox contents at build start so the model
+  // sees them in initial context, and deterministically mark them read once the
+  // first assistant turn lands (handled below right after the first model call).
   const seedManifest = workspace.list();
-  let unreadInboxCount = 0;
+  let unreadInboxItems: {
+    id: number;
+    category: string;
+    severity: string;
+    description: string;
+    screenshotUrl: string | null;
+  }[] = [];
   try {
     const { db: _db, agentInboxTable } = await import("@workspace/db");
-    const { and, eq, sql } = await import("drizzle-orm");
-    const [row] = await _db
-      .select({ n: sql<number>`count(*)::int` })
+    const { and, eq, desc } = await import("drizzle-orm");
+    const rows = await _db
+      .select({
+        id: agentInboxTable.id,
+        category: agentInboxTable.category,
+        severity: agentInboxTable.severity,
+        description: agentInboxTable.description,
+        screenshotUrl: agentInboxTable.screenshotUrl,
+      })
       .from(agentInboxTable)
       .where(
         and(eq(agentInboxTable.projectId, input.projectId), eq(agentInboxTable.status, "unread")),
-      );
-    unreadInboxCount = row?.n ?? 0;
+      )
+      .orderBy(desc(agentInboxTable.createdAt))
+      .limit(20);
+    unreadInboxItems = rows;
   } catch {
-    /* non-fatal — agent can still call read_inbox */
+    /* non-fatal — agent can still call read_inbox manually */
   }
-  const inboxLine =
-    unreadInboxCount > 0
-      ? `\n\nUser feedback: ${unreadInboxCount} unread feedback item${unreadInboxCount === 1 ? "" : "s"} are waiting. Call \`read_inbox\` early to review them before editing.`
+  const inboxBlock =
+    unreadInboxItems.length > 0
+      ? `\n\n# Unread user feedback (${unreadInboxItems.length})\nAddress these before finalizing this build. Each item is already being marked as read; do not re-surface them in later builds.\n\n` +
+        unreadInboxItems
+          .map((it) => {
+            const screenshot = it.screenshotUrl ? `\n  screenshot: ${it.screenshotUrl}` : "";
+            const desc =
+              it.description.length > 1200 ? it.description.slice(0, 1200) + "…" : it.description;
+            return `#${it.id} [${it.severity}/${it.category}] — ${desc}${screenshot}`;
+          })
+          .join("\n\n")
       : "";
   messages.push({
     role: "user",
@@ -1480,9 +1505,29 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       `Current files in project (${seedManifest.length}):\n${
         seedManifest.length > 0 ? seedManifest.slice(0, 40).join("\n") : "(empty)"
       }` +
-      inboxLine +
+      inboxBlock +
       `\n\nConversation history follows.`,
   });
+  // Mark the surfaced unread items as read deterministically — they have been
+  // delivered to the model context, so they should not reappear in future builds
+  // even if the loop later aborts.
+  if (unreadInboxItems.length > 0) {
+    try {
+      const { db: _db, agentInboxTable } = await import("@workspace/db");
+      const { inArray } = await import("drizzle-orm");
+      await _db
+        .update(agentInboxTable)
+        .set({ status: "read", readAt: new Date() })
+        .where(
+          inArray(
+            agentInboxTable.id,
+            unreadInboxItems.map((it) => it.id),
+          ),
+        );
+    } catch {
+      /* non-fatal */
+    }
+  }
   for (const turn of (input.conversationHistory ?? []).slice(-6)) {
     messages.push({ role: turn.role, content: turn.content });
   }
