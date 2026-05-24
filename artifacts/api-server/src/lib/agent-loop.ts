@@ -664,12 +664,25 @@ const TOOLS: ChatCompletionTool[] = [
     function: {
       name: "generate_video",
       description:
-        "Generate a short MP4 video from a text prompt. NOTE: video generation is not currently configured server-side — this returns a structured 'not configured' error. Prefer animated CSS/JS over calling this tool. Costs 3 credits per successful call (none today). Counts against the per-task creative-pack budget.",
+        "Generate a short MP4 video clip (2-8s) from a text prompt. Routes to the provider configured by VIDEO_GENERATION_PROVIDER_URL; returns a structured 'not configured' error otherwise. Prefer animated CSS/JS for purely decorative motion. Costs 3 credits per successful call. Counts against the per-task creative-pack budget.",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Project-relative output path ending in .mp4." },
-          prompt: { type: "string" },
+          path: {
+            type: "string",
+            description:
+              "Project-relative output path ending in .mp4. Defaults under assets/ if no folder is given.",
+          },
+          prompt: { type: "string", description: "Detailed description of the video." },
+          aspect_ratio: {
+            type: "string",
+            enum: ["16:9", "9:16"],
+            description: "16:9 landscape (default) or 9:16 portrait.",
+          },
+          duration_seconds: {
+            type: "integer",
+            description: "Clip length in seconds (2-8, default 6).",
+          },
         },
         required: ["path", "prompt"],
         additionalProperties: false,
@@ -2614,8 +2627,18 @@ async function executeCreativeTool(
     };
   }
 
-  const outPath = sanitizePath(args.path);
-  if (!outPath) return { ok: false, observation: "ERROR: invalid path" };
+  const rawPath = sanitizePath(args.path);
+  if (!rawPath) return { ok: false, observation: "ERROR: invalid path" };
+  // Asset placement: default media outputs under assets/ unless the model
+  // explicitly picked a recognized media folder. Keeps generated artifacts
+  // organized predictably. remove_image_background reads an existing file,
+  // so its input path is not rewritten — only the optional out_path is.
+  const ASSET_FOLDERS = ["assets/", "public/", "static/", "src/assets/", "media/"];
+  const isUnderAssets = (p: string) => ASSET_FOLDERS.some((f) => p.startsWith(f));
+  const outPath =
+    tool === "remove_image_background" || isUnderAssets(rawPath) || rawPath.includes("/")
+      ? rawPath
+      : `assets/${rawPath}`;
 
   const { generateImageAsset, generateVideoAsset, generateAudioAsset, removeImageBackgroundAsset } =
     await import("./agent-creative");
@@ -2623,6 +2646,7 @@ async function executeCreativeTool(
   // Lazy budget decrement: only counted when we actually start the call.
   ctx.creativeBudget.remaining -= 1;
   await safeEvent(input.onEvent, tool, `${tool.replace(/_/g, " ")} → ${outPath}`);
+  const tool_ = tool; // capture for closure
 
   let result: Awaited<ReturnType<typeof generateImageAsset>>;
   let counterKey: "image" | "video" | "audio" | "bgRemoval";
@@ -2640,7 +2664,14 @@ async function executeCreativeTool(
     }
     case "generate_video": {
       const prompt = typeof args.prompt === "string" ? args.prompt : "";
-      result = await generateVideoAsset({ prompt, signal: input.signal });
+      const aspectRatio = args.aspect_ratio === "9:16" ? "9:16" : "16:9";
+      const durationSeconds = typeof args.duration_seconds === "number" ? args.duration_seconds : 6;
+      result = await generateVideoAsset({
+        prompt,
+        aspectRatio,
+        durationSeconds,
+        signal: input.signal,
+      });
       counterKey = "video";
       break;
     }
@@ -2672,6 +2703,7 @@ async function executeCreativeTool(
     }
   }
 
+  void tool_;
   if (!result.ok) {
     return {
       ok: false,
@@ -2709,6 +2741,26 @@ async function executeCreativeTool(
       // billing must not break the loop
     }
   }
+
+  // Emit a richer narration event carrying preview metadata so the chat UI
+  // can render a thumbnail / asset card alongside the Sparkles icon. For
+  // images we include a small data-URI thumbnail (capped at ~6KB of source
+  // bytes encoded inline); for audio/video we ship path + size + MIME and
+  // let the UI link to the served snapshot.
+  const sizeKB = (result.bytes / 1024).toFixed(1);
+  const isImage = result.mimeType.startsWith("image/");
+  const previewDataUri =
+    isImage && result.base64.length < 8_000
+      ? `data:${result.mimeType};base64,${result.base64}`
+      : null;
+  const previewPayload = JSON.stringify({
+    tool,
+    path: writePath,
+    mimeType: result.mimeType,
+    sizeKB,
+    previewDataUri,
+  }).slice(0, 12_000);
+  await safeEvent(input.onEvent, tool, previewPayload);
 
   return {
     ok: true,

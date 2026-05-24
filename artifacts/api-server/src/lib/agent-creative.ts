@@ -112,25 +112,84 @@ export async function generateAudioAsset(args: {
 }
 
 /**
- * Text-to-video generation. There is no first-party server-side video provider
- * wired into MustaFlow today, so this stub returns a structured "not
- * configured" error — matching the web_search Brave-not-configured pattern.
- * Counted toward the per-task creative budget regardless so the model learns
- * not to spam it. NOT billed (failed calls never charge credits).
+ * Text-to-video generation.
+ *
+ * Routing:
+ *   1. If `VIDEO_GENERATION_PROVIDER_URL` is set, POST `{prompt, aspectRatio,
+ *      durationSeconds}` to that URL. Response must be an MP4 byte stream or
+ *      a JSON `{base64}` payload. This is the production hook used when a
+ *      real provider (Sora, Runway, Replicate, etc.) is wired up.
+ *   2. Otherwise return a structured `notConfigured` error — matching the
+ *      web_search "Brave not configured" pattern. Counted toward the
+ *      per-task creative budget so the model learns not to spam it, but NOT
+ *      billed (failed calls never charge credits).
  */
 export async function generateVideoAsset(args: {
   prompt: string;
+  aspectRatio?: "16:9" | "9:16";
+  durationSeconds?: number;
   signal: AbortSignal;
 }): Promise<CreativeResult> {
-  const prompt = (args.prompt ?? "").trim();
+  const prompt = (args.prompt ?? "").trim().slice(0, MAX_PROMPT_CHARS);
   if (!prompt) return { ok: false, error: "prompt is required" };
   if (args.signal.aborted) return { ok: false, error: "aborted by user" };
-  return {
-    ok: false,
-    notConfigured: true,
-    error:
-      "generate_video is not configured (no VIDEO_GENERATION_PROVIDER env var). Use generate_image plus CSS/JS animation instead.",
-  };
+
+  const providerUrl = process.env.VIDEO_GENERATION_PROVIDER_URL;
+  if (!providerUrl) {
+    return {
+      ok: false,
+      notConfigured: true,
+      error:
+        "generate_video is not configured (set VIDEO_GENERATION_PROVIDER_URL to enable). Use generate_image plus CSS/JS animation instead.",
+    };
+  }
+
+  try {
+    const aspectRatio = args.aspectRatio === "9:16" ? "9:16" : "16:9";
+    const durationSeconds = Math.min(8, Math.max(2, args.durationSeconds ?? 6));
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (process.env.VIDEO_GENERATION_PROVIDER_TOKEN) {
+      headers["authorization"] = `Bearer ${process.env.VIDEO_GENERATION_PROVIDER_TOKEN}`;
+    }
+    const resp = await fetch(providerUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt, aspectRatio, durationSeconds }),
+      signal: args.signal,
+    });
+    if (!resp.ok) {
+      return {
+        ok: false,
+        error: `video provider returned ${resp.status} ${resp.statusText}`,
+      };
+    }
+    const contentType = resp.headers.get("content-type") ?? "";
+    let buf: Buffer;
+    if (contentType.includes("application/json")) {
+      const body = (await resp.json()) as { base64?: string; error?: string };
+      if (!body.base64) {
+        return { ok: false, error: body.error ?? "video provider returned no base64 payload" };
+      }
+      buf = Buffer.from(body.base64, "base64");
+    } else {
+      const arr = await resp.arrayBuffer();
+      buf = Buffer.from(arr);
+    }
+    if (buf.length === 0) {
+      return { ok: false, error: "video provider returned empty payload" };
+    }
+    return {
+      ok: true,
+      base64: buf.toString("base64"),
+      mimeType: "video/mp4",
+      bytes: buf.length,
+    };
+  } catch (err) {
+    if (args.signal.aborted) return { ok: false, error: "aborted by user" };
+    const msg = String((err as Error).message ?? err).slice(0, 300);
+    logger.warn({ err }, "agent-creative: generate_video failed");
+    return { ok: false, error: msg };
+  }
 }
 
 /**
