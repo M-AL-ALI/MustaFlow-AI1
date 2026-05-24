@@ -1,10 +1,29 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { db, knowledgeEntriesTable, projectsTable } from "@workspace/db";
+import {
+  db,
+  knowledgeEntriesTable,
+  projectsTable,
+  creditTransactionsTable,
+  userCreditsTable,
+} from "@workspace/db";
 import { isAdminUser } from "../lib/adminAuth";
+import { getOrCreateCredits } from "./credits";
 import type { SQL } from "drizzle-orm";
 
 const router: IRouter = Router();
+
+// Reward tunables for public-library contributions (Task #688).
+// Granted exactly once per entry, the first time its net thumbs-up rating
+// (thumbsUp - thumbsDown) crosses LESSON_CONTRIBUTION_THRESHOLD.
+const LESSON_CONTRIBUTION_REWARD_CREDITS = Math.max(
+  0,
+  parseInt(process.env.LESSON_CONTRIBUTION_REWARD_CREDITS ?? "2", 10) || 0,
+);
+const LESSON_CONTRIBUTION_THRESHOLD = Math.max(
+  1,
+  parseInt(process.env.LESSON_CONTRIBUTION_THRESHOLD ?? "5", 10) || 5,
+);
 
 // GET /api/knowledge — list knowledge entries visible to the current user.
 // Query params:
@@ -57,18 +76,12 @@ router.get("/knowledge", async (req, res): Promise<void> => {
       projectCondition = or(
         eq(knowledgeEntriesTable.approvedForReuse, true),
         inArray(knowledgeEntriesTable.projectId, ownedIds),
-        and(
-          eq(knowledgeEntriesTable.userId, req.userId),
-          eq(knowledgeEntriesTable.scope, "user"),
-        ),
+        and(eq(knowledgeEntriesTable.userId, req.userId), eq(knowledgeEntriesTable.scope, "user")),
       ) as SQL;
     } else {
       projectCondition = or(
         eq(knowledgeEntriesTable.approvedForReuse, true),
-        and(
-          eq(knowledgeEntriesTable.userId, req.userId),
-          eq(knowledgeEntriesTable.scope, "user"),
-        ),
+        and(eq(knowledgeEntriesTable.userId, req.userId), eq(knowledgeEntriesTable.scope, "user")),
       ) as SQL;
     }
   } else {
@@ -246,6 +259,18 @@ router.post("/knowledge/:id/rate", async (req, res): Promise<void> => {
     return;
   }
 
+  // Capture pre-update net score so we can detect a true "crossing" event
+  // (some legacy entries may already sit above the threshold without ever
+  // being rewarded — we only fire when an up-vote pushes them across).
+  const [before] = await db
+    .select({
+      thumbsUp: knowledgeEntriesTable.thumbsUp,
+      thumbsDown: knowledgeEntriesTable.thumbsDown,
+    })
+    .from(knowledgeEntriesTable)
+    .where(eq(knowledgeEntriesTable.id, entryId));
+  const previousNet = before ? before.thumbsUp - before.thumbsDown : 0;
+
   const [updated] = await db
     .update(knowledgeEntriesTable)
     .set(
@@ -256,7 +281,69 @@ router.post("/knowledge/:id/rate", async (req, res): Promise<void> => {
     .where(eq(knowledgeEntriesTable.id, entryId))
     .returning();
 
-  res.json(updated);
+  // Task #688 — reward the contributor when a public lesson crosses the
+  // net-thumbs-up threshold. One-shot per entry (gated by contributorRewardedAt).
+  // We require this rating to be the actual crossing event: it must be an
+  // up-vote, and the previous net must have been below the threshold.
+  let contributorRewardGranted = false;
+  let contributorRewardCredits = 0;
+  const updatedNet = updated ? updated.thumbsUp - updated.thumbsDown : 0;
+  if (
+    updated &&
+    body.rating === "up" &&
+    updated.userId &&
+    updated.isPublic &&
+    !updated.contributorRewardedAt &&
+    LESSON_CONTRIBUTION_REWARD_CREDITS > 0 &&
+    previousNet < LESSON_CONTRIBUTION_THRESHOLD &&
+    updatedNet >= LESSON_CONTRIBUTION_THRESHOLD &&
+    updated.userId !== userId // don't reward self-ratings
+  ) {
+    // Atomically claim the reward slot first so concurrent raters can't
+    // double-grant. Only the row update that flips NULL → now() proceeds.
+    const [claimed] = await db
+      .update(knowledgeEntriesTable)
+      .set({ contributorRewardedAt: new Date() })
+      .where(
+        and(
+          eq(knowledgeEntriesTable.id, entryId),
+          isNull(knowledgeEntriesTable.contributorRewardedAt),
+        ),
+      )
+      .returning({ id: knowledgeEntriesTable.id });
+
+    if (claimed) {
+      try {
+        const credits = await getOrCreateCredits(updated.userId);
+        const newBalance = credits.balance + LESSON_CONTRIBUTION_REWARD_CREDITS;
+        await db.transaction(async (tx) => {
+          await tx
+            .update(userCreditsTable)
+            .set({ balance: newBalance, updatedAt: sql`now()` })
+            .where(eq(userCreditsTable.userId, updated.userId as string));
+          await tx.insert(creditTransactionsTable).values({
+            userId: updated.userId as string,
+            projectId: updated.projectId ?? null,
+            type: "lesson_contribution",
+            amount: LESSON_CONTRIBUTION_REWARD_CREDITS,
+            description: `Public lesson reward: "${updated.title.slice(0, 80)}" reached ${LESSON_CONTRIBUTION_THRESHOLD} net thumbs-up`,
+            balanceAfter: newBalance,
+          });
+        });
+        contributorRewardGranted = true;
+        contributorRewardCredits = LESSON_CONTRIBUTION_REWARD_CREDITS;
+      } catch {
+        // Best-effort: if credit accounting fails, roll back the claim so a
+        // future rating can re-trigger the reward path.
+        await db
+          .update(knowledgeEntriesTable)
+          .set({ contributorRewardedAt: null })
+          .where(eq(knowledgeEntriesTable.id, entryId));
+      }
+    }
+  }
+
+  res.json({ ...updated, contributorRewardGranted, contributorRewardCredits });
 });
 
 // GET /api/knowledge/export — export all accessible knowledge entries as JSON.

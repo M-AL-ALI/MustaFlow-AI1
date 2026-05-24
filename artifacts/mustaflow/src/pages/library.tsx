@@ -74,13 +74,25 @@ function PublicLessonCard({ entry }: { entry: KnowledgeEntry }) {
   const handleRate = async (direction: "up" | "down") => {
     if (ratedUp || ratedDown) return;
     try {
-      await fetch(`/api/knowledge/${entry.id}/rate`, {
+      const res = await fetch(`/api/knowledge/${entry.id}/rate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rating: direction }),
       });
       if (direction === "up") setRatedUp(true);
       else setRatedDown(true);
+      if (res.ok) {
+        const data = (await res.json().catch(() => null)) as {
+          contributorRewardGranted?: boolean;
+          contributorRewardCredits?: number;
+        } | null;
+        if (data?.contributorRewardGranted && (data.contributorRewardCredits ?? 0) > 0) {
+          toast({
+            title: "Your rating earned the contributor a reward",
+            description: `This lesson crossed the helpful-rating threshold — its author was granted ${data.contributorRewardCredits} credits.`,
+          });
+        }
+      }
     } catch {
       toast({ title: "Failed to rate lesson", variant: "destructive" });
     }
@@ -88,6 +100,7 @@ function PublicLessonCard({ entry }: { entry: KnowledgeEntry }) {
 
   const upCount = (entry.thumbsUp ?? 0) + (ratedUp ? 1 : 0);
   const downCount = (entry.thumbsDown ?? 0) + (ratedDown ? 1 : 0);
+  const netScore = upCount - downCount;
 
   return (
     <div className="border border-border rounded-lg p-4 bg-card hover:border-border/80 transition-colors">
@@ -101,6 +114,22 @@ function PublicLessonCard({ entry }: { entry: KnowledgeEntry }) {
             <div className="flex-1">
               <h3 className="text-sm font-medium text-foreground leading-snug">{entry.title}</h3>
               <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-semibold border",
+                    netScore >= 5
+                      ? "bg-green-500/15 border-green-500/30 text-green-400"
+                      : netScore > 0
+                        ? "bg-muted border-border text-foreground"
+                        : netScore < 0
+                          ? "bg-red-500/10 border-red-500/20 text-red-400/80"
+                          : "bg-muted border-border text-muted-foreground",
+                  )}
+                  title={`${upCount} thumbs up, ${downCount} thumbs down`}
+                >
+                  <ThumbsUp className="h-2.5 w-2.5" />
+                  {netScore > 0 ? `+${netScore}` : netScore}
+                </span>
                 {entry.category && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border border-border bg-muted text-muted-foreground">
                     {entry.category}

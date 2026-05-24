@@ -3642,7 +3642,10 @@ export const RateKnowledgeResponse = zod.object({
   "annotation": zod.string().nullish(),
   "archivedAt": zod.coerce.date().nullish(),
   "createdAt": zod.coerce.date()
-})
+}).and(zod.object({
+  "contributorRewardGranted": zod.boolean().optional().describe('True when this rating triggered a credit reward for the entry\'s contributor.'),
+  "contributorRewardCredits": zod.number().optional().describe('Number of credits granted to the contributor (0 when not granted).')
+}))
 
 
 /**

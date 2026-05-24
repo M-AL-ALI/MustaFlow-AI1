@@ -83,6 +83,9 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   embedding: vector("embedding", { dimensions: KNOWLEDGE_EMBEDDING_DIM }),
   // Soft-delete: when set, the entry is archived and hidden by default
   archivedAt: timestamp("archived_at", { withTimezone: true }),
+  // When set, this entry's contributor has already been rewarded for crossing
+  // the public-library net-thumbs-up threshold (prevents double-rewards).
+  contributorRewardedAt: timestamp("contributor_rewarded_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -322,6 +322,7 @@ export * from './purchasedDomainsResponse';
 export * from './purchasedDomainStatus';
 export * from './purchaseDomainInput';
 export * from './purchaseDomainResponse';
+export * from './rateKnowledge200';
 export * from './rateKnowledgeBody';
 export * from './rateKnowledgeBodyRating';
 export * from './readinessCheck';

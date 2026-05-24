@@ -2913,11 +2913,20 @@ paths:
                   enum: [up, down]
       responses:
         "200":
-          description: Updated entry with new rating counts
+          description: Updated entry with new rating counts (plus optional contributor reward flag)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/KnowledgeEntry"
+                allOf:
+                  - $ref: "#/components/schemas/KnowledgeEntry"
+                  - type: object
+                    properties:
+                      contributorRewardGranted:
+                        type: boolean
+                        description: True when this rating triggered a credit reward for the entry's contributor.
+                      contributorRewardCredits:
+                        type: integer
+                        description: Number of credits granted to the contributor (0 when not granted).
         "404":
           description: Not found
           content:
@@ -5234,7 +5243,22 @@ components:
 
     KnowledgeEntry:
       type: object
-      required: [id, title, category, content, type, severity, approvedForReuse, scope, thumbsUp, thumbsDown, usageCount, isPublic, createdAt]
+      required:
+        [
+          id,
+          title,
+          category,
+          content,
+          type,
+          severity,
+          approvedForReuse,
+          scope,
+          thumbsUp,
+          thumbsDown,
+          usageCount,
+          isPublic,
+          createdAt,
+        ]
       properties:
         id: { type: integer }
         title: { type: string }

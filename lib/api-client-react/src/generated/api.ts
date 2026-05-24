@@ -190,6 +190,7 @@ import type {
   PurchaseDomainResponse,
   PurchasedDomainResponse,
   PurchasedDomainsResponse,
+  RateKnowledge200,
   RateKnowledgeBody,
   ReadinessResult,
   RefreshPurchasedDomainInfo200,
@@ -10171,9 +10172,9 @@ export const getRateKnowledgeUrl = (id: number,) => {
  * @summary Record explicit thumbs-up or thumbs-down on a knowledge entry
  */
 export const rateKnowledge = async (id: number,
-    rateKnowledgeBody: RateKnowledgeBody, options?: RequestInit): Promise<KnowledgeEntry> => {
+    rateKnowledgeBody: RateKnowledgeBody, options?: RequestInit): Promise<RateKnowledge200> => {
 
-  return customFetch<KnowledgeEntry>(getRateKnowledgeUrl(id),
+  return customFetch<RateKnowledge200>(getRateKnowledgeUrl(id),
   {
     ...options,
     method: 'POST',

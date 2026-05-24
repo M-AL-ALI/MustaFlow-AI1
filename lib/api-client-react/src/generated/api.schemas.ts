@@ -3649,6 +3649,13 @@ export type RateKnowledgeBody = {
   rating: RateKnowledgeBodyRating;
 };
 
+export type RateKnowledge200 = KnowledgeEntry & {
+  /** True when this rating triggered a credit reward for the entry's contributor. */
+  contributorRewardGranted?: boolean;
+  /** Number of credits granted to the contributor (0 when not granted). */
+  contributorRewardCredits?: number;
+};
+
 export type ListMobileBuilds200 = {
   builds: MobileBuildLog[];
 };

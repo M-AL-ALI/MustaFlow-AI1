@@ -20,6 +20,7 @@ export const CREDIT_TRANSACTION_TYPES = [
   "purchase",
   "subscription_grant",
   "refund",
+  "lesson_contribution",
 ] as const;
 export type CreditTransactionType = (typeof CREDIT_TRANSACTION_TYPES)[number];
 
