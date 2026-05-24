@@ -1,4 +1,4 @@
-import { useParams } from "wouter";
+import { useParams, Link } from "wouter";
 import { useWebContainer } from "@/hooks/use-web-container";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import {
@@ -73,7 +73,35 @@ import {
   Github,
   Plug,
   HeartPulse,
+  Crown,
 } from "lucide-react";
+
+function SubscriptionTierBadge({ tier }: { tier: "free" | "pro" | "team" }) {
+  const tierLabel = tier === "team" ? "Team" : tier === "pro" ? "Pro" : "Free";
+  const isPaid = tier === "pro" || tier === "team";
+  return (
+    <Link href="/billing">
+      <a
+        className={cn(
+          "flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wide transition-colors",
+          tier === "team"
+            ? "border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500/15"
+            : tier === "pro"
+              ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
+              : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+        )}
+        title={
+          isPaid
+            ? `${tierLabel} plan — all builder modes unlocked`
+            : "Free plan — upgrade to unlock Power and Pro builder modes"
+        }
+      >
+        <Crown style={{ width: 10, height: 10 }} className="shrink-0" />
+        {tierLabel}
+      </a>
+    </Link>
+  );
+}
 import { SuggestionChips } from "./components/suggestion-chips";
 import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
 import { QueueComposer } from "./components/queue-composer";
@@ -761,6 +789,27 @@ export default function ProjectWorkspacePage() {
   const [_batchTotalCount, setBatchTotalCount] = useState(0);
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [agentMode, setAgentMode] = useState<AgentMode>("power");
+  const [subscriptionTier, setSubscriptionTier] = useState<"free" | "pro" | "team">("free");
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/billing/subscription");
+        if (!res.ok) return;
+        const data = (await res.json()) as { tier?: string };
+        if (cancelled) return;
+        const t = data.tier === "pro" || data.tier === "team" ? data.tier : "free";
+        setSubscriptionTier(t);
+        if (t === "free" && (agentMode === "power" || agentMode === "pro")) {
+          setAgentMode("eco");
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
   const [backgroundPanelOpen, setBackgroundPanelOpen] = useState(false);
@@ -1994,6 +2043,7 @@ export default function ProjectWorkspacePage() {
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <SubscriptionTierBadge tier={subscriptionTier} />
           <CreditBalancePill />
           <button
             onClick={startTour}
@@ -2645,6 +2695,7 @@ export default function ProjectWorkspacePage() {
                       projectId={projectId}
                       agentMode={agentMode}
                       onAgentModeChange={setAgentMode}
+                      subscriptionTier={subscriptionTier}
                       planMode={planMode}
                       onPlanModeChange={setPlanMode}
                       runInBackground={runInBackground}

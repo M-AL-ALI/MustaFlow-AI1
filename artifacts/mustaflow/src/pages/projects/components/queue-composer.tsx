@@ -16,6 +16,7 @@ import {
   Zap,
   LayoutTemplate,
   Clock,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGetAgentRouting, useUpdateProject } from "@workspace/api-client-react";
@@ -107,6 +108,7 @@ interface QueueComposerProps {
   projectId: number;
   agentMode: AgentMode;
   onAgentModeChange: (mode: AgentMode) => void;
+  subscriptionTier?: "free" | "pro" | "team";
   planMode: boolean;
   onPlanModeChange: (v: boolean) => void;
   runInBackground: boolean;
@@ -129,6 +131,7 @@ export function QueueComposer({
   projectId,
   agentMode,
   onAgentModeChange,
+  subscriptionTier = "free",
   planMode,
   onPlanModeChange,
   runInBackground: _runInBackground,
@@ -1228,21 +1231,38 @@ export function QueueComposer({
                       { mode: "power", label: "Power", desc: "5 credits · better quality" },
                       { mode: "pro", label: "Pro", desc: "10 credits · most capable" },
                     ] as const
-                  ).map(({ mode, label, desc }) => (
-                    <button
-                      key={mode}
-                      onClick={() => onAgentModeChange(mode)}
-                      title={desc}
-                      className={cn(
-                        "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
-                        agentMode === mode
-                          ? "bg-primary text-primary-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                  ).map(({ mode, label, desc }) => {
+                    const locked =
+                      subscriptionTier === "free" && (mode === "power" || mode === "pro");
+                    const title = locked
+                      ? `Upgrade to unlock — ${label} mode is included with the Pro and Team plans`
+                      : desc;
+                    return (
+                      <button
+                        key={mode}
+                        onClick={() => {
+                          if (locked) {
+                            window.location.href = "/billing";
+                            return;
+                          }
+                          onAgentModeChange(mode);
+                        }}
+                        title={title}
+                        aria-disabled={locked}
+                        className={cn(
+                          "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors inline-flex items-center gap-0.5",
+                          agentMode === mode && !locked
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : locked
+                              ? "text-muted-foreground/40 hover:text-muted-foreground cursor-help"
+                              : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {locked && <Lock style={{ width: 8, height: 8 }} />}
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
                 <span className="text-[9px] text-muted-foreground/50 pr-0.5">
                   {agentMode === "lite"
