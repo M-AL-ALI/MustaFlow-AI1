@@ -109,7 +109,12 @@ async function buildAll() {
       "ws",
       "openai",
     ],
-    sourcemap: "linked",
+    // Source maps blow up bundle size (26 MB on top of 16 MB code) and have
+    // tripped Replit's deploy bundler with "Socket closed 4500" during the
+    // Bundle stage. Emit them only in dev; production deploys get a smaller,
+    // minified bundle so the deployer doesn't choke.
+    sourcemap: process.env.NODE_ENV === "production" ? false : "linked",
+    minify: process.env.NODE_ENV === "production",
     plugins: [
       // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it
       esbuildPluginPino({ transports: ["pino-pretty"] }),
