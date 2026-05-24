@@ -38,6 +38,7 @@ import { CreateProjectModal } from "@/components/create-project-modal";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { BackgroundJobsPanel } from "@/components/background-jobs-panel";
 import { OrgSwitcher } from "@/components/org-switcher";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const NAV_ITEMS = [
   { name: "Home", href: "/", icon: Home },
@@ -328,16 +329,21 @@ function SidebarInner({
     <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col overflow-y-auto">
       <CreateProjectModal open={createOpen} onOpenChange={setCreateOpen} />
 
-      {/* Logo + collapse button */}
+      {/* Logo + theme toggle + collapse button */}
       <div className="px-4 py-5 flex flex-col items-center gap-2 shrink-0 relative">
-        <img src={logoUrl} alt="MustaFlow AI" className="h-28 w-auto object-contain" />
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          title="Collapse sidebar"
-        >
-          <PanelLeftClose className="h-4 w-4" />
-        </button>
+        <div className="rounded-3xl border-2 border-sidebar-border bg-sidebar-accent/40 p-3 shadow-lg ring-1 ring-primary/10">
+          <img src={logoUrl} alt="MustaFlow AI" className="h-28 w-auto object-contain" />
+        </div>
+        <div className="absolute top-3 right-3 flex items-center gap-1.5">
+          <ThemeToggle className="h-8 w-8" />
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Collapse sidebar"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {/* Workspace switcher — visible when signed in */}
