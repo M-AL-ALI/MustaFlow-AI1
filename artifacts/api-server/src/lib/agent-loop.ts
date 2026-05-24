@@ -1153,6 +1153,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
   const model = MODEL_FOR_MODE[input.agentMode] ?? "gpt-5-mini";
   const containerState = { id: input.containerId ?? null, installed: false };
+  // Task #533: when a take_screenshot tool call returns an image, the next
+  // LLM turn switches to the provider's VISION_MODEL so the screenshot is
+  // actually inspected by a vision-capable model.
+  let visionTurnsRemaining = 0;
   let step = 0;
 
   for (step = 1; step <= STEP_CAP; step++) {
@@ -1178,14 +1182,24 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
     let response;
     try {
-      const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+      const { createChatCompletion, resolveStageProvider, VISION_MODEL } =
+        await import("./ai-providers");
       const { provider, model: routedModel } = resolveStageProvider(
         input.mode === "refine" ? "refine" : "build",
         input.agentMode,
       );
+      // Vision-override: if a screenshot was just pushed, this turn must use a
+      // vision-capable model regardless of stage routing (Task #533).
+      const useVision = visionTurnsRemaining > 0;
+      if (useVision) visionTurnsRemaining -= 1;
+      const effectiveModel = useVision
+        ? VISION_MODEL[provider]
+        : provider === "openai"
+          ? model
+          : routedModel;
       response = await createChatCompletion({
         provider,
-        model: provider === "openai" ? model : routedModel,
+        model: effectiveModel,
         messages,
         tools: TOOLS,
         tool_choice: "auto",
@@ -1282,7 +1296,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     const handleToolResult = async (
       call: ChatCompletionMessageToolCall,
       parsed: Record<string, unknown>,
-      result: { ok: boolean; observation: string | unknown; noTruncate?: boolean },
+      result: {
+        ok: boolean;
+        observation: string | unknown;
+        noTruncate?: boolean;
+        imageBase64?: string;
+        imageMimeType?: string;
+      },
       durationMs: number,
     ): Promise<{ terminate: boolean; observation: string }> => {
       const callName = call.type === "function" ? call.function.name : "";
@@ -1334,6 +1354,25 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }
 
       messages.push({ role: "tool", tool_call_id: call.id, content: observation });
+
+      // Vision wiring (Task #533): when a tool returns an image, attach it as
+      // an image_url block on a follow-up user message and request a vision
+      // turn next. The adapters in ai-providers translate image_url blocks
+      // into Anthropic image blocks / Gemini inlineData parts.
+      if (result.imageBase64 && result.imageMimeType) {
+        const dataUri = `data:${result.imageMimeType};base64,${result.imageBase64}`;
+        messages.push({
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Screenshot captured by ${callName}. Inspect the image above to inform your next step.`,
+            },
+            { type: "image_url", image_url: { url: dataUri } },
+          ],
+        });
+        visionTurnsRemaining = 1;
+      }
 
       if (toolCalls.length >= STEP_CAP && callName !== "finalize") {
         terminationReason = "step-cap";
@@ -1406,7 +1445,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               loopStartedAt: startedAt,
               loopWallClockMs: wallClockMs,
             })
-              .then((r) => ({ ok: r.ok, observation: r.observation, noTruncate: r.noTruncate }))
+              .then((r) => ({
+                ok: r.ok,
+                observation: r.observation,
+                noTruncate: r.noTruncate,
+                imageBase64: r.imageBase64,
+                imageMimeType: r.imageMimeType,
+              }))
               .catch((err) => ({
                 ok: false as const,
                 observation: `ERROR: ${String((err as Error).message ?? err)}`,
@@ -1516,6 +1561,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         tool_call_id: call.id,
         content: observation,
       });
+
+      // Vision wiring (Task #533, serial path): mirror handleToolResult above.
+      if (result.imageBase64 && result.imageMimeType) {
+        const dataUri = `data:${result.imageMimeType};base64,${result.imageBase64}`;
+        messages.push({
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Screenshot captured by ${name}. Inspect the image above to inform your next step.`,
+            },
+            { type: "image_url", image_url: { url: dataUri } },
+          ],
+        });
+        visionTurnsRemaining = 1;
+      }
 
       // Enforce tool-call cap mid-turn — stop immediately if we hit the budget
       // partway through a multi-tool-call response.
@@ -2284,9 +2345,13 @@ function maybeChargeSenseBatch(ctx: ToolCtx): void {
   }
 }
 
-export async function executeTool(
-  ctx: ToolCtx,
-): Promise<{ ok: boolean; observation: string; noTruncate?: boolean }> {
+export async function executeTool(ctx: ToolCtx): Promise<{
+  ok: boolean;
+  observation: string;
+  noTruncate?: boolean;
+  imageBase64?: string;
+  imageMimeType?: string;
+}> {
   const { name, args, workspace, stack, input, commandsRun, step, containerState } = ctx;
   if (input.signal.aborted) {
     return { ok: false, observation: "ERROR: aborted by user" };
@@ -2831,22 +2896,24 @@ export async function executeTool(
         };
       }
       ctx.screenshotBudget.remaining = Math.max(ctx.screenshotBudget.remaining - actualBytes, 0);
-      // Return the full base64 PNG so vision-capable models can inspect the
-      // image. Observation truncation at the loop level caps total size, but
-      // we expose the whole image up to that cap so the model can actually
-      // see what it rendered.
+      // Task #533: return the base64 separately so the loop can attach it as
+      // an image_url block on a follow-up user message and switch to the
+      // provider's VISION_MODEL for the next turn. The tool observation
+      // itself stays small (metadata only) — the image flows via the user
+      // message that the loop appends after the tool response.
       return {
         ok: true,
-        noTruncate: true,
         observation: JSON.stringify({
           url: targetUrl || "(inline)",
           bytes: shot.bytes ?? null,
           width: shot.width ?? null,
           height: shot.height ?? null,
           mimeType: "image/png",
-          base64: shot.base64 ?? "",
           budgetRemaining: ctx.screenshotBudget.remaining,
+          attachedToNextTurn: true,
         }),
+        imageBase64: shot.base64 ?? undefined,
+        imageMimeType: "image/png",
       };
     }
     case "web_fetch": {

@@ -7671,27 +7671,25 @@ export async function runConverseStreamPipeline(
   }
 
   try {
-    // NOTE: streaming converse stays on OpenAI — translating Anthropic /
-    // Gemini SSE shapes into Chat Completion delta chunks is out of scope for
-    // Task #533. Non-streaming converse (above) goes through createChatCompletion.
-    const stream = await openai.chat.completions.create(
-      {
-        model,
-        max_completion_tokens: 1200,
-        stream: true,
-        messages: messages as Parameters<typeof openai.chat.completions.create>[0]["messages"],
-      },
-      signal ? { signal } : undefined,
+    // Provider-aware streaming (Task #533 step 4). Anthropic + Gemini deltas
+    // are normalized into the same `onToken(delta)` contract as OpenAI's
+    // chat completion deltas, so the SSE channel above stays unchanged.
+    const { streamChatCompletion, resolveStageProvider } = await import("./ai-providers");
+    const { provider: streamProv, model: streamModel } = resolveStageProvider(
+      "converse",
+      agentMode,
     );
-
     let markdown = "";
-    for await (const chunk of stream) {
+    for await (const delta of streamChatCompletion({
+      provider: streamProv,
+      model: streamProv === "openai" ? model : streamModel,
+      max_completion_tokens: 1200,
+      messages: messages as Parameters<typeof streamChatCompletion>[0]["messages"],
+      signal,
+    })) {
       if (signal?.aborted) break;
-      const delta = chunk.choices[0]?.delta?.content;
-      if (delta) {
-        markdown += delta;
-        onToken(delta);
-      }
+      markdown += delta;
+      onToken(delta);
     }
 
     if (!markdown) markdown = "I couldn't generate a response. Please try again.";

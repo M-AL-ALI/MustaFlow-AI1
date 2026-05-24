@@ -219,6 +219,159 @@ export async function createChatCompletion(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Streaming variant — returns an async iterable of text deltas, regardless of
+// provider. Used by the converse SSE path (Task #533 step 4).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface StreamChatCompletionParams {
+  provider: Provider;
+  model: string;
+  messages: ChatCompletionMessageParam[];
+  max_completion_tokens?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Provider-agnostic streaming chat completion. Yields incremental text deltas
+ * so callers can pipe them into their existing SSE channel without caring
+ * which provider executed the request.
+ */
+export async function* streamChatCompletion(
+  params: StreamChatCompletionParams,
+): AsyncGenerator<string, void, void> {
+  if (params.provider === "openai") {
+    const stream = await openai.chat.completions.create(
+      {
+        model: params.model,
+        max_completion_tokens: params.max_completion_tokens,
+        stream: true,
+        messages: params.messages,
+      },
+      params.signal ? { signal: params.signal } : undefined,
+    );
+    for await (const chunk of stream) {
+      if (params.signal?.aborted) return;
+      const delta = chunk.choices[0]?.delta?.content;
+      if (delta) yield delta;
+    }
+    return;
+  }
+
+  if (params.provider === "anthropic") {
+    yield* streamAnthropic(params);
+    return;
+  }
+
+  yield* streamGemini(params);
+}
+
+async function* streamAnthropic(
+  params: StreamChatCompletionParams,
+): AsyncGenerator<string, void, void> {
+  const { anthropic } = await import("@workspace/integrations-anthropic-ai");
+
+  const systemParts: string[] = [];
+  // Task #533: streaming path matches non-streaming — translate multimodal
+  // content blocks into Anthropic image blocks so converse SSE with image
+  // attachments keeps vision semantics across providers.
+  const turns: Array<{ role: "user" | "assistant"; content: unknown }> = [];
+  for (const msg of params.messages) {
+    if (msg.role === "system") {
+      if (typeof msg.content === "string") systemParts.push(msg.content);
+      continue;
+    }
+    if (msg.role === "user") {
+      if (Array.isArray(msg.content)) {
+        turns.push({ role: "user", content: openAiContentToAnthropicBlocks(msg.content) });
+      } else {
+        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        turns.push({ role: "user", content });
+      }
+      continue;
+    }
+    if (msg.role === "assistant") {
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      turns.push({ role: "assistant", content });
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stream: any = await anthropic.messages.stream(
+    {
+      model: params.model,
+      max_tokens: params.max_completion_tokens ?? 1200,
+      system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
+      messages: turns,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any,
+    { signal: params.signal },
+  );
+  for await (const event of stream) {
+    if (params.signal?.aborted) return;
+    if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+      const text = event.delta.text;
+      if (typeof text === "string" && text.length > 0) yield text;
+    }
+  }
+}
+
+async function* streamGemini(
+  params: StreamChatCompletionParams,
+): AsyncGenerator<string, void, void> {
+  const { ai } = await import("@workspace/integrations-gemini-ai");
+
+  const systemParts: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contents: any[] = [];
+  for (const msg of params.messages) {
+    if (msg.role === "system") {
+      if (typeof msg.content === "string") systemParts.push(msg.content);
+      continue;
+    }
+    if (msg.role === "user") {
+      // Task #533: streaming path matches non-streaming — translate image_url
+      // blocks into Gemini inlineData parts so converse SSE with image
+      // attachments keeps vision semantics across providers.
+      if (Array.isArray(msg.content)) {
+        contents.push({ role: "user", parts: openAiContentToGeminiParts(msg.content) });
+      } else {
+        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        contents.push({ role: "user", parts: [{ text: content }] });
+      }
+      continue;
+    }
+    if (msg.role === "assistant") {
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      contents.push({ role: "model", parts: [{ text: content }] });
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const config: Record<string, any> = {
+    maxOutputTokens: params.max_completion_tokens ?? 1200,
+  };
+  if (systemParts.length > 0) {
+    config.systemInstruction = { parts: [{ text: systemParts.join("\n\n") }] };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stream: any = await ai.models.generateContentStream({
+    model: params.model,
+    contents,
+    config,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+  for await (const chunk of stream) {
+    if (params.signal?.aborted) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parts = (chunk as any).candidates?.[0]?.content?.parts ?? [];
+    for (const part of parts) {
+      if (typeof part.text === "string" && part.text.length > 0) yield part.text;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Anthropic adapter
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -277,8 +430,16 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
       continue;
     }
     if (msg.role === "user") {
-      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-      turns.push({ role: "user", content });
+      // Task #533: translate OpenAI-style content blocks (text + image_url
+      // data: URIs from the agent loop's vision wiring) into Anthropic's
+      // image blocks. Falls back to plain string for non-array content.
+      if (Array.isArray(msg.content)) {
+        const blocks = openAiContentToAnthropicBlocks(msg.content);
+        turns.push({ role: "user", content: blocks });
+      } else {
+        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        turns.push({ role: "user", content });
+      }
     }
   }
 
@@ -410,8 +571,15 @@ async function callGemini(params: CreateChatCompletionParams): Promise<ChatCompl
       continue;
     }
     if (msg.role === "user") {
-      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-      contents.push({ role: "user", parts: [{ text: content }] });
+      // Task #533: translate OpenAI content blocks into Gemini parts —
+      // text parts pass through; image_url data: URIs become inlineData parts.
+      if (Array.isArray(msg.content)) {
+        const parts = openAiContentToGeminiParts(msg.content);
+        contents.push({ role: "user", parts });
+      } else {
+        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        contents.push({ role: "user", parts: [{ text: content }] });
+      }
     }
   }
 
@@ -483,6 +651,72 @@ async function callGemini(params: CreateChatCompletionParams): Promise<ChatCompl
     promptTokens: usage.promptTokenCount ?? 0,
     completionTokens: usage.candidatesTokenCount ?? 0,
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content-block translation (image_url support, Task #533)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Parses a `data:<mime>;base64,<payload>` URI. Returns null for http(s) URLs
+// or malformed input — the agent loop only ever emits data: URIs for its
+// own screenshots, so we don't fan out to URL fetching here.
+function parseDataUri(url: string): { mimeType: string; base64: string } | null {
+  if (!url.startsWith("data:")) return null;
+  const comma = url.indexOf(",");
+  if (comma < 0) return null;
+  const header = url.slice(5, comma);
+  const payload = url.slice(comma + 1);
+  const semi = header.indexOf(";");
+  const mimeType = (semi >= 0 ? header.slice(0, semi) : header) || "image/png";
+  const isBase64 = header.includes(";base64");
+  if (!isBase64) return null;
+  return { mimeType, base64: payload };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function openAiContentToAnthropicBlocks(content: any[]): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    if (block.type === "text" && typeof block.text === "string") {
+      out.push({ type: "text", text: block.text });
+    } else if (block.type === "image_url" && block.image_url?.url) {
+      const parsed = parseDataUri(String(block.image_url.url));
+      if (parsed) {
+        out.push({
+          type: "image",
+          source: { type: "base64", media_type: parsed.mimeType, data: parsed.base64 },
+        });
+      } else {
+        out.push({
+          type: "text",
+          text: `[image at ${String(block.image_url.url).slice(0, 200)} — non-data URI not inlined]`,
+        });
+      }
+    }
+  }
+  return out.length > 0 ? out : [{ type: "text", text: "" }];
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function openAiContentToGeminiParts(content: any[]): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    if (block.type === "text" && typeof block.text === "string") {
+      out.push({ text: block.text });
+    } else if (block.type === "image_url" && block.image_url?.url) {
+      const parsed = parseDataUri(String(block.image_url.url));
+      if (parsed) {
+        out.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } });
+      } else {
+        out.push({
+          text: `[image at ${String(block.image_url.url).slice(0, 200)} — non-data URI not inlined]`,
+        });
+      }
+    }
+  }
+  return out.length > 0 ? out : [{ text: "" }];
 }
 
 // Gemini's functionResponse requires a `name` (the tool the result is for).
