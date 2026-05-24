@@ -1156,46 +1156,64 @@ router.post("/billing/checkout", async (req, res): Promise<void> => {
   try {
     const { stripeCircuit, withRetry, isTransientError } = await import("../lib/resilience");
     const priceId = priceIdForPack(pkg);
-    const lineItem = priceId
-      ? { quantity: 1, price: priceId }
-      : {
-          quantity: 1,
-          price_data: {
-            currency: "usd",
-            unit_amount: pkg.priceUsd * 100,
-            product_data: {
-              name: `MustaFlow ${pkg.label}`,
-              description: pkg.description,
-            },
-          },
-        };
+    const inlineLineItem = {
+      quantity: 1,
+      price_data: {
+        currency: "usd",
+        unit_amount: pkg.priceUsd * 100,
+        product_data: {
+          name: `MustaFlow ${pkg.label}`,
+          description: pkg.description,
+        },
+      },
+    };
 
-    const baseParams = {
+    const buildParams = (lineItem: typeof inlineLineItem | { quantity: number; price: string }) => ({
       mode: "payment" as const,
       line_items: [lineItem],
       metadata: { userId, packageId: pkg.id, credits: String(pkg.credits) },
       automatic_tax: { enabled: Boolean(process.env.STRIPE_TAX_ENABLED === "true") },
+    });
+
+    const createSession = (lineItem: typeof inlineLineItem | { quantity: number; price: string }) => {
+      const baseParams = buildParams(lineItem);
+      return stripeCircuit.call(() =>
+        withRetry(
+          () =>
+            mode === "embedded"
+              ? stripe.checkout.sessions.create({
+                  ...baseParams,
+                  ui_mode: "embedded",
+                  ...(returnUrl
+                    ? { return_url: returnUrl }
+                    : { redirect_on_completion: "never" as const }),
+                })
+              : stripe.checkout.sessions.create({
+                  ...baseParams,
+                  success_url: successUrl!,
+                  cancel_url: cancelUrl!,
+                }),
+          { maxAttempts: 2, baseDelayMs: 1_000, shouldRetry: isTransientError, label: "stripe:checkout.sessions.create" },
+        ),
+      );
     };
 
-    const session = await stripeCircuit.call(() =>
-      withRetry(
-        () =>
-          mode === "embedded"
-            ? stripe.checkout.sessions.create({
-                ...baseParams,
-                ui_mode: "embedded",
-                ...(returnUrl
-                  ? { return_url: returnUrl }
-                  : { redirect_on_completion: "never" as const }),
-              })
-            : stripe.checkout.sessions.create({
-                ...baseParams,
-                success_url: successUrl!,
-                cancel_url: cancelUrl!,
-              }),
-        { maxAttempts: 2, baseDelayMs: 1_000, shouldRetry: isTransientError, label: "stripe:checkout.sessions.create" },
-      ),
-    );
+    let session;
+    if (priceId) {
+      try {
+        session = await createSession({ quantity: 1, price: priceId });
+      } catch (priceErr) {
+        const pmsg = priceErr instanceof Error ? priceErr.message : "";
+        if (/no such price|resource_missing/i.test(pmsg)) {
+          req.log.warn({ priceId, packageId: pkg.id }, "Configured Stripe Price not found; falling back to inline price_data");
+          session = await createSession(inlineLineItem);
+        } else {
+          throw priceErr;
+        }
+      }
+    } else {
+      session = await createSession(inlineLineItem);
+    }
 
     res.json({
       sessionId: session.id,
