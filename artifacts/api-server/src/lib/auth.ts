@@ -1,7 +1,7 @@
-import type { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { getAuth } from "@clerk/express";
 import { and, eq, isNull } from "drizzle-orm";
-import { db, projectsTable } from "@workspace/db";
+import { db, projectsTable, orgMembersTable } from "@workspace/db";
 import { logger } from "./logger";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,4 +115,76 @@ export async function requireProjectOwnership(
     return;
   }
   next();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// requireProjectAccess(minRole)
+//
+// Grants access when the requester is either:
+//   1. The direct project owner (legacy solo-user case — fully preserved), OR
+//   2. A member of the project's organization with role >= minRole.
+//
+// Role hierarchy (ascending): viewer < member < admin < owner.
+//
+// Use "viewer" for read-only GETs, "member" for content mutations, "admin"
+// for sensitive settings, and the legacy `requireProjectOwnership` (or
+// "owner") for destructive/ownership-transfer routes.
+// ─────────────────────────────────────────────────────────────────────────────
+export type ProjectRole = "viewer" | "member" | "admin" | "owner";
+
+const ROLE_RANK: Record<ProjectRole, number> = {
+  viewer: 1,
+  member: 2,
+  admin: 3,
+  owner: 4,
+};
+
+function roleMeets(actual: string, minimum: ProjectRole): boolean {
+  const actualRank = ROLE_RANK[actual as ProjectRole] ?? 0;
+  return actualRank >= ROLE_RANK[minimum];
+}
+
+export function requireProjectAccess(minRole: ProjectRole = "viewer"): RequestHandler {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.userId) {
+      res.status(401).json({ error: "Unauthenticated" });
+      return;
+    }
+    const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const projectId = parseInt(rawId ?? "", 10);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+    const [project] = await db
+      .select()
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    // Direct project owner always has full access — preserves solo-user behaviour.
+    if (project.ownerId === req.userId) {
+      next();
+      return;
+    }
+    // Otherwise, check org membership when the project is org-scoped.
+    if (project.organizationId != null) {
+      const [member] = await db
+        .select({ role: orgMembersTable.role })
+        .from(orgMembersTable)
+        .where(
+          and(
+            eq(orgMembersTable.organizationId, project.organizationId),
+            eq(orgMembersTable.userId, req.userId),
+          ),
+        );
+      if (member && roleMeets(member.role, minRole)) {
+        next();
+        return;
+      }
+    }
+    res.status(403).json({ error: "You do not have access to this project" });
+  };
 }

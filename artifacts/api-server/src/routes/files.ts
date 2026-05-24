@@ -1,7 +1,13 @@
 import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
-import { db, projectFilesTable, projectsTable, projectVersionsTable } from "@workspace/db";
-import { requireProjectOwnership } from "../lib/auth";
+import {
+  db,
+  projectFilesTable,
+  projectsTable,
+  projectVersionsTable,
+  orgMembersTable,
+} from "@workspace/db";
+import { requireProjectAccess } from "../lib/auth";
 import { guessMime } from "../lib/builder";
 import { isBinaryMime } from "../lib/binary-mime";
 import { injectBridge, MOCK_FLAG_SCRIPT } from "../lib/consoleBridge";
@@ -15,7 +21,7 @@ import { readDiagnostics } from "../lib/agent-senses";
 
 const router: IRouter = Router();
 
-router.get("/projects/:id/files", requireProjectOwnership, async (req, res): Promise<void> => {
+router.get("/projects/:id/files", requireProjectAccess("viewer"), async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
   // Optional artifactId filter (Task #544). Omitted = return every file in the
   // project regardless of artifact, preserving legacy single-artifact behaviour.
@@ -54,7 +60,7 @@ router.get("/projects/:id/files", requireProjectOwnership, async (req, res): Pro
 // Used by the WebContainer boot sequence to populate the virtual FS efficiently.
 router.get(
   "/projects/:id/files/all-content",
-  requireProjectOwnership,
+  requireProjectAccess("viewer"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const rows = await db
@@ -75,7 +81,7 @@ router.get(
 
 router.get(
   "/projects/:id/files/search",
-  requireProjectOwnership,
+  requireProjectAccess("viewer"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
@@ -121,7 +127,7 @@ router.get(
   },
 );
 
-router.post("/projects/:id/files", requireProjectOwnership, async (req, res): Promise<void> => {
+router.post("/projects/:id/files", requireProjectAccess("member"), async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
   const { path: filePath, content = "" } = req.body as {
     path?: unknown;
@@ -196,7 +202,7 @@ router.post("/projects/:id/files", requireProjectOwnership, async (req, res): Pr
 
 router.get(
   "/projects/:id/files/:fileId",
-  requireProjectOwnership,
+  requireProjectAccess("viewer"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const fileId = Number(req.params.fileId);
@@ -224,7 +230,7 @@ router.get(
 
 router.patch(
   "/projects/:id/files/:fileId",
-  requireProjectOwnership,
+  requireProjectAccess("member"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const fileId = Number(req.params.fileId);
@@ -290,7 +296,7 @@ router.patch(
 
 router.delete(
   "/projects/:id/files/:fileId",
-  requireProjectOwnership,
+  requireProjectAccess("member"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const fileId = Number(req.params.fileId);
@@ -315,7 +321,7 @@ router.delete(
 
 router.patch(
   "/projects/:id/files/:fileId/rename",
-  requireProjectOwnership,
+  requireProjectAccess("member"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const fileId = Number(req.params.fileId);
@@ -379,7 +385,7 @@ router.patch(
 // frontend applies the edit through Monaco so the user can save (or undo).
 router.post(
   "/projects/:id/files/:fileId/eslint-fix",
-  requireProjectOwnership,
+  requireProjectAccess("member"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const fileId = Number(req.params.fileId);
@@ -414,7 +420,7 @@ router.post(
 // Returns a per-file summary so the UI can show what changed.
 router.post(
   "/projects/:id/eslint-fix-all",
-  requireProjectOwnership,
+  requireProjectAccess("member"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     if (!Number.isFinite(projectId)) {
@@ -467,7 +473,7 @@ router.post(
 // Returns ok=false with an explanation when no container is running.
 router.post(
   "/projects/:id/files/:fileId/diagnostics",
-  requireProjectOwnership,
+  requireProjectAccess("member"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const fileId = Number(req.params.fileId);
@@ -532,7 +538,7 @@ router.post(
 
 router.get(
   "/projects/:id/files/:fileId/raw",
-  requireProjectOwnership,
+  requireProjectAccess("viewer"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const fileId = Number(req.params.fileId);
@@ -565,7 +571,12 @@ router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => 
 
   // Resolve the project so we can check its publish status and ownership
   const [project] = await db
-    .select({ id: projectsTable.id, status: projectsTable.status, ownerId: projectsTable.ownerId })
+    .select({
+      id: projectsTable.id,
+      status: projectsTable.status,
+      ownerId: projectsTable.ownerId,
+      organizationId: projectsTable.organizationId,
+    })
     .from(projectsTable)
     .where(eq(projectsTable.id, projectId));
 
@@ -579,14 +590,28 @@ router.get("/projects/:id/preview/{*splat}", async (req, res): Promise<void> => 
     return;
   }
 
-  // Only published projects are publicly accessible.
-  // All other statuses require the caller to own the project.
+  // Only published projects are publicly accessible. All other statuses
+  // require the caller to either own the project directly OR be a member
+  // of the project's organization (any role — viewers can preview).
   if (project.status !== "published") {
     if (!req.userId) {
       res.status(401).json({ error: "Unauthenticated" });
       return;
     }
-    if (project.ownerId !== req.userId) {
+    let allowed = project.ownerId === req.userId;
+    if (!allowed && project.organizationId != null) {
+      const [member] = await db
+        .select({ role: orgMembersTable.role })
+        .from(orgMembersTable)
+        .where(
+          and(
+            eq(orgMembersTable.organizationId, project.organizationId),
+            eq(orgMembersTable.userId, req.userId),
+          ),
+        );
+      allowed = !!member;
+    }
+    if (!allowed) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }

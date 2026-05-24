@@ -7,7 +7,7 @@ import {
   chatMessagesTable,
   agentTasksTable,
 } from "@workspace/db";
-import { requireProjectOwnership } from "../lib/auth";
+import { requireProjectOwnership, requireProjectAccess } from "../lib/auth";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -1230,7 +1230,7 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
   res.json(GetProjectResponse.parse(project));
 });
 
-router.get("/projects/:id", requireProjectOwnership, async (req, res): Promise<void> => {
+router.get("/projects/:id", requireProjectAccess("viewer"), async (req, res): Promise<void> => {
   const params = GetProjectParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -1252,7 +1252,7 @@ router.get("/projects/:id", requireProjectOwnership, async (req, res): Promise<v
   res.json({ ...parsed, healthScore });
 });
 
-router.patch("/projects/:id", requireProjectOwnership, async (req, res): Promise<void> => {
+router.patch("/projects/:id", requireProjectAccess("member"), async (req, res): Promise<void> => {
   const params = UpdateProjectParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -1325,7 +1325,7 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
 // Used by the frontend composer to show a live "Recommended: X Agent" badge.
 router.get(
   "/projects/:id/agent-routing",
-  requireProjectOwnership,
+  requireProjectAccess("viewer"),
   async (req, res): Promise<void> => {
     const params = GetAgentRoutingParams.safeParse(req.params);
     if (!params.success) {

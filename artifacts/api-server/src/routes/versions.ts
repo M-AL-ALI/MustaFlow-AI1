@@ -20,7 +20,7 @@ import {
   PatchVersionParams,
   PatchVersionBody,
 } from "@workspace/api-zod";
-import { requireProjectOwnership } from "../lib/auth";
+import { requireProjectAccess } from "../lib/auth";
 import { guessMime } from "../lib/builder";
 import { isBinaryMime } from "../lib/binary-mime";
 import { injectBridge } from "../lib/consoleBridge";
@@ -44,7 +44,7 @@ async function emitRollbackEvent(
   }
 }
 
-router.get("/projects/:id/versions", requireProjectOwnership, async (req, res): Promise<void> => {
+router.get("/projects/:id/versions", requireProjectAccess("viewer"), async (req, res): Promise<void> => {
   const params = ListVersionsParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -69,7 +69,7 @@ router.get("/projects/:id/versions", requireProjectOwnership, async (req, res): 
 
 router.patch(
   "/projects/:id/versions/:versionId",
-  requireProjectOwnership,
+  requireProjectAccess("member"),
   async (req, res): Promise<void> => {
     const params = PatchVersionParams.safeParse(req.params);
     if (!params.success) {
@@ -119,7 +119,7 @@ router.patch(
   },
 );
 
-router.post("/projects/:id/versions", requireProjectOwnership, async (req, res): Promise<void> => {
+router.post("/projects/:id/versions", requireProjectAccess("member"), async (req, res): Promise<void> => {
   const params = CreateVersionParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -161,7 +161,7 @@ router.post("/projects/:id/versions", requireProjectOwnership, async (req, res):
 
 router.get(
   "/projects/:id/versions/:versionId",
-  requireProjectOwnership,
+  requireProjectAccess("viewer"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const versionId = Number(req.params.versionId);
@@ -192,7 +192,7 @@ router.get(
 // Auth-checked: caller must own the project.
 router.get(
   "/projects/:id/versions/:versionId/preview/{*splat}",
-  requireProjectOwnership,
+  requireProjectAccess("viewer"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const versionId = Number(req.params.versionId);
@@ -252,7 +252,7 @@ router.get(
 
 router.post(
   "/projects/:id/versions/:versionId/rollback",
-  requireProjectOwnership,
+  requireProjectAccess("member"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const versionId = Number(req.params.versionId);
