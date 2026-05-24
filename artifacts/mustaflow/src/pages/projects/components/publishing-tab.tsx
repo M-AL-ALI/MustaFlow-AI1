@@ -2207,6 +2207,512 @@ function BuildLogViewer({
   );
 }
 
+// ── SigningFileUpload ──────────────────────────────────────────────────────────
+// Allows users to upload native signing credentials (P12 + provisioning profile
+// for iOS, keystore for Android) directly in the publishing tab. Files are
+// base64-encoded client-side before being sent to POST /signing/ios|android.
+
+type SigningStatus = {
+  ios: { hasP12: boolean; hasProvisioning: boolean; hasTeamId: boolean; configured: boolean };
+  android: { hasKeystore: boolean; hasAlias: boolean; configured: boolean };
+} | null;
+
+function SigningFileUpload({
+  projectId,
+  platform,
+  signingStatus,
+  onSaved,
+}: {
+  projectId: number;
+  platform: "ios" | "android";
+  signingStatus: SigningStatus;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  // iOS state
+  const [p12File, setP12File] = useState<string | null>(null);
+  const [p12Password, setP12Password] = useState("");
+  const [provisionFile, setProvisionFile] = useState<string | null>(null);
+  const [teamId, setTeamId] = useState("");
+
+  // Android state
+  const [keystoreFile, setKeystoreFile] = useState<string | null>(null);
+  const [ksPassword, setKsPassword] = useState("");
+  const [keyAlias, setKeyAlias] = useState("");
+  const [keyPassword, setKeyPassword] = useState("");
+
+  const status = platform === "ios" ? signingStatus?.ios : signingStatus?.android;
+  const isConfigured = status?.configured ?? false;
+
+  function readFileAsBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Strip the data URL prefix if present
+        const base64 = result.includes(",") ? (result.split(",")[1] ?? result) : result;
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleIosFile(e: React.ChangeEvent<HTMLInputElement>, kind: "p12" | "provision") {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const b64 = await readFileAsBase64(file);
+      if (kind === "p12") setP12File(b64);
+      else setProvisionFile(b64);
+    } catch {
+      setError("Failed to read file");
+    }
+  }
+
+  async function handleAndroidFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const b64 = await readFileAsBase64(file);
+      setKeystoreFile(b64);
+    } catch {
+      setError("Failed to read file");
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    setSuccess(false);
+    try {
+      let body: Record<string, string>;
+      if (platform === "ios") {
+        if (!p12File) {
+          setError("Select a P12 certificate file");
+          setSaving(false);
+          return;
+        }
+        if (!provisionFile) {
+          setError("Select a provisioning profile file");
+          setSaving(false);
+          return;
+        }
+        body = { p12Base64: p12File, p12Password, provisioningProfileBase64: provisionFile };
+        if (teamId.trim()) body.teamId = teamId.trim();
+      } else {
+        if (!keystoreFile) {
+          setError("Select a keystore file");
+          setSaving(false);
+          return;
+        }
+        if (!ksPassword) {
+          setError("Keystore password is required");
+          setSaving(false);
+          return;
+        }
+        if (!keyAlias) {
+          setError("Key alias is required");
+          setSaving(false);
+          return;
+        }
+        body = {
+          keystoreBase64: keystoreFile,
+          keystorePassword: ksPassword,
+          keyAlias,
+          keyPassword,
+        };
+      }
+
+      const res = await fetch(`/api/projects/${projectId}/signing/${platform}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      setSuccess(true);
+      setOpen(false);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemove() {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/signing/${platform}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Remove failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const platformLabel = platform === "ios" ? "iOS" : "Android";
+
+  return (
+    <div className="border border-border rounded-xl overflow-hidden bg-card">
+      <div className="flex items-center px-4 py-2.5">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex-1 flex items-center gap-2 text-left hover:opacity-80 transition-opacity"
+          aria-expanded={open}
+        >
+          <KeyRound className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-xs font-semibold">Signing Credentials</span>
+          {isConfigured ? (
+            <span className="text-[10px] bg-green-500/15 text-green-500 px-1.5 py-0.5 rounded font-medium">
+              Uploaded
+            </span>
+          ) : (
+            <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
+              Not uploaded
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          aria-expanded={open}
+        >
+          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-3">
+          {error && (
+            <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div className="text-xs text-green-600 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2 flex items-center gap-2">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              {platformLabel} signing credentials saved securely.
+            </div>
+          )}
+
+          {platform === "ios" ? (
+            <div className="space-y-3">
+              <p className="text-[11px] text-muted-foreground">
+                Upload your Apple Distribution certificate (.p12) and provisioning profile
+                (.mobileprovision) so EAS can sign your IPA without leaving MustaFlow.
+              </p>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Distribution Certificate (.p12)
+                </span>
+                <input
+                  type="file"
+                  accept=".p12,.pfx"
+                  onChange={(e) => void handleIosFile(e, "p12")}
+                  className="block w-full text-xs text-muted-foreground file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-muted file:text-foreground hover:file:bg-muted/80"
+                />
+                {p12File && (
+                  <span className="text-[10px] text-green-500 flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" /> File loaded
+                  </span>
+                )}
+              </label>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Certificate Password
+                </span>
+                <input
+                  type="password"
+                  value={p12Password}
+                  onChange={(e) => setP12Password(e.target.value)}
+                  placeholder="Leave blank if no password"
+                  className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Provisioning Profile (.mobileprovision)
+                </span>
+                <input
+                  type="file"
+                  accept=".mobileprovision"
+                  onChange={(e) => void handleIosFile(e, "provision")}
+                  className="block w-full text-xs text-muted-foreground file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-muted file:text-foreground hover:file:bg-muted/80"
+                />
+                {provisionFile && (
+                  <span className="text-[10px] text-green-500 flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" /> File loaded
+                  </span>
+                )}
+              </label>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Team ID (optional)
+                </span>
+                <input
+                  type="text"
+                  value={teamId}
+                  onChange={(e) => setTeamId(e.target.value)}
+                  placeholder="ABCD1234EF"
+                  maxLength={10}
+                  className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs font-mono"
+                />
+              </label>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-[11px] text-muted-foreground">
+                Upload your Android keystore file so EAS can sign your AAB/APK. The keystore is
+                stored encrypted and never returned.
+              </p>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Keystore File (.jks / .keystore)
+                </span>
+                <input
+                  type="file"
+                  accept=".jks,.keystore"
+                  onChange={(e) => void handleAndroidFile(e)}
+                  className="block w-full text-xs text-muted-foreground file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-muted file:text-foreground hover:file:bg-muted/80"
+                />
+                {keystoreFile && (
+                  <span className="text-[10px] text-green-500 flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" /> File loaded
+                  </span>
+                )}
+              </label>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Keystore Password
+                </span>
+                <input
+                  type="password"
+                  value={ksPassword}
+                  onChange={(e) => setKsPassword(e.target.value)}
+                  placeholder="Keystore password"
+                  className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Key Alias
+                </span>
+                <input
+                  type="text"
+                  value={keyAlias}
+                  onChange={(e) => setKeyAlias(e.target.value)}
+                  placeholder="e.g. my-release-key"
+                  className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs font-mono"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Key Password (if different from keystore)
+                </span>
+                <input
+                  type="password"
+                  value={keyPassword}
+                  onChange={(e) => setKeyPassword(e.target.value)}
+                  placeholder="Leave blank to use keystore password"
+                  className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs"
+                />
+              </label>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              size="sm"
+              onClick={() => void handleSave()}
+              disabled={saving}
+              className="flex-1"
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+              ) : (
+                <Save className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              {saving ? "Saving…" : "Save credentials"}
+            </Button>
+            {isConfigured && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleRemove()}
+                disabled={saving}
+                className="shrink-0 text-destructive hover:text-destructive"
+              >
+                Remove
+              </Button>
+            )}
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Credentials are AES-256 encrypted at rest. Raw values are never returned by the API.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── MobileSetupGuide ──────────────────────────────────────────────────────────
+// Expandable step-by-step guide for Apple / Google store setup, linked from
+// the iOS and Android publishing tabs.
+
+function MobileSetupGuide({ platform }: { platform: "ios" | "android" }) {
+  const [open, setOpen] = useState(false);
+
+  const iosSteps = [
+    {
+      title: "1. Enroll in Apple Developer Program",
+      body: "Go to developer.apple.com and enroll as an Individual ($99/yr) or Organization. You'll need a D‑U‑N‑S number for organizations. Approval takes 1–2 business days.",
+      link: {
+        label: "Apple Developer enrollment",
+        href: "https://developer.apple.com/programs/enroll/",
+      },
+    },
+    {
+      title: "2. Create an App ID and Bundle Identifier",
+      body: "In the Developer portal under Identifiers, create a new App ID with your reverse-domain bundle identifier (e.g. com.yourco.appname). Enable any capabilities you need (Push Notifications, Sign in with Apple, etc.).",
+      link: {
+        label: "Identifiers in Apple Developer portal",
+        href: "https://developer.apple.com/account/resources/identifiers/list",
+      },
+    },
+    {
+      title: "3. Generate a Distribution Certificate",
+      body: "In Certificates, create an Apple Distribution certificate. You'll generate a Certificate Signing Request (CSR) via Keychain Access on Mac. Download the .cer and export it as a .p12 file with a password. Upload the .p12 here in the Signing Credentials section above.",
+    },
+    {
+      title: "4. Create a Provisioning Profile",
+      body: "Under Profiles, create an App Store Distribution profile linked to your App ID and Distribution certificate. Download the .mobileprovision file and upload it here.",
+      link: {
+        label: "Provisioning Profiles",
+        href: "https://developer.apple.com/account/resources/profiles/list",
+      },
+    },
+    {
+      title: "5. Create an App in App Store Connect",
+      body: "Go to App Store Connect and create a new app. Set the Bundle ID to match what's in your app.json. Add your app name, primary language, and category.",
+      link: { label: "App Store Connect", href: "https://appstoreconnect.apple.com/apps" },
+    },
+    {
+      title: "6. Generate an App Store Connect API Key",
+      body: "In App Store Connect → Users and Access → Keys, create a new API key with App Manager role. Save the Key ID, Issuer ID, and download the .p8 private key. Add these as APPLE_ASC_KEY_ID, APPLE_ASC_ISSUER_ID, and APPLE_ASC_PRIVATE_KEY in the EAS Credentials section.",
+    },
+    {
+      title: "7. Trigger an EAS Build and Upload to TestFlight",
+      body: "Add your EAS_ACCESS_TOKEN in the EAS Credentials section and click 'Build for iOS'. Once the build finishes, EAS will automatically upload the IPA to TestFlight. Invite testers from App Store Connect → TestFlight → Internal Testing.",
+    },
+    {
+      title: "8. Submit for App Store Review",
+      body: "Once testing is complete, go to App Store Connect, add required metadata (screenshots, description, privacy policy URL), set the build from TestFlight, and submit for review. Review typically takes 1–3 business days.",
+    },
+  ];
+
+  const androidSteps = [
+    {
+      title: "1. Create a Google Play Developer Account",
+      body: "Go to play.google.com/console and pay the $25 one-time registration fee. Verification takes 2–3 business days.",
+      link: {
+        label: "Google Play Console sign-up",
+        href: "https://play.google.com/console/signup",
+      },
+    },
+    {
+      title: "2. Create a New Application",
+      body: "In the Play Console, click 'Create app'. Set the app name, default language, and whether it's an app or game. Accept the declarations. Your package name (from app.json android.package) cannot be changed after first submission.",
+    },
+    {
+      title: "3. Generate an Upload Keystore",
+      body: "Generate a keystore using keytool: `keytool -genkeypair -v -storetype PKCS12 -keystore my-release-key.keystore -alias my-key-alias -keyalg RSA -keysize 2048 -validity 10000`. Upload the .keystore file and its credentials in the Signing Credentials section above.",
+    },
+    {
+      title: "4. Create a Google Play Service Account",
+      body: "In Google Play Console → Setup → API access, link to a Google Cloud project and create a Service Account with 'Release manager' role. Download the JSON key file and add it as GOOGLE_SERVICE_ACCOUNT_JSON in the EAS Credentials section.",
+      link: { label: "Google Play API access", href: "https://play.google.com/console/api-access" },
+    },
+    {
+      title: "5. Trigger an EAS Build",
+      body: "Add your EAS_ACCESS_TOKEN and click 'Build for Android'. EAS will produce a signed AAB (Android App Bundle). Once complete, download the AAB from the build logs.",
+    },
+    {
+      title: "6. Upload to Internal Testing Track",
+      body: "In Google Play Console → Testing → Internal testing, create a new release and upload your AAB. Add testers by email. Internal testing releases are available within minutes of upload.",
+    },
+    {
+      title: "7. Promote to Production",
+      body: "After collecting feedback, promote through Closed → Open testing → Production in the Play Console. Production releases are reviewed by Google (1–7 days) before going live.",
+    },
+  ];
+
+  const steps = platform === "ios" ? iosSteps : androidSteps;
+  const platformLabel = platform === "ios" ? "iOS (App Store)" : "Android (Google Play)";
+
+  return (
+    <div className="border border-border rounded-xl overflow-hidden bg-card">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+        aria-expanded={open}
+      >
+        <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold">{platformLabel} Setup Guide</p>
+          <p className="text-xs text-muted-foreground">
+            Step-by-step: enrollment, signing, {platform === "ios" ? "TestFlight" : "Play Console"},
+            and submission
+          </p>
+        </div>
+        {open ? (
+          <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+        )}
+      </button>
+
+      {open && (
+        <div className="border-t border-border divide-y divide-border/50">
+          {steps.map((step, idx) => (
+            <div key={idx} className="px-4 py-3 space-y-1">
+              <p className="text-xs font-semibold text-foreground">{step.title}</p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">{step.body}</p>
+              {step.link && (
+                <a
+                  href={step.link.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                >
+                  {step.link.label} <ArrowUpRight className="h-3 w-3" />
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MobileBuildStatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { label: string; className: string; spin?: boolean }> = {
     queued: { label: "Queued", className: "bg-muted text-muted-foreground border-border" },
@@ -2733,6 +3239,21 @@ export function PublishingTab({
   // Expandable credentials panels
   const [iosCredsOpen, setIosCredsOpen] = useState(true);
   const [androidCredsOpen, setAndroidCredsOpen] = useState(true);
+
+  // Signing key status (whether P12, provisioning profile, keystore are uploaded)
+  const [signingStatus, setSigningStatus] = useState<SigningStatus>(null);
+  const fetchSigningStatus = useCallback(async () => {
+    if (!isMobile) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/signing`, { credentials: "include" });
+      if (res.ok) {
+        const data = (await res.json()) as SigningStatus;
+        setSigningStatus(data);
+      }
+    } catch {
+      // non-fatal — signing status is informational only
+    }
+  }, [isMobile, projectId]);
 
   // Credit balance for low-credit warning near EAS build buttons
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
@@ -3490,6 +4011,11 @@ export function PublishingTab({
       setSavingSecurityGate(false);
     }
   };
+
+  // Fetch signing key status when the mobile tab is active
+  useEffect(() => {
+    void fetchSigningStatus();
+  }, [fetchSigningStatus]);
 
   // Fetch secrets list for credentials checklist; re-fetch when the tab
   // becomes visible again so stale badge states are cleared automatically.
@@ -5743,6 +6269,12 @@ export function PublishingTab({
                   {buildError && platform === "ios" && (
                     <p className="text-xs text-destructive">{buildError}</p>
                   )}
+                  <SigningFileUpload
+                    projectId={projectId}
+                    platform="ios"
+                    signingStatus={signingStatus}
+                    onSaved={() => void fetchSigningStatus()}
+                  />
                   {creditBalance !== null && creditBalance < EAS_BUILD_COST && (
                     <div className="flex items-center gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2.5">
                       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
@@ -5956,6 +6488,9 @@ export function PublishingTab({
                 Store Connect.
               </p>
             </div>
+
+            {/* iOS setup guide */}
+            <MobileSetupGuide platform="ios" />
           </div>
         )}
 
@@ -6157,6 +6692,12 @@ export function PublishingTab({
                   {buildError && platform === "android" && (
                     <p className="text-xs text-destructive">{buildError}</p>
                   )}
+                  <SigningFileUpload
+                    projectId={projectId}
+                    platform="android"
+                    signingStatus={signingStatus}
+                    onSaved={() => void fetchSigningStatus()}
+                  />
                   {creditBalance !== null && creditBalance < EAS_BUILD_COST && (
                     <div className="flex items-center gap-2 text-xs text-yellow-600 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2.5">
                       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
@@ -6374,6 +6915,9 @@ export function PublishingTab({
                 Google Play Console.
               </p>
             </div>
+
+            {/* Android setup guide */}
+            <MobileSetupGuide platform="android" />
           </div>
         )}
       </div>

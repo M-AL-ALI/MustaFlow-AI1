@@ -266,4 +266,38 @@ export const TEMPLATES: TemplateDefinition[] = [
     seedPrompt:
       "Build an Expo React Native subscription SaaS app. Include tab navigation: Home, Features, Account. The Home screen shows a hero with app value proposition, 3 feature preview cards (blurred/locked for non-subscribers), and a prominent Subscribe CTA button. The Features screen shows gated premium features (blurred overlays on locked items) with an upgrade prompt at the top for free users and full access for subscribers. Include a Paywall modal/screen with 3 plan cards (Monthly $9.99, Annual $79.99 with 'Best Value' badge, Lifetime $149.99), feature list with checkmarks, restore purchases link, and terms/privacy links. The Account screen shows subscription status badge (Free/Pro/Premium), billing info, manage subscription, and sign out. Include a Settings screen with notifications toggles, theme selector, and help. Use NativeWind, Expo Router, and mock subscription state.",
   },
+
+  // ── Native feature templates ───────────────────────────────────────────────
+  {
+    id: "mobile-push-notifications",
+    title: "Push Notifications",
+    description:
+      "Expo app with push notification opt-in, permission flow, and notification history",
+    category: "Mobile",
+    icon: "Bell",
+    projectKind: "mobile-cross",
+    seedPrompt:
+      "Build a complete Expo React Native push notifications demo app using expo-notifications and expo-device. Include: (1) A Notifications Home screen with a permission banner — if notifications are not granted, show an 'Enable Notifications' card with a shield icon and a button that calls Notifications.requestPermissionsAsync(); if granted, show a green 'Notifications enabled' badge. (2) A notification history list (mock data: 5 past notifications with icon, title, body, and relative timestamp). (3) A 'Send Test' button that schedules a local notification in 3 seconds using Notifications.scheduleNotificationAsync(). (4) A Settings screen with a Notifications section: allow_alerts toggle, allow_badges toggle, allow_sounds toggle (all stored in AsyncStorage). (5) Show the push token in a copyable text field in Settings for debugging. Handle both foreground and background notification receipt: use a useNotifications() custom hook that sets up addNotificationReceivedListener and addNotificationResponseReceivedListener. For iOS/Android permission differences, show a platform-appropriate message if permission is denied. Use Expo Router for navigation, NativeWind for styling, and TypeScript throughout. Include app.json with the correct expo-notifications plugin config.",
+  },
+  {
+    id: "mobile-deep-linking",
+    title: "Deep Linking",
+    description:
+      "Expo app with universal links, shared link handling, and referral flows via Expo Router",
+    category: "Mobile",
+    icon: "Link",
+    projectKind: "mobile-cross",
+    seedPrompt:
+      "Build an Expo React Native deep linking demo app using Expo Router v3 universal links and expo-linking. Include: (1) A Home screen that shows the last received deep link URL in a highlighted card (use Linking.getInitialURL() and Linking.addEventListener). (2) A 'Link Tester' screen with an input field where users can type a deep link path (e.g. /profile/123 or /invite?code=ABC) and a 'Simulate' button that calls router.push() with that path. (3) A Profile screen at app/(tabs)/profile/[id].tsx that reads useLocalSearchParams() to display a user profile card with id, name (mock), avatar placeholder, and a 'Invite a friend' button that calls Share.share() with a deep link URL. (4) An Invite screen at app/invite.tsx that reads a 'code' query param from the URL and shows a referral welcome card: 'You were invited with code [code]' with a Claim Reward button. (5) A Settings screen showing: scheme (from app.json), host, and a list of example deep link patterns with copy buttons. Configure app.json with scheme: 'myapp', intentFilters for Android, and associatedDomains for iOS (commented example). Use expo-constants for the app slug. Use NativeWind, Expo Router file-based routing, TypeScript, and include all required app.json config.",
+  },
+  {
+    id: "mobile-iap-revenuecat",
+    title: "In-App Purchases",
+    description: "Expo app with RevenueCat paywall, subscription plans, and entitlement checks",
+    category: "Mobile",
+    icon: "ShoppingCart",
+    projectKind: "mobile-cross",
+    seedPrompt:
+      "Build a complete Expo React Native in-app purchases app using the RevenueCat Purchases React Native SDK (@revenuecat/purchases-react-native). Include: (1) An initialization setup in app/_layout.tsx that calls Purchases.configure({ apiKey: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY ?? '' }) on mount — fall back gracefully when the key is not set by showing a setup prompt instead of crashing. (2) A Paywall screen (app/paywall.tsx) that calls Purchases.getOfferings() and renders the 'default' offering's packages. Show 3 plan cards: Monthly, Annual (with 'Best Value' badge), and Lifetime — each with price from the StoreProduct, a feature checklist (5 items), and a 'Subscribe' button that calls Purchases.purchasePackage(). Handle PurchasesError codes: USER_CANCELLED silently, PRODUCT_ALREADY_PURCHASED shows 'Already subscribed', other errors show a toast. Include a 'Restore Purchases' button that calls Purchases.restorePurchases(). (3) A Home screen that calls Purchases.getCustomerInfo() and shows entitlement status: 'Pro' badge if 'pro_access' entitlement is active, or a 'Upgrade to Pro' button that opens the Paywall screen. (4) A subscription status card showing: plan name, renewal date (from CustomerInfo.activeSubscriptions), and a 'Manage Subscription' button that opens the platform store. (5) An Account screen with CustomerInfo details: userId, activeEntitlements list, and sign-out. Add EXPO_PUBLIC_REVENUECAT_API_KEY to a .env.example file with instructions. Use NativeWind, Expo Router, TypeScript, and include all required package.json dependencies. Note: RevenueCat requires a real device for production — the app should show a 'Simulated mode' banner in the web preview.",
+  },
 ];
