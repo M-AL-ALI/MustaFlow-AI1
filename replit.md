@@ -30,6 +30,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **Managed Redis**: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
 - **Knowledge Vault tuning**: `KNOWLEDGE_RETRIEVAL_ENABLED` (default `true`), `KNOWLEDGE_TOKEN_BUDGET` (default `2400`)
 - **Containers (Fly.io)**: `FLY_API_TOKEN`, `FLY_APP_NAME`, `FLY_ORG_SLUG`, `FLY_REGION`
+- **Container log retention** (Task #750): `CONTAINER_LOG_RETENTION_DAYS` (default `14`), `CONTAINER_LOG_MAX_ROWS_PER_PROJECT` (default `10000`). A scheduler in `artifacts/api-server/src/lib/container-log-retention.ts` runs ~1 min after boot and every 6 h, deleting `container_logs` rows older than the retention window and trimming each project to the row cap so long-lived agentic projects don't grow the table forever.
 - **Platform domain**: `PLATFORM_DOMAIN` (default `mustaflow.app`), `PLATFORM_CNAME_TARGET` (default `hosted.mustaflow.app`)
 - **Admin bootstrap**: `ADMIN_USER_IDS` (comma-separated Clerk user IDs)
 

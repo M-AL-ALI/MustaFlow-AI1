@@ -12,6 +12,7 @@ import { startCveScheduler } from "./lib/cve-scheduler";
 import { failStuckBackgroundTasksOnBoot } from "./lib/jobs";
 import { resumeStuckProvisioningOnBoot } from "./lib/provisioning";
 import { resumeContainerLogTailersOnBoot } from "./lib/container-logs";
+import { startContainerLogRetentionScheduler } from "./lib/container-log-retention";
 import { handleLivePreviewUpgrade, matchPreviewPath } from "./lib/livePreviewProxy";
 
 const execFileAsync = promisify(execFile);
@@ -58,6 +59,10 @@ void resumeStuckProvisioningOnBoot();
 // already has a containerId, so the workspace Logs tab gets a live feed
 // across server restarts.
 void resumeContainerLogTailersOnBoot();
+// Task #750 — periodically trim `container_logs` so long-lived agentic
+// projects don't grow the table without bound. Caps by age (default 14 days)
+// and by per-project row count (default 10k).
+startContainerLogRetentionScheduler();
 
 // Create an HTTP server so we can attach WebSocket upgrade handlers alongside Express.
 const server = createServer(app);
