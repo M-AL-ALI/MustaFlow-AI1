@@ -58,6 +58,9 @@ interface RoleGrant {
   grantedBy: string;
   createdAt: string;
   updatedAt: string;
+  email?: string | null;
+  displayName?: string | null;
+  imageUrl?: string | null;
 }
 
 interface ProjectSummary {
@@ -548,31 +551,39 @@ function RolesPanel({
   workspaceId: string;
 }) {
   const { toast } = useToast();
-  const [userId, setUserId] = useState("");
+  const [email, setEmail] = useState("");
   const [role, setRole] = useState<"viewer" | "editor" | "owner">("viewer");
   const [submitting, setSubmitting] = useState(false);
 
   async function grant(e: React.FormEvent) {
     e.preventDefault();
-    if (!userId.trim()) return;
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    if (!trimmed.includes("@")) {
+      toast({
+        title: "Enter a valid email address",
+        variant: "destructive",
+      });
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await fetch(`/api/workspaces/${workspaceId}/domains/${domain.id}/roles`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ userId: userId.trim(), role }),
+        body: JSON.stringify({ email: trimmed, role }),
       });
       const body = (await res.json().catch(() => ({}))) as {
         error?: string;
         upgradeMessage?: string;
       };
       if (!res.ok) throw new Error(body.error ?? body.upgradeMessage ?? `HTTP ${res.status}`);
-      toast({ title: "Role granted" });
-      setUserId("");
+      toast({ title: "Teammate added", description: trimmed });
+      setEmail("");
       onChange();
     } catch (err) {
       toast({
-        title: "Failed to grant role",
+        title: "Couldn't add teammate",
         description: err instanceof Error ? err.message : "Unknown error",
         variant: "destructive",
       });
@@ -581,8 +592,8 @@ function RolesPanel({
     }
   }
 
-  async function revoke(targetUserId: string) {
-    if (!window.confirm(`Revoke access for ${targetUserId}?`)) return;
+  async function revoke(targetUserId: string, label: string) {
+    if (!window.confirm(`Revoke access for ${label}?`)) return;
     try {
       const res = await fetch(
         `/api/workspaces/${workspaceId}/domains/${domain.id}/roles/${encodeURIComponent(targetUserId)}`,
@@ -607,10 +618,11 @@ function RolesPanel({
       </div>
       <form onSubmit={grant} className="flex items-stretch gap-2 mb-3">
         <input
-          type="text"
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
-          placeholder="User ID (e.g. user_2abc…)"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="teammate@example.com"
+          autoComplete="email"
           disabled={submitting}
           className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-blue-500 disabled:opacity-50"
         />
@@ -626,33 +638,60 @@ function RolesPanel({
         </select>
         <button
           type="submit"
-          disabled={submitting || !userId.trim()}
+          disabled={submitting || !email.trim()}
           className="px-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-medium transition-colors"
         >
-          Grant
+          {submitting ? "Adding…" : "Add"}
         </button>
       </form>
+      <p className="text-[11px] text-neutral-500 mb-3">
+        Teammates must have signed in to this workspace at least once. If they haven't, ask them to
+        visit the sign-in page first, then add them here.
+      </p>
       {roles === undefined ? (
         <div className="text-xs text-neutral-500">Loading…</div>
       ) : roles.length === 0 ? (
         <div className="text-xs text-neutral-500">No teammates have access yet.</div>
       ) : (
         <div className="divide-y divide-neutral-800 border border-neutral-800 rounded-lg overflow-hidden">
-          {roles.map((r) => (
-            <div key={r.id} className="flex items-center gap-3 px-3 py-2 bg-neutral-900/40">
-              <div className="flex-1 font-mono text-xs text-neutral-200 truncate">{r.userId}</div>
-              <span className="px-2 py-0.5 rounded-full text-[10px] bg-neutral-800 text-neutral-300 border border-neutral-700 uppercase tracking-wider">
-                {r.role}
-              </span>
-              <button
-                onClick={() => void revoke(r.userId)}
-                title="Revoke"
-                className="p-1 text-neutral-500 hover:text-red-400 transition-colors"
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
+          {roles.map((r) => {
+            const primary = r.displayName ?? r.email ?? r.userId;
+            const secondary =
+              r.displayName && r.email ? r.email : r.email || r.displayName ? r.userId : null;
+            return (
+              <div key={r.id} className="flex items-center gap-3 px-3 py-2 bg-neutral-900/40">
+                {r.imageUrl ? (
+                  <img
+                    src={r.imageUrl}
+                    alt=""
+                    className="w-6 h-6 rounded-full bg-neutral-800 object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-neutral-800 text-neutral-400 text-[10px] font-medium flex items-center justify-center flex-shrink-0 uppercase">
+                    {(r.email ?? r.userId).charAt(0)}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-neutral-100 truncate">{primary}</div>
+                  {secondary && (
+                    <div className="text-[10px] text-neutral-500 font-mono truncate">
+                      {secondary}
+                    </div>
+                  )}
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] bg-neutral-800 text-neutral-300 border border-neutral-700 uppercase tracking-wider">
+                  {r.role}
+                </span>
+                <button
+                  onClick={() => void revoke(r.userId, primary)}
+                  title="Revoke"
+                  className="p-1 text-neutral-500 hover:text-red-400 transition-colors"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

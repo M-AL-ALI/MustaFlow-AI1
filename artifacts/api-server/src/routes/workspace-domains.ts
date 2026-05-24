@@ -29,6 +29,7 @@ import {
 import type { DomainRole } from "@workspace/db";
 import { DOMAIN_ROLES } from "@workspace/db";
 import { enforceQuota } from "../lib/plans";
+import { findClerkUserByEmail, getClerkUserSummaries } from "../lib/clerk-users";
 import {
   getWorkspaceUsage,
   rollupUsage,
@@ -523,7 +524,45 @@ router.get(
       .where(eq(workspaceDomainRolesTable.workspaceDomainId, domainId))
       .orderBy(asc(workspaceDomainRolesTable.createdAt));
 
-    res.json({ roles, hostname: domain.hostname });
+    // Enrich with Clerk display info (best-effort — degrades to bare userId
+    // when Clerk is unavailable or the user can't be resolved).
+    const summaries = await getClerkUserSummaries(roles.map((r) => r.userId));
+    const enriched = roles.map((r) => {
+      const u = summaries.get(r.userId);
+      return {
+        ...r,
+        email: u?.email ?? null,
+        displayName: u?.displayName ?? null,
+        imageUrl: u?.imageUrl ?? null,
+      };
+    });
+
+    res.json({ roles: enriched, hostname: domain.hostname });
+  },
+);
+
+// POST /api/workspaces/:id/users/lookup
+// Resolve an email address to a Clerk user. Owner-only to limit account
+// enumeration surface — only the person who can actually grant a role needs
+// this. The POST roles endpoint resolves emails internally for everyone else.
+router.post(
+  "/workspaces/:id/users/lookup",
+  requireWorkspaceOwner,
+  async (req, res): Promise<void> => {
+    const { email } = req.body as { email?: string };
+    if (!email || typeof email !== "string" || !email.includes("@")) {
+      res.status(400).json({ error: "A valid email address is required" });
+      return;
+    }
+    const user = await findClerkUserByEmail(email);
+    if (!user) {
+      res.status(404).json({
+        error: "No account found for that email address.",
+        email: email.trim().toLowerCase(),
+      });
+      return;
+    }
+    res.json({ user });
   },
 );
 
@@ -535,18 +574,40 @@ router.post(
     const workspaceId = req.workspaceId!;
     const domainId = parseInt(param(req.params.domainId), 10);
     const userId = req.userId!;
-    const { userId: targetUserId, role } = req.body as {
+    const {
+      userId: rawUserId,
+      email,
+      role,
+    } = req.body as {
       userId?: string;
+      email?: string;
       role?: string;
     };
 
-    if (!targetUserId) {
-      res.status(400).json({ error: "userId is required" });
-      return;
-    }
     if (!role || !DOMAIN_ROLES.includes(role as DomainRole)) {
       res.status(400).json({ error: `role must be one of: ${DOMAIN_ROLES.join(", ")}` });
       return;
+    }
+
+    // Resolve the target user: prefer explicit userId, otherwise look up by email.
+    let targetUserId = rawUserId?.trim() ?? "";
+    let resolvedEmail: string | null = null;
+    if (!targetUserId) {
+      if (!email || typeof email !== "string" || !email.includes("@")) {
+        res.status(400).json({ error: "Provide an email address or userId" });
+        return;
+      }
+      const user = await findClerkUserByEmail(email);
+      if (!user) {
+        res.status(404).json({
+          error:
+            "No account found for that email. Ask them to sign up at this workspace's URL first, then try again.",
+          email: email.trim().toLowerCase(),
+        });
+        return;
+      }
+      targetUserId = user.userId;
+      resolvedEmail = user.email;
     }
 
     const [domain] = await db
@@ -619,10 +680,10 @@ router.post(
       userId,
       action: "role_granted",
       hostname: domain.hostname,
-      payload: { targetUserId, role },
+      payload: { targetUserId, role, email: resolvedEmail },
     });
 
-    res.status(201).json(grantRow);
+    res.status(201).json({ ...grantRow, email: resolvedEmail });
   },
 );
 
