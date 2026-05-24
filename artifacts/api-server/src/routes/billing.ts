@@ -522,39 +522,6 @@ async function handleStripeWebhook(
       }
       return;
     }
-
-  const userId = session?.metadata?.userId;
-  const creditsStr = session?.metadata?.credits;
-  const packageId = session?.metadata?.packageId;
-
-  if (!userId || !creditsStr) {
-    res.status(400).json({ error: "Missing userId or credits in session metadata" });
-    return;
-  }
-
-  const credits = parseInt(creditsStr, 10);
-  if (isNaN(credits) || credits <= 0) {
-    res.status(400).json({ error: "Invalid credits value in session metadata" });
-    return;
-  }
-
-  // Best-effort: fetch the Stripe-hosted receipt URL from the payment_intent's
-  // latest_charge so we can show users a "View receipt" link in billing history.
-  // Failures here are non-fatal — credits should always grant even if the
-  // receipt fetch fails (network blip, expanded API change, etc.).
-  let receiptUrl: string | null = null;
-  const paymentIntentId = session?.payment_intent;
-  if (paymentIntentId && typeof paymentIntentId === "string") {
-    try {
-      await handleCheckoutCompleted(stripe, event);
-      res.json({ ok: true, type: event.type });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unexpected error";
-      logger.error({ err: msg, eventId: event.id }, "Checkout completed handler threw — Stripe will retry");
-      await db.delete(stripeProcessedEventsTable).where(eq(stripeProcessedEventsTable.eventId, event.id));
-      res.status(500).json({ error: "Handler failed", willRetry: true });
-    }
-    return;
   }
 
   // Route to the correct handler based on event type.
@@ -1421,91 +1388,6 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     res.status(502).json({ error: `Stripe API error: ${msg}` });
   }
 });
-// POST /api/billing/subscription/portal — create a Stripe Billing Portal session
-// so the workspace owner can cancel, change plan, or update payment method.
-router.post("/billing/subscription/portal", async (req, res): Promise<void> => {
-  const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthenticated" });
-    return;
-  }
-
-  const { workspaceId, returnUrl } = req.body as {
-    workspaceId?: number;
-    returnUrl?: string;
-  };
-
-  if (typeof workspaceId !== "number" || !Number.isFinite(workspaceId)) {
-    res.status(400).json({ error: "workspaceId is required" });
-    return;
-  }
-  if (!returnUrl || typeof returnUrl !== "string") {
-    res.status(400).json({ error: "returnUrl is required" });
-    return;
-  }
-
-  const [ws] = await db
-    .select({ id: workspacesTable.id, ownerUserId: workspacesTable.ownerUserId })
-    .from(workspacesTable)
-    .where(and(eq(workspacesTable.id, workspaceId), isNull(workspacesTable.deletedAt)));
-  if (!ws) {
-    res.status(404).json({ error: "Workspace not found" });
-    return;
-  }
-  if (ws.ownerUserId !== userId) {
-    res.status(403).json({ error: "You do not own this workspace" });
-    return;
-  }
-
-  const [sub] = await db
-    .select({ customerId: workspaceSubscriptionsTable.stripeCustomerId })
-    .from(workspaceSubscriptionsTable)
-    .where(eq(workspaceSubscriptionsTable.workspaceId, workspaceId));
-
-  if (!sub?.customerId) {
-    res.status(400).json({
-      error: "No active subscription found for this workspace. Upgrade to a paid plan first.",
-    });
-    return;
-  }
-
-  const stripe = await getUncachableStripeClient();
-  if (!stripe) {
-    res.json({
-      setupRequired: true,
-      message:
-        "Stripe is not configured. Connect the Stripe integration (or set STRIPE_SECRET_KEY) to manage subscriptions.",
-    });
-    return;
-  }
-
-  try {
-    const { stripeCircuit, withRetry, isTransientError } = await import("../lib/resilience");
-    const session = await stripeCircuit.call(() =>
-      withRetry(
-        () =>
-          stripe.billingPortal.sessions.create({
-            customer: sub.customerId!,
-            return_url: returnUrl,
-          }),
-        {
-          maxAttempts: 2,
-          baseDelayMs: 1_000,
-          shouldRetry: isTransientError,
-          label: "stripe:billingPortal.sessions.create",
-        },
-      ),
-    );
-    res.json({ portalUrl: session.url });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unexpected error";
-    if (/api key|authentication|invalid_api_key/i.test(msg)) {
-      invalidateStripeCredentialCache();
-    }
-    res.status(502).json({ error: `Stripe API error: ${msg}` });
-  }
-});
-
 // POST /api/billing/subscription/portal — create a Stripe Billing Portal session
 // so the workspace owner can cancel, change plan, or update payment method.
 router.post("/billing/subscription/portal", async (req, res): Promise<void> => {
