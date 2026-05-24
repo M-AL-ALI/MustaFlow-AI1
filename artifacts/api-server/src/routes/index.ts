@@ -99,7 +99,7 @@ router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
 router.use(publicGalleryRouter); // GET /gallery-templates[/:slug] — public browsing
 router.use(publicExtensionsRouter); // GET /extensions[/:slug] — public browsing
 router.use(publicProfilesRouter); // GET /profiles/:username[/projects] — public profiles
-router.use(v1Router); // POST/GET /v1/* — PAT-authed public REST API (own auth middleware)
+router.use("/v1", v1Router); // POST/GET /v1/* — PAT-authed public REST API (own auth middleware)
 router.use(abuseRouter); // POST /abuse-reports (public intake, no auth)
 router.use(publicCanvasRouter); // GET /canvas/share/:token, /canvas/ab/:testId — public variant previews
 router.use(publicShareRouter); // GET /share/:token (public, no auth)

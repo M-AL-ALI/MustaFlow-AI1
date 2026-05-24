@@ -82,7 +82,7 @@ async function checkProjectAccess(
 router.use(patAuthMiddleware);
 
 // ── GET /api/v1/projects/:id/domains ─────────────────────────────────────────
-router.get("/v1/projects/:id/domains", async (req, res): Promise<void> => {
+router.get("/projects/:id/domains", async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
   if (!(await checkProjectAccess(req, projectId))) {
     res.status(403).json({ error: "Access denied to this project." });
@@ -99,7 +99,7 @@ router.get("/v1/projects/:id/domains", async (req, res): Promise<void> => {
 });
 
 // ── POST /api/v1/projects/:id/domains ────────────────────────────────────────
-router.post("/v1/projects/:id/domains", async (req, res): Promise<void> => {
+router.post("/projects/:id/domains", async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
   if (!(await checkProjectAccess(req, projectId))) {
     res.status(403).json({ error: "Access denied to this project." });
@@ -161,7 +161,7 @@ router.post("/v1/projects/:id/domains", async (req, res): Promise<void> => {
 });
 
 // ── DELETE /api/v1/projects/:id/domains/:domainId ─────────────────────────────
-router.delete("/v1/projects/:id/domains/:domainId", async (req, res): Promise<void> => {
+router.delete("/projects/:id/domains/:domainId", async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
   const domainId = Number(req.params.domainId);
 
@@ -197,7 +197,7 @@ router.delete("/v1/projects/:id/domains/:domainId", async (req, res): Promise<vo
 });
 
 // ── POST /api/v1/projects/:id/domains/:domainId/verify ────────────────────────
-router.post("/v1/projects/:id/domains/:domainId/verify", async (req, res): Promise<void> => {
+router.post("/projects/:id/domains/:domainId/verify", async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
   const domainId = Number(req.params.domainId);
 
@@ -262,7 +262,7 @@ router.post("/v1/projects/:id/domains/:domainId/verify", async (req, res): Promi
 // ── PAT management routes ─────────────────────────────────────────────────────
 
 // GET /api/v1/tokens — list caller's tokens (masked)
-router.get("/v1/tokens", async (req, res): Promise<void> => {
+router.get("/tokens", async (req, res): Promise<void> => {
   const tokens = await db
     .select({
       id: personalAccessTokensTable.id,
@@ -287,7 +287,7 @@ router.get("/v1/tokens", async (req, res): Promise<void> => {
 });
 
 // POST /api/v1/tokens — create a new PAT
-router.post("/v1/tokens", async (req, res): Promise<void> => {
+router.post("/tokens", async (req, res): Promise<void> => {
   const { name, projectId, scopes, expiresInDays } = req.body as {
     name?: string;
     projectId?: number;
@@ -343,7 +343,7 @@ router.post("/v1/tokens", async (req, res): Promise<void> => {
 });
 
 // DELETE /api/v1/tokens/:tokenId — revoke a PAT
-router.delete("/v1/tokens/:tokenId", async (req, res): Promise<void> => {
+router.delete("/tokens/:tokenId", async (req, res): Promise<void> => {
   const tokenId = Number(req.params.tokenId);
 
   const [existing] = await db
