@@ -113,6 +113,16 @@ async function run(): Promise<void> {
       backfilled++;
     }
 
+    // Replace the legacy (project_id, path) unique index with an artifact-scoped
+    // one so two artifacts in the same project can each have their own
+    // package.json / README.md / etc.
+    console.log("Replacing project_files unique index with artifact-scoped variant…");
+    await client.query(`DROP INDEX IF EXISTS project_files_project_path_unique;`);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS project_files_project_artifact_path_unique
+        ON project_files(project_id, artifact_id, path);
+    `);
+
     console.log(`Migration complete. Backfilled ${backfilled} primary artifact(s).`);
   } finally {
     client.release();

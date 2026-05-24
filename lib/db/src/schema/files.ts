@@ -20,7 +20,14 @@ export const projectFilesTable = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    pathUniq: uniqueIndex("project_files_project_path_unique").on(t.projectId, t.path),
+    // Task #544: uniqueness is scoped by artifact so two artifacts inside the
+    // same project can each have their own `package.json` / `README.md` / etc.
+    // The migration drops the legacy (project_id, path) index and adds this one.
+    pathUniq: uniqueIndex("project_files_project_artifact_path_unique").on(
+      t.projectId,
+      t.artifactId,
+      t.path,
+    ),
   }),
 );
 
