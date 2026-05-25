@@ -3249,7 +3249,7 @@ export function PublishingTab({
   const approveVersionMutation = useApproveVersionForTesting();
   const provisionPreviewDbMutation = useProvisionPreviewDatabase();
   const latestApprovedVersion = versions.find(
-    (v) => (v as { testingApprovedAt?: string | null }).testingApprovedAt != null,
+    (v) => v.testingApprovedAt != null,
   );
 
   // Deployment history state
@@ -4728,10 +4728,8 @@ export function PublishingTab({
                     </div>
                     <div className="divide-y divide-border max-h-64 overflow-y-auto">
                       {versions.slice(0, 10).map((v) => {
-                        const approvedAt = (v as { testingApprovedAt?: string | null })
-                          .testingApprovedAt;
-                        const approvedBy = (v as { testingApprovedBy?: string | null })
-                          .testingApprovedBy;
+                        const approvedAt = v.testingApprovedAt;
+                        const approvedBy = v.testingApprovedBy;
                         const isApproved = approvedAt != null;
                         return (
                           <div key={v.id} className="px-4 py-2.5 flex items-center gap-3">

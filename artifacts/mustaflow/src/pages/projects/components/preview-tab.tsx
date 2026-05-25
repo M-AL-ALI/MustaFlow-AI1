@@ -99,6 +99,8 @@ type Project = {
   testedSnapshotId?: number | null;
   /** Task #768: live status of the test container. */
   testContainerStatus?: string | null;
+  /** Task #738: builder mode — 'agentic' or 'static-legacy'. */
+  builderMode?: string | null;
 };
 
 type ReadinessReport = {
@@ -592,7 +594,7 @@ export function PreviewTab({
   // code via Vite HMR over the proxied container URL — restarting the WC (or
   // bumping the iframe cache-buster) would cause a full reload and break the
   // HMR session. Skip the restart in that case.
-  const isAgentic = (project as { builderMode?: string | null }).builderMode === "agentic";
+  const isAgentic = project.builderMode === "agentic";
   const containerLive = containerStatus === "running" && !!containerUrl;
   const wcRestartRef = useRef(wc.restart);
   wcRestartRef.current = wc.restart;

@@ -1168,9 +1168,9 @@ export default function ProjectWorkspacePage() {
 
   useEffect(() => {
     if (!project) return;
-    const st = (project as { provisioningStatus?: string }).provisioningStatus;
+    const st = project.provisioningStatus;
     if (st) setProvisioningStatus(st as ProvisioningStatus);
-    const err = (project as { provisioningError?: string | null }).provisioningError;
+    const err = project.provisioningError;
     setProvisioningError(err ?? null);
   }, [project]);
 
@@ -3515,7 +3515,7 @@ export default function ProjectWorkspacePage() {
               <PublishingTab
                 projectId={projectId}
                 kind={project.kind}
-                builderMode={(project as { builderMode?: string }).builderMode}
+                builderMode={project.builderMode}
                 containerStatus={containerStatus}
                 containerUrl={containerUrl}
                 onNavigateToSecret={handleAddKey}
@@ -3531,7 +3531,7 @@ export default function ProjectWorkspacePage() {
               <LogsTab
                 projectId={projectId}
                 kind={project.kind}
-                builderMode={(project as { builderMode?: string }).builderMode}
+                builderMode={project.builderMode}
                 onTryFix={(text) => {
                   setPrompt(text);
                   setActiveTab("preview");
