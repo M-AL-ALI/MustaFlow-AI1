@@ -7283,7 +7283,7 @@ Reasoning principles (apply in order, BEFORE judging):
 3. Asking about a previous error, task result, or your behavior ("what happened?", "why did it fail?", "why did you build instead of answer?") → "converse". Do NOT treat this as "fix the last error" or "redo the build" unless the user explicitly says "fix it", "rebuild it", or "try again".
 4. **Repeat / rephrase detection**: If the user's current message is the same as, or a rephrasing of, something they already said and you responded to — especially if your previous response was a build report and they now seem to want an explanation instead — treat it as "converse". The user is course-correcting, not asking for another build.
 5. **Discussion mode**: If the message describes, theorizes, complains, philosophizes, or asks you to behave differently ("you should understand intent, not just keywords") → "converse".
-6. **Bug / problem reports are "build" — even without an action verb**: If the user describes a symptom, error, or malfunction of their app — "the app is not running", "it's broken", "the button doesn't work", "I get an error", "nothing loads", "the page is blank", "something is wrong", "it keeps crashing" — classify as "build". The agent must investigate the files and fix the problem, not ask for clarification.
+6. **Bug reports, problem descriptions, AND diagnostic requests are all "build"**: If the user describes a symptom OR asks the agent to investigate — "the app is not running", "it's broken", "find the issue", "open the logs", "check what's wrong", "look at the errors", "read the code", "investigate the crash", "debug this", "what's causing the problem", "examine the files" — classify as "build". The agent must read the actual files, identify the root cause, and fix it. It must not respond conversationally with guesses.
 7. "build" generally requires an explicit action verb (add/remove/change/fix/build/create/make/update/refactor/style/etc.) OR a problem description as described in rule 6. Being on-topic about the app without either is not enough.
 8. When genuinely torn between "converse" and "build", choose "converse". A misrouted question is far more annoying than a missed build request — the user can always re-ask with an action verb.
 
@@ -7324,14 +7324,15 @@ const SHORT_REACTIONS = new Set([
 // build action verb — questions like "why isn't this fixed?" or "nothing is
 // fixed, why?" use the same vocabulary but are NOT imperatives.
 const STARTS_WITH_BUILD_IMPERATIVE =
-  /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge|deploy|publish|undo|rollback|retry|try\s+again)\b/i;
+  /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge|deploy|publish|undo|rollback|retry|try\s+again|find|look\s+at|look\s+into|check|open|read|examine|investigate|diagnose|debug|inspect|scan|search|analyze|analyse|review|trace|test|resolve|identify|locate|explore)\b/i;
 
-// Detect problem / bug reports that are implicit fix requests even without
-// an explicit action verb. "The app is not running", "it's broken", "there
-// is an error" all mean "find and fix this" — they must route to build so
-// the agent investigates the files rather than asking for more information.
+// Detect problem / bug reports AND diagnostic requests that are implicit fix
+// requests even without an explicit action verb. "The app is not running",
+// "it's broken", "find the issue", "open the logs" all mean "investigate the
+// files and fix this" — they must route to build so the agent has full file
+// access and runs a real read-fix loop rather than a conversational guess.
 const PROBLEM_REPORT_PATTERNS =
-  /\b(not\s+(?:working|running|loading|opening|showing|displaying|rendering|responding|found)|doesn'?t\s+(?:work|load|open|run|show|display|respond|function)|isn'?t\s+(?:working|loading|running|opening|showing)|(?:app|page|site|button|form|link|feature|screen|component)\s+(?:is\s+)?(?:not\s+working|broken|blank|empty|crashed?|down|failing|bugged?)|(?:broken|crashed?|glitchy|bugged?)\s*(?:app|page|site)?|white\s+screen|blank\s+(?:screen|page)|nothing\s+(?:works?|happens?|loads?|shows?|displays?)|something(?:\s+is)?\s+(?:wrong|broken|off|not\s+right)|not\s+(?:able\s+to|working\s+at\s+all)|(?:there(?:\s+is|'s)\s+(?:a\s+)?(?:an\s+)?(?:error|bug|issue|problem|glitch))|(?:error|bug|issue|problem|glitch)\s+(?:in|with|on)\s+(?:the\s+)?(?:app|page|site|code)|(?:app|it)\s+(?:is\s+)?(?:not\s+)?(?:running|working)|(?:keeps?\s+(?:crashing|failing|breaking))|(?:can'?t|cannot)\s+(?:open|load|use|access|see|view|click)|(?:stuck|freezing|frozen|hangs?|hanged?))\b/i;
+  /\b(not\s+(?:working|running|loading|opening|showing|displaying|rendering|responding|found)|doesn'?t\s+(?:work|load|open|run|show|display|respond|function)|isn'?t\s+(?:working|loading|running|opening|showing)|(?:app|page|site|button|form|link|feature|screen|component)\s+(?:is\s+)?(?:not\s+working|broken|blank|empty|crashed?|down|failing|bugged?)|(?:broken|crashed?|glitchy|bugged?)\s*(?:app|page|site)?|white\s+screen|blank\s+(?:screen|page)|nothing\s+(?:works?|happens?|loads?|shows?|displays?)|something(?:\s+is)?\s+(?:wrong|broken|off|not\s+right)|not\s+(?:able\s+to|working\s+at\s+all)|(?:there(?:\s+is|'s)\s+(?:a\s+)?(?:an\s+)?(?:error|bug|issue|problem|glitch))|(?:error|bug|issue|problem|glitch)\s+(?:in|with|on)\s+(?:the\s+)?(?:app|page|site|code)|(?:app|it)\s+(?:is\s+)?(?:not\s+)?(?:running|working)|(?:keeps?\s+(?:crashing|failing|breaking))|(?:can'?t|cannot)\s+(?:open|load|use|access|see|view|click)|(?:stuck|freezing|frozen|hangs?|hanged?)|(?:find|look\s+(?:at|into|for)|check|open|read|examine|investigate|diagnose|debug|inspect|scan|search|analyze|review|trace)\s+(?:the\s+)?(?:logs?|errors?|issues?|bugs?|problems?|console|output|crash|stacktrace|stack\s+trace|exception|warnings?|failures?|files?|code|cause|reason)|(?:the\s+)?(?:logs?|console)\s+(?:show|has|have|says?|shows?|contains?|reports?)|need\s+to\s+(?:find|fix|resolve|debug|diagnose|check|investigate)\s+(?:the\s+)?(?:issue|bug|error|problem|cause|reason)|what(?:'s|\s+is)\s+(?:wrong|the\s+(?:issue|problem|error|bug|cause)))\b/i;
 
 /** Normalize a message for fuzzy "is this the same thing they just said?" comparison. */
 function normalizeForRepeatCheck(s: string): string {
@@ -7587,11 +7588,13 @@ CRITICAL — do not misrepresent your capabilities:
 - If a user asks you to build/create/add/change something in this mode, briefly acknowledge what they want, then tell them to resend the request (or hit send again) and the builder will run it — do NOT tell them you lack the ability.
 - You are answering in this turn only because the previous classifier picked "explain", not because you lack tools.
 
-BUG / PROBLEM REPORTS — proactive investigation, never interrogation:
-- If the user describes a problem ("the app is not running", "it's broken", "the button doesn't work", "I see an error", "nothing loads", "something is wrong") do NOT ask them to describe it more precisely.
-- Instead: scan the provided file list for the most likely cause (broken JS references, missing event handlers, syntax errors, broken CDN links, missing files, broken logic). Name the specific file and issue you suspect.
-- Tell the user exactly what you found — or what you suspect — and then say: "I'll fix it now — just send any message and the builder will apply the repair."
-- If the file list is empty or you genuinely cannot identify the cause, say so honestly and give one concrete suggestion (e.g. "Check the browser console for a specific error message").
+BUG REPORTS & DIAGNOSTIC REQUESTS — always investigate, never deflect:
+- If the user describes a problem OR asks you to investigate one ("find the issue", "open the logs", "check what's wrong", "look at the errors", "why is it broken") — you MUST investigate immediately using the file contents provided below.
+- NEVER say "I can't open tabs", "I can't access the logs", "I don't have access to files", "in this turn I can't read", or anything similar. You DO have the file contents in your context — use them.
+- Read the actual file snippets provided. Look for: import errors, missing exports, broken native module references, platform guard omissions, unresolved dependencies, syntax errors, misconfigured routes, missing environment variables, and crash-prone startup code.
+- Name the SPECIFIC file, line/section, and suspected cause. Do not give generic guesses — reference what you actually see in the file content.
+- After your diagnosis, say: "I'll fix this now — just send any message (or tap the send button) and the builder will apply the repair."
+- If the file content snippets are too short to confirm the cause, say exactly which file you need to read in full and redirect the user to send any message so the builder can run a complete file inspection and fix loop.
 
 Your responses:
 - Are clear, concise, and in plain Markdown (use headings, lists, bold, code blocks as appropriate)
@@ -7668,16 +7671,19 @@ export async function runConversePipeline(args: {
     }
   }
 
-  // Build a compact file context: path + first 400 chars of content
+  // Build file context: path + up to 1200 chars of content per file, 20 files max.
+  // Enough for the AI to actually read startup code, imports, and key logic —
+  // not just guess from filenames. Short files are included in full.
   const fileContext =
     currentFiles.length > 0
       ? currentFiles
-          .slice(0, 12)
+          .slice(0, 20)
           .map((f) => {
-            const snippet = f.content.slice(0, 400).replace(/\n/g, " ").trim();
-            return `- ${f.path}: ${snippet}${f.content.length > 400 ? "…" : ""}`;
+            const snippet = f.content.slice(0, 1200).trim();
+            const truncated = f.content.length > 1200;
+            return `--- ${f.path} ---\n${snippet}${truncated ? "\n…(truncated)" : ""}`;
           })
-          .join("\n")
+          .join("\n\n")
       : "No files yet — the app hasn't been built.";
 
   const model = modelFor(agentMode);
@@ -7842,12 +7848,13 @@ export async function runConverseStreamPipeline(
   const fileContext =
     currentFiles.length > 0
       ? currentFiles
-          .slice(0, 12)
+          .slice(0, 20)
           .map((f) => {
-            const snippet = f.content.slice(0, 400).replace(/\n/g, " ").trim();
-            return `- ${f.path}: ${snippet}${f.content.length > 400 ? "…" : ""}`;
+            const snippet = f.content.slice(0, 1200).trim();
+            const truncated = f.content.length > 1200;
+            return `--- ${f.path} ---\n${snippet}${truncated ? "\n…(truncated)" : ""}`;
           })
-          .join("\n")
+          .join("\n\n")
       : "No files yet — the app hasn't been built.";
 
   const model = modelFor(agentMode);
