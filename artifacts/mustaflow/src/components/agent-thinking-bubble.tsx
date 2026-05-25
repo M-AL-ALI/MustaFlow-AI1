@@ -1400,11 +1400,7 @@ export function AgentThinkingBubble({
               title={hideThinking ? "Show agent thinking" : "Hide agent thinking"}
               className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground transition-colors shrink-0"
             >
-              {hideThinking ? (
-                <EyeOff className="h-2.5 w-2.5" />
-              ) : (
-                <Eye className="h-2.5 w-2.5" />
-              )}
+              {hideThinking ? <EyeOff className="h-2.5 w-2.5" /> : <Eye className="h-2.5 w-2.5" />}
             </button>
           )}
           {isQueued && (
