@@ -59,7 +59,7 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import type { AgentMode } from "./ai";
 import { detectRequiredStack } from "./ai";
 import { logger } from "./logger";
-import { writeKnowledge } from "./knowledge";
+import { writeKnowledge, getInstalledBlueprintKnowledge } from "./knowledge";
 import { generateEmbedding, cosineSimilarity } from "./embeddings";
 import type { DiffSummary } from "@workspace/db";
 import {
@@ -1414,28 +1414,32 @@ export async function runJob(input: JobInput): Promise<void> {
       return;
     }
 
-    const [{ context: rawKnowledgeContext, applied: knowledgeApplied }, conversationSummary] =
-      await Promise.all([
-        loadKnowledgeContext(projectId, userPrompt),
-        (async () => {
-          try {
-            const [row] = await db
-              .select({ content: knowledgeEntriesTable.content })
-              .from(knowledgeEntriesTable)
-              .where(
-                and(
-                  eq(knowledgeEntriesTable.projectId, projectId),
-                  eq(knowledgeEntriesTable.type, "conversation_summary"),
-                ),
-              )
-              .orderBy(desc(knowledgeEntriesTable.createdAt))
-              .limit(1);
-            return row?.content ?? undefined;
-          } catch {
-            return undefined;
-          }
-        })(),
-      ]);
+    const [
+      { context: rawKnowledgeContext, applied: knowledgeApplied },
+      conversationSummary,
+      blueprintContext,
+    ] = await Promise.all([
+      loadKnowledgeContext(projectId, userPrompt),
+      (async () => {
+        try {
+          const [row] = await db
+            .select({ content: knowledgeEntriesTable.content })
+            .from(knowledgeEntriesTable)
+            .where(
+              and(
+                eq(knowledgeEntriesTable.projectId, projectId),
+                eq(knowledgeEntriesTable.type, "conversation_summary"),
+              ),
+            )
+            .orderBy(desc(knowledgeEntriesTable.createdAt))
+            .limit(1);
+          return row?.content ?? undefined;
+        } catch {
+          return undefined;
+        }
+      })(),
+      getInstalledBlueprintKnowledge(projectId),
+    ]);
 
     // ── Domain context — inject primary domain so the builder uses real absolute URLs ──
     let domainContextStr: string | undefined;
@@ -1472,12 +1476,22 @@ Do NOT use window.location.origin, localhost, or placeholder domains in these co
       // Non-fatal — domain context is best-effort
     }
 
+    // Prepend installed-blueprint context unconditionally (before the token-budgeted
+    // relevance-ranked lessons block). This ensures the builder always knows which
+    // integrations are already scaffolded, even when the user's prompt doesn't
+    // mention the integration by name.
+    const mergedKnowledgeContext = blueprintContext
+      ? rawKnowledgeContext
+        ? `${blueprintContext}\n\n${rawKnowledgeContext}`
+        : blueprintContext
+      : rawKnowledgeContext;
+
     // Merge vault knowledge + domain context into a single context string
     const knowledgeContext =
-      rawKnowledgeContext && domainContextStr
-        ? `${rawKnowledgeContext}\n\n${domainContextStr}`
-        : rawKnowledgeContext
-          ? rawKnowledgeContext
+      mergedKnowledgeContext && domainContextStr
+        ? `${mergedKnowledgeContext}\n\n${domainContextStr}`
+        : mergedKnowledgeContext
+          ? mergedKnowledgeContext
           : (domainContextStr ?? undefined);
 
     // Build database context when the project has a provisioned DB

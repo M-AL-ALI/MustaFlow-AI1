@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { db, knowledgeEntriesTable, type DiffSummary } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, like } from "drizzle-orm";
 import { logger } from "./logger";
 import { buildEmbeddingInput, generateEmbedding } from "./embeddings";
 
@@ -22,6 +22,55 @@ export interface KnowledgeWriteOpts {
   tags?: string[];
   diffSummary?: DiffSummary;
   approvedForReuse?: boolean;
+}
+
+/**
+ * Returns a formatted context block containing all installed-blueprint knowledge
+ * entries for the given project.
+ *
+ * Blueprint entries are tagged with "blueprint" at install time, so they can be
+ * selected directly by a tag-filter without a vector search. The result is meant
+ * to be prepended to the AI system prompt unconditionally — before the
+ * token-budgeted relevance-ranked lessons block — so the builder always knows
+ * which integrations are already scaffolded, regardless of whether the user's
+ * prompt mentions them by name.
+ *
+ * Returns null when there are no installed blueprints (or on error).
+ */
+export async function getInstalledBlueprintKnowledge(projectId: number): Promise<string | null> {
+  try {
+    const entries = await db
+      .select({
+        id: knowledgeEntriesTable.id,
+        title: knowledgeEntriesTable.title,
+        content: knowledgeEntriesTable.content,
+        tags: knowledgeEntriesTable.tags,
+      })
+      .from(knowledgeEntriesTable)
+      .where(
+        and(
+          eq(knowledgeEntriesTable.projectId, projectId),
+          like(knowledgeEntriesTable.tags, "%blueprint%"),
+          isNull(knowledgeEntriesTable.archivedAt),
+        ),
+      )
+      .orderBy(knowledgeEntriesTable.id);
+
+    if (entries.length === 0) return null;
+
+    const lines = entries.map((e) => `- ${e.content}`).join("\n\n");
+    return [
+      `=== INSTALLED BLUEPRINTS & INTEGRATIONS (${entries.length} installed) ===`,
+      `The following integrations have already been scaffolded in this project.`,
+      `Always use these existing patterns and files — never re-implement from scratch.`,
+      ``,
+      lines,
+      `=== END INSTALLED BLUEPRINTS ===`,
+    ].join("\n");
+  } catch (err) {
+    logger.warn({ err, projectId }, "getInstalledBlueprintKnowledge failed — non-fatal");
+    return null;
+  }
 }
 
 export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
