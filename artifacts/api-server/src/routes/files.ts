@@ -606,9 +606,11 @@ router.get("/projects/:id/preview/{*splat}", async (req, res, next): Promise<voi
     return;
   }
 
-  // Agentic projects → live container proxy. Static-legacy projects keep
-  // the original DB-row serving below.
-  if (previewProject.builderMode === "agentic") {
+  // Agentic projects WITH a real container → live container proxy.
+  // Agentic projects without a container (most projects) fall through to the
+  // same DB-row serving as static-legacy — the generated HTML/CSS/JS files
+  // are already in project_files and can be served directly.
+  if (previewProject.builderMode === "agentic" && previewProject.containerId) {
     await handleLivePreviewHttp(req, res, next, previewProject);
     return;
   }
