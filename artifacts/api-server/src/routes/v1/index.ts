@@ -34,7 +34,12 @@ import { and, asc, eq } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { promises as dns } from "dns";
 import { db, projectDomainsTable, personalAccessTokensTable } from "@workspace/db";
-import { patAuthMiddleware, generateRawToken, hashToken, type PATRequest } from "../../lib/pat-auth";
+import {
+  patAuthMiddleware,
+  generateRawToken,
+  hashToken,
+  type PATRequest,
+} from "../../lib/pat-auth";
 import { publishDomainEvent } from "../../lib/event-bus";
 import { dispatchWebhookEvent } from "../../lib/webhook-dispatcher";
 import { getAuth } from "@clerk/express";
@@ -49,7 +54,6 @@ const router: IRouter = Router();
 
 const TOKEN_PREFIX = "mfp_";
 const CNAME_TARGET = process.env.PLATFORM_CNAME_TARGET ?? "hosted.mustaflow.app";
-
 
 function normaliseHostname(raw: string): string | null {
   const cleaned = raw
