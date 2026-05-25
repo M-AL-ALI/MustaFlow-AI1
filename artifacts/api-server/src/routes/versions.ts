@@ -605,11 +605,76 @@ router.post(
       return;
     }
 
+    // ── Preconditions ─────────────────────────────────────────────────────────
+    // Load project state for pre-conditions.
+    const [project] = await db
+      .select({
+        testingStatus: projectsTable.testingStatus,
+        testingCandidateSnapshotId: projectsTable.testingCandidateSnapshotId,
+        testContainerStatus: projectsTable.testContainerStatus,
+        runningTestSnapshotId: projectsTable.runningTestSnapshotId,
+        containerId: projectsTable.containerId,
+        builderMode: projectsTable.builderMode,
+      })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    // Precondition: this version must be the active testing candidate.
+    if (
+      project.testingCandidateSnapshotId !== null &&
+      project.testingCandidateSnapshotId !== versionId
+    ) {
+      res.status(422).json({
+        error: `Version ${versionId} is not the active testing candidate (candidate is version ${project.testingCandidateSnapshotId}). Use POST /preview-env/approve to approve the current candidate.`,
+        code: "not_active_candidate",
+        activeCandidate: project.testingCandidateSnapshotId,
+      });
+      return;
+    }
+
+    // Precondition: testing status must indicate the environment was ready.
+    if (project.testingStatus === "stale" || project.testingStatus === "idle") {
+      res.status(422).json({
+        error: `Testing status is '${project.testingStatus}'. The test environment must be started and ready before approving.`,
+        code: "testing_not_ready",
+        testingStatus: project.testingStatus,
+      });
+      return;
+    }
+
+    // Precondition: migration status must not be failed.
+    const [versionDetails] = await db
+      .select({ migrationStatus: projectVersionsTable.migrationStatus })
+      .from(projectVersionsTable)
+      .where(eq(projectVersionsTable.id, versionId));
+    if (versionDetails?.migrationStatus === "failed") {
+      res.status(422).json({
+        error: "Preview database migration failed for this version. Fix migrations before approving.",
+        code: "migration_failed",
+      });
+      return;
+    }
+
     const now = new Date();
     await db
       .update(projectVersionsTable)
       .set({ testingApprovedAt: now, testingApprovedBy: req.userId ?? null })
       .where(eq(projectVersionsTable.id, versionId));
+
+    // Also update the project's testedSnapshotId and testingStatus.
+    await db
+      .update(projectsTable)
+      .set({
+        testedSnapshotId: versionId,
+        testingStatus: "passed",
+        updatedAt: new Date(),
+      })
+      .where(eq(projectsTable.id, projectId));
 
     res.json({
       ok: true,

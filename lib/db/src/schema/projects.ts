@@ -191,6 +191,33 @@ export const projectsTable = pgTable("projects", {
   // previewDbStatus: none | provisioning | ready | error
   previewDbUrl: text("preview_db_url"),
   previewDbStatus: text("preview_db_status").notNull().default("none"),
+  // ── Testing workflow (test-then-publish architecture) ─────────────────────
+  // Dedicated test container — entirely separate from the live dev container
+  // (containerId). Never touched by file saves, AI builds, Apply, or terminal.
+  // Only updated by POST /preview-env/start and /rebuild.
+  testContainerId: text("test_container_id"),
+  testContainerUrl: text("test_container_url"),
+  testContainerStatus: text("test_container_status").notNull().default("stopped"),
+  // runningTestSnapshotId: snapshot currently loaded in the test container.
+  // Preserved even when testingStatus goes stale so the UI can show "last tested: #N".
+  runningTestSnapshotId: integer("running_test_snapshot_id"),
+  // staticTestCandidateSnapshotId: for pure-static/React-Vite projects.
+  // Set when the user starts Test Preview — same immutability contract as Full App Preview.
+  staticTestCandidateSnapshotId: integer("static_test_candidate_snapshot_id"),
+  // testingCandidateSnapshotId: the immutable snapshot being tested (full-stack or static).
+  // Cleared to null whenever testingStatus becomes stale.
+  testingCandidateSnapshotId: integer("testing_candidate_snapshot_id"),
+  // testingStatus: idle | building | ready | stale | passed | failed
+  testingStatus: text("testing_status").notNull().default("idle"),
+  // testedSnapshotId: the approved snapshot eligible for publishing.
+  // Only set when testingStatus = 'passed'. Cleared on invalidation.
+  testedSnapshotId: integer("tested_snapshot_id"),
+  // previousPublishedSnapshotId: anchor for rollback after a production swap.
+  previousPublishedSnapshotId: integer("previous_published_snapshot_id"),
+  // activePreviewSessionId: FK → preview_sessions.session_id.
+  // Points to the currently-active preview session for this project.
+  // Cleared when preview is stopped or security-invalidated.
+  activePreviewSessionId: text("active_preview_session_id"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

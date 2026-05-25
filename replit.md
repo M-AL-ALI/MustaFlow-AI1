@@ -136,3 +136,21 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **Post-merge `pnpm db push`**: occasionally requires TTY confirmation for the `projects_custom_domain_unique` constraint — falls back to a non-fatal stderr warning. Apply manually with `pnpm --filter @workspace/db run push` in an interactive shell if needed.
 - **Pre-existing migration gaps** (non-fatal warnings in API logs): `preview_snapshots`, `purchased_domains` tables and `knowledge_entries.scope` column missing on some DBs. Re-run the relevant migration scripts in `scripts/src/migrate-*.ts` to apply.
 - **Preview secrets default is_preview_safe=false**: newly added secrets require the user to explicitly toggle "Preview safe" in the Secrets tab before they are injected into the live preview container. Run `migrate-preview-secrets` before deploy.
+
+## Test-then-publish workflow (Task #768)
+
+Full architecture spec lives in `docs/changelog.md`. Key implementation files:
+
+- **Schema**: `lib/db/src/schema/projects.ts` (10 testing columns), `lib/db/src/schema/versions.ts` (`testingApprovedAt`, `testingApprovedBy`, `migrationStatus`, `testingSkipped`), `lib/db/src/schema/secrets.ts` (`exposureType`), `lib/db/src/schema/preview-sessions.ts` (new table)
+- **Migration**: `scripts/src/migrate-testing-workflow.ts` (run with `pnpm --filter @workspace/scripts run migrate-testing-workflow`)
+- **Preview env routes**: `artifacts/api-server/src/routes/preview-env.ts` — start/rebuild/stop/status/approve/session endpoints at `/api/projects/:id/preview-env/*`
+- **Gateway middleware**: `artifacts/api-server/src/middlewares/previewSubdomainGateway.ts` — intercepts `{sessionId}.preview.{PLATFORM_DOMAIN}`, validates HMAC cookie, proxies to test container
+- **Invalidation helpers**: `artifacts/api-server/src/lib/testing-invalidation.ts` — `staleDraftCandidate` (marks `testingStatus=stale` after draft edit), `revokePreviewForSecurityChange` (stops container on secret change)
+- **Health injection**: `artifacts/api-server/src/lib/health-inject.ts` — injects `GET /healthz` into server-stack builds before writing to `project_files`
+- **Publish gates**: `artifacts/api-server/src/routes/publish.ts` — auto-resolves `testedSnapshotId` as snapshot source; blocks full-stack projects without tested snapshot; blocks schema-changing SQL (`ALTER TABLE`, `DROP TABLE`, etc.); blue/green abort if container deploy fails
+- **Approve preconditions**: `artifacts/api-server/src/routes/versions.ts` — 3 preconditions added to `approve-testing` endpoint; also sets `project.testedSnapshotId` + `testingStatus=passed`
+
+### Env / deployment notes
+- `PLATFORM_DOMAIN` (default `mustaflow.app`) — used by gateway to identify preview subdomains
+- The migration adds columns to `projects`, `project_versions`, and `project_secrets`, and creates `preview_sessions`. Run it before deploying.
+- Full-stack projects (`containerId` set) now **require** a tested snapshot before publishing to production. Static projects continue to publish directly.

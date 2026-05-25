@@ -2032,7 +2032,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             mimeType: f.mimeType,
           }));
         } else {
-          await writeFiles(projectId, result.files, true);
+          // Inject health endpoint for server-stack projects before writing to project_files.
+          // This ensures the immutable test candidate snapshot always contains a health endpoint.
+          const { injectHealthEndpoint } = await import("./health-inject");
+          const filesWithHealth = injectHealthEndpoint(result.files, project.stack ?? null);
+          await writeFiles(projectId, filesWithHealth, true);
         }
         diffSummary = computeBuildDiff(result.files);
 

@@ -20,6 +20,8 @@ import type { ProjectProjectFormat } from './projectProjectFormat';
 import type { ProjectProvisioningStatus } from './projectProvisioningStatus';
 import type { ProjectStack } from './projectStack';
 import type { ProjectStatus } from './projectStatus';
+import type { ProjectTestContainerStatus } from './projectTestContainerStatus';
+import type { ProjectTestingStatus } from './projectTestingStatus';
 
 export interface Project {
   id: number;
@@ -142,6 +144,38 @@ export interface Project {
      * @nullable
      */
   stagingPublishedSnapshotId?: number | null;
+  /** Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish. */
+  testingStatus?: ProjectTestingStatus;
+  /**
+     * Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by /preview-env/start.
+     * @nullable
+     */
+  testingCandidateSnapshotId?: number | null;
+  /**
+     * Task #768. Version ID of the most recently approved test snapshot. The publish route uses this as the source snapshot automatically when no versionId is specified.
+     * @nullable
+     */
+  testedSnapshotId?: number | null;
+  /**
+     * Task #768. Current status of the test container. Null when no container has been started.
+     * @nullable
+     */
+  testContainerStatus?: ProjectTestContainerStatus;
+  /**
+     * Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.
+     * @nullable
+     */
+  runningTestSnapshotId?: number | null;
+  /**
+     * Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).
+     * @nullable
+     */
+  activePreviewSessionId?: string | null;
+  /**
+     * Task #767/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.
+     * @nullable
+     */
+  previewDbUrl?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

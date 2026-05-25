@@ -3160,23 +3160,38 @@ export function PublishingTab({
   builderMode,
   containerStatus: _containerStatus,
   containerUrl: _containerUrl,
+  containerId,
+  testedSnapshotId,
+  testingStatus,
   onNavigateToSecret,
   onNavigateToMobileSettings,
   onNavigateToChecks,
   onNavigateToLogs,
+  onNavigateToTestEnv,
 }: {
   projectId: number;
   kind?: string;
   builderMode?: string;
   containerStatus?: string;
   containerUrl?: string | null;
+  /** Task #768: truthy when the project has a dev container (full-stack). Gates testing requirement. */
+  containerId?: string | null;
+  /** Task #768: version ID of most recently approved test snapshot. Null = not yet tested. */
+  testedSnapshotId?: number | null;
+  /** Task #768: current testing workflow state (idle/stale/ready/passed). */
+  testingStatus?: string | null;
   onNavigateToSecret?: (secretName: string) => void;
   onNavigateToMobileSettings?: () => void;
   onNavigateToChecks?: () => void;
   onNavigateToLogs?: () => void;
+  /** Task #768: navigate to the Test Environment tab. Shown in the testing gate banner. */
+  onNavigateToTestEnv?: () => void;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
   const isAgentic = builderMode === "agentic";
+  // Task #768: full-stack projects (containerId set) must pass a test preview before
+  // deploying to production. Static projects can publish directly.
+  const isFullStackWithoutTest = !!containerId && !testedSnapshotId;
   const queryClient = useQueryClient();
   const [platform, setPlatform] = useState<Platform>("web");
   const [webEnv, setWebEnv] = useState<"testing" | "production">("testing");
@@ -5977,11 +5992,36 @@ export function PublishingTab({
                       </div>
                     )}
 
+                    {/* Task #768: testing required gate for full-stack projects */}
+                    {isFullStackWithoutTest && (
+                      <div className="flex items-start gap-2 text-xs bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 text-amber-700 dark:text-amber-400">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                        <span className="flex-1">
+                          {testingStatus === "stale"
+                            ? "Draft changed after the last test — run a new test before deploying to production."
+                            : testingStatus === "ready"
+                              ? "Test environment is running. Approve it in the Test Environment tab to unlock production deploys."
+                              : "This project must pass a test preview before deploying to production."}
+                        </span>
+                        {onNavigateToTestEnv && (
+                          <button
+                            onClick={onNavigateToTestEnv}
+                            className="shrink-0 font-semibold whitespace-nowrap hover:underline focus:outline-none"
+                          >
+                            Test Environment
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {!showDeployConfirm ? (
                       <Button
                         className="w-full"
                         disabled={
-                          !webReadyToPublish || readiness?.canPublish === false || isDeploying
+                          !webReadyToPublish ||
+                          readiness?.canPublish === false ||
+                          isDeploying ||
+                          isFullStackWithoutTest
                         }
                         onClick={() => setShowDeployConfirm(true)}
                       >

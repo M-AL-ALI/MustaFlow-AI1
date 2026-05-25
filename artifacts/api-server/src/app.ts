@@ -10,6 +10,7 @@ import {
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import { customDomainMiddleware } from "./middlewares/customDomainMiddleware";
+import { previewSubdomainGateway } from "./middlewares/previewSubdomainGateway";
 import { logger } from "./lib/logger";
 import { startProdLogRetentionWorker } from "./lib/prodLogs";
 import "./lib/preview-purge";
@@ -127,6 +128,10 @@ app.use(
 // Custom-domain middleware: intercepts GET requests whose Host header matches
 // a project's configured custom domain and serves the published snapshot directly.
 // Must be mounted before /api so platform traffic is never affected.
+// Preview subdomain gateway: intercepts {sessionId}.preview.{PLATFORM_DOMAIN}
+// requests BEFORE the custom-domain middleware and the /api router so that
+// preview session validation and proxying are fully isolated from platform traffic.
+app.use(previewSubdomainGateway);
 app.use(customDomainMiddleware);
 
 app.use("/api", router);

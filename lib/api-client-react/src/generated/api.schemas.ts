@@ -259,6 +259,34 @@ export const ProjectPreviewDbStatus = {
   error: 'error',
 } as const;
 
+/**
+ * Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.
+ */
+export type ProjectTestingStatus = typeof ProjectTestingStatus[keyof typeof ProjectTestingStatus];
+
+
+export const ProjectTestingStatus = {
+  idle: 'idle',
+  stale: 'stale',
+  ready: 'ready',
+  passed: 'passed',
+} as const;
+
+/**
+ * Task #768. Current status of the test container. Null when no container has been started.
+ * @nullable
+ */
+export type ProjectTestContainerStatus = typeof ProjectTestContainerStatus[keyof typeof ProjectTestContainerStatus] | null;
+
+
+export const ProjectTestContainerStatus = {
+  stopped: 'stopped',
+  starting: 'starting',
+  running: 'running',
+  hibernated: 'hibernated',
+  error: 'error',
+} as const;
+
 export interface Project {
   id: number;
   /** @nullable */
@@ -380,6 +408,38 @@ export interface Project {
      * @nullable
      */
   stagingPublishedSnapshotId?: number | null;
+  /** Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish. */
+  testingStatus?: ProjectTestingStatus;
+  /**
+     * Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by /preview-env/start.
+     * @nullable
+     */
+  testingCandidateSnapshotId?: number | null;
+  /**
+     * Task #768. Version ID of the most recently approved test snapshot. The publish route uses this as the source snapshot automatically when no versionId is specified.
+     * @nullable
+     */
+  testedSnapshotId?: number | null;
+  /**
+     * Task #768. Current status of the test container. Null when no container has been started.
+     * @nullable
+     */
+  testContainerStatus?: ProjectTestContainerStatus;
+  /**
+     * Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.
+     * @nullable
+     */
+  runningTestSnapshotId?: number | null;
+  /**
+     * Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).
+     * @nullable
+     */
+  activePreviewSessionId?: string | null;
+  /**
+     * Task #767/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.
+     * @nullable
+     */
+  previewDbUrl?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -3476,6 +3536,65 @@ export type ApproveVersionForTesting200 = {
 
 export type ProvisionPreviewDatabase200 = {
   previewDbStatus: string;
+};
+
+export type StartPreviewEnv202 = {
+  ok: boolean;
+  candidateVersionId: number;
+  testingStatus: string;
+  /** @nullable */
+  containerUrl?: string | null;
+};
+
+export type RebuildPreviewEnv202 = {
+  ok: boolean;
+  candidateVersionId: number;
+  testingStatus: string;
+};
+
+export type StopPreviewEnv200 = {
+  ok: boolean;
+};
+
+export type GetPreviewEnvStatus200TestingStatus = typeof GetPreviewEnvStatus200TestingStatus[keyof typeof GetPreviewEnvStatus200TestingStatus];
+
+
+export const GetPreviewEnvStatus200TestingStatus = {
+  idle: 'idle',
+  stale: 'stale',
+  ready: 'ready',
+  passed: 'passed',
+} as const;
+
+export type GetPreviewEnvStatus200 = {
+  testingStatus: GetPreviewEnvStatus200TestingStatus;
+  /** @nullable */
+  testContainerStatus: string | null;
+  /** @nullable */
+  containerUrl?: string | null;
+  /** @nullable */
+  candidateVersionId?: number | null;
+  /** @nullable */
+  testedSnapshotId?: number | null;
+  /** @nullable */
+  migrationStatus?: string | null;
+  /** @nullable */
+  previewSessionUrl?: string | null;
+};
+
+export type ApprovePreviewEnv200 = {
+  ok: boolean;
+  versionId: number;
+  testingStatus: string;
+  /** @nullable */
+  testingApprovedAt?: string | null;
+  alreadyApproved?: boolean;
+};
+
+export type CreatePreviewSession200 = {
+  sessionId: string;
+  previewUrl: string;
+  expiresAt: string;
 };
 
 export type DeleteProjectFile200 = {

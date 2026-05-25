@@ -91,6 +91,14 @@ type Project = {
   kind?: string;
   projectFormat?: string;
   publicSlug?: string | null;
+  /** Task #768: full-stack projects have a containerId. Presence gates Test Environment UI. */
+  containerId?: string | null;
+  /** Task #768: current testing workflow state. */
+  testingStatus?: string | null;
+  /** Task #768: version ID of the most recently approved test snapshot. */
+  testedSnapshotId?: number | null;
+  /** Task #768: live status of the test container. */
+  testContainerStatus?: string | null;
 };
 
 type ReadinessReport = {
@@ -130,6 +138,8 @@ type PreviewTabProps = {
   latestReport?: ReadinessReport | null;
   /** Switch to the Secrets / Tools panel so the user can fill in missing keys. */
   onJumpToSecrets?: () => void;
+  /** Task #768: navigate to the Test Environment tab when the user wants to start / approve a test build. */
+  onNavigateToTestEnv?: () => void;
   /**
    * Incrementing counter: whenever this value changes the preview iframe
    * is force-reloaded so freshly-built files are visible immediately.
@@ -166,6 +176,7 @@ export function PreviewTab({
   onStartContainer,
   latestReport,
   onJumpToSecrets,
+  onNavigateToTestEnv,
   refreshTrigger,
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
@@ -1775,6 +1786,29 @@ export function PreviewTab({
       </div>
 
       {/* Container waking/starting banner — Phase C server-side containers */}
+      {/* Task #768: testing gate nudge — shown for full-stack projects whose draft is not yet test-approved */}
+      {project.containerId && project.testingStatus !== "passed" && (
+        <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center justify-between gap-2 px-3 py-2 text-xs bg-amber-500/10 border-t border-amber-500/20 text-amber-700 dark:text-amber-400">
+          <div className="flex items-center gap-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              {project.testingStatus === "stale"
+                ? "Draft changed after last test — run a new test before publishing."
+                : project.testingStatus === "ready"
+                  ? "Test environment is ready. Approve it to unlock production publishing."
+                  : "Start a test build to preview and approve this app before publishing."}
+            </span>
+          </div>
+          {onNavigateToTestEnv && (
+            <button
+              onClick={onNavigateToTestEnv}
+              className="shrink-0 font-semibold hover:underline focus:outline-none"
+            >
+              Test Environment
+            </button>
+          )}
+        </div>
+      )}
       {containerStatus && ["starting", "hibernated"].includes(containerStatus) && (
         <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b bg-primary/8 border-primary/15 text-primary text-xs">
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />

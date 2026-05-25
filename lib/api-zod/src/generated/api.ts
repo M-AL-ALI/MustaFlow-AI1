@@ -708,6 +708,13 @@ export const ListProjectsResponseItem = zod.object({
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
+  "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
+  "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
+  "testedSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the most recently approved test snapshot. The publish route uses this as the source snapshot automatically when no versionId is specified.'),
+  "testContainerStatus": zod.union([zod.literal('stopped'),zod.literal('starting'),zod.literal('running'),zod.literal('hibernated'),zod.literal('error'),zod.literal(null)]).nullish().describe('Task #768. Current status of the test container. Null when no container has been started.'),
+  "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
+  "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
+  "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -787,6 +794,13 @@ export const GetProjectResponse = zod.object({
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
+  "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
+  "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
+  "testedSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the most recently approved test snapshot. The publish route uses this as the source snapshot automatically when no versionId is specified.'),
+  "testContainerStatus": zod.union([zod.literal('stopped'),zod.literal('starting'),zod.literal('running'),zod.literal('hibernated'),zod.literal('error'),zod.literal(null)]).nullish().describe('Task #768. Current status of the test container. Null when no container has been started.'),
+  "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
+  "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
+  "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -871,6 +885,13 @@ export const UpdateProjectResponse = zod.object({
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
+  "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
+  "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
+  "testedSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the most recently approved test snapshot. The publish route uses this as the source snapshot automatically when no versionId is specified.'),
+  "testContainerStatus": zod.union([zod.literal('stopped'),zod.literal('starting'),zod.literal('running'),zod.literal('hibernated'),zod.literal('error'),zod.literal(null)]).nullish().describe('Task #768. Current status of the test container. Null when no container has been started.'),
+  "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
+  "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
+  "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -937,6 +958,13 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
+  "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
+  "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
+  "testedSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the most recently approved test snapshot. The publish route uses this as the source snapshot automatically when no versionId is specified.'),
+  "testContainerStatus": zod.union([zod.literal('stopped'),zod.literal('starting'),zod.literal('running'),zod.literal('hibernated'),zod.literal('error'),zod.literal(null)]).nullish().describe('Task #768. Current status of the test container. Null when no container has been started.'),
+  "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
+  "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
+  "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -1003,6 +1031,13 @@ export const RestoreProjectResponse = zod.object({
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
+  "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
+  "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
+  "testedSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the most recently approved test snapshot. The publish route uses this as the source snapshot automatically when no versionId is specified.'),
+  "testContainerStatus": zod.union([zod.literal('stopped'),zod.literal('starting'),zod.literal('running'),zod.literal('hibernated'),zod.literal('error'),zod.literal(null)]).nullish().describe('Task #768. Current status of the test container. Null when no container has been started.'),
+  "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
+  "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
+  "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -1068,6 +1103,13 @@ export const GetProjectsSummaryResponse = zod.object({
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
+  "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
+  "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
+  "testedSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the most recently approved test snapshot. The publish route uses this as the source snapshot automatically when no versionId is specified.'),
+  "testContainerStatus": zod.union([zod.literal('stopped'),zod.literal('starting'),zod.literal('running'),zod.literal('hibernated'),zod.literal('error'),zod.literal(null)]).nullish().describe('Task #768. Current status of the test container. Null when no container has been started.'),
+  "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
+  "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
+  "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))
@@ -1946,6 +1988,82 @@ export const ProvisionPreviewDatabaseParams = zod.object({
 
 export const ProvisionPreviewDatabaseResponse = zod.object({
   "previewDbStatus": zod.string()
+})
+
+
+/**
+ * @summary Start (or restart) the test container for a project, creating an immutable test candidate snapshot
+ */
+export const StartPreviewEnvParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
+ * @summary Stop and recreate the test container (force rebuild)
+ */
+export const RebuildPreviewEnvParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
+ * @summary Stop and destroy the test container
+ */
+export const StopPreviewEnvParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const StopPreviewEnvResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Poll test container status and health
+ */
+export const GetPreviewEnvStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetPreviewEnvStatusResponse = zod.object({
+  "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']),
+  "testContainerStatus": zod.string().nullable(),
+  "containerUrl": zod.string().nullish(),
+  "candidateVersionId": zod.number().nullish(),
+  "testedSnapshotId": zod.number().nullish(),
+  "migrationStatus": zod.string().nullish(),
+  "previewSessionUrl": zod.string().nullish()
+})
+
+
+/**
+ * @summary Approve the current test candidate snapshot for production promotion (6-precondition gate)
+ */
+export const ApprovePreviewEnvParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ApprovePreviewEnvResponse = zod.object({
+  "ok": zod.boolean(),
+  "versionId": zod.number(),
+  "testingStatus": zod.string(),
+  "testingApprovedAt": zod.coerce.date().nullish(),
+  "alreadyApproved": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Create a short-lived signed preview session for the test container subdomain
+ */
+export const CreatePreviewSessionParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const CreatePreviewSessionResponse = zod.object({
+  "sessionId": zod.string(),
+  "previewUrl": zod.string(),
+  "expiresAt": zod.coerce.date()
 })
 
 

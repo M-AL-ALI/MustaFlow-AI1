@@ -42,6 +42,7 @@ import type {
   AnalyzePageMapParams,
   ApiError,
   AppTestRun,
+  ApprovePreviewEnv200,
   ApproveVersionForTesting200,
   AttachPurchasedDomainToProjectBody,
   BillingCheckoutInput,
@@ -66,6 +67,7 @@ import type {
   ContainerStatus,
   CreateDbSnapshotInput,
   CreateGithubBranch200,
+  CreatePreviewSession200,
   CreateProjectDomainDnsRecord201,
   CveFinding,
   CveScanResult,
@@ -108,6 +110,7 @@ import type {
   GetCheckRunTrendsParams,
   GetCheckRunsParams,
   GetContainerLogsParams,
+  GetPreviewEnvStatus200,
   GetProjectDomainDnsHistory200,
   GetProjectDomainDnsHistoryParams,
   GetProjectProvisioningStatus200,
@@ -196,6 +199,7 @@ import type {
   RateKnowledge200,
   RateKnowledgeBody,
   ReadinessResult,
+  RebuildPreviewEnv202,
   RefreshPurchasedDomainInfo200,
   RegisterProjectUploadBody,
   ReleasePurchasedDomain200,
@@ -231,7 +235,9 @@ import type {
   SetProjectDomainWwwRedirectBody,
   SetProjectSubdomain400,
   SetPurchasedDomainAutoRenewBody,
+  StartPreviewEnv202,
   StopContainer200,
+  StopPreviewEnv200,
   StripeWebhook200,
   SubdomainInput,
   SubdomainResult,
@@ -5204,6 +5210,433 @@ export const useProvisionPreviewDatabase = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getProvisionPreviewDatabaseMutationOptions(options));
+    }
+
+export const getStartPreviewEnvUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/preview-env/start`
+}
+
+/**
+ * @summary Start (or restart) the test container for a project, creating an immutable test candidate snapshot
+ */
+export const startPreviewEnv = async (id: number, options?: RequestInit): Promise<StartPreviewEnv202> => {
+
+  return customFetch<StartPreviewEnv202>(getStartPreviewEnvUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getStartPreviewEnvMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startPreviewEnv>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startPreviewEnv>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['startPreviewEnv'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startPreviewEnv>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  startPreviewEnv(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartPreviewEnvMutationResult = NonNullable<Awaited<ReturnType<typeof startPreviewEnv>>>
+
+    export type StartPreviewEnvMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Start (or restart) the test container for a project, creating an immutable test candidate snapshot
+ */
+export const useStartPreviewEnv = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startPreviewEnv>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startPreviewEnv>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getStartPreviewEnvMutationOptions(options));
+    }
+
+export const getRebuildPreviewEnvUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/preview-env/rebuild`
+}
+
+/**
+ * @summary Stop and recreate the test container (force rebuild)
+ */
+export const rebuildPreviewEnv = async (id: number, options?: RequestInit): Promise<RebuildPreviewEnv202> => {
+
+  return customFetch<RebuildPreviewEnv202>(getRebuildPreviewEnvUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRebuildPreviewEnvMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rebuildPreviewEnv>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rebuildPreviewEnv>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['rebuildPreviewEnv'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rebuildPreviewEnv>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  rebuildPreviewEnv(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RebuildPreviewEnvMutationResult = NonNullable<Awaited<ReturnType<typeof rebuildPreviewEnv>>>
+
+    export type RebuildPreviewEnvMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Stop and recreate the test container (force rebuild)
+ */
+export const useRebuildPreviewEnv = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rebuildPreviewEnv>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rebuildPreviewEnv>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getRebuildPreviewEnvMutationOptions(options));
+    }
+
+export const getStopPreviewEnvUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/preview-env/stop`
+}
+
+/**
+ * @summary Stop and destroy the test container
+ */
+export const stopPreviewEnv = async (id: number, options?: RequestInit): Promise<StopPreviewEnv200> => {
+
+  return customFetch<StopPreviewEnv200>(getStopPreviewEnvUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getStopPreviewEnvMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopPreviewEnv>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof stopPreviewEnv>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['stopPreviewEnv'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof stopPreviewEnv>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  stopPreviewEnv(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StopPreviewEnvMutationResult = NonNullable<Awaited<ReturnType<typeof stopPreviewEnv>>>
+
+    export type StopPreviewEnvMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Stop and destroy the test container
+ */
+export const useStopPreviewEnv = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopPreviewEnv>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof stopPreviewEnv>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getStopPreviewEnvMutationOptions(options));
+    }
+
+export const getGetPreviewEnvStatusUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/preview-env/status`
+}
+
+/**
+ * @summary Poll test container status and health
+ */
+export const getPreviewEnvStatus = async (id: number, options?: RequestInit): Promise<GetPreviewEnvStatus200> => {
+
+  return customFetch<GetPreviewEnvStatus200>(getGetPreviewEnvStatusUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPreviewEnvStatusQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/preview-env/status`
+    ] as const;
+    }
+
+
+export const getGetPreviewEnvStatusQueryOptions = <TData = Awaited<ReturnType<typeof getPreviewEnvStatus>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPreviewEnvStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPreviewEnvStatusQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPreviewEnvStatus>>> = ({ signal }) => getPreviewEnvStatus(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPreviewEnvStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPreviewEnvStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getPreviewEnvStatus>>>
+export type GetPreviewEnvStatusQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Poll test container status and health
+ */
+
+export function useGetPreviewEnvStatus<TData = Awaited<ReturnType<typeof getPreviewEnvStatus>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPreviewEnvStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPreviewEnvStatusQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getApprovePreviewEnvUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/preview-env/approve`
+}
+
+/**
+ * @summary Approve the current test candidate snapshot for production promotion (6-precondition gate)
+ */
+export const approvePreviewEnv = async (id: number, options?: RequestInit): Promise<ApprovePreviewEnv200> => {
+
+  return customFetch<ApprovePreviewEnv200>(getApprovePreviewEnvUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApprovePreviewEnvMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approvePreviewEnv>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approvePreviewEnv>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['approvePreviewEnv'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approvePreviewEnv>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  approvePreviewEnv(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApprovePreviewEnvMutationResult = NonNullable<Awaited<ReturnType<typeof approvePreviewEnv>>>
+
+    export type ApprovePreviewEnvMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Approve the current test candidate snapshot for production promotion (6-precondition gate)
+ */
+export const useApprovePreviewEnv = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approvePreviewEnv>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approvePreviewEnv>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getApprovePreviewEnvMutationOptions(options));
+    }
+
+export const getCreatePreviewSessionUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/preview-env/session`
+}
+
+/**
+ * @summary Create a short-lived signed preview session for the test container subdomain
+ */
+export const createPreviewSession = async (id: number, options?: RequestInit): Promise<CreatePreviewSession200> => {
+
+  return customFetch<CreatePreviewSession200>(getCreatePreviewSessionUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getCreatePreviewSessionMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPreviewSession>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPreviewSession>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['createPreviewSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPreviewSession>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  createPreviewSession(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePreviewSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createPreviewSession>>>
+
+    export type CreatePreviewSessionMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Create a short-lived signed preview session for the test container subdomain
+ */
+export const useCreatePreviewSession = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPreviewSession>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createPreviewSession>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getCreatePreviewSessionMutationOptions(options));
     }
 
 export const getRollbackVersionUrl = (id: number,

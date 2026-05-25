@@ -66,6 +66,7 @@
     "migrate-preview-secrets": "tsx ./src/migrate-preview-secrets.ts",
     "migrate-testing-approval": "tsx ./src/migrate-testing-approval.ts",
     "migrate-preview-db": "tsx ./src/migrate-preview-db.ts",
+    "migrate-testing-workflow": "tsx ./src/migrate-testing-workflow.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

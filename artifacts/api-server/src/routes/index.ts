@@ -80,6 +80,7 @@ import sharingRouter, { publicShareRouter } from "./sharing";
 import notificationsCollabRouter from "./notifications-collab";
 import projectActivityRouter from "./project-activity";
 import gdprRouter from "./gdpr";
+import previewEnvRouter from "./preview-env";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -152,6 +153,7 @@ const KNOWN_PREFIXES = [
   "/addons",
   "/usage",
   "/canvas",
+  "/preview-env",
   "/gallery-templates",
   "/extensions",
   "/profiles",
@@ -188,6 +190,7 @@ router.use(projectsRouter);
 router.use(messagesRouter);
 router.use(tasksRouter);
 router.use(versionsRouter);
+router.use(previewEnvRouter);
 router.use(checkpointsRouter);
 router.use(workflowsRouter);
 router.use(visualEditRouter);

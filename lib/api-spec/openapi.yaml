@@ -1380,6 +1380,148 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
 
+  /projects/{id}/preview-env/start:
+    post:
+      operationId: startPreviewEnv
+      tags: [preview-env]
+      summary: Start (or restart) the test container for a project, creating an immutable test candidate snapshot
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "202":
+          description: Test environment starting
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, candidateVersionId, testingStatus]
+                properties:
+                  ok: { type: boolean }
+                  candidateVersionId: { type: integer }
+                  testingStatus: { type: string }
+                  containerUrl: { type: ["string", "null"] }
+        "402": { description: Insufficient credits, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Container already running, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+
+  /projects/{id}/preview-env/rebuild:
+    post:
+      operationId: rebuildPreviewEnv
+      tags: [preview-env]
+      summary: Stop and recreate the test container (force rebuild)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "202":
+          description: Rebuild enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, candidateVersionId, testingStatus]
+                properties:
+                  ok: { type: boolean }
+                  candidateVersionId: { type: integer }
+                  testingStatus: { type: string }
+        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+
+  /projects/{id}/preview-env/stop:
+    post:
+      operationId: stopPreviewEnv
+      tags: [preview-env]
+      summary: Stop and destroy the test container
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Container stopped
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+
+  /projects/{id}/preview-env/status:
+    get:
+      operationId: getPreviewEnvStatus
+      tags: [preview-env]
+      summary: Poll test container status and health
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Current test environment state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [testingStatus, testContainerStatus]
+                properties:
+                  testingStatus:
+                    type: string
+                    enum: [idle, stale, ready, passed]
+                  testContainerStatus:
+                    type: ["string", "null"]
+                  containerUrl: { type: ["string", "null"] }
+                  candidateVersionId: { type: ["integer", "null"] }
+                  testedSnapshotId: { type: ["integer", "null"] }
+                  migrationStatus: { type: ["string", "null"] }
+                  previewSessionUrl: { type: ["string", "null"] }
+        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+
+  /projects/{id}/preview-env/approve:
+    post:
+      operationId: approvePreviewEnv
+      tags: [preview-env]
+      summary: Approve the current test candidate snapshot for production promotion (6-precondition gate)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Snapshot approved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, versionId, testingStatus]
+                properties:
+                  ok: { type: boolean }
+                  versionId: { type: integer }
+                  testingStatus: { type: string }
+                  testingApprovedAt: { type: ["string", "null"], format: date-time }
+                  alreadyApproved: { type: boolean }
+        "422":
+          description: Precondition failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+
+  /projects/{id}/preview-env/session:
+    post:
+      operationId: createPreviewSession
+      tags: [preview-env]
+      summary: Create a short-lived signed preview session for the test container subdomain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessionId, previewUrl, expiresAt]
+                properties:
+                  sessionId: { type: string }
+                  previewUrl: { type: string }
+                  expiresAt: { type: string, format: date-time }
+        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: No running test container, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+
   /projects/{id}/versions/{versionId}/rollback:
     post:
       operationId: rollbackVersion
@@ -4744,6 +4886,29 @@ components:
         stagingPublishedSnapshotId:
           type: ["integer", "null"]
           description: "Version ID currently live on the staging slot. Null = not staged. Set by POST /publish?env=staging, promoted by POST /promote."
+        testingStatus:
+          type: string
+          enum: [idle, stale, ready, passed]
+          description: "Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish."
+        testingCandidateSnapshotId:
+          type: ["integer", "null"]
+          description: "Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by /preview-env/start."
+        testedSnapshotId:
+          type: ["integer", "null"]
+          description: "Task #768. Version ID of the most recently approved test snapshot. The publish route uses this as the source snapshot automatically when no versionId is specified."
+        testContainerStatus:
+          type: ["string", "null"]
+          enum: [stopped, starting, running, hibernated, error, null]
+          description: "Task #768. Current status of the test container. Null when no container has been started."
+        runningTestSnapshotId:
+          type: ["integer", "null"]
+          description: "Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild."
+        activePreviewSessionId:
+          type: ["string", "null"]
+          description: "Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway)."
+        previewDbUrl:
+          type: ["string", "null"]
+          description: "Task #767/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 

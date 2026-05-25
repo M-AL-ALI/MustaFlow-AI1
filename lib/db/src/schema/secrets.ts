@@ -44,6 +44,13 @@ export const secretsTable = pgTable("project_secrets", {
   // Production secrets (API keys, payment keys) default to false so they are
   // never automatically exposed in the development preview environment.
   isPreviewSafe: boolean("is_preview_safe").notNull().default(false),
+  // exposureType: controls where the secret value is permitted to appear.
+  //   'server'        = server process only; never in a client bundle or browser env.
+  //   'public-client' = may be embedded in frontend bundle (e.g. VITE_PUBLIC_* vars).
+  //                     Requires explicit user confirmation before saving since client
+  //                     secrets are visible in the browser and public source maps.
+  // Default: 'server' (safe conservative default).
+  exposureType: text("exposure_type").notNull().default("server"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),

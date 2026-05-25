@@ -13,6 +13,28 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
+// ── detectSchemaMigrations ────────────────────────────────────────────────────
+// Returns paths of files that look like schema-changing SQL migration scripts.
+// Scans: files ending in .sql, files whose path contains "migrat" (any case),
+// and Drizzle/Prisma/Knex migration files ending in .ts or .js in a migrations/
+// directory. Any match against dangerous DDL triggers a hard block.
+function detectSchemaMigrations(
+  files: Array<{ path: string; content: string | null }>,
+): string[] {
+  const DANGEROUS_DDL = /\b(ALTER\s+TABLE|DROP\s+TABLE|DROP\s+COLUMN|DROP\s+INDEX|TRUNCATE\s+TABLE|RENAME\s+TABLE|RENAME\s+COLUMN)\b/i;
+  const violations: string[] = [];
+  for (const f of files) {
+    if (!f.content) continue;
+    const isSql = f.path.endsWith(".sql");
+    const isMigrationPath =
+      /migrat/i.test(f.path) &&
+      (f.path.endsWith(".ts") || f.path.endsWith(".js") || f.path.endsWith(".sql"));
+    if ((isSql || isMigrationPath) && DANGEROUS_DDL.test(f.content)) {
+      violations.push(f.path);
+    }
+  }
+  return violations;
+}
 import { eq, sql, isNull, and } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import {
@@ -133,6 +155,45 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     }
   }
 
+  // ── Test-then-publish gate (no explicit versionId supplied) ───────────────
+  // When the caller did not specify a versionId, auto-resolve from the project's
+  // testedSnapshotId (set by POST /preview-env/approve).
+  //
+  // Full-stack rule (first release): if the project has a dev container it MUST
+  // pass testing before publishing. Static projects may publish directly.
+  if (env === "production" && publishVersionId === null) {
+    const hasContainer = !!project.containerId;
+
+    if (project.testedSnapshotId) {
+      // Always publish from the approved snapshot — never from the draft.
+      const [testedVersion] = await db
+        .select({ filesSnapshot: projectVersionsTable.filesSnapshot })
+        .from(projectVersionsTable)
+        .where(
+          and(
+            eq(projectVersionsTable.id, project.testedSnapshotId),
+            eq(projectVersionsTable.projectId, projectId),
+          ),
+        );
+      if (testedVersion?.filesSnapshot && testedVersion.filesSnapshot.length > 0) {
+        approvedSnapshot = testedVersion.filesSnapshot;
+        req.log.info(
+          { projectId, testedSnapshotId: project.testedSnapshotId },
+          "Using approved testedSnapshotId for publish",
+        );
+      }
+    } else if (hasContainer) {
+      // Full-stack project with no tested snapshot: hard block.
+      res.status(422).json({
+        error:
+          "Full-stack projects must pass a test preview before publishing to production. " +
+          "Open the Test Environment tab, start a test build, verify the app, then approve it.",
+        code: "testing_required",
+      });
+      return;
+    }
+  }
+
   // ── Security gate: block publish when blockPublishOnCritical is on and findings exist ──
   // Only applied to production publishes.
   if (env === "production" && project.blockPublishOnCritical) {
@@ -173,6 +234,29 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       error: "Cannot publish a project with no generated files. Build the app first.",
     });
     return;
+  }
+
+  // ── Hard block: schema-changing SQL migrations ────────────────────────────
+  // v1 policy: no automated schema changes allowed in production publishes.
+  // Operators must run migrations out-of-band and ensure DB schema matches
+  // the code before publishing. No confirmation checkbox — this is a hard block.
+  if (env === "production") {
+    const migrationViolations = detectSchemaMigrations(files);
+    if (migrationViolations.length > 0) {
+      req.log.warn(
+        { projectId, files: migrationViolations },
+        "Publish blocked: schema-changing SQL migrations detected in snapshot",
+      );
+      res.status(422).json({
+        error:
+          `Publish blocked: ${migrationViolations.length} file(s) contain schema-changing SQL ` +
+          `(ALTER TABLE, DROP TABLE, DROP COLUMN, TRUNCATE, etc.). ` +
+          `Run database migrations out-of-band and remove or guard them before publishing to production.`,
+        code: "schema_migration_detected",
+        files: migrationViolations,
+      });
+      return;
+    }
   }
 
   // ── Content safety scan — phishing + malware patterns ─────────────────────
@@ -414,9 +498,27 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     } catch (err) {
       req.log.error(
         { err, projectId },
-        "Prod container deployment failed — falling back to snapshot",
+        "Prod container deployment failed",
       );
     }
+  }
+
+  // ── Blue/green safety: container deploy required but failed ───────────────
+  // Refuse to update publishedSnapshotId if the container never became healthy.
+  // The old production container (if any) is still serving traffic — preserve it.
+  if (shouldDeployContainer && !containerDeployed) {
+    req.log.error(
+      { projectId, prodContainerId: project.prodContainerId },
+      "Publish aborted: container deploy failed and no fallback allowed",
+    );
+    res.status(500).json({
+      error:
+        "Production container deployment failed — the health check did not pass within the timeout. " +
+        "The existing production version has been preserved. " +
+        "Check the deployment logs for details.",
+      code: "container_deploy_failed",
+    });
+    return;
   }
 
   // Mark the project published, store which snapshot is live, and save the slug.
