@@ -23,6 +23,9 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
+  History,
+  GitBranch,
+  Webhook,
 } from "lucide-react";
 
 const SESSION_TOKEN_KEY = "mf_dev_portal_token";
@@ -825,6 +828,53 @@ export default function DevelopersPage() {
                 {`const token = "<token>";\nconst projectId = "<project-id>";\nconst buildId = "<build-id>";\n\nasync function waitForBuild() {\n  while (true) {\n    const res = await fetch(\n      \`https://mustaflow.app/api/v1/projects/\${projectId}/builds/\${buildId}\`,\n      { headers: { Authorization: \`Bearer \${token}\` } }\n    );\n    const build = await res.json();\n\n    if (build.status === "completed") {\n      console.log("Build finished:", build.output);\n      break;\n    }\n    if (build.status === "failed") {\n      console.error("Build failed:", build.error);\n      break;\n    }\n\n    // Poll every 2 seconds\n    await new Promise((r) => setTimeout(r, 2000));\n  }\n}\n\nwaitForBuild();`}
               </CodeBlock>
             </div>
+          </Section>
+
+          {/* Changelog teaser */}
+          <Section icon={History} title="Changelog">
+            <p>
+              Every addition, breaking change, and deprecation is recorded in the{" "}
+              <Link href="/developers/changelog" className="text-primary hover:underline">
+                API Changelog
+              </Link>
+              . Check it before upgrading integrations to catch any breaking changes.
+            </p>
+            <div className="space-y-2">
+              {[
+                {
+                  version: "v1.7",
+                  date: "May 2026",
+                  text: "Preview environments, secret scoping, and publish gates",
+                },
+                {
+                  version: "v1.6",
+                  date: "April 2026",
+                  text: "Agentic provisioning and Neon database auto-creation",
+                },
+                {
+                  version: "v1.5",
+                  date: "March 2026",
+                  text: "GDPR data export, org audit log, and variant builds",
+                },
+              ].map(({ version, date, text }) => (
+                <div
+                  key={version}
+                  className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3"
+                >
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-primary/10 text-primary border border-primary/20 shrink-0">
+                    {version}
+                  </span>
+                  <span className="flex-1 text-xs text-foreground leading-relaxed">{text}</span>
+                  <span className="text-xs text-muted-foreground shrink-0">{date}</span>
+                </div>
+              ))}
+            </div>
+            <Link
+              href="/developers/changelog"
+              className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline font-medium"
+            >
+              View full changelog <ArrowRight className="h-3 w-3" />
+            </Link>
           </Section>
 
           {/* CTA */}

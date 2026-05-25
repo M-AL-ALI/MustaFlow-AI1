@@ -52,6 +52,7 @@ import { OnboardingTour } from "./components/onboarding-tour";
 import { OfflineIndicator } from "./components/offline-indicator";
 import TrustPage from "./pages/trust";
 import DevelopersPage from "./pages/developers";
+import DevelopersChangelogPage from "./pages/developers-changelog";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -563,6 +564,9 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                 <AppLayout>
                   <TrustPage />
                 </AppLayout>
+              </Route>
+              <Route path="/developers/changelog">
+                <DevelopersChangelogPage />
               </Route>
               <Route path="/developers">
                 <AppLayout>
