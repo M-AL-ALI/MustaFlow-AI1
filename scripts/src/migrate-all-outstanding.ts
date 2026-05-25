@@ -73,6 +73,7 @@ const MIGRATIONS = [
   "migrate-deployment-logs-mobile",
   "migrate-token-count",
   "migrate-chip-label",
+  "migrate-personal-access-tokens",
 ] as const;
 
 async function main(): Promise<void> {
