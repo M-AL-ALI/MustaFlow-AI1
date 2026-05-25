@@ -119,9 +119,9 @@ export default function DevelopersPage() {
           <h1 className="text-3xl font-bold">Developer Portal</h1>
         </div>
         <p className="text-muted-foreground max-w-xl">
-          Automate project creation, trigger builds, and read output files programmatically using the
-          MustaFlow AI REST API. Everything the web app does, you can do from your own scripts and
-          pipelines.
+          Automate project creation, trigger builds, and read output files programmatically using
+          the MustaFlow AI REST API. Everything the web app does, you can do from your own scripts
+          and pipelines.
         </p>
         <p className="text-xs text-muted-foreground">API version: v1 — last updated May 2026</p>
       </div>
@@ -281,8 +281,16 @@ export default function DevelopersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              <EndpointRow method="GET" path="/api/v1/projects" description="List all your projects" />
-              <EndpointRow method="POST" path="/api/v1/projects" description="Create a new project" />
+              <EndpointRow
+                method="GET"
+                path="/api/v1/projects"
+                description="List all your projects"
+              />
+              <EndpointRow
+                method="POST"
+                path="/api/v1/projects"
+                description="Create a new project"
+              />
               <EndpointRow
                 method="GET"
                 path="/api/v1/projects/:id"
@@ -332,8 +340,8 @@ export default function DevelopersPage() {
       <Section icon={Zap} title="Rate Limits">
         <p>
           Rate limits are applied per account. Exceeding a limit returns{" "}
-          <InlineCode>429 Too Many Requests</InlineCode> with a{" "}
-          <InlineCode>Retry-After</InlineCode> header indicating how many seconds to wait.
+          <InlineCode>429 Too Many Requests</InlineCode> with a <InlineCode>Retry-After</InlineCode>{" "}
+          header indicating how many seconds to wait.
         </p>
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-sm">
@@ -342,9 +350,7 @@ export default function DevelopersPage() {
                 <th className="text-left px-4 py-2.5 font-medium text-foreground text-xs">
                   Endpoint group
                 </th>
-                <th className="text-left px-4 py-2.5 font-medium text-foreground text-xs">
-                  Limit
-                </th>
+                <th className="text-left px-4 py-2.5 font-medium text-foreground text-xs">Limit</th>
                 <th className="text-left px-4 py-2.5 font-medium text-foreground text-xs">
                   Window
                 </th>

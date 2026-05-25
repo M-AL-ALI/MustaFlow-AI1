@@ -10,7 +10,7 @@
  * and are only bound by ownership.
  */
 
-import type { Request } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable } from "@workspace/db";
 import type { PATRequest } from "../../lib/pat-auth";
@@ -46,4 +46,19 @@ export async function checkV1ProjectAccess(req: Request, projectId: number): Pro
  */
 export function isPatAuth(req: Request): boolean {
   return Boolean(req.headers["authorization"]?.startsWith("Bearer "));
+}
+
+/**
+ * Middleware factory: enforce a PAT scope only when the request was
+ * authenticated via a Bearer token.  Clerk session-cookie callers are
+ * unaffected and pass straight through.
+ */
+export function requirePatScope(scope: string) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (isPatAuth(req) && !(req as unknown as PATRequest).patScopes?.includes(scope)) {
+      res.status(403).json({ error: `This token does not have the '${scope}' scope.` });
+      return;
+    }
+    next();
+  };
 }

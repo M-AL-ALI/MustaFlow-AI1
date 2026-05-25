@@ -13,13 +13,13 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, projectsTable, projectArtifactsTable } from "@workspace/db";
-import { checkV1ProjectAccess } from "./access";
+import { checkV1ProjectAccess, requirePatScope } from "./access";
 import type { PATRequest } from "../../lib/pat-auth";
 
 const router: IRouter = Router();
 
 // ── GET /api/v1/projects ──────────────────────────────────────────────────────
-router.get("/projects", async (req, res): Promise<void> => {
+router.get("/projects", requirePatScope("projects:read"), async (req, res): Promise<void> => {
   const userId = req.userId!;
 
   const rows = await db
@@ -53,7 +53,7 @@ router.get("/projects", async (req, res): Promise<void> => {
 });
 
 // ── GET /api/v1/projects/:id ──────────────────────────────────────────────────
-router.get("/projects/:id", async (req, res): Promise<void> => {
+router.get("/projects/:id", requirePatScope("projects:read"), async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
   if (!Number.isFinite(projectId)) {
     res.status(400).json({ error: "Invalid project id." });
@@ -98,7 +98,7 @@ router.get("/projects/:id", async (req, res): Promise<void> => {
 });
 
 // ── POST /api/v1/projects ─────────────────────────────────────────────────────
-router.post("/projects", async (req, res): Promise<void> => {
+router.post("/projects", requirePatScope("projects:write"), async (req, res): Promise<void> => {
   // Project-scoped PATs cannot create new projects (the scope is tied to a
   // specific existing project, so creating a new one is out of scope).
   if (
