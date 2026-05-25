@@ -24,11 +24,9 @@ import {
   Plus,
   Copy,
   Check,
-  KeyRound,
   FlaskConical,
   CheckCircle2,
   XCircle,
-  Code,
 } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
@@ -1254,7 +1252,7 @@ function DeveloperTab() {
   const fetchTokens = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/tokens");
+      const res = await fetch("/api/me/tokens");
       if (res.ok) {
         const data = (await res.json()) as { tokens: ApiToken[] };
         setTokens(data.tokens);
@@ -1295,7 +1293,7 @@ function DeveloperTab() {
       const days = parseInt(expiresInDays, 10);
       if (!isNaN(days) && days > 0) body.expiresInDays = days;
 
-      const res = await fetch("/api/tokens", {
+      const res = await fetch("/api/me/tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1364,7 +1362,7 @@ function DeveloperTab() {
   async function handleRevoke(tokenId: number) {
     setRevoking(tokenId);
     try {
-      const res = await fetch(`/api/tokens/${tokenId}`, { method: "DELETE" });
+      const res = await fetch(`/api/me/tokens/${tokenId}`, { method: "DELETE" });
       if (res.ok) {
         setTokens((prev) => prev.filter((t) => t.id !== tokenId));
         toast({ title: "Token revoked" });
