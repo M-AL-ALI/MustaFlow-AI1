@@ -65,8 +65,7 @@ describe("Editor preview route — authentication", () => {
    */
   it("T02: returns 403 when authenticated user is not a project member", () => {
     const project = makeProject({ userId: "owner_999" });
-    const canAccess = (requestingUserId: string, ownerId: string) =>
-      requestingUserId === ownerId;
+    const canAccess = (requestingUserId: string, ownerId: string) => requestingUserId === ownerId;
 
     const result = canAccess("attacker_001", project.userId as string);
     // A non-member gets 403
@@ -152,10 +151,8 @@ describe("Public slug /api/p/:slug/ — isolation", () => {
     const draftContent = "<html><body>v6 — draft edit (not published)</body></html>";
 
     // Public serving reads from the snapshot, not live files
-    const servePublic = (
-      _slug: string,
-      snapshot: { content: string } | null,
-    ) => snapshot?.content ?? null;
+    const servePublic = (_slug: string, snapshot: { content: string } | null) =>
+      snapshot?.content ?? null;
 
     const serveEditor = (_projectId: number, liveFile: { content: string }) => liveFile.content;
 
@@ -195,9 +192,11 @@ describe("Container fail fallback — frozen snapshot served on error", () => {
    * back to the frozen snapshot with HTTP 200 — never returns 504.
    */
   it("T08: container request timeout falls back to snapshot (200)", async () => {
-    const mockFetch = vi.fn().mockRejectedValue(
-      Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
-    );
+    const mockFetch = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+      );
 
     const result = await simulateContainerFallback({
       fetch: mockFetch,

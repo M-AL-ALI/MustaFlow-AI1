@@ -200,7 +200,6 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         severity: "warning",
       },
     ],
-    minimumRecommendedVersion: "4.4.1",
   },
   {
     name: "threejs",
@@ -245,7 +244,6 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         severity: "warning",
       },
     ],
-    minimumRecommendedVersion: "5.55.8",
   },
   {
     name: "gsap",
@@ -278,7 +276,6 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "3.7.x",
       },
     ],
-    minimumRecommendedVersion: "4.0.0",
   },
   {
     name: "bootstrap",
@@ -301,7 +298,6 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "5.3.x",
       },
     ],
-    minimumRecommendedVersion: "5.3.8",
   },
   {
     name: "react",
@@ -321,7 +317,6 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         severity: "warning",
       },
     ],
-    minimumRecommendedVersion: "19.2.6",
   },
   {
     name: "d3",
@@ -342,7 +337,6 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         severity: "warning",
       },
     ],
-    minimumRecommendedVersion: "7.9.0",
   },
   {
     name: "moment",
@@ -381,7 +375,6 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         severity: "warning",
       },
     ],
-    minimumRecommendedVersion: "3.5.34",
   },
 ];
 

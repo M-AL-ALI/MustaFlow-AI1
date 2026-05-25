@@ -442,7 +442,10 @@ export async function serveSnapshot(
       }
     } catch (err) {
       // ECONNREFUSED / ETIMEDOUT / AbortError — fall back to snapshot gracefully.
-      logger.warn({ err, projectId, filePath }, "Production container unreachable — falling back to published snapshot");
+      logger.warn(
+        { err, projectId, filePath },
+        "Production container unreachable — falling back to published snapshot",
+      );
     }
     if (containerServed) return;
     // Fall through to serve the frozen published snapshot below.

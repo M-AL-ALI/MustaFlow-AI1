@@ -100,7 +100,7 @@ describe("resolveAgentIdentity", () => {
 
 describe("DB context injection status guard", () => {
   function shouldInjectDbContext(dbProvider: string, dbStatus: string): boolean {
-    return dbProvider !== "none" && dbStatus === "connected";
+    return !!dbProvider && dbProvider !== "none" && dbStatus === "connected";
   }
 
   it("injects context when provider is postgres and status is connected", () => {
