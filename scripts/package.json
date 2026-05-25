@@ -64,6 +64,8 @@
     "migrate-agentic-provisioning": "tsx ./src/migrate-agentic-provisioning.ts",
     "migrate-task-agent-mode": "tsx ./src/migrate-task-agent-mode.ts",
     "migrate-preview-secrets": "tsx ./src/migrate-preview-secrets.ts",
+    "migrate-testing-approval": "tsx ./src/migrate-testing-approval.ts",
+    "migrate-preview-db": "tsx ./src/migrate-preview-db.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

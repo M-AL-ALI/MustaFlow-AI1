@@ -24,6 +24,7 @@ import {
   deploymentLogsTable,
   projectDomainsTable,
   secretsTable,
+  type FileSnapshotEntry,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
@@ -83,6 +84,55 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     return;
   }
 
+  // ── Testing approval gate (Task #767) ─────────────────────────────────────
+  // When a versionId is specified in the request body, the caller wants to
+  // publish a specific snapshot (not re-snapshot the current draft). For
+  // agentic projects, the specified version MUST have been approved via
+  // POST /projects/:id/versions/:versionId/approve-testing before it can be
+  // promoted to production.
+  const versionIdRaw = (req.body as Record<string, unknown>)?.versionId;
+  const publishVersionId = typeof versionIdRaw === "number" ? versionIdRaw : null;
+
+  // Track which snapshot files to publish. Null = re-snapshot from project_files (default).
+  let approvedSnapshot: FileSnapshotEntry[] | null = null;
+
+  if (publishVersionId !== null && env === "production") {
+    const [specVersion] = await db
+      .select({
+        id: projectVersionsTable.id,
+        projectId: projectVersionsTable.projectId,
+        filesSnapshot: projectVersionsTable.filesSnapshot,
+        testingApprovedAt: projectVersionsTable.testingApprovedAt,
+      })
+      .from(projectVersionsTable)
+      .where(
+        and(
+          eq(projectVersionsTable.id, publishVersionId),
+          eq(projectVersionsTable.projectId, projectId),
+        ),
+      );
+
+    if (!specVersion) {
+      res.status(404).json({ error: "Version not found for this project" });
+      return;
+    }
+
+    // Agentic projects require testing approval before production promotion.
+    if (project.builderMode === "agentic" && !specVersion.testingApprovedAt) {
+      res.status(422).json({
+        error: "Version must pass Testing Approval before publishing to production.",
+        code: "testing_approval_required",
+        versionId: publishVersionId,
+      });
+      return;
+    }
+
+    // Use the approved version's frozen filesSnapshot, not the current draft.
+    if (specVersion.filesSnapshot && specVersion.filesSnapshot.length > 0) {
+      approvedSnapshot = specVersion.filesSnapshot;
+    }
+  }
+
   // ── Security gate: block publish when blockPublishOnCritical is on and findings exist ──
   // Only applied to production publishes.
   if (env === "production" && project.blockPublishOnCritical) {
@@ -103,10 +153,20 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     }
   }
 
-  const files = await db
-    .select()
-    .from(projectFilesTable)
-    .where(eq(projectFilesTable.projectId, projectId));
+  // When `approvedSnapshot` is set (versionId was specified), use that frozen snapshot
+  // directly instead of re-querying project_files. This ensures the published bytes
+  // exactly match the approved snapshot, with no risk of draft edits sneaking in.
+  const files = approvedSnapshot
+    ? approvedSnapshot.map((f) => ({
+        id: 0,
+        projectId,
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }))
+    : await db.select().from(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
 
   if (files.length === 0) {
     res.status(400).json({

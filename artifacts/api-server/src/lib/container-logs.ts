@@ -20,6 +20,7 @@ import { db, projectsTable, containerLogsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger";
 import { publishContainerLog } from "./event-bus";
+import { redactSecretValuesInLog } from "./container-secrets";
 
 const FLY_GRAPHQL_URL = "https://api.fly.io/graphql";
 const FLY_TOKEN = process.env.FLY_API_TOKEN ?? "";
@@ -106,16 +107,20 @@ export async function recordContainerLog(
   message: string,
 ): Promise<void> {
   try {
+    // Redact any secret values from the log line before persisting or broadcasting.
+    // Uses a per-project TTL cache (60 s) to avoid a DB round-trip per log line.
+    const safeMessage = await redactSecretValuesInLog(projectId, message);
+
     const [row] = await db
       .insert(containerLogsTable)
-      .values({ projectId, level, message })
+      .values({ projectId, level, message: safeMessage })
       .returning({ id: containerLogsTable.id, createdAt: containerLogsTable.createdAt });
     if (row) {
       publishContainerLog({
         id: row.id,
         projectId,
         level,
-        message,
+        message: safeMessage,
         createdAt: row.createdAt,
       });
     }

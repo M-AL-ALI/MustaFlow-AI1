@@ -695,6 +695,7 @@ export const ListProjectsResponseItem = zod.object({
   "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
   "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
   "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
+  "previewDbStatus": zod.enum(['none', 'provisioning', 'ready', 'error']).optional().describe('Task #767. Lifecycle of the preview-environment Neon Postgres DB provisioning.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -773,6 +774,7 @@ export const GetProjectResponse = zod.object({
   "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
   "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
   "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
+  "previewDbStatus": zod.enum(['none', 'provisioning', 'ready', 'error']).optional().describe('Task #767. Lifecycle of the preview-environment Neon Postgres DB provisioning.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -856,6 +858,7 @@ export const UpdateProjectResponse = zod.object({
   "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
   "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
   "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
+  "previewDbStatus": zod.enum(['none', 'provisioning', 'ready', 'error']).optional().describe('Task #767. Lifecycle of the preview-environment Neon Postgres DB provisioning.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -921,6 +924,7 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
   "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
   "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
+  "previewDbStatus": zod.enum(['none', 'provisioning', 'ready', 'error']).optional().describe('Task #767. Lifecycle of the preview-environment Neon Postgres DB provisioning.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -986,6 +990,7 @@ export const RestoreProjectResponse = zod.object({
   "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
   "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
   "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
+  "previewDbStatus": zod.enum(['none', 'provisioning', 'ready', 'error']).optional().describe('Task #767. Lifecycle of the preview-environment Neon Postgres DB provisioning.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -1050,6 +1055,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "neonProjectId": zod.string().nullish().describe('Neon Postgres project id captured at provision time. Null = not provisioned (or non-agentic project).'),
   "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']).optional().describe('Lifecycle of the auto-provision background job (Task #738).'),
   "provisioningError": zod.string().nullish().describe('Most recent provisioning error message, or null when last attempt succeeded.'),
+  "previewDbStatus": zod.enum(['none', 'provisioning', 'ready', 'error']).optional().describe('Task #767. Lifecycle of the preview-environment Neon Postgres DB provisioning.'),
   "blockPublishOnCritical": zod.boolean().optional().describe('When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true.'),
   "dismissedFindingHashes": zod.array(zod.string()).nullish().describe('Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate.'),
   "autoFixOnCheckFailure": zod.boolean().optional().describe('When true, a refine task is automatically enqueued after any build that has failing checks. Auto-fix fires at most once per build and never on auto-fix tasks themselves.'),
@@ -1839,7 +1845,11 @@ export const ListVersionsResponseItem = zod.object({
   "changelogEntry": zod.string().nullish(),
   "filesCount": zod.number(),
   "createdAt": zod.coerce.date(),
-  "planSnapshot": zod.record(zod.string(), zod.unknown()).nullish()
+  "planSnapshot": zod.record(zod.string(), zod.unknown()).nullish(),
+  "testingApprovedAt": zod.coerce.date().nullish(),
+  "testingApprovedBy": zod.string().nullish(),
+  "migrationStatus": zod.string().nullish(),
+  "testingSkipped": zod.boolean().optional()
 })
 export const ListVersionsResponse = zod.array(ListVersionsResponseItem)
 
@@ -1880,7 +1890,11 @@ export const PatchVersionResponse = zod.object({
   "changelogEntry": zod.string().nullish(),
   "filesCount": zod.number(),
   "createdAt": zod.coerce.date(),
-  "planSnapshot": zod.record(zod.string(), zod.unknown()).nullish()
+  "planSnapshot": zod.record(zod.string(), zod.unknown()).nullish(),
+  "testingApprovedAt": zod.coerce.date().nullish(),
+  "testingApprovedBy": zod.string().nullish(),
+  "migrationStatus": zod.string().nullish(),
+  "testingSkipped": zod.boolean().optional()
 })
 
 
@@ -1903,6 +1917,35 @@ export const GetVersionResponse = zod.object({
   "content": zod.string(),
   "mimeType": zod.string()
 }))
+})
+
+
+/**
+ * @summary Approve a version snapshot for production promotion (Task
+ */
+export const ApproveVersionForTestingParams = zod.object({
+  "id": zod.coerce.number(),
+  "versionId": zod.coerce.number()
+})
+
+export const ApproveVersionForTestingResponse = zod.object({
+  "ok": zod.boolean(),
+  "versionId": zod.number(),
+  "testingApprovedAt": zod.coerce.date().nullish(),
+  "testingApprovedBy": zod.string().nullish(),
+  "alreadyApproved": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Provision a dedicated Neon Postgres DB for the project's preview environment (Task
+ */
+export const ProvisionPreviewDatabaseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ProvisionPreviewDatabaseResponse = zod.object({
+  "previewDbStatus": zod.string()
 })
 
 

@@ -16,21 +16,51 @@
 //   - No authentication required — this is the public URL.
 //   - Unpublish clears published_snapshot_id → this route returns 404.
 //   - publicSlug is never cleared → republishing reuses the same URL.
+//
+// Security: staging and per-build preview routes require owner or org-member auth.
+// Only the production catch-all (/p/:slug/*) is intentionally unauthenticated.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
 import { and, eq, isNull } from "drizzle-orm";
-import { db, projectsTable } from "@workspace/db";
+import { db, projectsTable, previewSnapshotsTable } from "@workspace/db";
 import { serveSnapshot, serveSnapshotForEnv, servePreviewSnapshot } from "../lib/serveSnapshot";
 import { r2GetObject } from "../lib/cloudflare";
+import {
+  loadPreviewProject,
+  userCanPreviewProject,
+} from "../lib/livePreviewProxy";
 
 const router: IRouter = Router();
 
 // ── Staging route: /api/p/:slug/staging/{*splat} ──────────────────────────
 // MUST be registered before the generic catch-all so Express matches it first.
-// Internal access to staging snapshot (useful in dev where subdomains aren't available).
+// Internal access to staging snapshot — requires owner or org-member auth.
 router.get("/p/:slug/staging/{*splat}", async (req, res): Promise<void> => {
   const slug = req.params.slug;
+
+  // Auth gate: look up the project by publicSlug and verify the caller has access.
+  const [projectRow] = await db
+    .select({ id: projectsTable.id, ownerId: projectsTable.ownerId, organizationId: projectsTable.organizationId })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.publicSlug, slug), isNull(projectsTable.deletedAt)));
+
+  if (!projectRow) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+
+  const allowed = await userCanPreviewProject(projectRow, req.userId);
+  if (!allowed) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
   const splat = req.params.splat;
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
   const filePath = raw === "" ? "index.html" : raw;
@@ -39,9 +69,38 @@ router.get("/p/:slug/staging/{*splat}", async (req, res): Promise<void> => {
 
 // ── Preview route: /api/p/:previewSlug/preview/{*splat} ──────────────────
 // MUST be registered before the generic catch-all so Express matches it first.
-// Internal access to a per-build preview snapshot.
+// Internal access to a per-build preview snapshot — requires owner or org-member auth.
 router.get("/p/:previewSlug/preview/{*splat}", async (req, res): Promise<void> => {
   const previewSlug = req.params.previewSlug;
+
+  // Auth gate: look up the project via the preview_snapshots table.
+  const [snapshot] = await db
+    .select({ projectId: previewSnapshotsTable.projectId })
+    .from(previewSnapshotsTable)
+    .where(eq(previewSnapshotsTable.previewSlug, previewSlug));
+
+  if (!snapshot) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+
+  const previewProject = await loadPreviewProject(snapshot.projectId);
+  if (!previewProject) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  const allowed = await userCanPreviewProject(previewProject, req.userId);
+  if (!allowed) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
   const splat = req.params.splat;
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
   const filePath = raw === "" ? "index.html" : raw;
@@ -50,6 +109,7 @@ router.get("/p/:previewSlug/preview/{*splat}", async (req, res): Promise<void> =
 
 // ── Primary route: slug-based (/api/p/:slug/) ─────────────────────────────
 // Generic catch-all — registered LAST so staging/preview routes above win.
+// Intentionally unauthenticated — this is the public production URL.
 //
 // When EDGE_SERVING_ENABLED=true the Cloudflare Worker is the primary path.
 // Requests that reach this route indicate either:

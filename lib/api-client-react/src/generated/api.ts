@@ -42,6 +42,7 @@ import type {
   AnalyzePageMapParams,
   ApiError,
   AppTestRun,
+  ApproveVersionForTesting200,
   AttachPurchasedDomainToProjectBody,
   BillingCheckoutInput,
   BillingCheckoutResult,
@@ -185,6 +186,7 @@ import type {
   ProjectVersionDetail,
   ProjectVersionInput,
   ProjectsSummary,
+  ProvisionPreviewDatabase200,
   PublishContainer200,
   PublishResult,
   PurchaseDomainInput,
@@ -5061,6 +5063,148 @@ export function useGetVersion<TData = Awaited<ReturnType<typeof getVersion>>, TE
 
 
 
+
+export const getApproveVersionForTestingUrl = (id: number,
+    versionId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/versions/${versionId}/approve-testing`
+}
+
+/**
+ * @summary Approve a version snapshot for production promotion (Task
+ */
+export const approveVersionForTesting = async (id: number,
+    versionId: number, options?: RequestInit): Promise<ApproveVersionForTesting200> => {
+
+  return customFetch<ApproveVersionForTesting200>(getApproveVersionForTestingUrl(id,versionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApproveVersionForTestingMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveVersionForTesting>>, TError,{id: number;versionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveVersionForTesting>>, TError,{id: number;versionId: number}, TContext> => {
+
+const mutationKey = ['approveVersionForTesting'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveVersionForTesting>>, {id: number;versionId: number}> = (props) => {
+          const {id,versionId} = props ?? {};
+
+          return  approveVersionForTesting(id,versionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveVersionForTestingMutationResult = NonNullable<Awaited<ReturnType<typeof approveVersionForTesting>>>
+
+    export type ApproveVersionForTestingMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Approve a version snapshot for production promotion (Task
+ */
+export const useApproveVersionForTesting = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveVersionForTesting>>, TError,{id: number;versionId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approveVersionForTesting>>,
+        TError,
+        {id: number;versionId: number},
+        TContext
+      > => {
+      return useMutation(getApproveVersionForTestingMutationOptions(options));
+    }
+
+export const getProvisionPreviewDatabaseUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/preview-db/provision`
+}
+
+/**
+ * @summary Provision a dedicated Neon Postgres DB for the project's preview environment (Task
+ */
+export const provisionPreviewDatabase = async (id: number, options?: RequestInit): Promise<ProvisionPreviewDatabase200> => {
+
+  return customFetch<ProvisionPreviewDatabase200>(getProvisionPreviewDatabaseUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getProvisionPreviewDatabaseMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof provisionPreviewDatabase>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof provisionPreviewDatabase>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['provisionPreviewDatabase'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof provisionPreviewDatabase>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  provisionPreviewDatabase(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ProvisionPreviewDatabaseMutationResult = NonNullable<Awaited<ReturnType<typeof provisionPreviewDatabase>>>
+
+    export type ProvisionPreviewDatabaseMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Provision a dedicated Neon Postgres DB for the project's preview environment (Task
+ */
+export const useProvisionPreviewDatabase = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof provisionPreviewDatabase>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof provisionPreviewDatabase>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getProvisionPreviewDatabaseMutationOptions(options));
+    }
 
 export const getRollbackVersionUrl = (id: number,
     versionId: number,) => {

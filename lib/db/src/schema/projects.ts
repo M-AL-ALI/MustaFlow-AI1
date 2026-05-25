@@ -185,6 +185,12 @@ export const projectsTable = pgTable("projects", {
   // Null = legacy personal project (not yet migrated to an org).
   // Set via migrate-collaboration backfill or explicitly on project creation.
   organizationId: integer("organization_id"),
+  // Task #767 — Preview database provisioning.
+  // previewDbUrl: encrypted connection string for the preview-environment Neon Postgres DB.
+  // Null = not provisioned (static-legacy projects or agentic projects before first provision).
+  // previewDbStatus: none | provisioning | ready | error
+  previewDbUrl: text("preview_db_url"),
+  previewDbStatus: text("preview_db_status").notNull().default("none"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

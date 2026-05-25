@@ -18,4 +18,11 @@ export interface ProjectVersion {
   filesCount: number;
   createdAt: Date;
   planSnapshot?: ProjectVersionPlanSnapshot;
+  /** @nullable */
+  testingApprovedAt?: Date | null;
+  /** @nullable */
+  testingApprovedBy?: string | null;
+  /** @nullable */
+  migrationStatus?: string | null;
+  testingSkipped?: boolean;
 }

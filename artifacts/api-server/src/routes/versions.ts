@@ -63,11 +63,15 @@ router.get(
         filesCount: sql<number>`COALESCE(jsonb_array_length(${projectVersionsTable.filesSnapshot}), 0)`,
         createdAt: projectVersionsTable.createdAt,
         planSnapshot: projectVersionsTable.planSnapshot,
+        testingApprovedAt: projectVersionsTable.testingApprovedAt,
+        testingApprovedBy: projectVersionsTable.testingApprovedBy,
+        migrationStatus: projectVersionsTable.migrationStatus,
+        testingSkipped: projectVersionsTable.testingSkipped,
       })
       .from(projectVersionsTable)
       .where(eq(projectVersionsTable.projectId, params.data.id))
       .orderBy(desc(projectVersionsTable.createdAt));
-    res.json(ListVersionsResponse.parse(rows));
+    res.json(rows);
   },
 );
 
@@ -553,6 +557,66 @@ router.post(
       dbSnapshotRestored,
       dbSnapshotId,
       dbSnapshotError,
+    });
+  },
+);
+
+// ── POST /api/projects/:id/versions/:versionId/approve-testing ───────────────
+// Mark a version as approved for production promotion (Task #767 testing gate).
+// Only the project owner or org admin/owner role may approve.
+// Approval is idempotent — re-approving an already-approved version is a no-op.
+router.post(
+  "/projects/:id/versions/:versionId/approve-testing",
+  requireProjectAccess("admin"),
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const versionId = Number(req.params.versionId);
+
+    if (!Number.isFinite(projectId) || !Number.isFinite(versionId)) {
+      res.status(400).json({ error: "Invalid project or version ID" });
+      return;
+    }
+
+    const [version] = await db
+      .select({
+        id: projectVersionsTable.id,
+        projectId: projectVersionsTable.projectId,
+        testingApprovedAt: projectVersionsTable.testingApprovedAt,
+      })
+      .from(projectVersionsTable)
+      .where(
+        and(eq(projectVersionsTable.id, versionId), eq(projectVersionsTable.projectId, projectId)),
+      );
+
+    if (!version) {
+      res.status(404).json({ error: "Version not found" });
+      return;
+    }
+
+    // Idempotent: if already approved, return current state.
+    if (version.testingApprovedAt) {
+      res.json({
+        ok: true,
+        versionId,
+        testingApprovedAt: version.testingApprovedAt,
+        testingApprovedBy: req.userId,
+        alreadyApproved: true,
+      });
+      return;
+    }
+
+    const now = new Date();
+    await db
+      .update(projectVersionsTable)
+      .set({ testingApprovedAt: now, testingApprovedBy: req.userId ?? null })
+      .where(eq(projectVersionsTable.id, versionId));
+
+    res.json({
+      ok: true,
+      versionId,
+      testingApprovedAt: now,
+      testingApprovedBy: req.userId,
+      alreadyApproved: false,
     });
   },
 );

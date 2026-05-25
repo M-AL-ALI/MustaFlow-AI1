@@ -246,6 +246,19 @@ export const ProjectProvisioningStatus = {
   error: 'error',
 } as const;
 
+/**
+ * Task #767. Lifecycle of the preview-environment Neon Postgres DB provisioning.
+ */
+export type ProjectPreviewDbStatus = typeof ProjectPreviewDbStatus[keyof typeof ProjectPreviewDbStatus];
+
+
+export const ProjectPreviewDbStatus = {
+  none: 'none',
+  provisioning: 'provisioning',
+  ready: 'ready',
+  error: 'error',
+} as const;
+
 export interface Project {
   id: number;
   /** @nullable */
@@ -338,6 +351,8 @@ export interface Project {
      * @nullable
      */
   provisioningError?: string | null;
+  /** Task #767. Lifecycle of the preview-environment Neon Postgres DB provisioning. */
+  previewDbStatus?: ProjectPreviewDbStatus;
   /** When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true. */
   blockPublishOnCritical?: boolean;
   /** Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate. */
@@ -1151,6 +1166,13 @@ export interface ProjectVersion {
   filesCount: number;
   createdAt: string;
   planSnapshot?: ProjectVersionPlanSnapshot;
+  /** @nullable */
+  testingApprovedAt?: string | null;
+  /** @nullable */
+  testingApprovedBy?: string | null;
+  /** @nullable */
+  migrationStatus?: string | null;
+  testingSkipped?: boolean;
 }
 
 export interface ProjectVersionInput {
@@ -3440,6 +3462,20 @@ export const GetAgentRouting200AgentIdentity = {
 export type GetAgentRouting200 = {
   agentIdentity: GetAgentRouting200AgentIdentity;
   reason: string;
+};
+
+export type ApproveVersionForTesting200 = {
+  ok: boolean;
+  versionId: number;
+  /** @nullable */
+  testingApprovedAt?: string | null;
+  /** @nullable */
+  testingApprovedBy?: string | null;
+  alreadyApproved?: boolean;
+};
+
+export type ProvisionPreviewDatabase200 = {
+  previewDbStatus: string;
 };
 
 export type DeleteProjectFile200 = {

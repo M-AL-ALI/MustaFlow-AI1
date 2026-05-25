@@ -23,9 +23,9 @@ import type { Socket } from "node:net";
 import { and, eq } from "drizzle-orm";
 import { createProxyMiddleware, type RequestHandler } from "http-proxy-middleware";
 import { getAuth } from "@clerk/express";
-import { db, projectsTable, projectFilesTable, secretsTable, orgMembersTable } from "@workspace/db";
+import { db, projectsTable, projectFilesTable, orgMembersTable } from "@workspace/db";
 import { provisionContainer } from "./container";
-import { encryptionService } from "./encryption";
+import { getContainerSecretMap } from "./container-secrets";
 import { logger } from "./logger";
 
 // Accepts both the full path (`/api/projects/:id/preview/...`, as seen by the
@@ -138,30 +138,18 @@ function wakeContainer(projectId: number): void {
   setImmediate(() => {
     void (async () => {
       try {
-        const fileRows = await db
-          .select({
-            path: projectFilesTable.path,
-            content: projectFilesTable.content,
-          })
-          .from(projectFilesTable)
-          .where(eq(projectFilesTable.projectId, projectId));
-
-        const secretRows = await db
-          .select({
-            name: secretsTable.name,
-            valueEncrypted: secretsTable.valueEncrypted,
-          })
-          .from(secretsTable)
-          .where(eq(secretsTable.projectId, projectId));
-
-        const envVars: Record<string, string> = {};
-        for (const row of secretRows) {
-          try {
-            envVars[row.name] = encryptionService.decrypt(row.valueEncrypted);
-          } catch {
-            /* skip */
-          }
-        }
+        const [fileRows, envVars] = await Promise.all([
+          db
+            .select({
+              path: projectFilesTable.path,
+              content: projectFilesTable.content,
+            })
+            .from(projectFilesTable)
+            .where(eq(projectFilesTable.projectId, projectId)),
+          // Only inject development + testing secrets into the dev container.
+          // Production and staging secrets must never reach a dev container.
+          getContainerSecretMap(projectId),
+        ]);
 
         await provisionContainer(projectId, fileRows, envVars);
       } catch (err) {

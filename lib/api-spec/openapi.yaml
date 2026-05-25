@@ -1324,6 +1324,62 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/versions/{versionId}/approve-testing:
+    post:
+      operationId: approveVersionForTesting
+      tags: [versions]
+      summary: Approve a version snapshot for production promotion (Task #767 testing gate)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: versionId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Version approved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, versionId]
+                properties:
+                  ok: { type: boolean }
+                  versionId: { type: integer }
+                  testingApprovedAt: { type: ["string", "null"], format: date-time }
+                  testingApprovedBy: { type: ["string", "null"] }
+                  alreadyApproved: { type: boolean }
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /projects/{id}/preview-db/provision:
+    post:
+      operationId: provisionPreviewDatabase
+      tags: [projects]
+      summary: Provision a dedicated Neon Postgres DB for the project's preview environment (Task #767)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Provisioning enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [previewDbStatus]
+                properties:
+                  previewDbStatus: { type: string }
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "409":
+          description: Provisioning already in progress
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   /projects/{id}/versions/{versionId}/rollback:
     post:
       operationId: rollbackVersion
@@ -4646,6 +4702,10 @@ components:
         provisioningError:
           type: ["string", "null"]
           description: "Most recent provisioning error message, or null when last attempt succeeded."
+        previewDbStatus:
+          type: string
+          enum: [none, provisioning, ready, error]
+          description: "Task #767. Lifecycle of the preview-environment Neon Postgres DB provisioning."
         blockPublishOnCritical:
           type: boolean
           description: "When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true."
@@ -5268,6 +5328,10 @@ components:
           nullable: true
           type: object
           additionalProperties: true
+        testingApprovedAt: { type: ["string", "null"], format: date-time }
+        testingApprovedBy: { type: ["string", "null"] }
+        migrationStatus: { type: ["string", "null"] }
+        testingSkipped: { type: boolean }
 
     ProjectVersionInput:
       type: object

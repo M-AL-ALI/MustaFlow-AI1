@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, jsonb, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, jsonb, timestamp, boolean } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export type FileSnapshotEntry = {
@@ -54,6 +54,19 @@ export const projectVersionsTable = pgTable("project_versions", {
   // "production" = live public URL, "staging" = staging URL, "preview" = ephemeral per-build URL.
   // Null = legacy build snapshot (no environment slot assigned).
   environment: text("environment").$type<"production" | "staging" | "preview">(),
+  // Task #767 — Testing approval gate.
+  // testingApprovedAt: when a reviewer approved this version for production promotion.
+  // Null = not yet approved. Required for agentic projects to publish to production.
+  testingApprovedAt: timestamp("testing_approved_at", { withTimezone: true }),
+  // testingApprovedBy: the Clerk userId of the reviewer who approved this version.
+  testingApprovedBy: text("testing_approved_by"),
+  // migrationStatus: lifecycle of the DB migration associated with this version.
+  // null = no migration defined. "pending" | "running" | "passed" | "failed"
+  migrationStatus: text("migration_status").$type<"pending" | "running" | "passed" | "failed">(),
+  // migrationLog: captured output from running the migration (stdout + stderr).
+  migrationLog: text("migration_log"),
+  // testingSkipped: when true the approval gate was explicitly bypassed by an admin.
+  testingSkipped: boolean("testing_skipped").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

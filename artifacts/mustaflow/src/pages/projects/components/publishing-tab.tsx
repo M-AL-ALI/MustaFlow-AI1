@@ -46,6 +46,10 @@ import {
   useDeleteSecret,
   getListSecretsQueryKey,
   getGetProjectQueryKey,
+  useListVersions,
+  getListVersionsQueryKey,
+  useApproveVersionForTesting,
+  useProvisionPreviewDatabase,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { DnsRecordsPanel, RegistrarGuideSection } from "./dns-records-panel";
@@ -3153,6 +3157,7 @@ function BuyDomainSection({ projectId }: { projectId: number }) {
 export function PublishingTab({
   projectId,
   kind,
+  builderMode,
   containerStatus: _containerStatus,
   containerUrl: _containerUrl,
   onNavigateToSecret,
@@ -3162,6 +3167,7 @@ export function PublishingTab({
 }: {
   projectId: number;
   kind?: string;
+  builderMode?: string;
   containerStatus?: string;
   containerUrl?: string | null;
   onNavigateToSecret?: (secretName: string) => void;
@@ -3170,6 +3176,7 @@ export function PublishingTab({
   onNavigateToLogs?: () => void;
 }) {
   const isMobile = kind?.startsWith("mobile-") ?? false;
+  const isAgentic = builderMode === "agentic";
   const queryClient = useQueryClient();
   const [platform, setPlatform] = useState<Platform>("web");
   const [webEnv, setWebEnv] = useState<"testing" | "production">("testing");
@@ -3216,6 +3223,19 @@ export function PublishingTab({
   const [iosReadinessLoading, setIosReadinessLoading] = useState(false);
   const [andReadiness, setAndReadiness] = useState<ReadinessResult | null>(null);
   const [andReadinessLoading, setAndReadinessLoading] = useState(false);
+
+  // Version approval gate (Task #767 — agentic projects)
+  const { data: versions = [], refetch: refetchVersions } = useListVersions(projectId, {
+    query: {
+      queryKey: getListVersionsQueryKey(projectId),
+      enabled: isAgentic,
+    },
+  });
+  const approveVersionMutation = useApproveVersionForTesting();
+  const provisionPreviewDbMutation = useProvisionPreviewDatabase();
+  const latestApprovedVersion = versions.find(
+    (v) => (v as { testingApprovedAt?: string | null }).testingApprovedAt != null,
+  );
 
   // Deployment history state
   const [deployments, setDeployments] = useState<
@@ -4670,6 +4690,139 @@ export function PublishingTab({
             {/* ── Production tab (existing content) ────────────────────────── */}
             {envTab === "production" && (
               <>
+                {/* Version approval gate — agentic projects only (Task #767) */}
+                {isAgentic && versions.length > 0 && (
+                  <div className="border border-border rounded-xl bg-card overflow-hidden">
+                    <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                      <div>
+                        <h3 className="font-semibold text-sm">Version Snapshots</h3>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Approve a snapshot to allow production publishing.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => void refetchVersions()}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        Refresh
+                      </button>
+                    </div>
+                    <div className="divide-y divide-border max-h-64 overflow-y-auto">
+                      {versions.slice(0, 10).map((v) => {
+                        const approvedAt = (v as { testingApprovedAt?: string | null })
+                          .testingApprovedAt;
+                        const approvedBy = (v as { testingApprovedBy?: string | null })
+                          .testingApprovedBy;
+                        const isApproved = approvedAt != null;
+                        return (
+                          <div key={v.id} className="px-4 py-2.5 flex items-center gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-mono text-muted-foreground shrink-0">
+                                  v{v.id}
+                                </span>
+                                {v.label && (
+                                  <span className="text-xs font-medium truncate">{v.label}</span>
+                                )}
+                                <span className="text-[10px] text-muted-foreground shrink-0">
+                                  {new Date(v.createdAt).toLocaleDateString()}
+                                </span>
+                              </div>
+                              {isApproved && (
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
+                                  <span className="text-[10px] text-green-600">
+                                    Approved for testing
+                                    {approvedBy ? ` by ${approvedBy}` : ""}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            {!isApproved && (
+                              <button
+                                onClick={() => {
+                                  approveVersionMutation.mutate(
+                                    { id: projectId, versionId: v.id },
+                                    { onSuccess: () => void refetchVersions() },
+                                  );
+                                }}
+                                disabled={approveVersionMutation.isPending}
+                                className="shrink-0 text-[11px] px-2.5 py-1 rounded-md border border-primary/40 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                              >
+                                {approveVersionMutation.isPending ? "Approving…" : "Approve"}
+                              </button>
+                            )}
+                            {isApproved && (
+                              <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 font-semibold">
+                                Approved
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Agentic publish gate notice */}
+                {isAgentic && !latestApprovedVersion && versions.length > 0 && (
+                  <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
+                    <p className="text-xs text-yellow-700 dark:text-yellow-400">
+                      Approve at least one version snapshot above before publishing to production.
+                    </p>
+                  </div>
+                )}
+
+                {/* Preview DB provisioning — agentic projects */}
+                {isAgentic && (
+                  <div className="border border-border rounded-xl p-4 bg-card space-y-2">
+                    <h3 className="font-semibold text-sm">Preview Database</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Provision a dedicated Postgres database for the preview / testing environment.
+                      This keeps preview traffic isolated from production data.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={provisionPreviewDbMutation.isPending}
+                      onClick={() =>
+                        provisionPreviewDbMutation.mutate(
+                          { id: projectId },
+                          {
+                            onSuccess: () =>
+                              void queryClient.invalidateQueries({
+                                queryKey: getGetProjectQueryKey(projectId),
+                              }),
+                          },
+                        )
+                      }
+                    >
+                      {provisionPreviewDbMutation.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <Server className="h-3.5 w-3.5 mr-1.5" />
+                      )}
+                      {provisionPreviewDbMutation.isPending
+                        ? "Provisioning…"
+                        : "Provision Preview DB"}
+                    </Button>
+                    {provisionPreviewDbMutation.isError && (
+                      <p className="text-xs text-destructive">
+                        {provisionPreviewDbMutation.error instanceof Error
+                          ? provisionPreviewDbMutation.error.message
+                          : "Failed to provision preview database"}
+                      </p>
+                    )}
+                    {provisionPreviewDbMutation.isSuccess && (
+                      <p className="text-xs text-green-600">
+                        Preview database provisioning started. This may take a moment.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* 1-2-3 publish flow */}
                 <div className="border border-border rounded-xl p-4 bg-card">
                   <h3 className="font-semibold text-sm mb-3">How to publish</h3>
@@ -4741,7 +4894,8 @@ export function PublishingTab({
                       {readiness?.canPublish &&
                         !publishResult &&
                         !deployResult &&
-                        webEnv === "testing" && (
+                        webEnv === "testing" &&
+                        (!isAgentic || latestApprovedVersion != null) && (
                           <button
                             onClick={() => void handlePublish()}
                             disabled={isPublishing}

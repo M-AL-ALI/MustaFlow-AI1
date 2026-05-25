@@ -437,6 +437,135 @@ export function enqueueProvisionProjectJob(projectId: number): void {
   });
 }
 
+// ─── Preview DB provisioning (Task #767) ─────────────────────────────────────
+
+/** Stable Neon project name for a project's preview environment. */
+function neonPreviewProjectNameFor(projectId: number): string {
+  return `mf-preview-${projectId}`;
+}
+
+/**
+ * Provision a dedicated Neon Postgres project for the preview environment.
+ *
+ * Stores the encrypted connection string in `projects.preview_db_url` and
+ * stamps `preview_db_status = 'ready'`.  Idempotent: if a preview DB is
+ * already provisioned (previewDbStatus = 'ready') the call is a no-op and
+ * returns early.
+ *
+ * When NEON_API_KEY is missing, stamps previewDbStatus = 'error' with a
+ * human-readable message — no throw, callers just surface the status.
+ */
+export async function provisionPreviewDb(projectId: number): Promise<void> {
+  const [project] = await db
+    .select({
+      id: projectsTable.id,
+      name: projectsTable.name,
+      previewDbStatus: projectsTable.previewDbStatus,
+    })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId));
+
+  if (!project) return;
+
+  // Idempotent: already done.
+  if (project.previewDbStatus === "ready") return;
+
+  await db
+    .update(projectsTable)
+    .set({ previewDbStatus: "provisioning" })
+    .where(eq(projectsTable.id, projectId));
+
+  const apiKey = process.env.NEON_API_KEY;
+  if (!apiKey) {
+    await db
+      .update(projectsTable)
+      .set({
+        previewDbStatus: "error",
+      })
+      .where(eq(projectsTable.id, projectId));
+    logger.warn({ projectId }, "provisionPreviewDb: NEON_API_KEY not set");
+    return;
+  }
+
+  try {
+    // Deduplicate by stable name — safe to call multiple times.
+    const stableName = neonPreviewProjectNameFor(projectId);
+    let connectionString: string | null = null;
+
+    // Check if a preview Neon project already exists (e.g. from a failed/retried run).
+    const existingId = await findNeonProjectByName(stableName);
+    if (existingId) {
+      connectionString = await fetchNeonConnectionUri(existingId);
+    } else {
+      // Create a new Neon project with the stable preview name.
+      // We call the Neon API directly here because createNeonProject() builds the
+      // name from neonProjectNameFor(projectId) = "mf-project-<id>", which collides
+      // with the main provisioning project. We need "mf-preview-<id>" instead.
+      const orgId = await resolveNeonOrgId(apiKey);
+      const dbName =
+        project.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "-")
+          .slice(0, 32) || `preview_${projectId}`;
+
+      const body: { project: Record<string, unknown> } = {
+        project: {
+          name: stableName,
+          pg_version: 16,
+          default_database_name: dbName,
+          default_role_name: "mustaflow",
+          region_id: "aws-us-east-1",
+        },
+      };
+      if (orgId) body.project.org_id = orgId;
+
+      const res = await fetch(`${NEON_API_BASE}/projects`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        logger.error(
+          { projectId, status: res.status, err: errText },
+          "Preview Neon project create failed",
+        );
+        await db
+          .update(projectsTable)
+          .set({ previewDbStatus: "error" })
+          .where(eq(projectsTable.id, projectId));
+        return;
+      }
+      const data = (await res.json()) as {
+        connection_uris?: Array<{ connection_uri: string }>;
+      };
+      connectionString = data.connection_uris?.[0]?.connection_uri ?? null;
+    }
+
+    if (!connectionString) {
+      await db
+        .update(projectsTable)
+        .set({ previewDbStatus: "error" })
+        .where(eq(projectsTable.id, projectId));
+      return;
+    }
+
+    const encrypted = encryptionService.encrypt(connectionString);
+    await db
+      .update(projectsTable)
+      .set({ previewDbUrl: encrypted, previewDbStatus: "ready" })
+      .where(eq(projectsTable.id, projectId));
+
+    logger.info({ projectId }, "Preview DB provisioned successfully");
+  } catch (err) {
+    logger.error({ err, projectId }, "provisionPreviewDb failed");
+    await db
+      .update(projectsTable)
+      .set({ previewDbStatus: "error" })
+      .where(eq(projectsTable.id, projectId));
+  }
+}
+
 /**
  * Boot recovery: any project left in `provisioning` when the server crashed is
  * picked back up. We re-enqueue (rather than mark as error) because the

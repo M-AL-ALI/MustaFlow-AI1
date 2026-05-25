@@ -24,7 +24,7 @@ import {
 } from "@workspace/api-zod";
 import { buildInitialAssistantMessage } from "../lib/ai";
 import { resolveAgentIdentity } from "../lib/jobs";
-import { enqueueProvisionProjectJob } from "../lib/provisioning";
+import { enqueueProvisionProjectJob, provisionPreviewDb } from "../lib/provisioning";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -1248,6 +1248,38 @@ router.post(
       .where(eq(projectsTable.id, projectId));
     enqueueProvisionProjectJob(projectId);
     res.json({ provisioningStatus: "provisioning" });
+  },
+);
+
+// ── POST /api/projects/:id/preview-db/provision ───────────────────────────────
+// Task #767 — provision a dedicated Neon Postgres DB for the preview environment.
+// Idempotent: safe to call multiple times — re-calls when previewDbStatus='ready' are no-ops.
+router.post(
+  "/projects/:id/preview-db/provision",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+    const [project] = await db
+      .select({ id: projectsTable.id, previewDbStatus: projectsTable.previewDbStatus })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (project.previewDbStatus === "provisioning") {
+      res.status(409).json({ error: "Preview DB provisioning is already in progress." });
+      return;
+    }
+    // Fire-and-forget — the front-end polls project status to see when it changes to "ready".
+    setImmediate(() => {
+      void provisionPreviewDb(projectId);
+    });
+    res.json({ previewDbStatus: "provisioning" });
   },
 );
 

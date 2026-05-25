@@ -14,6 +14,7 @@ import type { ProjectDefaultAgent } from './projectDefaultAgent';
 import type { ProjectKind } from './projectKind';
 import type { ProjectPlatform } from './projectPlatform';
 import type { ProjectPolicyStrictness } from './projectPolicyStrictness';
+import type { ProjectPreviewDbStatus } from './projectPreviewDbStatus';
 import type { ProjectProdContainerStatus } from './projectProdContainerStatus';
 import type { ProjectProjectFormat } from './projectProjectFormat';
 import type { ProjectProvisioningStatus } from './projectProvisioningStatus';
@@ -112,6 +113,8 @@ export interface Project {
      * @nullable
      */
   provisioningError?: string | null;
+  /** Task #767. Lifecycle of the preview-environment Neon Postgres DB provisioning. */
+  previewDbStatus?: ProjectPreviewDbStatus;
   /** When true, the publish readiness gate blocks publishing if any unresolved critical (error-severity) security findings exist from the latest check run. Default true. */
   blockPublishOnCritical?: boolean;
   /** Array of dismissed finding keys (file:line:message). Dismissed findings are excluded from the publish security gate. */

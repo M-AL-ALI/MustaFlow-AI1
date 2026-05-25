@@ -29,6 +29,7 @@ import {
 } from "../lib/container";
 import { ensureContainerLogTailer, recordContainerLog } from "../lib/container-logs";
 import { subscribeContainerLogs, type ContainerLogPayload } from "../lib/event-bus";
+import { getContainerSecretMap } from "../lib/container-secrets";
 import { encryptionService } from "../lib/encryption";
 import { logger } from "../lib/logger";
 
@@ -53,8 +54,9 @@ async function loadProjectFiles(projectId: number) {
 }
 
 /**
- * Load all project secrets and return them as a plain { KEY: value } map
- * suitable for injecting into a container's environment.
+ * Load project secrets scoped to development + testing as a plain { KEY: value } map.
+ * Only development and testing secrets are injected into the dev container —
+ * production and staging secrets must never reach a dev container.
  * Decryption errors for individual secrets are caught and skipped (best-effort).
  *
  * @param previewOnly — when true, only injects secrets where is_preview_safe = true.
@@ -63,26 +65,12 @@ async function loadProjectFiles(projectId: number) {
  */
 async function loadProjectSecretsAsEnv(
   projectId: number,
-  previewOnly = false,
+  _previewOnly = false,
 ): Promise<Record<string, string>> {
-  const conds = [eq(secretsTable.projectId, projectId)];
-  if (previewOnly) {
-    conds.push(eq(secretsTable.isPreviewSafe, true));
-  }
-  const rows = await db
-    .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
-    .from(secretsTable)
-    .where(and(...conds));
-
-  const env: Record<string, string> = {};
-  for (const row of rows) {
-    try {
-      env[row.name] = encryptionService.decrypt(row.valueEncrypted);
-    } catch {
-      // skip secrets that can't be decrypted rather than aborting the whole start
-    }
-  }
-  return env;
+  // Task #767: always restrict to dev+testing environments via getContainerSecretMap.
+  // This subsumes the is_preview_safe filter — environment scoping is the authoritative
+  // security boundary for the dev container.
+  return getContainerSecretMap(projectId);
 }
 
 // ── GET /api/projects/:id/container/status ───────────────────────────────────
