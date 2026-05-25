@@ -981,7 +981,12 @@ export function QueueComposer({
         const res = await fetch(`/api/projects/${projectId}/queue`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: variantMessages, agentMode, planMode, agentIdentity: agentType }),
+          body: JSON.stringify({
+            messages: variantMessages,
+            agentMode,
+            planMode,
+            agentIdentity: agentType,
+          }),
           credentials: "include",
         });
         if (!res.ok) {
@@ -1055,6 +1060,7 @@ export function QueueComposer({
     agentMode,
     planMode,
     variantMode,
+    agentType,
     projectId,
     clientIntent,
     activeIntent,
