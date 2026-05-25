@@ -72,6 +72,7 @@
     "migrate-token-count": "tsx ./src/migrate-token-count.ts",
     "migrate-chip-label": "tsx ./src/migrate-chip-label.ts",
     "migrate-personal-access-tokens": "tsx ./src/migrate-personal-access-tokens.ts",
+    "migrate-pat-rotation": "tsx ./src/migrate-pat-rotation.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"

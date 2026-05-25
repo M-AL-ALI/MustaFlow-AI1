@@ -21,9 +21,12 @@ import {
   Shield,
   Trash2,
   Code2,
+  Key,
+  KeyRound,
   Plus,
   Copy,
   Check,
+  TriangleAlert,
   FlaskConical,
   CheckCircle2,
   XCircle,
@@ -1157,6 +1160,7 @@ interface ApiToken {
   projectId: number | null;
   lastUsedAt: string | null;
   expiresAt: string | null;
+  rotatedAt: string | null;
   createdAt: string;
 }
 
@@ -1248,6 +1252,7 @@ function DeveloperTab() {
   const [testResults, setTestResults] = useState<
     Record<number, { ok: boolean; scopes?: string[]; reason?: string }>
   >({});
+  const [rotating, setRotating] = useState<number | null>(null);
 
   const fetchTokens = useCallback(async () => {
     setLoading(true);
@@ -1356,6 +1361,35 @@ function DeveloperTab() {
       }));
     } finally {
       setTesting(null);
+    }
+  }
+
+  async function handleRotate(tokenId: number) {
+    setRotating(tokenId);
+    try {
+      const res = await fetch(`/api/tokens/${tokenId}/rotate`, { method: "POST" });
+      const data = (await res.json()) as {
+        token?: ApiToken;
+        rawToken?: string;
+        error?: string;
+      };
+      if (!res.ok || data.error) {
+        toast({
+          title: "Failed to rotate token",
+          description: data.error ?? "An error occurred.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setRevealedToken(data.rawToken ?? null);
+      if (data.token) {
+        setTokens((prev) => prev.map((t) => (t.id === tokenId ? (data.token as ApiToken) : t)));
+      }
+      toast({ title: "Token rotated", description: "The new token value has been generated." });
+    } catch {
+      toast({ title: "Failed to rotate token", variant: "destructive" });
+    } finally {
+      setRotating(null);
     }
   }
 
@@ -1596,12 +1630,20 @@ function DeveloperTab() {
           <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
             {tokens.map((token) => {
               const result = testResults[token.id];
+              const isRecentlyRotated =
+                token.rotatedAt !== null &&
+                Date.now() - new Date(token.rotatedAt).getTime() < 24 * 60 * 60 * 1000;
               return (
                 <div key={token.id} className="bg-background">
                   <div className="flex items-center gap-4 px-4 py-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium truncate">{token.name}</span>
+                        {isRecentlyRotated && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 font-medium border border-blue-500/20">
+                            Rotated
+                          </span>
+                        )}
                         {token.expiresAt && new Date(token.expiresAt) < new Date() && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-medium">
                             Expired
@@ -1640,7 +1682,7 @@ function DeveloperTab() {
                     <div className="shrink-0 flex items-center gap-2">
                       <button
                         onClick={() => void handleTest(token.id)}
-                        disabled={testing === token.id || revoking === token.id}
+                        disabled={testing === token.id || revoking === token.id || rotating === token.id}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-transparent hover:border-border disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         title="Test this token"
                       >
@@ -1652,8 +1694,21 @@ function DeveloperTab() {
                         Test
                       </button>
                       <button
+                        onClick={() => void handleRotate(token.id)}
+                        disabled={rotating === token.id || revoking === token.id || testing === token.id}
+                        title="Rotate token — generates a new secret value while keeping the same name and scopes"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-transparent hover:border-border disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {rotating === token.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        )}
+                        Rotate
+                      </button>
+                      <button
                         onClick={() => void handleRevoke(token.id)}
-                        disabled={revoking === token.id || testing === token.id}
+                        disabled={revoking === token.id || testing === token.id || rotating === token.id}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         {revoking === token.id ? (

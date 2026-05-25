@@ -74,6 +74,7 @@ const MIGRATIONS = [
   "migrate-token-count",
   "migrate-chip-label",
   "migrate-personal-access-tokens",
+  "migrate-pat-rotation",
 ] as const;
 
 async function main(): Promise<void> {

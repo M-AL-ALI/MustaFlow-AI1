@@ -48,6 +48,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/scripts run migrate-mobile-deployment-columns` — adds `build_id`, `platform`, `download_url`, `testflight_url` to `deployment_logs` (Task #776; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-chip-label` — adds `chip_label` to `projects` (Task #794; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-personal-access-tokens` — creates `personal_access_tokens` table (Task #845; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-pat-rotation` — adds `rotated_at` to `personal_access_tokens` (Task #864; run before deploy)
 
 ## Stack
 

@@ -12,6 +12,7 @@ export const personalAccessTokensTable = pgTable("personal_access_tokens", {
   active: boolean("active").notNull().default(true),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
+  rotatedAt: timestamp("rotated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

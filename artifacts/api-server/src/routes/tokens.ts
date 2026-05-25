@@ -3,20 +3,21 @@
  * Mounted under the auth wall so users can manage their tokens from the web UI.
  *
  * Routes:
- *   GET    /me/tokens            — list caller's active tokens (masked)
- *   POST   /me/tokens            — create a new PAT; returns raw token once
- *   DELETE /me/tokens/:tokenId   — revoke a PAT
+ *   GET    /tokens  (+ /me/tokens)            — list caller's active tokens
+ *   POST   /tokens  (+ /me/tokens)            — create a new PAT; returns raw token once
+ *   GET    /tokens/:id/test                   — validate a token is still active / not expired
+ *   POST   /tokens/:id/rotate (+ /me/…)       — rotate a PAT; new secret, same id/name/scopes
+ *   DELETE /tokens/:id (+ /me/tokens/:id)     — revoke a PAT
  */
 
-import { Router, type IRouter } from "express";
+import { Router, type RequestHandler } from "express";
 import { and, asc, eq } from "drizzle-orm";
 import { db, personalAccessTokensTable } from "@workspace/db";
 import { generateRawToken, hashToken } from "../lib/pat-auth";
 import { logger } from "../lib/logger";
 
-const router: IRouter = Router();
+const router = Router();
 
-const TOKEN_PREFIX = "mfp_";
 const VALID_SCOPES = [
   "projects:read",
   "projects:write",
@@ -31,8 +32,8 @@ const VALID_SCOPES = [
   "webhooks:write",
 ];
 
-// ── GET /me/tokens ────────────────────────────────────────────────────────────
-router.get("/me/tokens", async (req, res): Promise<void> => {
+// ── GET /tokens (also /me/tokens) ─────────────────────────────────────────────
+const listTokens: RequestHandler = async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Unauthenticated" });
     return;
@@ -47,6 +48,7 @@ router.get("/me/tokens", async (req, res): Promise<void> => {
         projectId: personalAccessTokensTable.projectId,
         lastUsedAt: personalAccessTokensTable.lastUsedAt,
         expiresAt: personalAccessTokensTable.expiresAt,
+        rotatedAt: personalAccessTokensTable.rotatedAt,
         createdAt: personalAccessTokensTable.createdAt,
       })
       .from(personalAccessTokensTable)
@@ -59,13 +61,16 @@ router.get("/me/tokens", async (req, res): Promise<void> => {
       .orderBy(asc(personalAccessTokensTable.createdAt));
     res.json({ tokens });
   } catch (err) {
-    logger.warn({ err }, "GET /me/tokens error");
+    logger.warn({ err }, "GET /tokens error");
     res.status(500).json({ error: "Failed to list tokens" });
   }
-});
+};
 
-// ── POST /me/tokens ───────────────────────────────────────────────────────────
-router.post("/me/tokens", async (req, res): Promise<void> => {
+router.get("/tokens", listTokens);
+router.get("/me/tokens", listTokens);
+
+// ── POST /tokens (also /me/tokens) ────────────────────────────────────────────
+const createToken: RequestHandler = async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Unauthenticated" });
     return;
@@ -90,7 +95,6 @@ router.post("/me/tokens", async (req, res): Promise<void> => {
     return;
   }
 
-  // Max 20 active tokens per user
   const existing = await db
     .select({ id: personalAccessTokensTable.id })
     .from(personalAccessTokensTable)
@@ -145,17 +149,20 @@ router.post("/me/tokens", async (req, res): Promise<void> => {
       note: "Store the raw token now — it will not be shown again.",
     });
   } catch (err) {
-    logger.warn({ err }, "POST /me/tokens error");
+    logger.warn({ err }, "POST /tokens error");
     res.status(500).json({ error: "Failed to create token" });
   }
-});
+};
 
-// ── GET /api/tokens/:id/test ──────────────────────────────────────────────────
-// Validates that a token owned by the caller is still active and not expired.
-// Returns { ok: true, scopes } on success, or { ok: false, reason } on failure.
-// Auth: session cookie (same as other /api/tokens routes).
+router.post("/tokens", createToken);
+router.post("/me/tokens", createToken);
+
+// ── GET /tokens/:id/test ───────────────────────────────────────────────────────
 router.get("/tokens/:id/test", async (req, res): Promise<void> => {
-  const userId = req.userId!;
+  if (!req.userId) {
+    res.status(401).json({ ok: false, reason: "Unauthenticated" });
+    return;
+  }
   const tokenId = parseInt(req.params.id ?? "", 10);
 
   if (!Number.isFinite(tokenId)) {
@@ -174,7 +181,7 @@ router.get("/tokens/:id/test", async (req, res): Promise<void> => {
     .from(personalAccessTokensTable)
     .where(eq(personalAccessTokensTable.id, tokenId));
 
-  if (!token || token.userId !== userId) {
+  if (!token || token.userId !== req.userId) {
     res.status(404).json({ ok: false, reason: "Token not found." });
     return;
   }
@@ -192,9 +199,79 @@ router.get("/tokens/:id/test", async (req, res): Promise<void> => {
   res.json({ ok: true, scopes: token.scopes ?? [] });
 });
 
-// ── DELETE /api/tokens/:id ────────────────────────────────────────────────────
-router.delete("/tokens/:id", async (req, res): Promise<void> => {
-  const userId = req.userId!;
+// ── POST /tokens/:id/rotate (also /me/tokens/:id/rotate) ──────────────────────
+const rotateToken: RequestHandler<{ id: string }> = async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const tokenId = Number(req.params.id);
+  if (!Number.isFinite(tokenId)) {
+    res.status(400).json({ error: "Invalid token id" });
+    return;
+  }
+
+  try {
+    const [existing] = await db
+      .select({
+        id: personalAccessTokensTable.id,
+        userId: personalAccessTokensTable.userId,
+        active: personalAccessTokensTable.active,
+      })
+      .from(personalAccessTokensTable)
+      .where(eq(personalAccessTokensTable.id, tokenId));
+
+    if (!existing || existing.userId !== req.userId) {
+      res.status(404).json({ error: "Token not found." });
+      return;
+    }
+    if (!existing.active) {
+      res.status(422).json({ error: "Cannot rotate a revoked token." });
+      return;
+    }
+
+    const raw = generateRawToken();
+    const tokenHash = hashToken(raw);
+    const tokenPreview = `${raw.slice(0, 10)}•••••••${raw.slice(-4)}`;
+    const rotatedAt = new Date();
+
+    const [updated] = await db
+      .update(personalAccessTokensTable)
+      .set({ tokenHash, tokenPreview, rotatedAt })
+      .where(eq(personalAccessTokensTable.id, tokenId))
+      .returning({
+        id: personalAccessTokensTable.id,
+        name: personalAccessTokensTable.name,
+        tokenPreview: personalAccessTokensTable.tokenPreview,
+        scopes: personalAccessTokensTable.scopes,
+        projectId: personalAccessTokensTable.projectId,
+        expiresAt: personalAccessTokensTable.expiresAt,
+        rotatedAt: personalAccessTokensTable.rotatedAt,
+        createdAt: personalAccessTokensTable.createdAt,
+      });
+
+    logger.info({ userId: req.userId, tokenId }, "PAT rotated");
+
+    res.json({
+      token: updated,
+      rawToken: raw,
+      note: "Store the raw token now — it will not be shown again.",
+    });
+  } catch (err) {
+    logger.warn({ err }, "POST /tokens/:id/rotate error");
+    res.status(500).json({ error: "Failed to rotate token" });
+  }
+};
+
+router.post("/tokens/:id/rotate", rotateToken);
+router.post("/me/tokens/:id/rotate", rotateToken);
+
+// ── DELETE /tokens/:id (also /me/tokens/:id) ──────────────────────────────────
+const revokeToken: RequestHandler<{ id: string }> = async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const tokenId = parseInt(req.params.id ?? "", 10);
   if (!Number.isFinite(tokenId)) {
     res.status(400).json({ error: "Invalid token id" });
@@ -221,9 +298,12 @@ router.delete("/tokens/:id", async (req, res): Promise<void> => {
 
     res.json({ revoked: true });
   } catch (err) {
-    logger.warn({ err }, "DELETE /me/tokens/:tokenId error");
+    logger.warn({ err }, "DELETE /tokens/:id error");
     res.status(500).json({ error: "Failed to revoke token" });
   }
-});
+};
+
+router.delete("/tokens/:id", revokeToken);
+router.delete("/me/tokens/:id", revokeToken);
 
 export default router;
