@@ -406,6 +406,10 @@ function SidebarInner({
           <a href="/help" className="hover:text-muted-foreground transition-colors">
             Help
           </a>
+          <span>·</span>
+          <a href="/developers" className="hover:text-muted-foreground transition-colors">
+            API Docs
+          </a>
         </div>
         <UserSection />
       </div>

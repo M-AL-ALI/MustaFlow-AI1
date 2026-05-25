@@ -1,7 +1,24 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, ChevronRight, ChevronLeft, Zap, FolderKanban, Eye, BookOpen } from "lucide-react";
+import {
+  X,
+  ChevronRight,
+  ChevronLeft,
+  Zap,
+  FolderKanban,
+  Eye,
+  BookOpen,
+  Terminal,
+  GitBranch,
+  Key,
+  ShieldCheck,
+} from "lucide-react";
 
 const TOUR_STORAGE_KEY = "mf-onboarding-tour-v1-seen";
+
+// Custom DOM event name dispatched by the workspace when the user sends their first
+// message in the AI builder chat. The event detail carries the message text so the
+// tour can decide which path to show.
+export const FIRST_WS_MESSAGE_EVENT = "mf:first-workspace-message";
 
 interface TourStep {
   title: string;
@@ -9,7 +26,7 @@ interface TourStep {
   icon: React.ElementType;
 }
 
-const STEPS: TourStep[] = [
+const MAKER_STEPS: TourStep[] = [
   {
     title: "Welcome to MustaFlow AI",
     description:
@@ -42,25 +59,148 @@ const STEPS: TourStep[] = [
   },
 ];
 
+const DEVELOPER_STEPS: TourStep[] = [
+  {
+    title: "Welcome, developer",
+    description:
+      "MustaFlow is a full development environment in your browser. Describe or write what you need — the AI handles the boilerplate while you keep full control over the code.",
+    icon: Terminal,
+  },
+  {
+    title: "Code editor & terminal",
+    description:
+      "Open the Code tab to view and edit every generated file. The Terminal tab gives you a real shell — run commands, install packages, tail logs, and inspect the running process.",
+    icon: Terminal,
+  },
+  {
+    title: "GitHub integration",
+    description:
+      "Connect your GitHub account in Settings to push your project to a repo, open pull requests, and sync changes back — all without leaving the workspace.",
+    icon: GitBranch,
+  },
+  {
+    title: "API tokens & REST access",
+    description:
+      "Generate a personal access token in Settings to call the full platform REST API at /api/v1. Automate builds, manage projects, and integrate MustaFlow into your own pipelines.",
+    icon: Key,
+  },
+  {
+    title: "Security & quality checks",
+    description:
+      "Every build runs Semgrep SAST and dependency CVE scanning automatically. Open the Checks tab to review findings, suppress false positives, and track your security posture over time.",
+    icon: ShieldCheck,
+  },
+];
+
+// Detect whether a message text looks like it came from a developer
+export function isDeveloperMessage(text: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+
+  // Code fences
+  if (/```/.test(text)) return true;
+
+  // File extensions
+  if (/\.(js|ts|py|go|rs|rb|java|cs|cpp|sh|yml|yaml|json|toml)\b/.test(lower)) return true;
+
+  // Framework/language names
+  const frameworkKeywords = [
+    "react",
+    "express",
+    "fastapi",
+    "django",
+    "flask",
+    "nextjs",
+    "next.js",
+    "vue",
+    "angular",
+    "svelte",
+    "rails",
+    "laravel",
+    "spring",
+    "gin",
+    "fiber",
+    "graphql",
+    "grpc",
+    "rest api",
+    "microservice",
+    "docker",
+    "kubernetes",
+    "postgres",
+    "postgresql",
+    "mysql",
+    "mongodb",
+    "redis",
+    "prisma",
+    "drizzle",
+    "typescript",
+    "javascript",
+    "python",
+    "golang",
+    "rust",
+    "ruby",
+    "node.js",
+    "nodejs",
+    "bun",
+    "deno",
+    "webpack",
+    "vite",
+    "esbuild",
+    "ci/cd",
+    "github actions",
+    "webhook",
+    "jwt",
+    "oauth",
+    "openapi",
+    "swagger",
+  ];
+  if (frameworkKeywords.some((kw) => lower.includes(kw))) return true;
+
+  // Error keywords
+  const errorKeywords = [
+    "typeerror",
+    "traceback",
+    " 500",
+    "segfault",
+    "null pointer",
+    "undefined is not",
+    "cannot read",
+    "econnrefused",
+    "timeout",
+  ];
+  if (errorKeywords.some((kw) => lower.includes(kw))) return true;
+
+  return false;
+}
+
 export function OnboardingTour() {
   const [visible, setVisible] = useState(false);
   const [step, setStep] = useState(0);
   const [dismissed, setDismissed] = useState(false);
+  const [steps, setSteps] = useState<TourStep[]>(MAKER_STEPS);
 
   useEffect(() => {
-    // Only show the tour to users who haven't seen it
-    let cleanup: (() => void) | undefined;
+    // Skip entirely if already seen
     try {
-      const seen = localStorage.getItem(TOUR_STORAGE_KEY);
-      if (!seen) {
-        // Small delay so the app finishes loading before the tour appears
-        const t = setTimeout(() => setVisible(true), 1200);
-        cleanup = () => clearTimeout(t);
-      }
+      if (localStorage.getItem(TOUR_STORAGE_KEY)) return;
     } catch {
-      // localStorage may be blocked in some envs — skip silently
+      /* ignore */
     }
-    return cleanup;
+
+    // Listen for the first workspace message event dispatched by the AI builder chat.
+    // We select the tour path based on the message content, then show the tour.
+    const handleFirstMessage = (e: Event) => {
+      const messageText = (e as CustomEvent<string>).detail ?? "";
+      const tourSteps = isDeveloperMessage(messageText) ? DEVELOPER_STEPS : MAKER_STEPS;
+      setSteps(tourSteps);
+      // Small delay so the UI isn't interrupted mid-send
+      setTimeout(() => setVisible(true), 800);
+    };
+
+    window.addEventListener(FIRST_WS_MESSAGE_EVENT, handleFirstMessage, { once: true });
+    return () => {
+      window.removeEventListener(FIRST_WS_MESSAGE_EVENT, handleFirstMessage);
+    };
   }, []);
 
   const dismiss = useCallback(() => {
@@ -74,12 +214,12 @@ export function OnboardingTour() {
   }, []);
 
   const next = useCallback(() => {
-    if (step < STEPS.length - 1) {
+    if (step < steps.length - 1) {
       setStep((s) => s + 1);
     } else {
       dismiss();
     }
-  }, [step, dismiss]);
+  }, [step, steps.length, dismiss]);
 
   const prev = useCallback(() => {
     if (step > 0) setStep((s) => s - 1);
@@ -87,9 +227,9 @@ export function OnboardingTour() {
 
   if (!visible) return null;
 
-  const current = STEPS[step]!;
+  const current = steps[step]!;
   const Icon = current.icon;
-  const isLast = step === STEPS.length - 1;
+  const isLast = step === steps.length - 1;
 
   return (
     <div
@@ -113,7 +253,7 @@ export function OnboardingTour() {
         <div className="h-1 bg-muted">
           <div
             className="h-full bg-primary transition-all duration-300"
-            style={{ width: `${((step + 1) / STEPS.length) * 100}%` }}
+            style={{ width: `${((step + 1) / steps.length) * 100}%` }}
           />
         </div>
 
@@ -121,7 +261,7 @@ export function OnboardingTour() {
           {/* Close */}
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
-              {step + 1} of {STEPS.length}
+              {step + 1} of {steps.length}
             </span>
             <button
               onClick={dismiss}
@@ -155,7 +295,7 @@ export function OnboardingTour() {
             </button>
 
             <div className="flex gap-1.5">
-              {STEPS.map((_, i) => (
+              {steps.map((_, i) => (
                 <button
                   key={i}
                   onClick={() => setStep(i)}

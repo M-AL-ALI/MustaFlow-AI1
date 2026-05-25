@@ -7,11 +7,9 @@ import {
   LayoutDashboard,
   Paintbrush,
   BarChart,
-  Table,
   Zap,
   Database,
   MessageSquare,
-  Store,
   Sparkles,
   ArrowRight,
   LayoutTemplate,
@@ -30,6 +28,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Package,
+  GitBranch,
+  Terminal,
+  Bug,
+  Key,
+  Plug,
+  ShieldCheck,
+  Code2,
+  Cpu,
+  Smartphone,
+  PresentationIcon,
+  Bot,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
@@ -54,18 +63,109 @@ const PERSONA_ICONS: Record<string, React.ComponentType<{ className?: string }>>
   nonprofit: Heart,
 };
 
-// Mobile generation is intentionally excluded — the builder produces static
-// HTML/CSS/JS. Expo/React Native output is a future milestone.
+// Capability chips — dual-audience, each pre-fills the prompt input
+const CAPABILITY_CHIPS = [
+  {
+    name: "React SaaS app",
+    icon: Monitor,
+    prompt:
+      "Build me a React SaaS app with a dashboard, user authentication, and subscription billing",
+  },
+  {
+    name: "REST API + Postgres",
+    icon: Database,
+    prompt: "Build a REST API with Postgres, authentication, and CRUD endpoints for a todo app",
+  },
+  {
+    name: "Python script",
+    icon: Code2,
+    prompt: "Write a Python script that processes CSV files and generates a summary report",
+  },
+  {
+    name: "Go microservice",
+    icon: Cpu,
+    prompt: "Build a Go microservice with HTTP endpoints, middleware, and health checks",
+  },
+  {
+    name: "Mobile app",
+    icon: Smartphone,
+    prompt: "Build a React Native mobile app for tracking daily habits with local storage",
+  },
+  {
+    name: "Slide deck",
+    icon: PresentationIcon,
+    prompt: "Create a pitch deck slide presentation for a B2B SaaS startup",
+  },
+  {
+    name: "Data automation",
+    icon: Zap,
+    prompt:
+      "Build a data automation pipeline that fetches data from an API and saves it to a database",
+  },
+  {
+    name: "AI chatbot",
+    icon: Bot,
+    prompt:
+      "Build an AI chatbot with a chat interface, conversation history, and OpenAI integration",
+  },
+];
+
+// Quick-start chips — developer-oriented first, maker-oriented second
 const CHIPS = [
+  { name: "REST API", icon: Database, kind: "api" },
+  { name: "Python", icon: Code2, kind: "api" },
+  { name: "Go", icon: Cpu, kind: "api" },
   { name: "Website", icon: Monitor, kind: "web" },
   { name: "Dashboard", icon: LayoutDashboard, kind: "dashboard" },
+  { name: "Automation", icon: Zap, kind: "automation" },
   { name: "Design", icon: Paintbrush, kind: "design" },
   { name: "Data Viz", icon: BarChart, kind: "dashboard" },
-  { name: "Spreadsheet", icon: Table, kind: "spreadsheet" },
-  { name: "Automation", icon: Zap, kind: "automation" },
-  { name: "API/Backend", icon: Database, kind: "api" },
   { name: "AI Chatbot", icon: MessageSquare, kind: "chatbot" },
-  { name: "Marketplace", icon: Store, kind: "marketplace" },
+];
+
+// Developer feature cards — all features already exist in the platform
+const DEV_FEATURES = [
+  {
+    icon: GitBranch,
+    title: "GitHub push & PR",
+    description:
+      "Push your project to a GitHub repo and open pull requests directly from the workspace.",
+    href: "/projects",
+  },
+  {
+    icon: Terminal,
+    title: "Real terminal shell",
+    description:
+      "Full shell access via Fly.io exec WebSocket — run commands, inspect processes, tail logs.",
+    href: "/projects",
+  },
+  {
+    icon: Bug,
+    title: "Remote DAP debugging",
+    description: "Attach a debugger to your running container with the Debug Adapter Protocol.",
+    href: "/projects",
+  },
+  {
+    icon: Key,
+    title: "API tokens & REST access",
+    description:
+      "Generate personal access tokens and call the full platform via the /api/v1 REST API.",
+    href: "/settings",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Semgrep + CVE scanning",
+    description:
+      "Automated SAST and dependency CVE scans run on every build. Findings surface in the Checks tab.",
+    href: "/security",
+  },
+  {
+    icon: Plug,
+    title: "40+ managed blueprints",
+    description:
+      "One-click provisioning for Postgres, Redis, queues, object storage, and more — no config files.",
+    href: "/integrations",
+  },
 ];
 
 const HOW_IT_WORKS = [
@@ -174,10 +274,6 @@ export default function HomePage() {
     }
   }
 
-  function handlePersonaPrompt(persona: (typeof INDUSTRY_PERSONAS)[number]) {
-    setPrompt(persona.demoPrompt);
-  }
-
   return (
     <>
       <div className="flex-1 overflow-y-auto pb-24">
@@ -216,6 +312,12 @@ export default function HomePage() {
                 className="hover:text-foreground transition-colors"
               >
                 Security
+              </button>
+              <button
+                onClick={() => setLocation("/developers")}
+                className="hover:text-foreground transition-colors"
+              >
+                Developers
               </button>
               <button
                 onClick={() => setLocation("/help")}
@@ -275,39 +377,35 @@ export default function HomePage() {
           <div className="text-center mb-6">
             <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-6">
               <Sparkles className="h-3 w-3" />
-              No code required
+              Code optional
             </p>
             <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight gradient-text mb-5 leading-tight">
-              Describe it.
-              <br className="hidden sm:block" /> Watch it build.
+              Build. Debug. Deploy.
             </h1>
             <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-              Type your idea in plain language. MustaFlow AI plans, builds, and publishes your app —
-              no coding, no setup.
+              Describe it or write it — MustaFlow plans, builds, tests, and ships your app, whether
+              you code or not.
             </p>
           </div>
 
-          {/* Rotating persona chips */}
+          {/* Capability chips — dual-audience, pre-fill prompt */}
           <div className="flex items-center justify-center gap-2 mb-4 flex-wrap">
-            {INDUSTRY_PERSONAS.map((persona, i) => {
-              const Icon = PERSONA_ICONS[persona.id] ?? Sparkles;
+            {CAPABILITY_CHIPS.map((chip) => {
+              const Icon = chip.icon;
               return (
                 <button
-                  key={persona.id}
+                  key={chip.name}
                   type="button"
-                  onClick={() => {
-                    setActivePersona(i);
-                    handlePersonaPrompt(persona);
-                  }}
+                  onClick={() => setPrompt(chip.prompt)}
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all",
-                    i === activePersona
+                    prompt === chip.prompt
                       ? "border-primary bg-primary/10 text-primary shadow-sm"
                       : "border-border text-muted-foreground hover:text-foreground hover:border-border/80 hover:bg-muted/50",
                   )}
                 >
                   <Icon className="h-3 w-3" />
-                  {persona.label}
+                  {chip.name}
                 </button>
               );
             })}
@@ -322,10 +420,7 @@ export default function HomePage() {
               <Input
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder={
-                  INDUSTRY_PERSONAS[activePersona]?.demoPrompt ??
-                  "e.g. A marketplace app for local artists to sell prints..."
-                }
+                placeholder="e.g. A REST API with Postgres and auth, or a landing page for my startup..."
                 className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-lg h-14 bg-transparent shadow-none"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleBuild();
@@ -343,8 +438,8 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Template browser toggle */}
-          <div className="flex justify-center mb-6">
+          {/* CTA row with secondary API link */}
+          <div className="flex items-center justify-center gap-4 mb-4">
             <button
               type="button"
               onClick={() => setShowTemplateBrowser((v) => !v)}
@@ -366,6 +461,14 @@ export default function HomePage() {
                   Start from a template
                 </>
               )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setLocation("/developers")}
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Explore the API
+              <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
 
@@ -413,13 +516,51 @@ export default function HomePage() {
             {[
               "No credit card to start",
               "Publish in seconds",
-              "Built for makers, not engineers",
+              "Built for developers and makers who ship fast",
             ].map((item) => (
               <span key={item} className="flex items-center gap-1.5">
                 <CheckCircle2 className="h-3 w-3 text-primary/60" />
                 {item}
               </span>
             ))}
+          </div>
+        </div>
+
+        {/* Developer features section */}
+        <div className="border-t border-border bg-muted/10">
+          <div className="max-w-6xl mx-auto px-6 py-20">
+            <div className="text-center mb-12">
+              <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-4">
+                <Terminal className="h-3 w-3" />
+                For developers
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-3">
+                Professional tools, <span className="gradient-text">built in</span>
+              </h2>
+              <p className="text-muted-foreground max-w-2xl mx-auto">
+                Not a no-code toy. MustaFlow ships with the tools developers actually use — shell
+                access, debugging, CI, and a REST API to automate everything.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {DEV_FEATURES.map((feature) => (
+                <button
+                  key={feature.title}
+                  type="button"
+                  onClick={() => setLocation(feature.href)}
+                  className="group text-left relative rounded-2xl border border-border bg-card p-6 hover:border-primary/40 hover:bg-muted/40 transition-all duration-200"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 mb-4 group-hover:bg-primary/15 transition-colors">
+                    <feature.icon className="h-5 w-5 text-primary" />
+                  </div>
+                  <h3 className="font-semibold text-sm text-foreground mb-1.5">{feature.title}</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {feature.description}
+                  </p>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -713,11 +854,15 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* How it works */}
+        {/* How it works — For makers */}
         <div className="border-t border-border bg-muted/20">
           <div className="max-w-4xl mx-auto px-6 py-20">
             <div className="text-center mb-12">
-              <h2 className="text-2xl font-bold tracking-tight mb-2">How it works</h2>
+              <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-4">
+                <Sparkles className="h-3 w-3" />
+                For makers
+              </div>
+              <h2 className="text-2xl font-bold tracking-tight mb-2">Describe and launch</h2>
               <p className="text-muted-foreground text-sm max-w-md mx-auto">
                 From idea to live app in three simple steps — no experience required.
               </p>
@@ -827,12 +972,22 @@ export default function HomePage() {
         <div className="max-w-4xl mx-auto px-6 py-16 text-center">
           <h2 className="text-2xl font-bold mb-3">Ready to build something?</h2>
           <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
-            Join makers, founders, and creators who build faster with MustaFlow AI.
+            Join developers, makers, founders, and creators who ship faster with MustaFlow AI.
           </p>
-          <Button size="lg" onClick={() => setLocation("/sign-up")} className="gap-2">
-            Get started for free
-            <ArrowRight className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center justify-center gap-4 flex-wrap">
+            <Button size="lg" onClick={() => setLocation("/sign-up")} className="gap-2">
+              Get started for free
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+            <button
+              type="button"
+              onClick={() => setLocation("/developers")}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Explore the API
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 

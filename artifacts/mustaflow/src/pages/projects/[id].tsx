@@ -1302,6 +1302,9 @@ export default function ProjectWorkspacePage() {
   const filesScrollRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
   const autoAnalyzedRef = useRef(false);
+  // Tracks whether we've dispatched the first-workspace-message event for tour detection.
+  // We read from localStorage so it persists across page refreshes within a session.
+  const firstWsMsgFiredRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
@@ -1735,6 +1738,23 @@ export default function ProjectWorkspacePage() {
       // Allow image-only sends — when no text prompt is given the server injects a default.
       const hasImageAttachments = (opts?.attachments ?? []).length > 0;
       if (!content.trim() && !hasImageAttachments) return;
+
+      // Dispatch first-workspace-message event once so the onboarding tour can
+      // detect developer signals from the actual first message the user sends.
+      if (!firstWsMsgFiredRef.current) {
+        firstWsMsgFiredRef.current = true;
+        try {
+          const tourSeen = localStorage.getItem("mf-onboarding-tour-v1-seen");
+          if (!tourSeen) {
+            window.dispatchEvent(
+              new CustomEvent("mf:first-workspace-message", { detail: content }),
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
       setActiveTaskId(null);
       chatAtBottomRef.current = true;
       setPendingBuildStartedAt(new Date());
