@@ -19,6 +19,7 @@ import {
   cveFindingsTable,
   projectDomainsTable,
   userSubscriptionsTable,
+  projectActivityTable,
   type TaskReport,
   type FileSnapshotEntry,
   type CvePatchStatus,
@@ -3618,6 +3619,168 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         logger.warn({ err, projectId }, "Page map extraction failed (non-fatal)");
       }
 
+      // ── Autonomous Browser QA — runs BEFORE "completed" so qa_step events
+      // arrive at the frontend while the EventSource is still open.
+      // Eligible stacks: static-html and react-vite.  Skipped for mobile,
+      // node-api, python-*, go-*, and any server-side stack.
+      const isQaEligible =
+        resolvedProjectStack === "static-html" || resolvedProjectStack === "react-vite";
+
+      if (isQaEligible) {
+        try {
+          const { runHeadlessQA } = await import("./headless-qa");
+
+          const qaOnEvent = async (type: string, message: string): Promise<void> => {
+            await emitEvent(taskId, type, message);
+          };
+
+          let qaResult: import("./headless-qa").QAResult | null = null;
+          let qaTimedOut = false;
+
+          const qaAbortController = new AbortController();
+          const qaTimeoutHandle = setTimeout(() => qaAbortController.abort(), 60_000);
+
+          try {
+            qaResult = await Promise.race([
+              runHeadlessQA(snapshot, qaOnEvent, qaAbortController.signal),
+              new Promise<never>((_, reject) =>
+                qaAbortController.signal.addEventListener("abort", () =>
+                  reject(new Error("QA_TIMEOUT")),
+                ),
+              ),
+            ]);
+          } catch (raceErr) {
+            if ((raceErr as Error).message === "QA_TIMEOUT") {
+              qaTimedOut = true;
+              await emitEvent(taskId, "qa_timeout", "Self-test timed out.");
+              // Persist timeout outcome so Checks tab and activity feed are consistent.
+              const timeoutEntry = {
+                passed: false,
+                errors: [] as string[],
+                stepsRun: 0,
+                timedOut: true,
+                ranAt: new Date().toISOString(),
+              };
+              void db
+                .update(agentTasksTable)
+                .set({ report: { ...report, qaResult: timeoutEntry } })
+                .where(eq(agentTasksTable.id, taskId))
+                .catch((err: unknown) =>
+                  logger.warn({ err, taskId }, "Failed to patch task report with qa timeout"),
+                );
+              void db
+                .insert(projectActivityTable)
+                .values({
+                  projectId,
+                  eventType: "qa_completed",
+                  summary: "Self-test timed out",
+                  metadata: {
+                    passed: false,
+                    errors: [],
+                    stepsRun: 0,
+                    timedOut: true,
+                    taskId,
+                    ranAt: timeoutEntry.ranAt,
+                  },
+                })
+                .catch((err: unknown) =>
+                  logger.warn(
+                    { err, projectId, taskId },
+                    "Failed to write qa_completed (timeout) activity",
+                  ),
+                );
+            } else {
+              throw raceErr;
+            }
+          } finally {
+            clearTimeout(qaTimeoutHandle);
+          }
+
+          if (!qaTimedOut && qaResult) {
+            // Auto-fix on failure — one retry cap
+            if (!qaResult.passed && qaResult.errors.length > 0) {
+              await emitEvent(
+                taskId,
+                "qa_step",
+                `Error detected — auto-fixing ${qaResult.errors.length} issue(s)…`,
+              );
+              const currentFiles = await loadFiles(projectId);
+              const fixPrompt = [
+                "Fix the following JavaScript errors detected by the headless browser QA pass:",
+                ...qaResult.errors.map((e, i) => `${i + 1}. ${e}`),
+              ].join("\n");
+              try {
+                const fixResult = await runRefinePipeline({
+                  projectName: project.name ?? "app",
+                  projectKind: project.kind ?? "web",
+                  userPrompt: fixPrompt,
+                  agentMode,
+                  existingFiles: currentFiles,
+                  onEvent: qaOnEvent,
+                });
+                if (fixResult && fixResult.changedFiles.length > 0) {
+                  await writeFiles(projectId, fixResult.changedFiles, false);
+                  if (fixResult.removedPaths.length > 0) {
+                    await deleteFiles(projectId, fixResult.removedPaths);
+                  }
+                  const reloadedFiles = await snapshotFilesForVersion(projectId);
+                  const retryResult = await runHeadlessQA(reloadedFiles, qaOnEvent);
+                  qaResult = retryResult;
+                }
+              } catch (fixErr) {
+                logger.warn({ err: fixErr, projectId, taskId }, "QA auto-fix failed (non-fatal)");
+              }
+            }
+
+            const fixedCount = qaResult.errors.length;
+            const qaDoneMsg = qaResult.passed
+              ? `All tests passed (${qaResult.stepsRun} steps)`
+              : fixedCount === 0
+                ? "No issues found"
+                : `${fixedCount} issue(s) remain after auto-fix`;
+            await emitEvent(taskId, "qa_done", qaDoneMsg);
+
+            const qaResultEntry = {
+              passed: qaResult.passed,
+              errors: qaResult.errors,
+              stepsRun: qaResult.stepsRun,
+              timedOut: false,
+              ranAt: new Date().toISOString(),
+            };
+
+            // Patch the task report with qaResult so the Checks tab can read it.
+            void db
+              .update(agentTasksTable)
+              .set({ report: { ...report, qaResult: qaResultEntry } })
+              .where(eq(agentTasksTable.id, taskId))
+              .catch((err: unknown) =>
+                logger.warn({ err, taskId }, "Failed to patch task report with qaResult"),
+              );
+
+            void db
+              .insert(projectActivityTable)
+              .values({
+                projectId,
+                eventType: "qa_completed",
+                summary: qaDoneMsg,
+                metadata: {
+                  passed: qaResult.passed,
+                  errors: qaResult.errors,
+                  stepsRun: qaResult.stepsRun,
+                  taskId,
+                  ranAt: qaResultEntry.ranAt,
+                },
+              })
+              .catch((err: unknown) =>
+                logger.warn({ err, projectId, taskId }, "Failed to write qa_completed activity"),
+              );
+          }
+        } catch (qaErr) {
+          logger.warn({ err: qaErr, projectId, taskId }, "Browser QA pass failed (non-fatal)");
+        }
+      }
+      // ── End Browser QA ─────────────────────────────────────────────────────
+
       await emitEvent(taskId, "completed", "Task completed.");
 
       // Drain batch tasks, then any orphaned project-level queued tasks
@@ -3643,15 +3806,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         ).catch((err) => logger.warn({ err, taskId }, "Background suggestion generation failed"));
       });
 
-      // Run AI-generated browser tests in the background (non-blocking, non-fatal)
-      // Only runs for web (non-mobile) projects that produce HTML output
-      if (!isMobileProject) {
-        setImmediate(() => {
-          void runAppTestingJob(projectId, taskId, project.name ?? project.kind).catch((err) =>
-            logger.warn({ err, taskId }, "Background app-testing job failed"),
-          );
-        });
-      }
+      // Browser QA now runs BEFORE the "completed" event (see above).
+      // The old background runAppTestingJob call has been replaced by the
+      // in-process headless-qa pass so QA steps appear in the live EventSource.
 
       // --- Deduct credits after a successful AI build/refine ---
       // Skip when credits were reserved upfront (background jobs — Task #509).

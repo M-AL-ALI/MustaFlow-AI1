@@ -48,6 +48,9 @@ type EventType =
   | "writing_lessons"
   | "architecture_chosen"
   | "narration"
+  | "qa_step"
+  | "qa_done"
+  | "qa_timeout"
   | "completed"
   | "failed";
 
@@ -144,6 +147,24 @@ const EVENT_META: Record<
     pillStyle: "brain",
   },
   narration: { icon: Zap, color: "text-primary", label: "Update", pillStyle: "narrate" },
+  qa_step: {
+    icon: CheckCircle2,
+    color: "text-cyan-300",
+    label: "QA step",
+    pillStyle: "check",
+  },
+  qa_done: {
+    icon: CheckCircle2,
+    color: "text-green-400",
+    label: "QA done",
+    pillStyle: "done",
+  },
+  qa_timeout: {
+    icon: FlaskConical,
+    color: "text-yellow-400",
+    label: "QA timeout",
+    pillStyle: "narrate",
+  },
   completed: { icon: CheckCircle2, color: "text-green-400", label: "Completed", pillStyle: "done" },
   failed: { icon: XCircle, color: "text-destructive", label: "Failed", pillStyle: "fail" },
 };

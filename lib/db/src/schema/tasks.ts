@@ -241,6 +241,18 @@ export type TaskReport = {
    * a successful build, or a user-triggered re-run).
    */
   e2eResults?: E2eRunSummary | null;
+  /**
+   * Result of the autonomous headless-browser QA pass that runs BEFORE the
+   * "completed" event so steps are streamed while the EventSource is open.
+   * Populated for static-html and react-vite builds only.
+   */
+  qaResult?: {
+    passed: boolean;
+    errors: string[];
+    stepsRun: number;
+    timedOut?: boolean;
+    ranAt?: string;
+  } | null;
 };
 
 /**

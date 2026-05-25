@@ -85,6 +85,9 @@ const STEP_ICON: Record<string, React.ElementType> = {
   restoring_files: BookOpen,
   completed: CheckCircle2,
   failed: XCircle,
+  qa_step: ShieldCheck,
+  qa_done: CheckCircle2,
+  qa_timeout: Timer,
   take_screenshot: Camera,
   web_fetch: Globe,
   web_search: Search,
@@ -121,11 +124,155 @@ const STEP_COLOR: Record<string, string> = {
   restoring_files: "text-blue-400",
   completed: "text-green-400",
   failed: "text-destructive",
+  qa_step: "text-cyan-300",
+  qa_done: "text-green-400",
+  qa_timeout: "text-yellow-400",
   file_diff: "text-yellow-400",
   command_output: "text-cyan-400",
   thinking: "text-violet-300",
   tool_call: "text-amber-300",
 };
+
+/**
+ * Task #785 — Collapse a run of `qa_step` events plus the terminal
+ * `qa_done` / `qa_timeout` event into a single synthetic QA card so the
+ * live stream shows a live spinner that collapses to a pass/fail chip.
+ */
+type QACardPayload = {
+  steps: string[];
+  terminal: "qa_done" | "qa_timeout" | null;
+  terminalMessage: string;
+};
+
+function dedupeQASteps(steps: StepEvent[]): StepEvent[] {
+  const QA_TERMINAL = new Set(["qa_done", "qa_timeout"]);
+  const QA_EVENTS = new Set(["qa_step", "qa_done", "qa_timeout"]);
+  const out: StepEvent[] = [];
+  let qaStartIdx: number | null = null;
+  let qaStepMessages: string[] = [];
+  let qaTerminal: "qa_done" | "qa_timeout" | null = null;
+  let qaTerminalMessage = "";
+  let qaFirstId = -1;
+
+  const flushQA = (): StepEvent | null => {
+    if (qaStartIdx === null) return null;
+    const payload: QACardPayload = {
+      steps: qaStepMessages,
+      terminal: qaTerminal,
+      terminalMessage: qaTerminalMessage,
+    };
+    return { id: qaFirstId, eventType: "qa_card", message: JSON.stringify(payload) };
+  };
+
+  for (const s of steps) {
+    if (!QA_EVENTS.has(s.eventType)) {
+      const card = flushQA();
+      if (card) out.push(card);
+      qaStartIdx = null;
+      qaStepMessages = [];
+      qaTerminal = null;
+      qaTerminalMessage = "";
+      qaFirstId = -1;
+      out.push(s);
+      continue;
+    }
+    if (qaStartIdx === null) {
+      qaStartIdx = out.length;
+      qaFirstId = s.id;
+    }
+    if (s.eventType === "qa_step") {
+      qaStepMessages.push(s.message);
+    } else if (QA_TERMINAL.has(s.eventType)) {
+      qaTerminal = s.eventType as "qa_done" | "qa_timeout";
+      qaTerminalMessage = s.message;
+    }
+  }
+  const card = flushQA();
+  if (card) out.push(card);
+  return out;
+}
+
+function parseQACard(eventType: string, message: string): QACardPayload | null {
+  if (eventType !== "qa_card") return null;
+  if (!message.startsWith("{")) return null;
+  try {
+    const obj = JSON.parse(message) as Partial<QACardPayload>;
+    return {
+      steps: Array.isArray(obj.steps) ? (obj.steps as string[]) : [],
+      terminal: obj.terminal ?? null,
+      terminalMessage: typeof obj.terminalMessage === "string" ? obj.terminalMessage : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function QACard({ data, isActive }: { data: QACardPayload; isActive: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const isDone = data.terminal === "qa_done";
+  const isTimeout = data.terminal === "qa_timeout";
+  const isPending = data.terminal === null;
+  const isPass = isDone && data.terminalMessage.startsWith("All tests passed");
+
+  return (
+    <div className="rounded-md border border-border/40 bg-muted/30 p-1.5 my-0.5 max-w-full">
+      <button
+        onClick={() => data.steps.length > 0 && setExpanded((v) => !v)}
+        className="w-full flex items-center gap-1.5 text-left"
+      >
+        <div className="shrink-0 text-muted-foreground/50">
+          {data.steps.length > 0 ? (
+            expanded ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )
+          ) : (
+            <span className="h-3 w-3 inline-block" />
+          )}
+        </div>
+        {isPending ? (
+          <Loader2 className="h-3 w-3 shrink-0 text-cyan-300 animate-spin" />
+        ) : isTimeout ? (
+          <Timer className="h-3 w-3 shrink-0 text-yellow-400" />
+        ) : isPass ? (
+          <CheckCircle2 className="h-3 w-3 shrink-0 text-green-400" />
+        ) : (
+          <AlertCircle className="h-3 w-3 shrink-0 text-red-400" />
+        )}
+        <span
+          className={cn(
+            "text-[10px] font-medium flex-1 truncate",
+            isPending
+              ? "text-cyan-300"
+              : isTimeout
+                ? "text-yellow-400"
+                : isPass
+                  ? "text-green-400"
+                  : "text-red-400",
+          )}
+        >
+          {isPending
+            ? (data.steps[data.steps.length - 1] ?? "Running QA…")
+            : data.terminalMessage || (isPass ? "Tests passed" : "Issues found")}
+        </span>
+        {isPending && isActive && (
+          <span className="text-[9px] text-muted-foreground/50 font-mono">QA</span>
+        )}
+      </button>
+      {expanded && data.steps.length > 0 && (
+        <div className="mt-1 ml-5 space-y-0.5 border-l border-border/40 pl-2">
+          {data.steps.map((msg, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <CheckCircle2 className="h-2.5 w-2.5 shrink-0 text-cyan-300/50" />
+              <span className="text-[10px] text-muted-foreground/70">{msg}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * Task #743 — `tool_call` payload emitted by the agentic loop for tools that
@@ -809,7 +956,7 @@ function FinishedGroupRow({
   const filtered = hideThinking
     ? group.steps.filter((s) => s.eventType !== "thinking")
     : group.steps;
-  const visibleSteps = dedupeCommandOutputs(filtered);
+  const visibleSteps = dedupeQASteps(dedupeCommandOutputs(filtered));
 
   return (
     <div className="space-y-1">
@@ -850,8 +997,12 @@ function FinishedGroupRow({
             const diff = parseFileDiff(step.eventType, step.message);
             const cmd = parseCommandOutput(step.eventType, step.message);
             const tool = parseToolCall(step.eventType, step.message);
+            const qaCard = parseQACard(step.eventType, step.message);
             if (step.eventType === "thinking") {
               return <ThinkingRow key={step.id} text={step.message} isActive={false} />;
+            }
+            if (qaCard) {
+              return <QACard key={step.id} data={qaCard} isActive={false} />;
             }
             return (
               <div key={step.id} className="flex items-start gap-1.5 py-0.5">
@@ -903,7 +1054,7 @@ function ActiveGroupRow({
   const filtered = hideThinking
     ? group.steps.filter((s) => s.eventType !== "thinking")
     : group.steps;
-  const visibleSteps = dedupeCommandOutputs(filtered);
+  const visibleSteps = dedupeQASteps(dedupeCommandOutputs(filtered));
   const lastStep = visibleSteps[visibleSteps.length - 1];
   // Task #733: when the current step is a structured payload (file_diff /
   // command_output) the JSON blob is useless as a status string, so fall back
@@ -925,25 +1076,32 @@ function ActiveGroupRow({
   const lastCmd = lastStep ? parseCommandOutput(lastStep.eventType, lastStep.message) : null;
   const lastTool = lastStep ? parseToolCall(lastStep.eventType, lastStep.message) : null;
   const lastThinking = lastStep?.eventType === "thinking" ? lastStep.message : null;
+  const lastQA = lastStep ? parseQACard(lastStep.eventType, lastStep.message) : null;
 
   return (
     <div className="space-y-1">
       <NarrationText text={group.narration} isActive={true} isFinished={isTerminal} />
       <IconStrip steps={visibleSteps} isGroupActive={true} isTerminal={isTerminal} />
       {lastThinking && <ThinkingRow text={lastThinking} isActive={!isTerminal} />}
+      {lastQA && <QACard data={lastQA} isActive={!isTerminal} />}
       {lastDiff && <FileDiffCard data={lastDiff} />}
       {lastCmd && <CommandOutputCard data={lastCmd} projectId={projectId} taskId={taskId} />}
       {lastTool && <ToolCallCard data={lastTool} />}
-      {visibleSteps.length > 0 && !lastDiff && !lastCmd && !lastTool && !lastThinking && (
-        <p
-          className={cn(
-            "text-[10px] truncate leading-tight",
-            isTerminal ? "text-muted-foreground/50" : "text-muted-foreground",
-          )}
-        >
-          {fallbackLabel}
-        </p>
-      )}
+      {visibleSteps.length > 0 &&
+        !lastDiff &&
+        !lastCmd &&
+        !lastTool &&
+        !lastThinking &&
+        !lastQA && (
+          <p
+            className={cn(
+              "text-[10px] truncate leading-tight",
+              isTerminal ? "text-muted-foreground/50" : "text-muted-foreground",
+            )}
+          >
+            {fallbackLabel}
+          </p>
+        )}
     </div>
   );
 }

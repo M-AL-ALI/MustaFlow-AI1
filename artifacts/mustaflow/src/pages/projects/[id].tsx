@@ -132,7 +132,7 @@ import { HistoryTab } from "./components/history-tab";
 import { TerminalTab } from "./components/terminal-tab";
 import { DatabaseTab } from "./components/database-tab";
 import { RuntimeTab } from "./components/runtime-tab";
-import { ChecksTab, useCveCriticalHighCount } from "./components/checks-tab";
+import { ChecksTab, useCveCriticalHighCount, type BrowserQAResult } from "./components/checks-tab";
 import { SecurityTab } from "./components/security-tab";
 import {
   useGetCveScanStatus,
@@ -2140,6 +2140,17 @@ export default function ProjectWorkspacePage() {
         .slice(0, 20),
     [tasksForFeed],
   );
+
+  const latestQaResult = useMemo((): BrowserQAResult | null => {
+    const completedTasks = tasksForFeed
+      .filter((t) => t.status === "completed" && (t as { report?: { qaResult?: unknown } }).report)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    for (const task of completedTasks) {
+      const report = (task as { report?: { qaResult?: BrowserQAResult | null } }).report;
+      if (report?.qaResult) return report.qaResult;
+    }
+    return null;
+  }, [tasksForFeed]);
   const bgActiveCount = backgroundTasks.filter(
     (t) => !["completed", "failed", "canceled"].includes(t.status),
   ).length;
@@ -3746,6 +3757,7 @@ export default function ProjectWorkspacePage() {
               <ChecksTab
                 projectId={projectId}
                 files={files}
+                latestQaResult={latestQaResult}
                 onSendMessage={(text) => {
                   setPrompt(text);
                 }}

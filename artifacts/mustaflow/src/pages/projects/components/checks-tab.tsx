@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetCheckRuns,
@@ -44,6 +44,7 @@ import {
   ExternalLink,
   Ban,
   Download,
+  MonitorCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -878,18 +879,54 @@ function CvePanel() {
   );
 }
 
+export interface BrowserQAResult {
+  passed: boolean;
+  errors: string[];
+  stepsRun: number;
+  timedOut?: boolean;
+  ranAt?: string;
+}
+
+/** Fetch the latest QA result from project_activity (server-of-record). */
+function useLatestQAFromActivity(projectId: number): BrowserQAResult | null {
+  const [result, setResult] = useState<BrowserQAResult | null>(null);
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    fetch(`/api/projects/${projectId}/activity-log?eventType=qa_completed&limit=1`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((rows: { metadata?: unknown }[] | null) => {
+        if (cancelled || !rows || rows.length === 0) return;
+        const meta = rows[0]?.metadata;
+        if (meta && typeof meta === "object" && "passed" in meta) {
+          setResult(meta as BrowserQAResult);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+  return result;
+}
+
 export function ChecksTab({
   projectId,
   files = [],
   onSendMessage,
   onNavigateToFile,
+  latestQaResult: latestQaResultProp,
 }: {
   projectId: number;
   files?: ProjectFileSummary[];
   onSendMessage?: (text: string) => void;
   onNavigateToFile?: (filePath: string, line?: number) => void;
+  latestQaResult?: BrowserQAResult | null;
 }) {
   const queryClient = useQueryClient();
+  // Prefer the authoritative project_activity record over the prop-drilled value.
+  const qaFromActivity = useLatestQAFromActivity(projectId);
+  const latestQaResult = qaFromActivity ?? latestQaResultProp ?? null;
 
   const { data: runs, isLoading } = useGetCheckRuns(projectId, PARAMS, {
     query: {
@@ -1057,9 +1094,83 @@ export function ChecksTab({
           </div>
         )}
 
+        {latestQaResult !== undefined && latestQaResult !== null && (
+          <div className="border-t border-border pt-4">
+            <BrowserQASection qaResult={latestQaResult} />
+          </div>
+        )}
+
         <div className="border-t border-border pt-4">
           <CvePanel />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function BrowserQASection({ qaResult }: { qaResult: BrowserQAResult }) {
+  const [expanded, setExpanded] = useState(false);
+  const passed = qaResult.passed;
+  const timedOut = qaResult.timedOut;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <MonitorCheck className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-semibold text-foreground">Browser QA</span>
+      </div>
+
+      <div className="border border-border rounded-lg overflow-hidden">
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full text-left px-3 py-2.5 flex items-center gap-2 hover:bg-muted/30 transition-colors"
+        >
+          {timedOut ? (
+            <AlertTriangle className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
+          ) : passed ? (
+            <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
+          ) : (
+            <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+          )}
+          <span
+            className={cn(
+              "text-xs font-medium flex-1",
+              timedOut ? "text-yellow-400" : passed ? "text-green-400" : "text-red-400",
+            )}
+          >
+            {timedOut
+              ? "Self-test timed out"
+              : passed
+                ? `All tests passed (${qaResult.stepsRun} steps)`
+                : `${qaResult.errors.length} issue(s) found`}
+          </span>
+          {qaResult.errors.length > 0 && (
+            <>
+              {expanded ? (
+                <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              )}
+            </>
+          )}
+        </button>
+
+        {expanded && qaResult.errors.length > 0 && (
+          <div className="border-t border-border px-3 py-2 space-y-1.5 bg-muted/10">
+            {qaResult.errors.map((err, i) => (
+              <div key={i} className="flex items-start gap-1.5 text-[11px]">
+                <XCircle className="h-3 w-3 text-red-400 shrink-0 mt-0.5" />
+                <span className="text-muted-foreground font-mono break-all">{err}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {qaResult.ranAt && (
+          <div className="border-t border-border px-3 py-1.5 text-[10px] text-muted-foreground">
+            Last run {new Date(qaResult.ranAt).toLocaleString()}
+          </div>
+        )}
       </div>
     </div>
   );
