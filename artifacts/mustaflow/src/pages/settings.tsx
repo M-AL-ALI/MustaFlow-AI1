@@ -434,8 +434,16 @@ interface CreatedPat {
 }
 
 const ALL_SCOPES: { value: string; label: string; description: string }[] = [
-  { value: "domains:read", label: "Domains (read)", description: "List and inspect custom domains" },
-  { value: "domains:write", label: "Domains (write)", description: "Add, remove, and verify domains" },
+  {
+    value: "domains:read",
+    label: "Domains (read)",
+    description: "List and inspect custom domains",
+  },
+  {
+    value: "domains:write",
+    label: "Domains (write)",
+    description: "Add, remove, and verify domains",
+  },
   { value: "webhooks:read", label: "Webhooks (read)", description: "List webhook configurations" },
   { value: "webhooks:write", label: "Webhooks (write)", description: "Create and delete webhooks" },
 ];
@@ -493,9 +501,7 @@ function DeveloperTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = (await res.json()) as
-        | CreatedPat
-        | { error: string };
+      const data = (await res.json()) as CreatedPat | { error: string };
 
       if (!res.ok || "error" in data) {
         toast({
@@ -512,7 +518,11 @@ function DeveloperTab() {
       setFormExpiry("");
       void fetchTokens();
     } catch {
-      toast({ title: "Failed to create token", description: "Please try again.", variant: "destructive" });
+      toast({
+        title: "Failed to create token",
+        description: "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setCreating(false);
     }
@@ -554,7 +564,11 @@ function DeveloperTab() {
 
   function formatDate(iso: string | null) {
     if (!iso) return "—";
-    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    return new Date(iso).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
   }
 
   function isExpired(expiresAt: string | null) {
@@ -580,8 +594,8 @@ function DeveloperTab() {
           </a>
         </div>
         <p className="text-sm text-muted-foreground">
-          Personal access tokens let you authenticate with the REST API from scripts, CI pipelines, and
-          GitHub Actions without browser cookies. Pass the token as a{" "}
+          Personal access tokens let you authenticate with the REST API from scripts, CI pipelines,
+          and GitHub Actions without browser cookies. Pass the token as a{" "}
           <code className="text-xs font-mono bg-muted px-1 rounded">Bearer</code> header in every
           request.
         </p>
@@ -611,7 +625,11 @@ function DeveloperTab() {
                 onClick={() => void handleCopy(createdPat.rawToken)}
                 className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-md border border-border bg-muted/50 hover:bg-muted text-xs font-medium transition-colors"
               >
-                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? (
+                  <Check className="h-3.5 w-3.5 text-green-500" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
                 {copied ? "Copied" : "Copy"}
               </button>
             </div>

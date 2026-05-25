@@ -20,6 +20,9 @@
  *   POST   /api/v1/projects/:id/domains                  — add domain
  *   DELETE /api/v1/projects/:id/domains/:domainId        — remove domain
  *   POST   /api/v1/projects/:id/domains/:domainId/verify — trigger verify
+ *   GET    /api/v1/projects/:id/webhooks                 — list webhooks
+ *   POST   /api/v1/projects/:id/webhooks                 — create a webhook
+ *   DELETE /api/v1/projects/:id/webhooks/:webhookId      — delete a webhook
  *   GET    /api/v1/tokens                                — list caller's PATs (masked)
  *   POST   /api/v1/tokens                                — create a PAT
  *   DELETE /api/v1/tokens/:tokenId                       — revoke a PAT
@@ -40,6 +43,7 @@ import { checkV1ProjectAccess, isPatAuth } from "./access";
 import projectsRouter from "./projects";
 import buildsRouter from "./builds";
 import filesRouter from "./files";
+import webhooksRouter from "./webhooks";
 
 const router: IRouter = Router();
 
@@ -110,10 +114,11 @@ async function v1AuthMiddleware(req: Request, res: Response, next: NextFunction)
 // ── All v1 routes require auth ────────────────────────────────────────────────
 router.use(v1AuthMiddleware);
 
-// ── Mount sub-routers for projects, builds, and files ─────────────────────────
+// ── Mount sub-routers for projects, builds, files, and webhooks ───────────────
 router.use(projectsRouter);
 router.use(buildsRouter);
 router.use(filesRouter);
+router.use(webhooksRouter);
 
 // ── GET /api/v1/projects/:id/domains ─────────────────────────────────────────
 router.get("/projects/:id/domains", async (req, res): Promise<void> => {
