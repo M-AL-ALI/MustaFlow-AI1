@@ -2210,6 +2210,16 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-pat-rotation (Task #864) ────────────────────────────────────────
+  {
+    name: "migrate-pat-rotation",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE personal_access_tokens ADD COLUMN IF NOT EXISTS rotated_at TIMESTAMPTZ`,
+      );
+    },
+  },
 ];
 
 /**
