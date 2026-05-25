@@ -1,0 +1,201 @@
+Do not start the remaining implementation yet. The dedicated test container correction is good, but the final plan still misses critical requirements.
+
+First: Phase 0 must be preserved and pushed
+
+You state Phase 0 exists locally at commit a43a6789, but GitHub main still exposes the old insecure preview route.
+
+Before relying on Phase 0 as complete:
+- preserve the commit/checkpoint;
+- provide the exact git branch and whether it has been pushed;
+- ensure the final GitHub main branch eventually contains the Phase 0 security fixes;
+- do not overwrite or regress those changes in later phases.
+
+1. Static projects must also publish only a tested immutable version
+
+The proposed static publish path is not acceptable:
+
+- user visually reviews Quick Preview from live draft;
+- publish snapshots whatever files exist at publish time;
+- untested late changes can reach production.
+
+Static apps do not need a server container, but they still need immutable test approval.
+
+Required static workflow:
+
+- Add `Test Preview - Static Candidate`.
+- When the user starts static test review, snapshot current files into an immutable Test Candidate version.
+- Render that snapshot in the test preview, not live `project_files`.
+- If draft files change afterward, mark the candidate stale.
+- Allow `Mark Testing Passed` on that immutable static candidate.
+- Publish only its `testedSnapshotId`.
+
+UI modes must be:
+
+- `Quick Preview - Draft` for fast live editing.
+- `Test Preview - Static Candidate` for immutable frontend-only approval.
+- `Full App Preview - Test Runtime` for apps requiring actual runtime/backend/database testing.
+
+Required tests:
+
+- Static projects create an immutable candidate before approval.
+- Draft edits make the static candidate stale.
+- Static publish reads from `testedSnapshotId.filesSnapshot`, not current files.
+- A static app cannot publish untested late edits.
+
+2. Full App Preview still needs a real isolated application origin
+
+Your routes still propose:
+
+`/api/projects/:id/preview-env/{*splat}`
+
+That alone does not prove real full-app testing.
+
+A generated app may call:
+
+- `/api/users`
+- `/auth/callback`
+- `/socket`
+- cookie/session routes
+- service workers
+- OAuth redirect URLs
+
+If the app is hosted under MustaFlow's own `/api/projects/...` path, absolute app routes may go to MustaFlow itself rather than the generated application's backend.
+
+Required correction:
+
+Define the preview-origin architecture before implementation.
+
+Preferred design:
+
+- Each running test candidate receives a dedicated protected preview origin, for example a generated preview subdomain or equivalent gateway-hosted origin.
+- The origin maps `/`, `/api/*`, WebSockets, cookies and auth callbacks to the test container.
+- Access requires an authenticated owner preview session or short-lived signed access token.
+- The raw test container is never public.
+- The iframe loads this protected test-app origin, not an ambiguous nested API path.
+
+Required tests:
+
+- A generated frontend request to `/api/test` reaches the generated backend.
+- WebSockets reach the generated runtime.
+- Cookies/session behavior operates on the test-app origin.
+- Auth callback URLs can be configured against the test origin.
+- Unauthenticated visitors cannot access the preview origin.
+
+Do not claim Full App Preview tests real backend/auth/integrations until this origin model works.
+
+3. Test approval must be invalidated by every relevant change
+
+Your plan invalidates testing on file edits, but approved behavior also depends on secrets and database configuration.
+
+Required correction:
+
+When any of the following change, keep historical approval audit data on the version, but clear current publish eligibility:
+
+- draft files change;
+- Main Agent writes files;
+- Task Agent Apply writes files;
+- testing secret is created, edited, removed or toggled;
+- secret `isPreviewSafe` or `exposureType` changes;
+- preview database is reset or replaced;
+- preview migrations change or fail;
+- runtime/build configuration changes.
+
+The project-level state must become:
+
+- `testedSnapshotId = null`
+- `testingStatus = 'stale'`
+
+The running old test container may remain viewable for audit, but cannot be approved or published as current.
+
+Approval must require:
+
+- `testingStatus === 'ready'`
+- `testingCandidateSnapshotId !== null`
+- `runningTestSnapshotId === testingCandidateSnapshotId`
+- test runtime health passed
+- required testing secrets resolved
+- preview migrations passed
+
+Required tests:
+
+- Changing a testing secret invalidates publish eligibility.
+- Resetting the test database invalidates publish eligibility.
+- Changing runtime configuration invalidates publish eligibility.
+- Approval is rejected unless the running snapshot equals the active candidate.
+
+4. Production database migration safety is still missing
+
+Deploying an approved container atomically does not make database migrations safe.
+
+A new production migration can alter the database while the old published app is still serving traffic, breaking the old app before the new deployment is healthy.
+
+Required initial policy:
+
+- Detect whether the approved version includes database schema or migration changes.
+- For the first implementation, require production migration changes to be reviewed and explicitly confirmed.
+- Block obviously destructive migrations by default, such as dropping tables/columns or destructive resets.
+- Require backward-compatible migrations for zero-downtime deployment.
+- Run production migration steps with logs and failure reporting before switching traffic.
+- If safe support cannot be implemented now, clearly block publishing database-changing versions instead of claiming production-safe promotion.
+
+Required tests:
+
+- A destructive migration blocks production publish by default.
+- Migration failure leaves previous public version active.
+- A backward-compatible successful migration plus healthy deployment permits traffic switch.
+
+5. Health checks must be defined, not assumed
+
+The plan references `project.healthCheckPath`, but generated apps may not provide one.
+
+Required correction:
+
+- Add a platform-defined health check contract for every supported runtime template, or automatically generate a health endpoint for agent-built server apps.
+- Store the configured health path when needed.
+- Full App Preview and production deployment must both validate health using the same supported-runtime contract.
+
+Required tests:
+
+- Supported Node API, Next.js, Flask and FastAPI templates pass their generated health checks.
+- An app with a failed health check cannot be marked test-ready or promoted to production.
+
+6. Use one authoritative testing-state model
+
+The project can keep:
+
+- `testingCandidateSnapshotId`
+- `runningTestSnapshotId`
+- `testedSnapshotId`
+- `testingStatus`
+
+That is acceptable if these fields are the only authoritative candidate/approval state.
+
+If `project_environments.snapshotVersionId` is also used, it must not become a second competing source of truth.
+
+Required correction:
+
+- State clearly that project-level testing fields own candidate and approval state.
+- Use `project_environments` only for environment/runtime metadata, or omit its testing snapshot pointer entirely.
+- Add tests preventing conflicting active candidate state.
+
+7. Keep the Task Agent audit and dedicated-container boundary
+
+The dedicated test container rule is correct and must stay:
+
+- Main Agent and Task Agent Apply update only the mutable draft/dev environment.
+- They invalidate test approval.
+- They never silently sync files into the immutable test container.
+- Rebuilding the Test Preview is the only action that deploys a new snapshot into the test container.
+
+Also audit all task creation and execution paths so missing `agentIdentity` cannot silently convert staged Task Agent work into live Main Agent writes.
+
+Return one final amended plan covering:
+
+- immutable testing for static apps;
+- protected test-app origin/subdomain or gateway model;
+- invalidation on secrets/database/runtime changes;
+- production migration safety policy;
+- runtime health-check contract;
+- one authoritative testing-state model.
+
+After those amendments, you may implement in phases. Phase 0 should be preserved and pushed as an urgent standalone security fix as soon as possible.
