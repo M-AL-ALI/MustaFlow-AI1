@@ -162,7 +162,13 @@ const REFINE_BIAS_TO_ACTION = `BIAS TO ACTION — this is a CHANGE request, not 
     1. Set "summary" to clearly state what you did NOT change and exactly why ("I did not modify any files because the error originated from the OpenAI API, not your code.").
     2. Provide a concrete next step the user can take in "nextRecommendation" (rephrase, share the failing input, configure a secret, etc.).
 - If the user's intent is ambiguous, make your best interpretation and ship a change — do not refuse. The user can always rollback to the previous version.
-- Never claim "your app is already up to date" unless you genuinely inspected every relevant file and confirmed no change is warranted.`;
+- Never claim "your app is already up to date" unless you genuinely inspected every relevant file and confirmed no change is warranted.
+
+PROACTIVE DIAGNOSIS — when the user reports a symptom without naming the cause:
+- Phrases like "the app is not running", "it's broken", "something is wrong", "there's a bug", "it's not loading", "nothing happens", "the button doesn't work", "I see an error" are fix requests. Do NOT ask the user to describe the problem in more detail.
+- Instead: READ every file in the provided file list, IDENTIFY the specific root cause (broken JS reference, missing handler, syntax error, wrong selector, broken CDN URL, logic error, etc.), and FIX it.
+- State clearly in your "summary" what the specific problem was and what you changed to resolve it — e.g. "Found an unclosed function in script.js that caused the page to crash on load. Fixed the syntax error at line 47."
+- If you inspect the files and genuinely find nothing wrong, set "files" to [] but explain in "summary" exactly what you checked and why it appears correct, then suggest what the user can try next.`;
 
 const PREVIEW_NOTE = `IMPORTANT preview-runtime constraints:
 - This is a static preview. Generate only safe, self-contained files: HTML, CSS, vanilla JS (or React via CDN inside <script type="text/babel">), images via public CDNs.
@@ -7277,8 +7283,9 @@ Reasoning principles (apply in order, BEFORE judging):
 3. Asking about a previous error, task result, or your behavior ("what happened?", "why did it fail?", "why did you build instead of answer?") → "converse". Do NOT treat this as "fix the last error" or "redo the build" unless the user explicitly says "fix it", "rebuild it", or "try again".
 4. **Repeat / rephrase detection**: If the user's current message is the same as, or a rephrasing of, something they already said and you responded to — especially if your previous response was a build report and they now seem to want an explanation instead — treat it as "converse". The user is course-correcting, not asking for another build.
 5. **Discussion mode**: If the message describes, theorizes, complains, philosophizes, or asks you to behave differently ("you should understand intent, not just keywords") → "converse".
-6. "build" requires an explicit action verb pointed at the code (add/remove/change/fix/build/create/make/update/refactor/style/etc.). Being on-topic about the app is not enough.
-7. When genuinely torn between "converse" and "build", choose "converse". A misrouted question is far more annoying than a missed build request — the user can always re-ask with an action verb.
+6. **Bug / problem reports are "build" — even without an action verb**: If the user describes a symptom, error, or malfunction of their app — "the app is not running", "it's broken", "the button doesn't work", "I get an error", "nothing loads", "the page is blank", "something is wrong", "it keeps crashing" — classify as "build". The agent must investigate the files and fix the problem, not ask for clarification.
+7. "build" generally requires an explicit action verb (add/remove/change/fix/build/create/make/update/refactor/style/etc.) OR a problem description as described in rule 6. Being on-topic about the app without either is not enough.
+8. When genuinely torn between "converse" and "build", choose "converse". A misrouted question is far more annoying than a missed build request — the user can always re-ask with an action verb.
 
 Respond with ONLY valid JSON: {"intent": "converse"|"plan"|"build", "confidence": 0.0-1.0}
 
@@ -7319,6 +7326,13 @@ const SHORT_REACTIONS = new Set([
 const STARTS_WITH_BUILD_IMPERATIVE =
   /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge|deploy|publish|undo|rollback|retry|try\s+again)\b/i;
 
+// Detect problem / bug reports that are implicit fix requests even without
+// an explicit action verb. "The app is not running", "it's broken", "there
+// is an error" all mean "find and fix this" — they must route to build so
+// the agent investigates the files rather than asking for more information.
+const PROBLEM_REPORT_PATTERNS =
+  /\b(not\s+(?:working|running|loading|opening|showing|displaying|rendering|responding|found)|doesn'?t\s+(?:work|load|open|run|show|display|respond|function)|isn'?t\s+(?:working|loading|running|opening|showing)|(?:app|page|site|button|form|link|feature|screen|component)\s+(?:is\s+)?(?:not\s+working|broken|blank|empty|crashed?|down|failing|bugged?)|(?:broken|crashed?|glitchy|bugged?)\s*(?:app|page|site)?|white\s+screen|blank\s+(?:screen|page)|nothing\s+(?:works?|happens?|loads?|shows?|displays?)|something(?:\s+is)?\s+(?:wrong|broken|off|not\s+right)|not\s+(?:able\s+to|working\s+at\s+all)|(?:there(?:\s+is|'s)\s+(?:a\s+)?(?:an\s+)?(?:error|bug|issue|problem|glitch))|(?:error|bug|issue|problem|glitch)\s+(?:in|with|on)\s+(?:the\s+)?(?:app|page|site|code)|(?:app|it)\s+(?:is\s+)?(?:not\s+)?(?:running|working)|(?:keeps?\s+(?:crashing|failing|breaking))|(?:can'?t|cannot)\s+(?:open|load|use|access|see|view|click)|(?:stuck|freezing|frozen|hangs?|hanged?))\b/i;
+
 /** Normalize a message for fuzzy "is this the same thing they just said?" comparison. */
 function normalizeForRepeatCheck(s: string): string {
   return s
@@ -7357,6 +7371,20 @@ function fastClassify(
   // make this work?") all → converse.
   if (trimmed.endsWith("?") && !isImperative) {
     return { intent: "converse", confidence: 0.95 };
+  }
+
+  // Implicit fix request: the message describes a problem/bug/error without
+  // using an explicit action verb. These are never conversation — the user
+  // wants the agent to investigate the files and fix the issue.
+  // Only applies when there are already files (hasFiles) so we don't fire on
+  // vague initial prompts like "there's an issue" before a project exists.
+  if (
+    hasFiles &&
+    !trimmed.endsWith("?") &&
+    !QUESTION_STARTERS.test(trimmed) &&
+    PROBLEM_REPORT_PATTERNS.test(trimmed)
+  ) {
+    return { intent: "build", confidence: 0.9 };
   }
 
   // Repeat / rephrase detection: if the user is re-sending the same (or very
@@ -7556,6 +7584,12 @@ CRITICAL — do not misrepresent your capabilities:
 - The user is already inside a project. NEVER tell them to "create a new project" or "go to the project creation flow" to get changes made — they are already there. If they want changes to THIS project, the next message they send (without Plan Mode on) will run the builder.
 - If a user asks you to build/create/add/change something in this mode, briefly acknowledge what they want, then tell them to resend the request (or hit send again) and the builder will run it — do NOT tell them you lack the ability.
 - You are answering in this turn only because the previous classifier picked "explain", not because you lack tools.
+
+BUG / PROBLEM REPORTS — proactive investigation, never interrogation:
+- If the user describes a problem ("the app is not running", "it's broken", "the button doesn't work", "I see an error", "nothing loads", "something is wrong") do NOT ask them to describe it more precisely.
+- Instead: scan the provided file list for the most likely cause (broken JS references, missing event handlers, syntax errors, broken CDN links, missing files, broken logic). Name the specific file and issue you suspect.
+- Tell the user exactly what you found — or what you suspect — and then say: "I'll fix it now — just send any message and the builder will apply the repair."
+- If the file list is empty or you genuinely cannot identify the cause, say so honestly and give one concrete suggestion (e.g. "Check the browser console for a specific error message").
 
 Your responses:
 - Are clear, concise, and in plain Markdown (use headings, lists, bold, code blocks as appropriate)
