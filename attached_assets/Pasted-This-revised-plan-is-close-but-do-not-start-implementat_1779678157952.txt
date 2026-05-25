@@ -1,0 +1,119 @@
+This revised plan is close, but do not start implementation until you make the following final corrections.
+
+1. Full App Preview must test an immutable version, not a moving draft
+
+The current proposed flow is unsafe:
+
+- Start Full App Preview from live project_files
+- User tests
+- On "Mark Testing Passed", create a new snapshot from current project_files
+
+This can approve files that changed after testing began.
+
+Required correction:
+
+- When the user starts or rebuilds Full App Preview, create an immutable Test Candidate version from the current draft files.
+- Store its version ID, preferably by reusing `project_environments.snapshotVersionId` for the `testing` environment, or add a clearly named `testingCandidateSnapshotId`.
+- Sync and run the preview container from that exact immutable Test Candidate snapshot, not directly from changing `project_files`.
+- If draft files change while testing is running, mark the running candidate as stale and require Rebuild Test Preview before it can be approved.
+- `Mark Testing Passed` must approve the existing Test Candidate version that was actually running and tested. It must not create a new snapshot at approval time.
+- Production publishing must deploy exactly `testedSnapshotId`.
+
+Required tests:
+- Editing draft files after the Test Candidate starts makes the candidate stale.
+- A stale candidate cannot be marked Testing Passed.
+- Mark Testing Passed approves the same snapshot ID that ran in Full App Preview.
+- Production deploy receives files from `testedSnapshotId`, never from current mutable `project_files`.
+
+2. Neon branching does not automatically mean safe test data isolation
+
+A Neon preview branch cloned from the production/default branch may still contain real production customer data. That isolates writes, but it does not satisfy the requirement that preview must not use production customer data by default.
+
+Required correction:
+
+- Default Preview/Test database must be empty or seeded with safe synthetic/demo data.
+- A branch copied from production data may only be created through an explicit user action with a warning that production-derived data will be available in testing.
+- If the first implementation cannot create a clean preview database, clearly mark production-data branching as unsupported for the safe default path rather than claiming Preview/Test isolation is complete.
+
+Required tests:
+- Default Full App Preview database creation does not expose production records.
+- Preview migrations operate only on the testing database.
+- Reset Preview Database destroys and recreates only the testing database.
+
+3. Secret injection must prevent stale or mixed environments
+
+Changing `getProjectEnvVars(projectId, env = "testing")` is not sufficient and the default parameter is dangerous. A forgotten production caller could accidentally deploy testing values, or an already-running preview container could retain old production values.
+
+Required correction:
+
+- Make the environment parameter required, not optional:
+  `getProjectEnvVars(projectId, environment)`
+- Audit every caller and explicitly pass either `"testing"` or `"production"`.
+- Full App Preview must use a dedicated testing container environment, or fully replace and restart its runtime environment when secrets change.
+- A testing container must never retain previously injected production variables.
+- Production deployment must never read testing variables.
+
+Also do not use a name prefix such as `SERVER_` as the only secret-security rule.
+
+- Store an explicit exposure type for environment variables, such as `server` or `public-client`.
+- Server secrets are injected only into server runtime processes.
+- Values intended for client bundles are not secrets and must be visibly marked as public before exposure.
+
+Required tests:
+- A preview container started after production deployment contains no production-only secret values.
+- Removing a testing secret removes it from the restarted testing runtime.
+- All production and testing call sites explicitly choose their environment.
+- Public-client variables require explicit user confirmation.
+
+4. The Task Agent identity bug must be explicitly fixed, not assumed fixed
+
+The earlier code inspection found that queued/background task paths could fail to pass persisted `agentIdentity` into job execution, allowing Task Agent work to behave like Main Agent work.
+
+Your plan currently says this invariant was already implemented or only needs confirmation. Do not assume that.
+
+Required correction:
+
+- Inspect every enqueue, drain and background task execution path.
+- Specifically verify batch drains, project drains and task-route background execution.
+- Persist and forward `agentIdentity` into `runJob` everywhere.
+- If any path omits it, fix it as part of this implementation.
+- Task Agent generated files must never write into live `project_files`, Quick Preview or Full App Preview until Apply is explicitly executed.
+
+Required tests:
+- A queued Task Agent job retains `agentIdentity = "task"` through execution.
+- A background Task Agent job remains staged before Apply.
+- Main Agent jobs still update the live draft normally.
+- Applying Task Agent output invalidates the tested version and creates a new draft state requiring retesting.
+
+5. Production deployment must be atomic and version-specific
+
+Do not allow production deployment to rebuild from live draft files after approval.
+
+Required correction:
+
+- Production deployment must read files only from the immutable `testedSnapshotId` version.
+- Production secrets must be injected only during this deploy path.
+- Run production health checks before switching public traffic or published snapshot pointers.
+- If deployment fails, keep the previous published version live.
+- Test both public slug URLs and custom domains during fallback/rollback behavior.
+
+For container fallback:
+- Fix the confirmed misplaced `return` in `serveSnapshot.ts`.
+- Treat container timeout, network failure and server-level failure as fallback conditions.
+- Be careful not to convert valid application route behavior into incorrect snapshot responses without defining the expected routing semantics.
+
+Required tests:
+- Published deployment uses `testedSnapshotId.filesSnapshot`.
+- Draft changes after approval cannot enter production.
+- Failed production deploy leaves both slug URL and custom domain serving the previous stable version.
+- Production runtime failure correctly falls back to the published snapshot.
+
+After adding these corrections, return the final implementation plan one more time.
+
+You may implement Phase 0 security fixes as a separate urgent patch once approved:
+- make editor preview owner-only at all times;
+- remove console bridge from public published HTML;
+- fix production-container-to-snapshot fallback;
+- add tests for those three security behaviors.
+
+Do not describe Full App Preview or safe publish promotion as complete until immutable test-candidate execution, safe testing secrets, isolated test data and exact-version production deployment are implemented and demonstrated.
