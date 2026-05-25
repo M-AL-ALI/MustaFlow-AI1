@@ -675,6 +675,80 @@ function LowCreditsBanner({
   );
 }
 
+function parseFilenameCodeBlocks(content: string): Array<{ filePath: string; code: string }> {
+  const blocks: Array<{ filePath: string; code: string }> = [];
+  const regex = /```([^\n`]+\.[a-zA-Z][^\n`]*)\n([\s\S]*?)```/g;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    const lang = match[1]?.trim() ?? "";
+    const code = match[2] ?? "";
+    if (lang && code.trim()) {
+      blocks.push({ filePath: lang, code: code.trim() });
+    }
+  }
+  return blocks;
+}
+
+function ApplyEditButton({
+  projectId,
+  filePath,
+  code,
+}: {
+  projectId: number;
+  filePath: string;
+  code: string;
+}) {
+  const [state, setState] = useState<"idle" | "loading" | "applied" | "error">("idle");
+
+  const handleApply = async () => {
+    setState("loading");
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/files/apply-suggestion`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath, content: code }),
+        credentials: "include",
+      });
+      if (!resp.ok) {
+        setState("error");
+        return;
+      }
+      setState("applied");
+    } catch {
+      setState("error");
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-2 bg-muted/50 rounded px-2 py-1">
+      <div className="flex items-center gap-1.5 min-w-0">
+        <FileCode2 className="h-3 w-3 text-muted-foreground shrink-0" />
+        <span className="text-[10px] text-muted-foreground font-mono truncate">{filePath}</span>
+      </div>
+      <button
+        onClick={() => void handleApply()}
+        disabled={state === "loading" || state === "applied"}
+        className={cn(
+          "shrink-0 px-2 py-0.5 rounded text-[10px] font-medium transition-colors border",
+          state === "applied"
+            ? "bg-green-500/15 text-green-500 border-green-500/30 opacity-70"
+            : state === "error"
+              ? "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/20"
+              : "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20",
+        )}
+      >
+        {state === "loading"
+          ? "Applying…"
+          : state === "applied"
+            ? "Applied"
+            : state === "error"
+              ? "Retry"
+              : "Apply edit"}
+      </button>
+    </div>
+  );
+}
+
 const PRIMARY_TABS = [
   { label: "Preview", value: "preview", icon: Monitor },
   { label: "Code", value: "code", icon: FileCode2 },
@@ -2716,22 +2790,50 @@ export default function ProjectWorkspacePage() {
                                       );
                                     })()}
                                   {msg.role === "assistant" && !isReport && !isError ? (
-                                    <StreamingText
-                                      content={msg.content}
-                                      messageId={msg.id}
-                                      animate={
-                                        msgIdx === visibleMsgs.length - 1 &&
-                                        !!(
-                                          planPayload as { streaming?: boolean } | null | undefined
-                                        )?.streaming
-                                      }
-                                      onApply={(code) =>
-                                        send(`Apply this to my app:\n\`\`\`\n${code}\n\`\`\``, {
-                                          agentIntent: "build",
-                                          planMode: false,
-                                        })
-                                      }
-                                    />
+                                    <>
+                                      {payloadKind === "converse" && (
+                                        <div className="flex items-center gap-1 mb-1.5 text-[9px] text-primary/70 font-medium">
+                                          <MessageSquare className="h-2.5 w-2.5" />
+                                          <span>Assistant</span>
+                                        </div>
+                                      )}
+                                      <StreamingText
+                                        content={msg.content}
+                                        messageId={msg.id}
+                                        animate={
+                                          msgIdx === visibleMsgs.length - 1 &&
+                                          !!(
+                                            planPayload as
+                                              | { streaming?: boolean }
+                                              | null
+                                              | undefined
+                                          )?.streaming
+                                        }
+                                        onApply={(code) =>
+                                          send(`Apply this to my app:\n\`\`\`\n${code}\n\`\`\``, {
+                                            agentIntent: "build",
+                                            planMode: false,
+                                          })
+                                        }
+                                      />
+                                      {payloadKind === "converse" &&
+                                        (() => {
+                                          const blocks = parseFilenameCodeBlocks(msg.content);
+                                          if (!blocks.length) return null;
+                                          return (
+                                            <div className="mt-2 pt-2 border-t border-border/50 space-y-1">
+                                              {blocks.map((block, i) => (
+                                                <ApplyEditButton
+                                                  key={i}
+                                                  projectId={projectId}
+                                                  filePath={block.filePath}
+                                                  code={block.code}
+                                                />
+                                              ))}
+                                            </div>
+                                          );
+                                        })()}
+                                    </>
                                   ) : (
                                     <div className="whitespace-pre-wrap leading-relaxed">
                                       {msg.content}

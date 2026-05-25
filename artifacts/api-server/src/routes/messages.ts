@@ -34,7 +34,12 @@ import {
   CREDIT_COST,
   backgroundWallClockFor,
 } from "../lib/jobs";
-import { deductCredits, getOrCreateCredits, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
+import {
+  deductCredits,
+  deductCreditsAtomic,
+  getOrCreateCredits,
+  CREDITS_ENFORCEMENT_ENABLED,
+} from "./credits";
 import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
 import { fetchAttachmentAsDataUri } from "./images";
@@ -638,6 +643,25 @@ router.post(
       (a) => a.kind === "image" && typeof a.url === "string",
     );
 
+    // Gate explicit-converse (Assistant mode) behind a credit check BEFORE SSE
+    // headers are flushed so we can still return a proper HTTP 402 response.
+    if (explicitAgentIntent === "converse") {
+      const converseOwner = req.userId ?? project.ownerId;
+      if (converseOwner) {
+        const deduction = await deductCreditsAtomic(converseOwner, 1, {
+          type: "converse",
+          description: `Assistant chat — project ${project.id}`,
+          projectId: project.id,
+        });
+        if ("insufficient" in deduction) {
+          res.status(402).json({
+            error: "Insufficient credits. Top up in Billing to continue chatting.",
+          });
+          return;
+        }
+      }
+    }
+
     // Set SSE headers before any await so the client sees the stream start quickly
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -761,6 +785,22 @@ router.post(
         if (dataUri) visionParts.push({ dataUri, alt: att.alt });
       }
 
+      // Build system prompt: use developer pair-programmer prompt when the
+      // client explicitly set agentIntent=converse (i.e. "Assistant" mode).
+      const DEVELOPER_PAIR_PROGRAMMER_PROMPT = `You are MustaFlow Assistant — an expert developer pair programmer with deep knowledge of TypeScript, JavaScript, Python, Go, React, Node.js, Express, SQL, and system design. You help developers debug errors, review code quality, explain architecture decisions, and suggest refactors. Match the technical depth of the user: use precise developer language when they do; plain language otherwise. When recommending a specific file change, wrap the new content in a fenced code block with the filename as the language tag (e.g. \`\`\`src/api/auth.ts).`;
+
+      const hasDeveloperSignals =
+        /```|\.ts\b|\.tsx\b|\.js\b|\.py\b|\.go\b|error:|Error:|TypeError|at \w+\s*\(|stack trace|undefined is not|cannot read/i.test(
+          content,
+        );
+
+      const systemPromptOverride =
+        explicitAgentIntent === "converse"
+          ? hasDeveloperSignals
+            ? `${DEVELOPER_PAIR_PROGRAMMER_PROMPT}\n\nThe user appears to be a technical developer — use precise developer language.`
+            : DEVELOPER_PAIR_PROGRAMMER_PROMPT
+          : undefined;
+
       // Stream tokens directly to the client
       const converseResult = await runConverseStreamPipeline(
         {
@@ -772,6 +812,7 @@ router.post(
           isAmbiguous,
           imageAttachments: visionParts.length > 0 ? visionParts : undefined,
           signal: abortController.signal,
+          systemPromptOverride,
         },
         (token) => {
           sendEvent({ type: "token", content: token });

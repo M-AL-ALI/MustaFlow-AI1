@@ -42,6 +42,8 @@ import type {
   AnalyzePageMapParams,
   ApiError,
   AppTestRun,
+  ApplyFileSuggestion200,
+  ApplyFileSuggestionBody,
   ApprovePreviewEnv200,
   ApproveVersionForTesting200,
   AttachPurchasedDomainToProjectBody,
@@ -6088,6 +6090,78 @@ export const useCreateProjectFile = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getCreateProjectFileMutationOptions(options));
+    }
+
+export const getApplyFileSuggestionUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files/apply-suggestion`
+}
+
+/**
+ * @summary Apply an AI-suggested file edit without triggering a full build pipeline.
+ */
+export const applyFileSuggestion = async (id: number,
+    applyFileSuggestionBody: ApplyFileSuggestionBody, options?: RequestInit): Promise<ApplyFileSuggestion200> => {
+
+  return customFetch<ApplyFileSuggestion200>(getApplyFileSuggestionUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      applyFileSuggestionBody,)
+  }
+);}
+
+
+
+
+export const getApplyFileSuggestionMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyFileSuggestion>>, TError,{id: number;data: BodyType<ApplyFileSuggestionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyFileSuggestion>>, TError,{id: number;data: BodyType<ApplyFileSuggestionBody>}, TContext> => {
+
+const mutationKey = ['applyFileSuggestion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyFileSuggestion>>, {id: number;data: BodyType<ApplyFileSuggestionBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  applyFileSuggestion(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyFileSuggestionMutationResult = NonNullable<Awaited<ReturnType<typeof applyFileSuggestion>>>
+    export type ApplyFileSuggestionMutationBody = BodyType<ApplyFileSuggestionBody>
+    export type ApplyFileSuggestionMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Apply an AI-suggested file edit without triggering a full build pipeline.
+ */
+export const useApplyFileSuggestion = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyFileSuggestion>>, TError,{id: number;data: BodyType<ApplyFileSuggestionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof applyFileSuggestion>>,
+        TError,
+        {id: number;data: BodyType<ApplyFileSuggestionBody>},
+        TContext
+      > => {
+      return useMutation(getApplyFileSuggestionMutationOptions(options));
     }
 
 export const getGetProjectFileUrl = (id: number,

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db, projectFilesTable, projectsTable, projectVersionsTable } from "@workspace/db";
 import { requireProjectAccess } from "../lib/auth";
 import { guessMime } from "../lib/builder";
@@ -679,5 +679,73 @@ router.get("/projects/:id/preview/{*splat}", async (req, res, next): Promise<voi
     );
   }
 });
+
+router.post(
+  "/projects/:id/files/apply-suggestion",
+  requireProjectAccess("member"),
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+
+    const { filePath, content } = req.body as { filePath?: unknown; content?: unknown };
+    if (typeof filePath !== "string" || filePath.trim() === "") {
+      res.status(400).json({ error: "filePath must be a non-empty string" });
+      return;
+    }
+    if (typeof content !== "string") {
+      res.status(400).json({ error: "content must be a string" });
+      return;
+    }
+
+    const normalizedPath = filePath.trim();
+
+    const [existing] = await db
+      .select({ id: projectFilesTable.id, content: projectFilesTable.content })
+      .from(projectFilesTable)
+      .where(
+        and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, normalizedPath)),
+      );
+
+    if (existing && existing.content === content) {
+      res.json({ applied: false, reason: "content unchanged", filePath: normalizedPath });
+      return;
+    }
+
+    const mimeType = guessMime(normalizedPath);
+
+    // Snapshot current state BEFORE the write so the user has a rollback target
+    const currentFiles = await db
+      .select({
+        path: projectFilesTable.path,
+        content: projectFilesTable.content,
+        mimeType: projectFilesTable.mimeType,
+      })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId));
+
+    await db.insert(projectVersionsTable).values({
+      projectId,
+      label: `Assistant edit: ${normalizedPath}`,
+      note: "Snapshot taken before applying an Assistant suggestion.",
+      filesSnapshot: currentFiles,
+    });
+
+    if (existing) {
+      await db
+        .update(projectFilesTable)
+        .set({ content, mimeType, updatedAt: sql`now()` })
+        .where(eq(projectFilesTable.id, existing.id));
+    } else {
+      await db
+        .insert(projectFilesTable)
+        .values({ projectId, path: normalizedPath, content, mimeType });
+    }
+
+    res.json({ applied: true, filePath: normalizedPath });
+  },
+);
 
 export default router;

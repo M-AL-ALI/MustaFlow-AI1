@@ -2221,6 +2221,25 @@ export const CreateProjectFileBody = zod.object({
 
 
 /**
+ * @summary Apply an AI-suggested file edit without triggering a full build pipeline.
+ */
+export const ApplyFileSuggestionParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ApplyFileSuggestionBody = zod.object({
+  "filePath": zod.string(),
+  "content": zod.string()
+})
+
+export const ApplyFileSuggestionResponse = zod.object({
+  "applied": zod.boolean(),
+  "filePath": zod.string().optional(),
+  "reason": zod.string().optional()
+})
+
+
+/**
  * @summary Get the contents of one generated file by id
  */
 export const GetProjectFileParams = zod.object({

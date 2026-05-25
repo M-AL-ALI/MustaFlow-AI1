@@ -42,3 +42,6 @@ export { RenewPurchasedDomainBody } from "./generated/api";
 export { SetPurchasedDomainAutoRenewBody } from "./generated/api";
 export { ImportKnowledgeBody } from "./generated/api";
 export { RateKnowledgeBody } from "./generated/api";
+export { ApplyFileSuggestionBody } from "./generated/api";
+export { ApplyFileSuggestionParams } from "./generated/api";
+export { ApplyFileSuggestionResponse } from "./generated/api";

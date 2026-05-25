@@ -218,6 +218,40 @@ export function QueueComposer({
     return (stored as AgentType | null) ?? "main";
   });
 
+  const chatModeLsKey = `mustaflow_chat_mode_${projectId}`;
+  const [chatMode, setChatModeRaw] = useState<"agent" | "assistant">(() => {
+    try {
+      const stored = localStorage.getItem(chatModeLsKey);
+      return stored === "assistant" ? "assistant" : "agent";
+    } catch {
+      return "agent";
+    }
+  });
+  const [showAssistantTooltip, setShowAssistantTooltip] = useState(false);
+  const setChatMode = useCallback(
+    (mode: "agent" | "assistant") => {
+      setChatModeRaw(mode);
+      try {
+        localStorage.setItem(chatModeLsKey, mode);
+      } catch {
+        /* ignore */
+      }
+      if (mode === "assistant") {
+        try {
+          const seen = localStorage.getItem("mustaflow_assistant_mode_tooltip_seen");
+          if (!seen) {
+            localStorage.setItem("mustaflow_assistant_mode_tooltip_seen", "1");
+            setShowAssistantTooltip(true);
+            setTimeout(() => setShowAssistantTooltip(false), 4000);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    [chatModeLsKey],
+  );
+
   const { mutate: updateProject } = useUpdateProject();
 
   const setAgentType = useCallback(
@@ -893,7 +927,11 @@ export function QueueComposer({
       // and routes directly — prevents the agent from asking the user to
       // "switch to plan mode" when the message is clearly a planning request.
       const detectedIntent =
-        clientIntent === "plan" || clientIntent === "converse" ? clientIntent : undefined;
+        chatMode === "assistant"
+          ? "converse"
+          : clientIntent === "plan" || clientIntent === "converse"
+            ? clientIntent
+            : undefined;
       onSingleSend(text, detectedIntent, inlineImages.length > 0 ? inlineImages : undefined);
       return;
     }
@@ -927,6 +965,7 @@ export function QueueComposer({
     variantMode,
     projectId,
     clientIntent,
+    chatMode,
     onSingleSend,
     onBatchStarted,
     onPromptValueChange,
@@ -1353,55 +1392,95 @@ export function QueueComposer({
             )}
             <div className="ml-auto flex items-center gap-2">
               <div className="flex flex-col items-end gap-0.5">
+                {/* Agent / Assistant two-pill toggle */}
                 <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
-                  {(
-                    [
-                      { mode: "lite", label: "Lite", desc: "1 credit · fastest" },
-                      { mode: "eco", label: "Eco", desc: "2 credits · fast & lightweight" },
-                      { mode: "power", label: "Power", desc: "5 credits · better quality" },
-                      { mode: "pro", label: "Pro", desc: "10 credits · most capable" },
-                    ] as const
-                  ).map(({ mode, label, desc }) => {
-                    const locked = false;
-                    const title = locked
-                      ? `Upgrade to unlock — ${label} mode is included with the Pro and Team plans`
-                      : desc;
-                    return (
-                      <button
-                        key={mode}
-                        onClick={() => {
-                          if (locked) {
-                            window.location.href = "/billing";
-                            return;
-                          }
-                          onAgentModeChange(mode);
-                        }}
-                        title={title}
-                        aria-disabled={locked}
-                        className={cn(
-                          "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors inline-flex items-center gap-0.5",
-                          agentMode === mode && !locked
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : locked
-                              ? "text-muted-foreground/40 hover:text-muted-foreground cursor-help"
-                              : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {locked && <Lock style={{ width: 8, height: 8 }} />}
-                        {label}
-                      </button>
-                    );
-                  })}
+                  {(["agent", "assistant"] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setChatMode(m)}
+                      title={
+                        m === "agent"
+                          ? "Agent mode — AI builds and edits your app"
+                          : "Assistant mode — developer pair programmer (1 credit per reply)"
+                      }
+                      className={cn(
+                        "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
+                        chatMode === m
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {m === "agent" ? "Agent" : "Assistant"}
+                    </button>
+                  ))}
                 </div>
-                <span className="text-[9px] text-muted-foreground/50 pr-0.5">
-                  {agentMode === "lite"
-                    ? "1 credit · fastest"
-                    : agentMode === "eco"
-                      ? "2 credits · fast & lightweight"
-                      : agentMode === "power"
-                        ? "5 credits · better quality"
-                        : "10 credits · most capable"}
-                </span>
+                {chatMode === "agent" && (
+                  <>
+                    <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
+                      {(
+                        [
+                          { mode: "lite", label: "Lite", desc: "1 credit · fastest" },
+                          { mode: "eco", label: "Eco", desc: "2 credits · fast & lightweight" },
+                          { mode: "power", label: "Power", desc: "5 credits · better quality" },
+                          { mode: "pro", label: "Pro", desc: "10 credits · most capable" },
+                        ] as const
+                      ).map(({ mode, label, desc }) => {
+                        const locked = false;
+                        const title = locked
+                          ? `Upgrade to unlock — ${label} mode is included with the Pro and Team plans`
+                          : desc;
+                        return (
+                          <button
+                            key={mode}
+                            onClick={() => {
+                              if (locked) {
+                                window.location.href = "/billing";
+                                return;
+                              }
+                              onAgentModeChange(mode);
+                            }}
+                            title={title}
+                            aria-disabled={locked}
+                            className={cn(
+                              "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors inline-flex items-center gap-0.5",
+                              agentMode === mode && !locked
+                                ? "bg-primary text-primary-foreground shadow-sm"
+                                : locked
+                                  ? "text-muted-foreground/40 hover:text-muted-foreground cursor-help"
+                                  : "text-muted-foreground hover:text-foreground",
+                            )}
+                          >
+                            {locked && <Lock style={{ width: 8, height: 8 }} />}
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="text-[9px] text-muted-foreground/50 pr-0.5">
+                      {agentMode === "lite"
+                        ? "1 credit · fastest"
+                        : agentMode === "eco"
+                          ? "2 credits · fast & lightweight"
+                          : agentMode === "power"
+                            ? "5 credits · better quality"
+                            : "10 credits · most capable"}
+                    </span>
+                  </>
+                )}
+                {chatMode === "assistant" && (
+                  <span className="text-[9px] text-muted-foreground/50 pr-0.5">
+                    1 credit per reply
+                  </span>
+                )}
+                {showAssistantTooltip && (
+                  <div className="absolute bottom-full right-0 mb-1.5 z-50 w-56 rounded-lg border border-border bg-popover px-3 py-2 text-[10px] text-popover-foreground shadow-lg">
+                    <strong className="font-semibold">Assistant mode</strong>
+                    <p className="mt-0.5 leading-relaxed text-muted-foreground">
+                      Ask questions and get code suggestions. When the AI recommends a file change
+                      it will show an "Apply edit" button — no full rebuild needed.
+                    </p>
+                  </div>
+                )}
               </div>
               {activeTaskId != null ? (
                 <button

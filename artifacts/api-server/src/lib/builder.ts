@@ -7982,6 +7982,7 @@ export async function runConverseStreamPipeline(
     isAmbiguous?: boolean;
     imageAttachments?: ConverseImageAttachment[];
     signal?: AbortSignal;
+    systemPromptOverride?: string;
   },
   onToken: (token: string) => void,
 ): Promise<ConverseResult> {
@@ -7994,6 +7995,7 @@ export async function runConverseStreamPipeline(
     isAmbiguous,
     imageAttachments,
     signal,
+    systemPromptOverride,
   } = args;
 
   // Ambiguous path uses JSON mode — not streamable; call onToken once with full text.
@@ -8041,7 +8043,7 @@ export async function runConverseStreamPipeline(
             return `--- ${f.path} ---\n${snippet}${truncated ? "\n…(truncated)" : ""}`;
           })
           .join("\n\n")
-      : "No files yet — the app hasn't been built.";
+      : "No project files yet — starting fresh.";
 
   const model = modelFor(agentMode);
 
@@ -8052,7 +8054,7 @@ export async function runConverseStreamPipeline(
     | { role: "user"; content: string | Array<TextPart | ImagePart> };
 
   const messages: ChatMsg[] = [
-    { role: "system", content: CONVERSE_SYSTEM_PROMPT },
+    { role: "system", content: systemPromptOverride ?? CONVERSE_SYSTEM_PROMPT },
     {
       role: "system",
       content: `Project: "${projectName}"\n\nCurrent files:\n${fileContext}`,

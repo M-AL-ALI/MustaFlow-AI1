@@ -3608,6 +3608,17 @@ export type CreatePreviewSession200 = {
   expiresAt: string;
 };
 
+export type ApplyFileSuggestionBody = {
+  filePath: string;
+  content: string;
+};
+
+export type ApplyFileSuggestion200 = {
+  applied: boolean;
+  filePath?: string;
+  reason?: string;
+};
+
 export type DeleteProjectFile200 = {
   deleted: boolean;
 };

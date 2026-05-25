@@ -59,6 +59,8 @@ export * from './analyticsSummaryTopReferrersItem';
 export * from './analyzePageMapParams';
 export * from './analyzePageMapPlatform';
 export * from './apiError';
+export * from './applyFileSuggestion200';
+export * from './applyFileSuggestionBody';
 export * from './approvePreviewEnv200';
 export * from './approveVersionForTesting200';
 export * from './appTestRun';

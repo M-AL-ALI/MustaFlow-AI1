@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db, userCreditsTable, creditTransactionsTable } from "@workspace/db";
 
 const router: IRouter = Router();
@@ -67,7 +67,7 @@ export async function deductCredits(
   amount: number,
   opts: {
     projectId?: number;
-    type: "build" | "refine" | "plan" | "architect" | "senses" | "creative";
+    type: "build" | "refine" | "plan" | "architect" | "senses" | "creative" | "converse";
     description: string;
   },
 ): Promise<{ newBalance: number } | { insufficient: true; balance: number }> {
@@ -101,6 +101,53 @@ export async function deductCredits(
   });
 
   return { newBalance };
+}
+
+// Atomic credit deduction — uses a conditional UPDATE so concurrent requests
+// cannot both succeed when the balance is tight. Falls back gracefully when
+// CREDITS_ENFORCEMENT is disabled. Returns { insufficient } when balance < amount.
+export async function deductCreditsAtomic(
+  userId: string,
+  amount: number,
+  opts: {
+    projectId?: number;
+    type: "build" | "refine" | "plan" | "architect" | "senses" | "creative" | "converse";
+    description: string;
+  },
+): Promise<{ newBalance: number } | { insufficient: true; balance: number }> {
+  const credits = await getOrCreateCredits(userId);
+
+  if (!CREDITS_ENFORCEMENT_ENABLED) {
+    return { newBalance: credits.balance };
+  }
+
+  if (credits.balance < amount) {
+    return { insufficient: true, balance: credits.balance };
+  }
+
+  // Single conditional UPDATE — only succeeds if balance is still >= amount
+  const [updated] = await db
+    .update(userCreditsTable)
+    .set({ balance: sql`balance - ${amount}`, updatedAt: sql`now()` })
+    .where(and(eq(userCreditsTable.userId, userId), sql`balance >= ${amount}`))
+    .returning({ balance: userCreditsTable.balance });
+
+  if (!updated) {
+    // Concurrent request won the race — re-read and report insufficient
+    const current = await getOrCreateCredits(userId);
+    return { insufficient: true, balance: current.balance };
+  }
+
+  await db.insert(creditTransactionsTable).values({
+    userId,
+    projectId: opts.projectId ?? null,
+    type: opts.type,
+    amount: -amount,
+    description: opts.description,
+    balanceAfter: updated.balance,
+  });
+
+  return { newBalance: updated.balance };
 }
 
 // Refund credits — used when a background job is canceled, discarded, or fails
