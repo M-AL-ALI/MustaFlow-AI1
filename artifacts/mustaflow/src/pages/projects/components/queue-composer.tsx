@@ -90,9 +90,10 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB hard limit
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB hard limit per file
 const MAX_IMAGE_SIDE = 1500; // px — downscale if either dimension exceeds this
 const MAX_IMAGE_BYTES_BEFORE_RESIZE = 1 * 1024 * 1024; // 1 MB — also resize even if dimensions ok
+const MAX_IMAGES_PER_MESSAGE = 4; // max simultaneous image attachments
 
 /**
  * Downscale an image File using a hidden canvas element if it exceeds the
@@ -298,7 +299,7 @@ export function QueueComposer({
   const [rows, setRows] = useState<QueueRow[]>([{ id: crypto.randomUUID(), text: "" }]);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [uploadingCount, setUploadingCount] = useState(0);
-  const [attachError, setAttachError] = useState<string | null>(null);
+  const [attachErrors, setAttachErrors] = useState<string[]>([]);
   const [imagePrompt, setImagePrompt] = useState("");
   const [imagePanelOpen, setImagePanelOpen] = useState(false);
   const [generatingImage, setGeneratingImage] = useState(false);
@@ -307,22 +308,23 @@ export function QueueComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const uploadFile = useCallback(
-    async (file: File): Promise<ComposerAttachment | null> => {
+    async (file: File): Promise<{ attachment: ComposerAttachment | null; error?: string }> => {
       // Image path — screenshot-to-code flow with client-side resizing.
       if (file.type.startsWith("image/")) {
         // Validate MIME type (PNG / JPG / WebP only)
         if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-          setAttachError("Only PNG, JPG, and WebP images are supported.");
-          return null;
+          return {
+            attachment: null,
+            error: `"${file.name}": only PNG, JPG, and WebP images are supported.`,
+          };
         }
         // Validate raw size before resizing (5 MB cap on original)
         if (file.size > MAX_IMAGE_BYTES) {
-          setAttachError(
-            `Image too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB.`,
-          );
-          return null;
+          return {
+            attachment: null,
+            error: `"${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB per image.`,
+          };
         }
-        setAttachError(null);
         setUploadingCount((c) => c + 1);
         try {
           // Downscale to ≤ 1500 px on either side if needed.
@@ -353,12 +355,14 @@ export function QueueComposer({
           });
           if (!put.ok) throw new Error("Image upload failed");
 
-          return { kind: "image", url: objectPath, alt: file.name };
+          return { attachment: { kind: "image", url: objectPath, alt: file.name } };
         } catch (err) {
           // eslint-disable-next-line no-console
           console.error("Image upload failed:", err);
-          setAttachError(err instanceof Error ? err.message : "Image upload failed");
-          return null;
+          return {
+            attachment: null,
+            error: err instanceof Error ? err.message : "Image upload failed",
+          };
         } finally {
           setUploadingCount((c) => Math.max(0, c - 1));
         }
@@ -418,16 +422,18 @@ export function QueueComposer({
           sizeBytes: number;
         };
         return {
-          kind: "file",
-          uploadId: row.id,
-          name: row.filename,
-          mime: row.mimeType,
-          size: row.sizeBytes,
+          attachment: {
+            kind: "file",
+            uploadId: row.id,
+            name: row.filename,
+            mime: row.mimeType,
+            size: row.sizeBytes,
+          },
         };
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error("Upload failed:", err);
-        return null;
+        return { attachment: null };
       } finally {
         setUploadingCount((c) => Math.max(0, c - 1));
       }
@@ -439,11 +445,47 @@ export function QueueComposer({
     async (files: FileList | File[]) => {
       const arr = Array.from(files);
       if (arr.length === 0) return;
-      const results = await Promise.all(arr.map((f) => uploadFile(f)));
-      const ok = results.filter((r): r is ComposerAttachment => r !== null);
+
+      const newErrors: string[] = [];
+
+      // Separate images from other files so we can enforce the per-message image cap.
+      const imageFiles = arr.filter((f) => f.type.startsWith("image/"));
+      const otherFiles = arr.filter((f) => !f.type.startsWith("image/"));
+
+      // Determine how many image slots are still available.
+      // Include in-flight uploads (uploadingCount) to avoid overrun during concurrent attaches.
+      const currentImageCount =
+        attachments.filter((a) => a.kind === "image").length + uploadingCount;
+      const remainingSlots = Math.max(0, MAX_IMAGES_PER_MESSAGE - currentImageCount);
+
+      // Images that exceed the per-message cap are rejected immediately.
+      const imagesToProcess = imageFiles.slice(0, remainingSlots);
+      const rejectedImages = imageFiles.slice(remainingSlots);
+      for (const f of rejectedImages) {
+        newErrors.push(
+          `"${f.name}" skipped — maximum of ${MAX_IMAGES_PER_MESSAGE} images per message.`,
+        );
+      }
+
+      const filesToProcess = [...imagesToProcess, ...otherFiles];
+      if (filesToProcess.length === 0) {
+        if (newErrors.length > 0) setAttachErrors(newErrors);
+        return;
+      }
+
+      const results = await Promise.all(filesToProcess.map((f) => uploadFile(f)));
+      const ok: ComposerAttachment[] = [];
+      for (const r of results) {
+        if (r.attachment) ok.push(r.attachment);
+        if (r.error) newErrors.push(r.error);
+      }
+
       if (ok.length > 0) setAttachments((prev) => [...prev, ...ok]);
+      // Always update errors (even if empty) so stale errors from a previous
+      // attempt are cleared when a subsequent attach succeeds.
+      setAttachErrors(newErrors);
     },
-    [uploadFile],
+    [uploadFile, attachments, uploadingCount],
   );
 
   const handlePaste = useCallback(
@@ -471,6 +513,14 @@ export function QueueComposer({
   const handleGenerateImage = useCallback(async () => {
     const p = imagePrompt.trim();
     if (!p || generatingImage) return;
+    // Enforce per-message image cap before starting the network request.
+    const currentImageCount = attachments.filter((a) => a.kind === "image").length + uploadingCount;
+    if (currentImageCount >= MAX_IMAGES_PER_MESSAGE) {
+      setAttachErrors([
+        `Maximum of ${MAX_IMAGES_PER_MESSAGE} images per message — remove one before generating another.`,
+      ]);
+      return;
+    }
     setGeneratingImage(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/generate-image`, {
@@ -487,6 +537,7 @@ export function QueueComposer({
         attachment: { kind: "image"; url: string; alt?: string; generated?: boolean };
       };
       setAttachments((prev) => [...prev, data.attachment]);
+      setAttachErrors([]);
       setImagePrompt("");
       setImagePanelOpen(false);
     } catch (err) {
@@ -495,7 +546,7 @@ export function QueueComposer({
     } finally {
       setGeneratingImage(false);
     }
-  }, [imagePrompt, generatingImage, projectId]);
+  }, [imagePrompt, generatingImage, projectId, attachments, uploadingCount]);
 
   // Client-side intent heuristic — fast local keyword scan for immediate UI feedback.
   // The authoritative routing still happens server-side; this is display-only.
@@ -701,6 +752,7 @@ export function QueueComposer({
     setIsListening(false);
     const newId = crypto.randomUUID();
     setRows([{ id: newId, text: "" }]);
+    setAttachErrors([]);
     if (onPromptValueChange) onPromptValueChange("");
   }, [onPromptValueChange]);
 
@@ -916,6 +968,7 @@ export function QueueComposer({
       const pending = attachments;
       setRows([{ id: crypto.randomUUID(), text: "" }]);
       setAttachments([]);
+      setAttachErrors([]);
       if (onPromptValueChange) onPromptValueChange("");
       // Only inline image attachments go on the message payload. File uploads
       // (CSV/PDF/etc.) live in the project_uploads table and the agent reads
@@ -1061,7 +1114,7 @@ export function QueueComposer({
         <div className="pointer-events-none absolute inset-2 z-20 rounded-2xl border-2 border-dashed border-primary/60 bg-primary/10 backdrop-blur-[2px] flex items-center justify-center">
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-background/80 border border-primary/40 text-primary text-xs font-semibold shadow-md">
             <ImageIcon className="h-3.5 w-3.5" />
-            Drop screenshot to build from it
+            Drop images to attach (up to {MAX_IMAGES_PER_MESSAGE})
           </div>
         </div>
       )}
@@ -1156,20 +1209,28 @@ export function QueueComposer({
             </button>
           )}
 
-          {attachError && (
+          {attachErrors.length > 0 && (
             <div
-              className="mx-3 mt-1 mb-0.5 flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[10px] bg-destructive/10 text-destructive border border-destructive/20"
+              className="mx-3 mt-1 mb-0.5 rounded-md px-2 py-1 text-[10px] bg-destructive/10 text-destructive border border-destructive/20"
               role="alert"
             >
-              <span>{attachError}</span>
-              <button
-                type="button"
-                onClick={() => setAttachError(null)}
-                className="text-destructive/70 hover:text-destructive"
-                aria-label="Dismiss"
-              >
-                <X className="h-3 w-3" />
-              </button>
+              <div className="flex items-start justify-between gap-2">
+                <ul className="flex-1 space-y-0.5">
+                  {attachErrors.map((err, i) => (
+                    <li key={i} className="leading-snug">
+                      {err}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => setAttachErrors([])}
+                  className="shrink-0 text-destructive/70 hover:text-destructive mt-0.5"
+                  aria-label="Dismiss"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
             </div>
           )}
 
@@ -1215,7 +1276,7 @@ export function QueueComposer({
           )}
 
           {(attachments.length > 0 || uploadingCount > 0) && (
-            <div className="px-3 pt-1.5 flex flex-wrap gap-1.5">
+            <div className="px-3 pt-1.5 flex flex-wrap gap-1.5 items-start">
               {attachments.map((a, i) => {
                 if (a.kind === "image") {
                   const src = a.url.startsWith("/objects/") ? `/api/storage${a.url}` : a.url;
@@ -1274,6 +1335,16 @@ export function QueueComposer({
                   Uploading…
                 </div>
               )}
+              {(() => {
+                const imgCount =
+                  attachments.filter((a) => a.kind === "image").length + uploadingCount;
+                if (imgCount === 0) return null;
+                return (
+                  <span className="self-end mb-0.5 text-[9px] text-muted-foreground/50 leading-none">
+                    {imgCount}/{MAX_IMAGES_PER_MESSAGE} images
+                  </span>
+                );
+              })()}
             </div>
           )}
           {imagePanelOpen && (
