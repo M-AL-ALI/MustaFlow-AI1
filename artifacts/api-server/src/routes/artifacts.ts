@@ -31,6 +31,8 @@ const SLUG_BASE_BY_KIND: Record<string, string> = {
   api: "api",
   slides: "slides",
   "data-app": "data",
+  animation: "animation",
+  automation: "automation",
 };
 
 const FORMAT_BY_KIND: Record<string, { platform: string; projectFormat: string; stack: string }> = {
@@ -41,6 +43,8 @@ const FORMAT_BY_KIND: Record<string, { platform: string; projectFormat: string; 
   api: { platform: "server", projectFormat: "node-api", stack: "node-api" },
   slides: { platform: "web", projectFormat: "slides", stack: "react-vite" },
   "data-app": { platform: "web", projectFormat: "data-app", stack: "react-vite" },
+  animation: { platform: "web", projectFormat: "static-html", stack: "static-html" },
+  automation: { platform: "server", projectFormat: "static-html", stack: "static-html" },
 };
 
 function slugify(value: string): string {

@@ -37,7 +37,8 @@ import {
   Code2,
   Cpu,
   Smartphone,
-  PresentationIcon,
+  Presentation,
+  Clapperboard,
   Bot,
 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -93,7 +94,7 @@ const CAPABILITY_CHIPS = [
   },
   {
     name: "Slide deck",
-    icon: PresentationIcon,
+    icon: Presentation,
     prompt: "Create a pitch deck slide presentation for a B2B SaaS startup",
   },
   {
@@ -111,12 +112,15 @@ const CAPABILITY_CHIPS = [
 ];
 
 // Quick-start chips — developer-oriented first, maker-oriented second
+
 const CHIPS = [
   { name: "REST API", icon: Database, kind: "api" },
   { name: "Python", icon: Code2, kind: "api" },
   { name: "Go", icon: Cpu, kind: "api" },
   { name: "Website", icon: Monitor, kind: "web" },
   { name: "Dashboard", icon: LayoutDashboard, kind: "dashboard" },
+  { name: "Slide Deck", icon: Presentation, kind: "slides" },
+  { name: "Animation", icon: Clapperboard, kind: "animation" },
   { name: "Automation", icon: Zap, kind: "automation" },
   { name: "Design", icon: Paintbrush, kind: "design" },
   { name: "Data Viz", icon: BarChart, kind: "dashboard" },

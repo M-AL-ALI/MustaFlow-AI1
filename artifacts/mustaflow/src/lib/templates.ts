@@ -4,7 +4,15 @@ export interface TemplateDefinition {
   description: string;
   category: TemplateCategory;
   icon: string;
-  projectKind: "web" | "fullstack" | "dashboard" | "automation" | "api" | "mobile-cross";
+  projectKind:
+    | "web"
+    | "fullstack"
+    | "dashboard"
+    | "automation"
+    | "api"
+    | "mobile-cross"
+    | "slides"
+    | "animation";
   seedPrompt: string;
   isStarterPack?: boolean;
   industry?: string;
@@ -20,6 +28,8 @@ export type TemplateCategory =
   | "Productivity"
   | "AI"
   | "Mobile"
+  | "Slides"
+  | "Animation"
   | "Starter Packs";
 
 export const TEMPLATE_CATEGORIES: TemplateCategory[] = [
@@ -33,6 +43,8 @@ export const TEMPLATE_CATEGORIES: TemplateCategory[] = [
   "Productivity",
   "AI",
   "Mobile",
+  "Slides",
+  "Animation",
 ];
 
 export const CATEGORY_COLORS: Record<TemplateCategory, string> = {
@@ -46,6 +58,8 @@ export const CATEGORY_COLORS: Record<TemplateCategory, string> = {
   Productivity: "bg-rose-500/10 text-rose-400 border-rose-500/20",
   AI: "bg-violet-500/10 text-violet-400 border-violet-500/20",
   Mobile: "bg-green-500/10 text-green-400 border-green-500/20",
+  Slides: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
+  Animation: "bg-pink-500/10 text-pink-400 border-pink-500/20",
 };
 
 export const STARTER_PACKS: TemplateDefinition[] = [
@@ -413,6 +427,87 @@ export const TEMPLATES: TemplateDefinition[] = [
       "Build a complete Expo React Native in-app purchases app using the RevenueCat Purchases React Native SDK (@revenuecat/purchases-react-native). Include: (1) An initialization setup in app/_layout.tsx that calls Purchases.configure({ apiKey: process.env.EXPO_PUBLIC_REVENUECAT_API_KEY ?? '' }) on mount — fall back gracefully when the key is not set by showing a setup prompt instead of crashing. (2) A Paywall screen (app/paywall.tsx) that calls Purchases.getOfferings() and renders the 'default' offering's packages. Show 3 plan cards: Monthly, Annual (with 'Best Value' badge), and Lifetime — each with price from the StoreProduct, a feature checklist (5 items), and a 'Subscribe' button that calls Purchases.purchasePackage(). Handle PurchasesError codes: USER_CANCELLED silently, PRODUCT_ALREADY_PURCHASED shows 'Already subscribed', other errors show a toast. Include a 'Restore Purchases' button that calls Purchases.restorePurchases(). (3) A Home screen that calls Purchases.getCustomerInfo() and shows entitlement status: 'Pro' badge if 'pro_access' entitlement is active, or a 'Upgrade to Pro' button that opens the Paywall screen. (4) A subscription status card showing: plan name, renewal date (from CustomerInfo.activeSubscriptions), and a 'Manage Subscription' button that opens the platform store. (5) An Account screen with CustomerInfo details: userId, activeEntitlements list, and sign-out. Add EXPO_PUBLIC_REVENUECAT_API_KEY to a .env.example file with instructions. Use NativeWind, Expo Router, TypeScript, and include all required package.json dependencies. Note: RevenueCat requires a real device for production — the app should show a 'Simulated mode' banner in the web preview.",
   },
 ];
+
+export const SLIDES_TEMPLATES: TemplateDefinition[] = [
+  {
+    id: "slides-pitch-deck",
+    title: "Startup Pitch Deck",
+    description: "10-slide investor pitch: problem, solution, market, traction, team, and ask",
+    category: "Slides",
+    icon: "Presentation",
+    projectKind: "slides",
+    seedPrompt:
+      "Build a polished 10-slide investor pitch deck using Reveal.js. Slides: 1) Title — company name, tagline, logo placeholder. 2) Problem — the pain point with 3 bullet stats. 3) Solution — how we fix it, key differentiator. 4) Product — screenshot placeholder + 3 core features. 5) Market Size — TAM/SAM/SOM circles. 6) Business Model — revenue streams table. 7) Traction — growth metrics chart placeholder, key milestones. 8) Competitive Landscape — 2x2 positioning matrix. 9) Team — 4 founder cards with photo placeholder, name, role. 10) The Ask — funding amount, use of funds pie chart placeholder, CTA. Use a dark professional theme with accent colour, smooth slide transitions, and speaker notes for each slide.",
+  },
+  {
+    id: "slides-product-launch",
+    title: "Product Launch Deck",
+    description: "Marketing-ready slide deck to announce a new product",
+    category: "Slides",
+    icon: "Presentation",
+    projectKind: "slides",
+    seedPrompt:
+      "Build a 12-slide product launch presentation using Reveal.js. Slides: 1) Hero — product name, bold tagline, hero image placeholder. 2) The world before — status quo pain. 3) Introducing [Product] — big reveal slide. 4) Key Feature 1 — full-bleed visual + 2-line description. 5) Key Feature 2. 6) Key Feature 3. 7) How it works — 3-step illustrated flow. 8) Social proof — 3 customer quote cards. 9) Pricing — 3-tier card comparison. 10) FAQ — 4 common questions. 11) Availability — date, platforms, channels. 12) Call to action — sign-up form placeholder, QR code placeholder. Use a vibrant gradient theme, large typography, and subtle entrance animations.",
+  },
+  {
+    id: "slides-company-overview",
+    title: "Company Overview",
+    description: "Professional company overview deck for partners and clients",
+    category: "Slides",
+    icon: "Presentation",
+    projectKind: "slides",
+    seedPrompt:
+      "Build a 9-slide company overview deck using Reveal.js. Slides: 1) Cover — logo, company name, date. 2) About Us — founding story, mission statement, key numbers (employees, countries, years). 3) What We Do — 3 service pillars with icons. 4) Our Process — 4-step horizontal timeline. 5) Case Studies — 2 client success stories with results. 6) Technology — tools and platforms used, partner logos. 7) Team — org chart style or 6 headshots grid. 8) Clients & Partners — logo wall. 9) Contact — address, email, phone, social handles. Clean corporate design, blue/white palette, consistent transitions.",
+  },
+];
+
+export const ANIMATION_TEMPLATES: TemplateDefinition[] = [
+  {
+    id: "anim-product-explainer",
+    title: "Product Explainer",
+    description: "Animated explainer that walks through how a product works in 3 steps",
+    category: "Animation",
+    icon: "Clapperboard",
+    projectKind: "animation",
+    seedPrompt:
+      "Build a self-contained animated product explainer page using React and Framer Motion via CDN (no bundler). The animation auto-plays and loops. Structure: 1) Brand intro — logo fades + scales in with the product name. 2) Problem — icon animates in, text staggered word-by-word. 3) Step 1 of solution — illustration placeholder slides in from left, headline appears. 4) Step 2 — slides from right with stat counter animating to final number. 5) Step 3 — scales up from center. 6) CTA — button pulses, tagline fades in. Use smooth spring animations, a bold color palette, and 60fps-friendly transforms only (translate, scale, opacity). Total runtime ~8 seconds, looping.",
+  },
+  {
+    id: "anim-data-story",
+    title: "Animated Data Story",
+    description: "Data visualization that animates charts and key stats into view",
+    category: "Animation",
+    icon: "Clapperboard",
+    projectKind: "animation",
+    seedPrompt:
+      "Build a self-contained animated data story page using React and Framer Motion via CDN. Auto-plays on load. Sections that animate in as you scroll (or on a timer): 1) Title card with animated gradient background. 2) Key stat #1 — large number counts up from 0. 3) Bar chart — bars grow from bottom with staggered delay. 4) Key stat #2 with icon. 5) Line chart — path draws itself left to right. 6) Callout quote — text reveals word by word. 7) Summary stat grid — 4 tiles scale in. Use a dark background, neon accent colour, smooth easing, and GPU-only properties.",
+  },
+];
+
+export const AUTOMATION_TEMPLATES: TemplateDefinition[] = [
+  {
+    id: "auto-weekly-report",
+    title: "Weekly Email Report",
+    description: "Node.js script that generates and emails a weekly CSV report",
+    category: "Productivity",
+    icon: "Zap",
+    projectKind: "automation",
+    seedPrompt:
+      "Build a Node.js automation script that generates and sends a weekly email report. Files: automation.js — fetches placeholder data (or reads from a local JSON file), formats it as CSV, and sends it via Nodemailer using SMTP env vars (SMTP_HOST, SMTP_USER, SMTP_PASS, REPORT_EMAIL). Include error handling, a clear console log of each step, and graceful fallback when env vars are missing. cron.json — schedule to run every Monday at 8 AM UTC. README.md — clear setup instructions, required env vars, how to test locally with a dry-run flag.",
+  },
+  {
+    id: "auto-data-sync",
+    title: "API Data Sync",
+    description: "Scheduled script that syncs data between two APIs and writes a log",
+    category: "Productivity",
+    icon: "Zap",
+    projectKind: "automation",
+    seedPrompt:
+      "Build a Node.js automation script that syncs data between two APIs on a schedule. Files: automation.js — fetches records from a source API (configurable via SOURCE_API_URL env var), transforms them, and pushes to a destination (DEST_API_URL). Writes a structured JSON log file (sync-log.json) with timestamp, records processed, errors. Includes retry logic with exponential back-off for failed records. cron.json — runs every 6 hours. README.md — setup guide, env vars reference, log format explanation, and a section on extending the transform step.",
+  },
+];
+
+TEMPLATES.push(...SLIDES_TEMPLATES, ...ANIMATION_TEMPLATES, ...AUTOMATION_TEMPLATES);
 
 export const INDUSTRY_PERSONAS = [
   {

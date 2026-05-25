@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { Plus, Smartphone, Globe, Server, Presentation, BarChart3, X } from "lucide-react";
+import {
+  Plus,
+  Smartphone,
+  Globe,
+  Server,
+  Presentation,
+  BarChart3,
+  X,
+  Clapperboard,
+  Cog,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,8 +72,20 @@ const KIND_OPTIONS: Array<{
   {
     value: "slides",
     label: "Slides",
-    description: "React-based slide deck",
+    description: "Reveal.js slide deck",
     Icon: Presentation,
+  },
+  {
+    value: "animation",
+    label: "Animation",
+    description: "Animated explainer / motion graphic",
+    Icon: Clapperboard,
+  },
+  {
+    value: "automation",
+    label: "Automation",
+    description: "Node.js cron / scheduled script",
+    Icon: Cog,
   },
   {
     value: "data-app",
@@ -77,6 +99,8 @@ function iconFor(kind: string): typeof Globe {
   if (kind.startsWith("mobile")) return Smartphone;
   if (kind === "api") return Server;
   if (kind === "slides") return Presentation;
+  if (kind === "animation") return Clapperboard;
+  if (kind === "automation") return Cog;
   if (kind === "data-app") return BarChart3;
   return Globe;
 }

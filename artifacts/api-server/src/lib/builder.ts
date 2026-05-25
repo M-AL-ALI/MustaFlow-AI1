@@ -8627,6 +8627,191 @@ export async function runGuidedRefinementPipeline(args: {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Slides pipeline — Reveal.js HTML presentation
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SLIDES_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate complete, self-contained Reveal.js HTML slide decks from a single user request.
+
+CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
+
+Output schema:
+{
+  "summary": "one-sentence description of the deck",
+  "files": [
+    { "path": "index.html", "content": "<full HTML>" }
+  ]
+}
+
+RULES FOR THE HTML:
+- Load Reveal.js 4.x from CDN: https://cdn.jsdelivr.net/npm/reveal.js@4/dist/reveal.js and https://cdn.jsdelivr.net/npm/reveal.js@4/dist/reveal.css
+- Choose a built-in theme (black, white, league, beige, sky, night, serif, simple, solarized) via CDN
+- Place all slides inside <div class="reveal"><div class="slides">…</div></div>
+- Each slide is a <section> element; nested sections create vertical stacks
+- Use <aside class="notes">…</aside> inside each <section> for speaker notes
+- Initialise with: Reveal.initialize({ hash: true, transition: 'slide' });
+- Inline all CSS customisations in a <style> tag; do not reference external files
+- Produce at least 6 slides with clear headings, bullets, and rich content
+- Use appropriate HTML elements: <h1>/<h2>, <ul>/<li>, <table>, <blockquote>, <code>
+- Make the design visually polished with custom colours or backgrounds where appropriate`;
+
+const SLIDES_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder refining an existing Reveal.js slide deck.
+
+CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
+
+Output schema:
+{
+  "summary": "what changed",
+  "changedFiles": [{ "path": "index.html", "content": "<full updated HTML>" }],
+  "removedPaths": []
+}
+
+Apply the user's requested changes while keeping all existing slides unless explicitly told to remove them.
+Preserve the Reveal.js CDN setup and initialisation.`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Animation pipeline — React + Framer Motion via CDN (single index.html)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ANIMATION_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate self-contained animated web experiences using React and Framer Motion loaded from CDN — no bundler, no npm.
+
+CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
+
+Output schema:
+{
+  "summary": "one-sentence description of the animation",
+  "files": [
+    { "path": "index.html", "content": "<full HTML>" }
+  ]
+}
+
+RULES FOR THE HTML:
+- Load React 18 + ReactDOM via: https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js and https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js
+- Load Framer Motion via: https://cdn.jsdelivr.net/npm/framer-motion@11/dist/framer-motion.js (exposes window.FramerMotion)
+- Load Babel standalone: https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js
+- Write React code inside <script type="text/babel"> … </script>
+- Destructure from window.FramerMotion: const { motion, AnimatePresence, useAnimation } = window.FramerMotion;
+- Render with ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+- The animation must auto-play on page load with no user interaction required
+- Use only GPU-friendly CSS properties for animations: translate, scale, opacity, rotate
+- Make the design visually rich: gradient backgrounds, bold typography, dynamic colours
+- Target at least 4–6 distinct animation segments that tell a visual story
+- Inline all styles; do not reference external CSS files`;
+
+const ANIMATION_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder refining an existing animated web experience.
+
+CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
+
+Output schema:
+{
+  "summary": "what changed",
+  "changedFiles": [{ "path": "index.html", "content": "<full updated HTML>" }],
+  "removedPaths": []
+}
+
+Apply the user's requested changes while preserving the CDN setup (React, Framer Motion, Babel) and the auto-play behaviour.`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Automation pipeline — Node.js script + cron.json + README.md
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AUTOMATION_BUILD_SYSTEM_PROMPT = `You are the MustaFlow AI Builder. You generate Node.js automation scripts from a single user request.
+
+CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
+
+Output schema:
+{
+  "summary": "one-sentence description of the automation",
+  "files": [
+    { "path": "automation.js", "content": "…" },
+    { "path": "cron.json", "content": "…" },
+    { "path": "README.md", "content": "…" }
+  ]
+}
+
+RULES:
+- automation.js: a complete, runnable Node.js ESM script. Must have:
+  - A clear main() async function with try/catch error handling
+  - Console log at each key step (start, fetch, transform, write/send, done)
+  - Graceful degradation when env vars are missing (log a warning, skip the step)
+  - No external bundler needed — use built-in node: modules + minimal npm deps
+  - A --dry-run CLI flag that logs what would happen without actually doing it
+- cron.json: a JSON object { "schedule": "<cron expression>", "timezone": "UTC", "description": "…" }
+- README.md: must include:
+  - Overview: what the script does and why
+  - Setup: npm install command, list of required env vars with descriptions
+  - Usage: how to run manually, how to use --dry-run, how to schedule with cron or a platform
+  - Output: what files/emails/requests are produced
+  - Extending: how to customise the script for different data sources or destinations`;
+
+const AUTOMATION_REFINE_SYSTEM_PROMPT = `You are the MustaFlow AI Builder refining an existing Node.js automation script.
+
+CRITICAL: Your entire response MUST be a single valid JSON object — no markdown, no code fences, no extra text.
+
+Output schema:
+{
+  "summary": "what changed",
+  "changedFiles": [{ "path": "…", "content": "…" }],
+  "removedPaths": []
+}
+
+Apply the user's requested changes while preserving the --dry-run flag, error handling, and README.md structure.`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Exported pipeline functions for slides, animation, automation
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function runSlidesBuildPipeline(args: StackBuildArgs): Promise<BuilderResult> {
+  return runStackBuildPipeline(args, SLIDES_BUILD_SYSTEM_PROMPT, "Slides");
+}
+
+export async function runSlidesRefinePipeline(args: StackRefineArgs): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  return runStackRefinePipeline(args, SLIDES_REFINE_SYSTEM_PROMPT, "Slides");
+}
+
+export async function runAnimationBuildPipeline(args: StackBuildArgs): Promise<BuilderResult> {
+  return runStackBuildPipeline(args, ANIMATION_BUILD_SYSTEM_PROMPT, "Animation");
+}
+
+export async function runAnimationRefinePipeline(args: StackRefineArgs): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  return runStackRefinePipeline(args, ANIMATION_REFINE_SYSTEM_PROMPT, "Animation");
+}
+
+export async function runAutomationBuildPipeline(args: StackBuildArgs): Promise<BuilderResult> {
+  return runStackBuildPipeline(args, AUTOMATION_BUILD_SYSTEM_PROMPT, "Automation");
+}
+
+export async function runAutomationRefinePipeline(args: StackRefineArgs): Promise<{
+  changedFiles: BuilderFile[];
+  removedPaths: string[];
+  unchangedFiles: string[];
+  report: TaskReport;
+  assistantSummary: string;
+  correctionPasses: number;
+  correctionFailed: boolean;
+  primaryErrorCategory: string | null;
+}> {
+  return runStackRefinePipeline(args, AUTOMATION_REFINE_SYSTEM_PROMPT, "Automation");
+}
+
 export function guessMime(path: string): string {
   const lower = path.toLowerCase();
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html";

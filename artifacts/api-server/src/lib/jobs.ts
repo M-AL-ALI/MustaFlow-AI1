@@ -41,6 +41,12 @@ import {
   runFastapiRefinePipeline,
   runGoGinBuildPipeline,
   runGoGinRefinePipeline,
+  runSlidesBuildPipeline,
+  runSlidesRefinePipeline,
+  runAnimationBuildPipeline,
+  runAnimationRefinePipeline,
+  runAutomationBuildPipeline,
+  runAutomationRefinePipeline,
   scanCodeSmells,
   sanitisePrompt,
   scanForSecrets,
@@ -1655,6 +1661,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 "Building a Python FastAPI service with async handlers and Pydantic schemas.",
               "go-gin":
                 "Building a Go + Gin REST API with idiomatic Go handlers and typed structs.",
+              slides: "Building an interactive slide deck powered by Reveal.js.",
+              animation: "Building an animated web experience using React and Framer Motion.",
+              automation: "Building a Node.js automation script with scheduling and logging.",
             };
             const archMessage =
               architectureSummaries[detectedStack] ?? `Architecture selected: ${detectedStack}.`;
@@ -1686,6 +1695,30 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               resolvedProjectStack = "react-vite";
               resolvedProjectFormat = "static-html";
               resolvedIsMobile = true;
+            } else if (
+              detectedStack === "slides" ||
+              detectedStack === "animation" ||
+              detectedStack === "automation"
+            ) {
+              // Upgrade project kind so the dedicated pipeline runs.
+              await db
+                .update(projectsTable)
+                .set({ kind: detectedStack, stack: detectedStack, projectFormat: "static-html" })
+                .where(eq(projectsTable.id, projectId));
+              resolvedProjectStack = detectedStack;
+              resolvedProjectFormat = "static-html";
+              // Update primary artifact kind so the frontend tab switches automatically.
+              const { projectArtifactsTable } = await import("@workspace/db");
+              await db
+                .update(projectArtifactsTable)
+                .set({ kind: detectedStack })
+                .where(
+                  and(
+                    eq(projectArtifactsTable.projectId, projectId),
+                    eq(projectArtifactsTable.isPrimary, true),
+                    isNull(projectArtifactsTable.deletedAt),
+                  ),
+                );
             } else {
               const newFormat = detectedStack === "react-vite" ? "react-vite" : "static-html";
               await db
@@ -1739,12 +1772,25 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }
       }
 
-      const isReactViteProject = !resolvedIsMobile && resolvedProjectFormat === "react-vite";
-      const isNextjsProject = !resolvedIsMobile && resolvedProjectStack === "nextjs";
-      const isNodeApiProject = !resolvedIsMobile && resolvedProjectStack === "node-api";
-      const isPythonFlaskProject = !resolvedIsMobile && resolvedProjectStack === "python-flask";
-      const isPythonFastapiProject = !resolvedIsMobile && resolvedProjectStack === "python-fastapi";
-      const isGoGinProject = !resolvedIsMobile && resolvedProjectStack === "go-gin";
+      const isSlidesProject = !resolvedIsMobile && resolvedProjectStack === "slides";
+      const isAnimationProject = !resolvedIsMobile && resolvedProjectStack === "animation";
+      const isAutomationProject = !resolvedIsMobile && resolvedProjectStack === "automation";
+      const isSpecializedStaticProject =
+        isSlidesProject || isAnimationProject || isAutomationProject;
+      const isReactViteProject =
+        !resolvedIsMobile && !isSpecializedStaticProject && resolvedProjectFormat === "react-vite";
+      const isNextjsProject =
+        !resolvedIsMobile && !isSpecializedStaticProject && resolvedProjectStack === "nextjs";
+      const isNodeApiProject =
+        !resolvedIsMobile && !isSpecializedStaticProject && resolvedProjectStack === "node-api";
+      const isPythonFlaskProject =
+        !resolvedIsMobile && !isSpecializedStaticProject && resolvedProjectStack === "python-flask";
+      const isPythonFastapiProject =
+        !resolvedIsMobile &&
+        !isSpecializedStaticProject &&
+        resolvedProjectStack === "python-fastapi";
+      const isGoGinProject =
+        !resolvedIsMobile && !isSpecializedStaticProject && resolvedProjectStack === "go-gin";
 
       // For mobile projects: load last successful task's wired modules + project secret names once,
       // so both build and refine pipelines have durable module context.
@@ -1779,15 +1825,21 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           "narration",
           resolvedIsMobile
             ? "Let me plan the mobile app structure before writing any code."
-            : isReactViteProject
-              ? "Let me plan the React + Vite project structure before writing any code."
-              : isNodeApiProject
-                ? "Let me plan the Node.js project structure before writing any code."
-                : isPythonFlaskProject || isPythonFastapiProject
-                  ? "Let me plan the Python project structure before writing any code."
-                  : isGoGinProject
-                    ? "Let me plan the Go + Gin project structure before writing any code."
-                    : "Let me plan the app structure before writing any code.",
+            : isSlidesProject
+              ? "Let me plan the slide deck structure before writing any code."
+              : isAnimationProject
+                ? "Let me plan the animation sequence before writing any code."
+                : isAutomationProject
+                  ? "Let me plan the automation script before writing any code."
+                  : isReactViteProject
+                    ? "Let me plan the React + Vite project structure before writing any code."
+                    : isNodeApiProject
+                      ? "Let me plan the Node.js project structure before writing any code."
+                      : isPythonFlaskProject || isPythonFastapiProject
+                        ? "Let me plan the Python project structure before writing any code."
+                        : isGoGinProject
+                          ? "Let me plan the Go + Gin project structure before writing any code."
+                          : "Let me plan the app structure before writing any code.",
         );
         await emitEvent(taskId, "planning", "Reading project configuration…");
         await emitEvent(
@@ -1795,15 +1847,21 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           "generating_code",
           resolvedIsMobile
             ? "Generating Expo/React Native app with AI…"
-            : isReactViteProject
-              ? "Generating React + Vite project with AI…"
-              : isNodeApiProject
-                ? "Generating Node.js / Express project with AI…"
-                : isPythonFlaskProject || isPythonFastapiProject
-                  ? "Generating Python project with AI…"
-                  : isGoGinProject
-                    ? "Generating Go + Gin project with AI…"
-                    : "Generating app blueprint and code with AI…",
+            : isSlidesProject
+              ? "Generating Reveal.js slide deck with AI…"
+              : isAnimationProject
+                ? "Generating animated web experience with AI…"
+                : isAutomationProject
+                  ? "Generating Node.js automation script with AI…"
+                  : isReactViteProject
+                    ? "Generating React + Vite project with AI…"
+                    : isNodeApiProject
+                      ? "Generating Node.js / Express project with AI…"
+                      : isPythonFlaskProject || isPythonFastapiProject
+                        ? "Generating Python / Flask project with AI…"
+                        : isGoGinProject
+                          ? "Generating Go + Gin project with AI…"
+                          : "Generating app blueprint and code with AI…",
         );
 
         const stackBuildArgs = {
@@ -1827,112 +1885,119 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         );
         let result:
           | Awaited<ReturnType<typeof runBuildPipeline>>
-          | Awaited<ReturnType<typeof runMobileBuildPipeline>> = USE_AGENT_LOOP_BUILD
-          ? await (async () => {
-              const { runAgentLoop, loopResultToBuildResult } = await import("./agent-loop");
-              await emitEvent(taskId, "narration", "Agentic builder loop engaged.");
-              const loopRes = await runAgentLoop({
-                mode: "build",
-                projectId,
-                projectName: project.name,
-                projectKind: project.kind,
-                projectFormat: project.projectFormat ?? null,
-                stack: project.stack ?? null,
-                userPrompt,
-                agentMode,
-                conversationHistory,
-                knowledgeContext: knowledgeContext || undefined,
-                planContext: input.planContext ?? null,
-                existingFiles: [],
-                containerId: project.containerId ?? null,
-                policyStrictness:
-                  (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
-                  null,
-                taskId,
-                wallClockMs: input.wallClockCapMs,
-                previewUrl: project.containerUrl ?? null,
-                e2eEnabled: project.e2eEnabled ?? true,
-                onEvent: async (t, m) => emitEvent(taskId, t, m),
-                signal,
-                onBillableSenseBatch: (credits, total) => {
-                  if (!project.ownerId) return;
-                  void deductCredits(project.ownerId, credits, {
-                    type: "senses",
-                    description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
-                    projectId,
-                  }).catch((err) =>
-                    logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
-                  );
-                },
-                onBillableCreativeCall: (credits, tool) => {
-                  if (!project.ownerId) return;
-                  void deductCredits(project.ownerId, credits, {
-                    type: "creative",
-                    description: `Agent ${tool} — project ${projectId}`,
-                    projectId,
-                  }).catch((err) =>
-                    logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
-                  );
-                },
-              });
-              return loopResultToBuildResult(loopRes, userPrompt, project.name);
-            })()
-          : resolvedIsMobile
-            ? await runMobileBuildPipeline({
-                projectName: project.name,
-                projectKind: project.kind,
-                userPrompt,
-                agentMode,
-                conversationHistory,
-                knowledgeContext: knowledgeContext || undefined,
-                activeModuleIds,
-                configuredSecretNames,
-                imageAttachments,
-                onEvent: async (type, message) => emitEvent(taskId, type, message),
-                signal,
-              })
-            : isReactViteProject
-              ? await runReactViteBuildPipeline({
+          | Awaited<ReturnType<typeof runMobileBuildPipeline>> =
+          USE_AGENT_LOOP_BUILD && !isSpecializedStaticProject
+            ? await (async () => {
+                const { runAgentLoop, loopResultToBuildResult } = await import("./agent-loop");
+                await emitEvent(taskId, "narration", "Agentic builder loop engaged.");
+                const loopRes = await runAgentLoop({
+                  mode: "build",
+                  projectId,
+                  projectName: project.name,
+                  projectKind: project.kind,
+                  projectFormat: project.projectFormat ?? null,
+                  stack: project.stack ?? null,
+                  userPrompt,
+                  agentMode,
+                  conversationHistory,
+                  knowledgeContext: knowledgeContext || undefined,
+                  planContext: input.planContext ?? null,
+                  existingFiles: [],
+                  containerId: project.containerId ?? null,
+                  policyStrictness:
+                    (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
+                    null,
+                  taskId,
+                  wallClockMs: input.wallClockCapMs,
+                  previewUrl: project.containerUrl ?? null,
+                  e2eEnabled: project.e2eEnabled ?? true,
+                  onEvent: async (t, m) => emitEvent(taskId, t, m),
+                  signal,
+                  onBillableSenseBatch: (credits, total) => {
+                    if (!project.ownerId) return;
+                    void deductCredits(project.ownerId, credits, {
+                      type: "senses",
+                      description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
+                      projectId,
+                    }).catch((err) =>
+                      logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
+                    );
+                  },
+                  onBillableCreativeCall: (credits, tool) => {
+                    if (!project.ownerId) return;
+                    void deductCredits(project.ownerId, credits, {
+                      type: "creative",
+                      description: `Agent ${tool} — project ${projectId}`,
+                      projectId,
+                    }).catch((err) =>
+                      logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
+                    );
+                  },
+                });
+                return loopResultToBuildResult(loopRes, userPrompt, project.name);
+              })()
+            : resolvedIsMobile
+              ? await runMobileBuildPipeline({
                   projectName: project.name,
                   projectKind: project.kind,
                   userPrompt,
                   agentMode,
                   conversationHistory,
                   knowledgeContext: knowledgeContext || undefined,
-                  databaseContext,
-                  planContext: input.planContext ?? null,
-                  conversationSummary,
+                  activeModuleIds,
+                  configuredSecretNames,
                   imageAttachments,
                   onEvent: async (type, message) => emitEvent(taskId, type, message),
                   signal,
                 })
-              : isNextjsProject
-                ? await runNextjsBuildPipeline(stackBuildArgs)
-                : isNodeApiProject
-                  ? await runNodeApiBuildPipeline(stackBuildArgs)
-                  : isPythonFlaskProject
-                    ? await runFlaskBuildPipeline(stackBuildArgs)
-                    : isPythonFastapiProject
-                      ? await runFastapiBuildPipeline(stackBuildArgs)
-                      : isGoGinProject
-                        ? await runGoGinBuildPipeline(stackBuildArgs)
-                        : await runBuildPipeline({
-                            projectName: project.name,
-                            projectKind: project.kind,
-                            userPrompt,
-                            agentMode,
-                            conversationHistory,
-                            knowledgeContext: knowledgeContext || undefined,
-                            databaseContext,
-                            planContext: input.planContext ?? null,
-                            conversationSummary,
-                            imageAttachments,
-                            builderMode: project.builderMode,
-                            onEvent: async (type: string, message: string) =>
-                              emitEvent(taskId, type, message),
-                            onToken: (delta: string) => emitTokenEvent(taskId, delta),
-                            signal,
-                          });
+              : isSlidesProject
+                ? await runSlidesBuildPipeline(stackBuildArgs)
+                : isAnimationProject
+                  ? await runAnimationBuildPipeline(stackBuildArgs)
+                  : isAutomationProject
+                    ? await runAutomationBuildPipeline(stackBuildArgs)
+                    : isReactViteProject
+                      ? await runReactViteBuildPipeline({
+                          projectName: project.name,
+                          projectKind: project.kind,
+                          userPrompt,
+                          agentMode,
+                          conversationHistory,
+                          knowledgeContext: knowledgeContext || undefined,
+                          databaseContext,
+                          planContext: input.planContext ?? null,
+                          conversationSummary,
+                          imageAttachments,
+                          onEvent: async (type, message) => emitEvent(taskId, type, message),
+                          signal,
+                        })
+                      : isNextjsProject
+                        ? await runNextjsBuildPipeline(stackBuildArgs)
+                        : isNodeApiProject
+                          ? await runNodeApiBuildPipeline(stackBuildArgs)
+                          : isPythonFlaskProject
+                            ? await runFlaskBuildPipeline(stackBuildArgs)
+                            : isPythonFastapiProject
+                              ? await runFastapiBuildPipeline(stackBuildArgs)
+                              : isGoGinProject
+                                ? await runGoGinBuildPipeline(stackBuildArgs)
+                                : await runBuildPipeline({
+                                    projectName: project.name,
+                                    projectKind: project.kind,
+                                    userPrompt,
+                                    agentMode,
+                                    conversationHistory,
+                                    knowledgeContext: knowledgeContext || undefined,
+                                    databaseContext,
+                                    planContext: input.planContext ?? null,
+                                    conversationSummary,
+                                    imageAttachments,
+                                    builderMode: project.builderMode,
+                                    onEvent: async (type: string, message: string) =>
+                                      emitEvent(taskId, type, message),
+                                    onToken: (delta: string) => emitTokenEvent(taskId, delta),
+                                    signal,
+                                  });
 
         analyticsCorrectionPasses = result.correctionPasses;
         analyticsErrorCategory = result.primaryErrorCategory;
@@ -1970,45 +2035,53 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
             signal,
           };
-          const escalatedResult = isReactViteProject
-            ? await runReactViteBuildPipeline({
-                projectName: project.name,
-                projectKind: project.kind,
-                userPrompt,
-                agentMode: buildEscalationMode,
-                conversationHistory,
-                knowledgeContext: knowledgeContext || undefined,
-                databaseContext,
-                planContext: input.planContext ?? null,
-                conversationSummary,
-                imageAttachments,
-                signal,
-              })
-            : isNextjsProject
-              ? await runNextjsBuildPipeline(escalatedStackBuildArgs)
-              : isNodeApiProject
-                ? await runNodeApiBuildPipeline(escalatedStackBuildArgs)
-                : isPythonFlaskProject
-                  ? await runFlaskBuildPipeline(escalatedStackBuildArgs)
-                  : isPythonFastapiProject
-                    ? await runFastapiBuildPipeline(escalatedStackBuildArgs)
-                    : await runBuildPipeline({
-                        projectName: project.name,
-                        projectKind: project.kind,
-                        userPrompt,
-                        agentMode: buildEscalationMode,
-                        conversationHistory,
-                        knowledgeContext: knowledgeContext || undefined,
-                        imageAttachments,
-                        databaseContext,
-                        planContext: input.planContext ?? null,
-                        conversationSummary,
-                        builderMode: project.builderMode,
-                        onEvent: async (type: string, message: string) =>
-                          emitEvent(taskId, type, message),
-                        onToken: (delta: string) => emitTokenEvent(taskId, delta),
-                        signal,
-                      });
+          const escalatedResult = isSlidesProject
+            ? await runSlidesBuildPipeline(escalatedStackBuildArgs)
+            : isAnimationProject
+              ? await runAnimationBuildPipeline(escalatedStackBuildArgs)
+              : isAutomationProject
+                ? await runAutomationBuildPipeline(escalatedStackBuildArgs)
+                : isReactViteProject
+                  ? await runReactViteBuildPipeline({
+                      projectName: project.name,
+                      projectKind: project.kind,
+                      userPrompt,
+                      agentMode: buildEscalationMode,
+                      conversationHistory,
+                      knowledgeContext: knowledgeContext || undefined,
+                      databaseContext,
+                      planContext: input.planContext ?? null,
+                      conversationSummary,
+                      imageAttachments,
+                      signal,
+                    })
+                  : isNextjsProject
+                    ? await runNextjsBuildPipeline(escalatedStackBuildArgs)
+                    : isNodeApiProject
+                      ? await runNodeApiBuildPipeline(escalatedStackBuildArgs)
+                      : isPythonFlaskProject
+                        ? await runFlaskBuildPipeline(escalatedStackBuildArgs)
+                        : isPythonFastapiProject
+                          ? await runFastapiBuildPipeline(escalatedStackBuildArgs)
+                          : isGoGinProject
+                            ? await runGoGinBuildPipeline(escalatedStackBuildArgs)
+                            : await runBuildPipeline({
+                                projectName: project.name,
+                                projectKind: project.kind,
+                                userPrompt,
+                                agentMode: buildEscalationMode,
+                                conversationHistory,
+                                knowledgeContext: knowledgeContext || undefined,
+                                imageAttachments,
+                                databaseContext,
+                                planContext: input.planContext ?? null,
+                                conversationSummary,
+                                builderMode: project.builderMode,
+                                onEvent: async (type: string, message: string) =>
+                                  emitEvent(taskId, type, message),
+                                onToken: (delta: string) => emitTokenEvent(taskId, delta),
+                                signal,
+                              });
           wasEscalated = true;
           agentMode = buildEscalationMode;
           result = escalatedResult;
@@ -2113,19 +2186,25 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         assistantSummary = result.assistantSummary;
         nextVersionLabel = isMobileProject
           ? "Initial mobile build"
-          : isReactViteProject
-            ? "Initial React + Vite build"
-            : isNextjsProject
-              ? "Initial Next.js build"
-              : isNodeApiProject
-                ? "Initial Node.js API build"
-                : isPythonFlaskProject
-                  ? "Initial Flask build"
-                  : isPythonFastapiProject
-                    ? "Initial FastAPI build"
-                    : isGoGinProject
-                      ? "Initial Go + Gin build"
-                      : "Initial build";
+          : isSlidesProject
+            ? "Initial slide deck"
+            : isAnimationProject
+              ? "Initial animation"
+              : isAutomationProject
+                ? "Initial automation script"
+                : isReactViteProject
+                  ? "Initial React + Vite build"
+                  : isNextjsProject
+                    ? "Initial Next.js build"
+                    : isNodeApiProject
+                      ? "Initial Node.js API build"
+                      : isPythonFlaskProject
+                        ? "Initial Flask build"
+                        : isPythonFastapiProject
+                          ? "Initial FastAPI build"
+                          : isGoGinProject
+                            ? "Initial Go + Gin build"
+                            : "Initial build";
         filesToSmellScan = result.files;
       } else {
         await emitEvent(
@@ -2176,30 +2255,42 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           "narration",
           isMobileProject
             ? "Applying your changes to the Expo project now."
-            : isReactViteProject
-              ? "Applying your changes to the React + Vite project now."
-              : isNodeApiProject
-                ? "Applying your changes to the Node.js project now."
-                : isPythonFlaskProject || isPythonFastapiProject
-                  ? "Applying your changes to the Python project now."
-                  : isGoGinProject
-                    ? "Applying your changes to the Go + Gin project now."
-                    : "Applying your requested changes to the codebase now.",
+            : isSlidesProject
+              ? "Applying your changes to the slide deck now."
+              : isAnimationProject
+                ? "Applying your changes to the animation now."
+                : isAutomationProject
+                  ? "Applying your changes to the automation script now."
+                  : isReactViteProject
+                    ? "Applying your changes to the React + Vite project now."
+                    : isNodeApiProject
+                      ? "Applying your changes to the Node.js project now."
+                      : isPythonFlaskProject || isPythonFastapiProject
+                        ? "Applying your changes to the Python project now."
+                        : isGoGinProject
+                          ? "Applying your changes to the Go + Gin project now."
+                          : "Applying your requested changes to the codebase now.",
         );
         await emitEvent(
           taskId,
           "generating_code",
           isMobileProject
             ? "Applying change to Expo project with AI…"
-            : isReactViteProject
-              ? "Applying change to React + Vite project with AI…"
-              : isNodeApiProject
-                ? "Applying change to Node.js project with AI…"
-                : isPythonFlaskProject || isPythonFastapiProject
-                  ? "Applying change to Python project with AI…"
-                  : isGoGinProject
-                    ? "Applying change to Go + Gin project with AI…"
-                    : "Applying change request with AI…",
+            : isSlidesProject
+              ? "Applying change to slide deck with AI…"
+              : isAnimationProject
+                ? "Applying change to animation with AI…"
+                : isAutomationProject
+                  ? "Applying change to automation script with AI…"
+                  : isReactViteProject
+                    ? "Applying change to React + Vite project with AI…"
+                    : isNodeApiProject
+                      ? "Applying change to Node.js project with AI…"
+                      : isPythonFlaskProject || isPythonFastapiProject
+                        ? "Applying change to Python project with AI…"
+                        : isGoGinProject
+                          ? "Applying change to Go + Gin project with AI…"
+                          : "Applying change request with AI…",
         );
 
         const stackRefineArgs = {
@@ -2223,73 +2314,59 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           { taskId, projectId, pipeline: USE_AGENT_LOOP_REFINE ? "agentic" : "legacy" },
           "Refine pipeline selected",
         );
-        let refineResult: Awaited<ReturnType<typeof runRefinePipeline>> = USE_AGENT_LOOP_REFINE
-          ? await (async () => {
-              const { runAgentLoop, loopResultToRefineResult } = await import("./agent-loop");
-              await emitEvent(taskId, "narration", "Agentic builder loop engaged.");
-              const loopRes = await runAgentLoop({
-                mode: "refine",
-                projectId,
-                projectName: project.name,
-                projectKind: project.kind,
-                projectFormat: project.projectFormat ?? null,
-                stack: project.stack ?? null,
-                userPrompt,
-                agentMode,
-                conversationHistory,
-                knowledgeContext: knowledgeContext || undefined,
-                planContext: input.planContext ?? null,
-                existingFiles,
-                containerId: project.containerId ?? null,
-                policyStrictness:
-                  (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
-                  null,
-                taskId,
-                wallClockMs: input.wallClockCapMs,
-                previewUrl: project.containerUrl ?? null,
-                e2eEnabled: project.e2eEnabled ?? true,
-                onEvent: async (t, m) => emitEvent(taskId, t, m),
-                signal,
-                onBillableSenseBatch: (credits, total) => {
-                  if (!project.ownerId) return;
-                  void deductCredits(project.ownerId, credits, {
-                    type: "senses",
-                    description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
-                    projectId,
-                  }).catch((err) =>
-                    logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
-                  );
-                },
-                onBillableCreativeCall: (credits, tool) => {
-                  if (!project.ownerId) return;
-                  void deductCredits(project.ownerId, credits, {
-                    type: "creative",
-                    description: `Agent ${tool} — project ${projectId}`,
-                    projectId,
-                  }).catch((err) =>
-                    logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
-                  );
-                },
-              });
-              return loopResultToRefineResult(loopRes, userPrompt);
-            })()
-          : isMobileProject
-            ? await runMobileRefinePipeline({
-                projectName: project.name,
-                projectKind: project.kind,
-                userPrompt,
-                agentMode,
-                existingFiles,
-                conversationHistory,
-                knowledgeContext: knowledgeContext || undefined,
-                activeModuleIds,
-                configuredSecretNames,
-                imageAttachments,
-                onEvent: async (type, message) => emitEvent(taskId, type, message),
-                signal,
-              })
-            : isReactViteProject
-              ? await runReactViteRefinePipeline({
+        let refineResult: Awaited<ReturnType<typeof runRefinePipeline>> =
+          USE_AGENT_LOOP_REFINE && !isSpecializedStaticProject
+            ? await (async () => {
+                const { runAgentLoop, loopResultToRefineResult } = await import("./agent-loop");
+                await emitEvent(taskId, "narration", "Agentic builder loop engaged.");
+                const loopRes = await runAgentLoop({
+                  mode: "refine",
+                  projectId,
+                  projectName: project.name,
+                  projectKind: project.kind,
+                  projectFormat: project.projectFormat ?? null,
+                  stack: project.stack ?? null,
+                  userPrompt,
+                  agentMode,
+                  conversationHistory,
+                  knowledgeContext: knowledgeContext || undefined,
+                  planContext: input.planContext ?? null,
+                  existingFiles,
+                  containerId: project.containerId ?? null,
+                  policyStrictness:
+                    (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
+                    null,
+                  taskId,
+                  wallClockMs: input.wallClockCapMs,
+                  previewUrl: project.containerUrl ?? null,
+                  e2eEnabled: project.e2eEnabled ?? true,
+                  onEvent: async (t, m) => emitEvent(taskId, t, m),
+                  signal,
+                  onBillableSenseBatch: (credits, total) => {
+                    if (!project.ownerId) return;
+                    void deductCredits(project.ownerId, credits, {
+                      type: "senses",
+                      description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
+                      projectId,
+                    }).catch((err) =>
+                      logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
+                    );
+                  },
+                  onBillableCreativeCall: (credits, tool) => {
+                    if (!project.ownerId) return;
+                    void deductCredits(project.ownerId, credits, {
+                      type: "creative",
+                      description: `Agent ${tool} — project ${projectId}`,
+                      projectId,
+                    }).catch((err) =>
+                      logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
+                    );
+                  },
+                });
+                return loopResultToRefineResult(loopRes, userPrompt);
+              })()
+            : isMobileProject
+              ? await runMobileRefinePipeline({
                   projectName: project.name,
                   projectKind: project.kind,
                   userPrompt,
@@ -2297,45 +2374,68 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   existingFiles,
                   conversationHistory,
                   knowledgeContext: knowledgeContext || undefined,
-                  databaseContext,
-                  unchangedFilesHint:
-                    unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                  planContext: input.planContext ?? null,
-                  conversationSummary,
+                  activeModuleIds,
+                  configuredSecretNames,
                   imageAttachments,
                   onEvent: async (type, message) => emitEvent(taskId, type, message),
                   signal,
                 })
-              : isNextjsProject
-                ? await runNextjsRefinePipeline(stackRefineArgs)
-                : isNodeApiProject
-                  ? await runNodeApiRefinePipeline(stackRefineArgs)
-                  : isPythonFlaskProject
-                    ? await runFlaskRefinePipeline(stackRefineArgs)
-                    : isPythonFastapiProject
-                      ? await runFastapiRefinePipeline(stackRefineArgs)
-                      : isGoGinProject
-                        ? await runGoGinRefinePipeline(stackRefineArgs)
-                        : await runRefinePipeline({
-                            projectName: project.name,
-                            projectKind: project.kind,
-                            userPrompt,
-                            agentMode,
-                            existingFiles,
-                            conversationHistory,
-                            knowledgeContext: knowledgeContext || undefined,
-                            databaseContext,
-                            unchangedFilesHint:
-                              unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                            planContext: input.planContext ?? null,
-                            conversationSummary,
-                            imageAttachments,
-                            builderMode: project.builderMode,
-                            onEvent: async (type: string, message: string) =>
-                              emitEvent(taskId, type, message),
-                            onToken: (delta: string) => emitTokenEvent(taskId, delta),
-                            signal,
-                          });
+              : isSlidesProject
+                ? await runSlidesRefinePipeline(stackRefineArgs)
+                : isAnimationProject
+                  ? await runAnimationRefinePipeline(stackRefineArgs)
+                  : isAutomationProject
+                    ? await runAutomationRefinePipeline(stackRefineArgs)
+                    : isReactViteProject
+                      ? await runReactViteRefinePipeline({
+                          projectName: project.name,
+                          projectKind: project.kind,
+                          userPrompt,
+                          agentMode,
+                          existingFiles,
+                          conversationHistory,
+                          knowledgeContext: knowledgeContext || undefined,
+                          databaseContext,
+                          unchangedFilesHint:
+                            unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                          planContext: input.planContext ?? null,
+                          conversationSummary,
+                          imageAttachments,
+                          onEvent: async (type, message) => emitEvent(taskId, type, message),
+                          signal,
+                        })
+                      : isNextjsProject
+                        ? await runNextjsRefinePipeline(stackRefineArgs)
+                        : isNodeApiProject
+                          ? await runNodeApiRefinePipeline(stackRefineArgs)
+                          : isPythonFlaskProject
+                            ? await runFlaskRefinePipeline(stackRefineArgs)
+                            : isPythonFastapiProject
+                              ? await runFastapiRefinePipeline(stackRefineArgs)
+                              : isGoGinProject
+                                ? await runGoGinRefinePipeline(stackRefineArgs)
+                                : await runRefinePipeline({
+                                    projectName: project.name,
+                                    projectKind: project.kind,
+                                    userPrompt,
+                                    agentMode,
+                                    existingFiles,
+                                    conversationHistory,
+                                    knowledgeContext: knowledgeContext || undefined,
+                                    databaseContext,
+                                    unchangedFilesHint:
+                                      unchangedFilesHint.length > 0
+                                        ? unchangedFilesHint
+                                        : undefined,
+                                    planContext: input.planContext ?? null,
+                                    conversationSummary,
+                                    imageAttachments,
+                                    builderMode: project.builderMode,
+                                    onEvent: async (type: string, message: string) =>
+                                      emitEvent(taskId, type, message),
+                                    onToken: (delta: string) => emitTokenEvent(taskId, delta),
+                                    signal,
+                                  });
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
         analyticsErrorCategory = refineResult.primaryErrorCategory;
@@ -2372,50 +2472,57 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             imageAttachments,
             onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
           };
-          const escalatedResult = isReactViteProject
-            ? await runReactViteRefinePipeline({
-                projectName: project.name,
-                projectKind: project.kind,
-                userPrompt,
-                agentMode: refineEscalationMode,
-                existingFiles,
-                conversationHistory,
-                knowledgeContext: knowledgeContext || undefined,
-                databaseContext,
-                unchangedFilesHint: unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                planContext: input.planContext ?? null,
-                conversationSummary,
-                imageAttachments,
-              })
-            : isNextjsProject
-              ? await runNextjsRefinePipeline(escalatedStackRefineArgs)
-              : isNodeApiProject
-                ? await runNodeApiRefinePipeline(escalatedStackRefineArgs)
-                : isPythonFlaskProject
-                  ? await runFlaskRefinePipeline(escalatedStackRefineArgs)
-                  : isPythonFastapiProject
-                    ? await runFastapiRefinePipeline(escalatedStackRefineArgs)
-                    : isGoGinProject
-                      ? await runGoGinRefinePipeline(escalatedStackRefineArgs)
-                      : await runRefinePipeline({
-                          projectName: project.name,
-                          projectKind: project.kind,
-                          userPrompt,
-                          agentMode: refineEscalationMode,
-                          existingFiles,
-                          conversationHistory,
-                          knowledgeContext: knowledgeContext || undefined,
-                          databaseContext,
-                          unchangedFilesHint:
-                            unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                          planContext: input.planContext ?? null,
-                          conversationSummary,
-                          imageAttachments,
-                          builderMode: project.builderMode,
-                          onEvent: async (type: string, message: string) =>
-                            emitEvent(taskId, type, message),
-                          onToken: (delta: string) => emitTokenEvent(taskId, delta),
-                        });
+          const escalatedResult = isSlidesProject
+            ? await runSlidesRefinePipeline(escalatedStackRefineArgs)
+            : isAnimationProject
+              ? await runAnimationRefinePipeline(escalatedStackRefineArgs)
+              : isAutomationProject
+                ? await runAutomationRefinePipeline(escalatedStackRefineArgs)
+                : isReactViteProject
+                  ? await runReactViteRefinePipeline({
+                      projectName: project.name,
+                      projectKind: project.kind,
+                      userPrompt,
+                      agentMode: refineEscalationMode,
+                      existingFiles,
+                      conversationHistory,
+                      knowledgeContext: knowledgeContext || undefined,
+                      databaseContext,
+                      unchangedFilesHint:
+                        unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                      planContext: input.planContext ?? null,
+                      conversationSummary,
+                      imageAttachments,
+                    })
+                  : isNextjsProject
+                    ? await runNextjsRefinePipeline(escalatedStackRefineArgs)
+                    : isNodeApiProject
+                      ? await runNodeApiRefinePipeline(escalatedStackRefineArgs)
+                      : isPythonFlaskProject
+                        ? await runFlaskRefinePipeline(escalatedStackRefineArgs)
+                        : isPythonFastapiProject
+                          ? await runFastapiRefinePipeline(escalatedStackRefineArgs)
+                          : isGoGinProject
+                            ? await runGoGinRefinePipeline(escalatedStackRefineArgs)
+                            : await runRefinePipeline({
+                                projectName: project.name,
+                                projectKind: project.kind,
+                                userPrompt,
+                                agentMode: refineEscalationMode,
+                                existingFiles,
+                                conversationHistory,
+                                knowledgeContext: knowledgeContext || undefined,
+                                databaseContext,
+                                unchangedFilesHint:
+                                  unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                                planContext: input.planContext ?? null,
+                                conversationSummary,
+                                imageAttachments,
+                                builderMode: project.builderMode,
+                                onEvent: async (type: string, message: string) =>
+                                  emitEvent(taskId, type, message),
+                                onToken: (delta: string) => emitTokenEvent(taskId, delta),
+                              });
           wasEscalated = true;
           agentMode = refineEscalationMode;
           refineResult = escalatedResult;
@@ -2484,54 +2591,60 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   onEvent: async (type, message) => emitEvent(taskId, type, message),
                   signal,
                 })
-              : isReactViteProject
-                ? await runReactViteRefinePipeline({
-                    projectName: project.name,
-                    projectKind: project.kind,
-                    userPrompt: stricterPrompt,
-                    agentMode,
-                    existingFiles,
-                    conversationHistory,
-                    knowledgeContext: knowledgeContext || undefined,
-                    databaseContext,
-                    unchangedFilesHint:
-                      unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                    planContext: input.planContext ?? null,
-                    conversationSummary,
-                    imageAttachments,
-                    onEvent: async (type, message) => emitEvent(taskId, type, message),
-                    signal,
-                  })
-                : isNextjsProject
-                  ? await runNextjsRefinePipeline(retryStackArgs)
-                  : isNodeApiProject
-                    ? await runNodeApiRefinePipeline(retryStackArgs)
-                    : isPythonFlaskProject
-                      ? await runFlaskRefinePipeline(retryStackArgs)
-                      : isPythonFastapiProject
-                        ? await runFastapiRefinePipeline(retryStackArgs)
-                        : isGoGinProject
-                          ? await runGoGinRefinePipeline(retryStackArgs)
-                          : await runRefinePipeline({
-                              projectName: project.name,
-                              projectKind: project.kind,
-                              userPrompt: stricterPrompt,
-                              agentMode,
-                              existingFiles,
-                              conversationHistory,
-                              knowledgeContext: knowledgeContext || undefined,
-                              databaseContext,
-                              unchangedFilesHint:
-                                unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                              planContext: input.planContext ?? null,
-                              conversationSummary,
-                              imageAttachments,
-                              builderMode: project.builderMode,
-                              onEvent: async (type: string, message: string) =>
-                                emitEvent(taskId, type, message),
-                              onToken: (delta: string) => emitTokenEvent(taskId, delta),
-                              signal,
-                            });
+              : isSlidesProject
+                ? await runSlidesRefinePipeline(retryStackArgs)
+                : isAnimationProject
+                  ? await runAnimationRefinePipeline(retryStackArgs)
+                  : isAutomationProject
+                    ? await runAutomationRefinePipeline(retryStackArgs)
+                    : isReactViteProject
+                      ? await runReactViteRefinePipeline({
+                          projectName: project.name,
+                          projectKind: project.kind,
+                          userPrompt: stricterPrompt,
+                          agentMode,
+                          existingFiles,
+                          conversationHistory,
+                          knowledgeContext: knowledgeContext || undefined,
+                          databaseContext,
+                          unchangedFilesHint:
+                            unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                          planContext: input.planContext ?? null,
+                          conversationSummary,
+                          imageAttachments,
+                          onEvent: async (type, message) => emitEvent(taskId, type, message),
+                          signal,
+                        })
+                      : isNextjsProject
+                        ? await runNextjsRefinePipeline(retryStackArgs)
+                        : isNodeApiProject
+                          ? await runNodeApiRefinePipeline(retryStackArgs)
+                          : isPythonFlaskProject
+                            ? await runFlaskRefinePipeline(retryStackArgs)
+                            : isPythonFastapiProject
+                              ? await runFastapiRefinePipeline(retryStackArgs)
+                              : isGoGinProject
+                                ? await runGoGinRefinePipeline(retryStackArgs)
+                                : await runRefinePipeline({
+                                    projectName: project.name,
+                                    projectKind: project.kind,
+                                    userPrompt: stricterPrompt,
+                                    agentMode,
+                                    existingFiles,
+                                    conversationHistory,
+                                    knowledgeContext: knowledgeContext || undefined,
+                                    databaseContext,
+                                    unchangedFilesHint:
+                                      unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                                    planContext: input.planContext ?? null,
+                                    conversationSummary,
+                                    imageAttachments,
+                                    builderMode: project.builderMode,
+                                    onEvent: async (type: string, message: string) =>
+                                      emitEvent(taskId, type, message),
+                                    onToken: (delta: string) => emitTokenEvent(taskId, delta),
+                                    signal,
+                                  });
             if (!retryResult.correctionFailed) {
               refineResult = retryResult;
               refineResult.report.warnings = [
@@ -2651,6 +2764,35 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         assistantSummary = result.assistantSummary;
         nextVersionLabel = userPrompt.slice(0, 40) || "Refinement";
         filesToSmellScan = result.changedFiles;
+      }
+
+      // ── Ensure primary artifact kind matches the specialised pipeline ────────
+      // Unconditional upsert so refine passes (and any build that skips the
+      // stack-detection branch) also keep the artifact record in sync. Non-fatal.
+      if (isSpecializedStaticProject) {
+        const targetKind = isSlidesProject
+          ? "slides"
+          : isAnimationProject
+            ? "animation"
+            : "automation";
+        try {
+          const { projectArtifactsTable } = await import("@workspace/db");
+          await db
+            .update(projectArtifactsTable)
+            .set({ kind: targetKind })
+            .where(
+              and(
+                eq(projectArtifactsTable.projectId, projectId),
+                eq(projectArtifactsTable.isPrimary, true),
+                isNull(projectArtifactsTable.deletedAt),
+              ),
+            );
+        } catch (artifactKindErr) {
+          logger.warn(
+            { err: artifactKindErr, projectId, taskId, targetKind },
+            "Failed to sync primary artifact kind for specialised pipeline (non-fatal)",
+          );
+        }
       }
 
       // Attach knowledge lessons that influenced this build

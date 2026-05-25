@@ -161,7 +161,69 @@ export type StackId =
   | "mobile-cross"
   | "python-flask"
   | "python-fastapi"
-  | "go-gin";
+  | "go-gin"
+  | "slides"
+  | "animation"
+  | "automation";
+
+/**
+ * Keyword signals that strongly suggest a slide-deck / presentation output.
+ * Checked before backend/react signals so a "pitch deck" doesn't accidentally
+ * get classified as a React SPA.
+ */
+const SLIDES_SIGNALS = [
+  "slide deck",
+  "slide show",
+  "slideshow",
+  "presentation",
+  "pitch deck",
+  "pitch presentation",
+  "keynote",
+  "powerpoint",
+  "slides",
+  "deck",
+  "slide",
+];
+
+/**
+ * Keyword signals that strongly suggest an animated / motion-graphics output.
+ */
+const ANIMATION_SIGNALS = [
+  "animation",
+  "animated",
+  "animate",
+  "motion graphic",
+  "motion design",
+  "animated explainer",
+  "product explainer",
+  "explainer animation",
+  "framer motion",
+  "gsap animation",
+  "lottie",
+  "kinetic typography",
+];
+
+/**
+ * Keyword signals that strongly suggest an automation / script output.
+ */
+const AUTOMATION_SIGNALS = [
+  "automation",
+  "automate",
+  "cron job",
+  "cron script",
+  "scheduled job",
+  "scheduled report",
+  "scheduled task",
+  "email csv",
+  "email report",
+  "batch script",
+  "data pipeline",
+  "etl script",
+  "node script",
+  "weekly report",
+  "daily report",
+  "recurring task",
+];
 
 /**
  * Keyword signals that strongly suggest a native mobile app is needed.
@@ -392,6 +454,18 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
     return "mobile-cross";
   }
 
+  // Specific output types — checked before generic web/backend signals so
+  // "build me a pitch deck" doesn't accidentally become a React SPA.
+  if (SLIDES_SIGNALS.some((s) => lower.includes(s))) {
+    return "slides";
+  }
+  if (ANIMATION_SIGNALS.some((s) => lower.includes(s))) {
+    return "animation";
+  }
+  if (AUTOMATION_SIGNALS.some((s) => lower.includes(s))) {
+    return "automation";
+  }
+
   // Go/Gin intent — checked before generic backend signals so Go prompts
   // don't fall through to node-api.
   if (GO_SIGNALS.some((s) => lower.includes(s))) {
@@ -425,16 +499,19 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
         {
           role: "system",
           content:
-            "Classify this app idea into exactly one category. Reply with a single word only.\n" +
+            "Classify this request into exactly one category. Reply with a single word only.\n" +
             "Categories:\n" +
             "  mobile    — native phone/tablet app: something you'd install from the App Store or Play Store\n" +
+            "  slides    — slide deck, presentation, or pitch deck (Reveal.js)\n" +
+            "  animation — animated explainer, motion graphic, or branded animation\n" +
+            "  automation — automation script, cron job, scheduled report, or data pipeline\n" +
             "  go        — Go (Golang) backend: REST API or microservice using Go / Gin framework\n" +
             "  fastapi   — Python FastAPI backend: async Python API with Pydantic models\n" +
             "  flask     — Python Flask backend: web app or REST API using Flask\n" +
             "  fullstack — Node.js/TypeScript web app that needs a real backend: user auth, database, file uploads, payments, APIs\n" +
             "  react     — rich web single-page app, dashboard, or data viz with no server-side database\n" +
             "  static    — simple web page: landing page, portfolio, brochure, no persistent data\n" +
-            "Reply with ONLY one of: mobile | go | fastapi | flask | fullstack | react | static",
+            "Reply with ONLY one of: mobile | slides | animation | automation | go | fastapi | flask | fullstack | react | static",
         },
         { role: "user", content: prompt.slice(0, 800) },
       ],
@@ -442,6 +519,9 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
     });
     const word = res.choices[0]?.message?.content?.trim().toLowerCase() ?? "";
     if (word.includes("mobile")) return "mobile-cross";
+    if (word.includes("slides") || word.includes("slide")) return "slides";
+    if (word.includes("animation") || word.includes("animate")) return "animation";
+    if (word.includes("automation") || word.includes("automate")) return "automation";
     if (word.includes("go")) return "go-gin";
     if (word.includes("fastapi")) return "python-fastapi";
     if (word.includes("flask")) return "python-flask";
