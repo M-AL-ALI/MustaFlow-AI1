@@ -246,6 +246,23 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     // ── Conversational / developer-intent path ───────────────────────────────
     // Creates a lightweight task record (kind="converse") for history tracking.
     // No files are written, no build report is generated.
+
+    // Deduct 1 credit for all converse-family intents (converse, debug, refactor, review, explain).
+    const converseOwner = req.userId ?? project.ownerId;
+    if (converseOwner) {
+      const deduction = await deductCreditsAtomic(converseOwner, 1, {
+        type: "converse",
+        description: `${resolvedIntent !== "converse" ? resolvedIntent.charAt(0).toUpperCase() + resolvedIntent.slice(1) : "Assistant chat"} — project ${project.id}`,
+        projectId: project.id,
+      });
+      if ("insufficient" in deduction) {
+        res.status(402).json({
+          error: "Insufficient credits. Top up in Billing to continue.",
+        });
+        return;
+      }
+    }
+
     const isAmbiguous = resolvedIntent === "converse" && intentConfidence < 0.7;
     const systemPromptOverride =
       resolvedIntent !== "converse" ? DEVELOPER_INTENT_SYSTEM_PROMPTS[resolvedIntent] : undefined;
@@ -669,19 +686,24 @@ router.post(
       (a) => a.kind === "image" && typeof a.url === "string",
     );
 
-    // Gate explicit-converse (Assistant mode) behind a credit check BEFORE SSE
-    // headers are flushed so we can still return a proper HTTP 402 response.
-    if (explicitAgentIntent === "converse") {
+    // Gate all converse-family intents (converse, debug, refactor, review, explain) behind a
+    // credit check BEFORE SSE headers are flushed so we can still return a proper HTTP 402.
+    const converseIntents = ["converse", "debug", "refactor", "review", "explain"] as const;
+    if (converseIntents.includes(explicitAgentIntent as (typeof converseIntents)[number])) {
       const converseOwner = req.userId ?? project.ownerId;
       if (converseOwner) {
+        const intentLabel =
+          explicitAgentIntent && explicitAgentIntent !== "converse"
+            ? explicitAgentIntent.charAt(0).toUpperCase() + explicitAgentIntent.slice(1)
+            : "Assistant chat";
         const deduction = await deductCreditsAtomic(converseOwner, 1, {
           type: "converse",
-          description: `Assistant chat — project ${project.id}`,
+          description: `${intentLabel} — project ${project.id}`,
           projectId: project.id,
         });
         if ("insufficient" in deduction) {
           res.status(402).json({
-            error: "Insufficient credits. Top up in Billing to continue chatting.",
+            error: "Insufficient credits. Top up in Billing to continue.",
           });
           return;
         }

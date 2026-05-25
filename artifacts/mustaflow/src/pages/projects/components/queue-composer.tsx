@@ -1675,7 +1675,8 @@ export function QueueComposer({
               icon: Bug,
               label: "Debug",
               starter: "Debug this error: ",
-              title: "Paste a stack trace or error message and get a root-cause analysis",
+              title:
+                "Paste a stack trace or error message and get a root-cause analysis · 1 credit",
               cls: "border-red-500/20 text-red-400/70 hover:text-red-400 hover:border-red-500/40",
             },
             {
@@ -1683,7 +1684,7 @@ export function QueueComposer({
               icon: Wrench,
               label: "Refactor",
               starter: "Refactor ",
-              title: "Improve code structure without changing behaviour",
+              title: "Improve code structure without changing behaviour · 1 credit",
               cls: "border-yellow-500/20 text-yellow-400/70 hover:text-yellow-400 hover:border-yellow-500/40",
             },
             {
@@ -1691,7 +1692,7 @@ export function QueueComposer({
               icon: CheckSquare,
               label: "Review",
               starter: "Review my code for ",
-              title: "Get a structured code review — Critical / Warnings / Suggestions",
+              title: "Get a structured code review — Critical / Warnings / Suggestions · 1 credit",
               cls: "border-blue-500/20 text-blue-400/70 hover:text-blue-400 hover:border-blue-500/40",
             },
             {
@@ -1699,7 +1700,7 @@ export function QueueComposer({
               icon: BookOpenIcon,
               label: "Explain",
               starter: "Explain how ",
-              title: "Get a deep technical explanation with architectural context",
+              title: "Get a deep technical explanation with architectural context · 1 credit",
               cls: "border-violet-500/20 text-violet-400/70 hover:text-violet-400 hover:border-violet-500/40",
             },
           ].map(({ intent, icon: Icon, label, starter, title, cls }) => (
