@@ -106,7 +106,7 @@ router.get(
 // ── POST /api/v1/projects/:id/builds ─────────────────────────────────────────
 router.post(
   "/projects/:id/builds",
-  requirePatScope("builds:write"),
+  requirePatScope("builds:trigger"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     if (!Number.isFinite(projectId)) {
@@ -211,7 +211,7 @@ router.post(
 // ── POST /api/v1/projects/:id/builds/:buildId/cancel ──────────────────────────
 router.post(
   "/projects/:id/builds/:buildId/cancel",
-  requirePatScope("builds:write"),
+  requirePatScope("builds:trigger"),
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const buildId = Number(req.params.buildId);

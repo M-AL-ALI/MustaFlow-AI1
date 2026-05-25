@@ -365,15 +365,16 @@ router.post("/tokens", async (req, res): Promise<void> => {
   }
 
   const validScopes = [
+    "projects:read",
+    "projects:write",
+    "builds:read",
+    "builds:trigger",
+    "files:read",
+    "files:write",
     "domains:read",
     "domains:write",
     "webhooks:read",
     "webhooks:write",
-    "projects:read",
-    "projects:write",
-    "builds:read",
-    "builds:write",
-    "files:read",
   ];
   const resolvedScopes = Array.isArray(scopes)
     ? scopes.filter((s) => validScopes.includes(s))

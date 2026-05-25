@@ -420,19 +420,6 @@ function AppearanceOption({
   );
 }
 
-// ── Types for PAT management ──────────────────────────────────────────────────
-
-interface PatEntry {
-  id: number;
-  name: string;
-  tokenPreview: string;
-  scopes: string[];
-  projectId: number | null;
-  lastUsedAt: string | null;
-  expiresAt: string | null;
-  createdAt: string;
-}
-
 // Cache the loadStripe promise per publishable key so we don't re-init the
 // Stripe.js singleton across re-renders. Map keeps it safe if the key changes
 // at runtime (e.g. after Stripe connector reconfiguration).
@@ -1198,15 +1185,21 @@ const ALL_SCOPES: { value: string; label: string; description: string; group: st
     group: "Builds",
   },
   {
-    value: "builds:write",
-    label: "builds:write",
-    description: "Trigger and cancel builds",
+    value: "builds:trigger",
+    label: "builds:trigger",
+    description: "Trigger new AI builds and cancel active ones",
     group: "Builds",
   },
   {
     value: "files:read",
     label: "files:read",
     description: "List and download generated files",
+    group: "Files",
+  },
+  {
+    value: "files:write",
+    label: "files:write",
+    description: "Create or update project files via the API",
     group: "Files",
   },
   {

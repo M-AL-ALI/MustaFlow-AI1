@@ -222,6 +222,17 @@ export async function patOrSessionAuthMiddleware(
   req.userId = userId;
   req.patProjectId = null;
   // Session-authenticated users (project owners) have full access — grant all scopes.
-  req.patScopes = ["domains:read", "domains:write", "webhooks:read", "webhooks:write"];
+  req.patScopes = [
+    "projects:read",
+    "projects:write",
+    "builds:read",
+    "builds:trigger",
+    "files:read",
+    "files:write",
+    "domains:read",
+    "domains:write",
+    "webhooks:read",
+    "webhooks:write",
+  ];
   next();
 }

@@ -1,16 +1,17 @@
 /**
- * /api/v1/projects/:id/files — list and download generated project files.
+ * /api/v1/projects/:id/files — list, download, and write generated project files.
  *
  * Auth: Bearer PAT token OR Clerk session cookie (handled by v1AuthMiddleware).
  *
  * Routes:
  *   GET /api/v1/projects/:id/files           — list all files (path, mimeType, size)
  *   GET /api/v1/projects/:id/files/*path     — download a file by path
+ *   PUT /api/v1/projects/:id/files/*path     — create or update a file by path
  */
 
 import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
-import { db, projectFilesTable } from "@workspace/db";
+import { db, projectFilesTable, projectArtifactsTable } from "@workspace/db";
 import { checkV1ProjectAccess, requirePatScope } from "./access";
 
 const router: IRouter = Router();
@@ -107,6 +108,128 @@ router.get(
       .set("Content-Type", file.mimeType || "text/plain")
       .set("Content-Disposition", `attachment; filename="${normalisedPath.split("/").pop()}"`)
       .send(file.content);
+  },
+);
+
+// ── PUT /api/v1/projects/:id/files/*path ──────────────────────────────────────
+// Create or replace a project file. Body: { content: string, mimeType?: string }
+router.put(
+  "/projects/:id/files/*path",
+  requirePatScope("files:write"),
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id." });
+      return;
+    }
+
+    if (!(await checkV1ProjectAccess(req, projectId))) {
+      res.status(404).json({ error: "Project not found." });
+      return;
+    }
+
+    const pathParam = req.params["path"];
+    const filePath = Array.isArray(pathParam) ? pathParam.join("/") : (pathParam ?? "");
+
+    if (!filePath) {
+      res.status(400).json({ error: "File path is required." });
+      return;
+    }
+
+    const normalisedPath = filePath.startsWith("/") ? filePath.slice(1) : filePath;
+
+    const { content, mimeType } = req.body as { content?: unknown; mimeType?: unknown };
+
+    if (content === undefined || content === null) {
+      res.status(400).json({ error: "content is required." });
+      return;
+    }
+
+    const contentStr = typeof content === "string" ? content : JSON.stringify(content);
+
+    // Detect MIME type from extension if not provided.
+    const ext = normalisedPath.split(".").pop()?.toLowerCase() ?? "";
+    const mimeMap: Record<string, string> = {
+      html: "text/html",
+      css: "text/css",
+      js: "text/javascript",
+      ts: "text/typescript",
+      tsx: "text/typescript",
+      jsx: "text/javascript",
+      json: "application/json",
+      svg: "image/svg+xml",
+      md: "text/markdown",
+      txt: "text/plain",
+    };
+    const resolvedMime =
+      typeof mimeType === "string" && mimeType.trim()
+        ? mimeType.trim()
+        : (mimeMap[ext] ?? "text/plain");
+
+    // Find the primary artifact for this project to attach the file to.
+    const [primaryArtifact] = await db
+      .select({ id: projectArtifactsTable.id })
+      .from(projectArtifactsTable)
+      .where(
+        and(
+          eq(projectArtifactsTable.projectId, projectId),
+          eq(projectArtifactsTable.isPrimary, true),
+        ),
+      );
+
+    const artifactId = primaryArtifact?.id ?? null;
+
+    // Upsert: update if exists, insert if not.
+    const [existing] = await db
+      .select({ id: projectFilesTable.id })
+      .from(projectFilesTable)
+      .where(
+        and(
+          eq(projectFilesTable.projectId, projectId),
+          eq(projectFilesTable.path, normalisedPath),
+        ),
+      );
+
+    if (existing) {
+      await db
+        .update(projectFilesTable)
+        .set({ content: contentStr, mimeType: resolvedMime, updatedAt: new Date() })
+        .where(eq(projectFilesTable.id, existing.id));
+
+      res.json({
+        file: {
+          path: normalisedPath,
+          mimeType: resolvedMime,
+          size: contentStr.length,
+          updated: true,
+        },
+      });
+    } else {
+      const [created] = await db
+        .insert(projectFilesTable)
+        .values({
+          projectId,
+          artifactId,
+          path: normalisedPath,
+          content: contentStr,
+          mimeType: resolvedMime,
+        })
+        .returning({
+          id: projectFilesTable.id,
+          path: projectFilesTable.path,
+          mimeType: projectFilesTable.mimeType,
+        });
+
+      res.status(201).json({
+        file: {
+          id: created?.id,
+          path: normalisedPath,
+          mimeType: resolvedMime,
+          size: contentStr.length,
+          updated: false,
+        },
+      });
+    }
   },
 );
 

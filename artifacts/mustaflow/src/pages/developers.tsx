@@ -89,7 +89,7 @@ function buildUrl(path: string, params: Record<string, string>): string {
 }
 
 interface TryItPanelProps {
-  method: "GET" | "POST" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   token: string;
   onTokenChange: (t: string) => void;
@@ -105,7 +105,7 @@ interface ApiResponse {
 
 function TryItPanel({ method, path, token, onTokenChange, hasAuth }: TryItPanelProps) {
   const pathParams = extractPathParams(path);
-  const needsBody = method === "POST" || method === "PATCH";
+  const needsBody = method === "POST" || method === "PUT" || method === "PATCH";
 
   const [paramValues, setParamValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(pathParams.map((p) => [p, ""])),
@@ -248,9 +248,11 @@ function TryItPanel({ method, path, token, onTokenChange, hasAuth }: TryItPanelP
               ? "text-blue-400"
               : method === "POST"
                 ? "text-emerald-400"
-                : method === "PATCH"
-                  ? "text-amber-400"
-                  : "text-red-400"
+                : method === "PUT"
+                  ? "text-violet-400"
+                  : method === "PATCH"
+                    ? "text-amber-400"
+                    : "text-red-400"
           }`}
         >
           {method}
@@ -337,9 +339,10 @@ function TryItPanel({ method, path, token, onTokenChange, hasAuth }: TryItPanelP
 }
 
 interface EndpointRowProps {
-  method: "GET" | "POST" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   description: string;
+  scope?: string;
   isOpen: boolean;
   onToggle: () => void;
   token: string;
@@ -351,6 +354,7 @@ function EndpointRow({
   method,
   path,
   description,
+  scope,
   isOpen,
   onToggle,
   token,
@@ -360,6 +364,7 @@ function EndpointRow({
   const methodColors: Record<string, string> = {
     GET: "bg-blue-500/10 text-blue-400 border-blue-500/20",
     POST: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    PUT: "bg-violet-500/10 text-violet-400 border-violet-500/20",
     PATCH: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     DELETE: "bg-red-500/10 text-red-400 border-red-500/20",
   };
@@ -376,6 +381,13 @@ function EndpointRow({
         </td>
         <td className="px-4 py-3 font-mono text-xs text-foreground">{path}</td>
         <td className="px-4 py-3 text-xs">{description}</td>
+        <td className="px-4 py-3">
+          {scope && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono bg-muted text-muted-foreground border border-border whitespace-nowrap">
+              {scope}
+            </span>
+          )}
+        </td>
         <td className="px-4 py-3 text-right">
           <button
             onClick={onToggle}
@@ -399,7 +411,7 @@ function EndpointRow({
       </tr>
       {isOpen && (
         <tr className="bg-card">
-          <td colSpan={4} className="p-0">
+          <td colSpan={5} className="p-0">
             <TryItPanel
               method={method}
               path={path}
@@ -468,38 +480,62 @@ export default function DevelopersPage() {
   }
 
   const endpoints: Array<{
-    method: "GET" | "POST" | "PATCH" | "DELETE";
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
     path: string;
     description: string;
+    scope?: string;
   }> = [
-    { method: "GET", path: "/api/v1/projects", description: "List all your projects" },
-    { method: "POST", path: "/api/v1/projects", description: "Create a new project" },
-    { method: "GET", path: "/api/v1/projects/:id", description: "Get project details" },
+    { method: "GET", path: "/api/v1/projects", description: "List all your projects", scope: "projects:read" },
+    { method: "POST", path: "/api/v1/projects", description: "Create a new project", scope: "projects:write" },
+    { method: "GET", path: "/api/v1/projects/:id", description: "Get project details", scope: "projects:read" },
     {
       method: "POST",
       path: "/api/v1/projects/:id/builds",
       description: "Trigger an AI build from a prompt",
+      scope: "builds:trigger",
     },
-    { method: "GET", path: "/api/v1/projects/:id/builds", description: "List build history" },
+    { method: "GET", path: "/api/v1/projects/:id/builds", description: "List build history", scope: "builds:read" },
     {
       method: "GET",
       path: "/api/v1/projects/:id/builds/:buildId",
       description: "Poll a specific build for status and output",
+      scope: "builds:read",
+    },
+    {
+      method: "POST",
+      path: "/api/v1/projects/:id/builds/:buildId/cancel",
+      description: "Cancel an in-progress build",
+      scope: "builds:trigger",
     },
     {
       method: "GET",
       path: "/api/v1/projects/:id/files",
       description: "List generated project files",
+      scope: "files:read",
     },
     {
       method: "GET",
       path: "/api/v1/projects/:id/files/:path",
       description: "Download a specific generated file",
+      scope: "files:read",
+    },
+    {
+      method: "PUT",
+      path: "/api/v1/projects/:id/files/:path",
+      description: "Create or update a project file",
+      scope: "files:write",
+    },
+    {
+      method: "GET",
+      path: "/api/v1/projects/:id/domains",
+      description: "List custom domains",
+      scope: "domains:read",
     },
     {
       method: "POST",
-      path: "/api/v1/projects/:id/publish",
-      description: "Publish the latest build to production",
+      path: "/api/v1/projects/:id/domains",
+      description: "Attach a custom domain",
+      scope: "domains:write",
     },
     { method: "GET", path: "/api/healthz", description: "API health check — no auth required" },
   ];
@@ -773,6 +809,9 @@ export default function DevelopersPage() {
                     <th className="text-left px-4 py-2.5 font-medium text-foreground text-xs">
                       Description
                     </th>
+                    <th className="text-left px-4 py-2.5 font-medium text-foreground text-xs">
+                      Scope
+                    </th>
                     <th className="text-right px-4 py-2.5 font-medium text-foreground text-xs">
                       Try it
                     </th>
@@ -787,6 +826,7 @@ export default function DevelopersPage() {
                         method={ep.method}
                         path={ep.path}
                         description={ep.description}
+                        scope={ep.scope}
                         isOpen={openEndpoint === key}
                         onToggle={() => toggleEndpoint(key)}
                         token={token}
@@ -798,6 +838,57 @@ export default function DevelopersPage() {
                 </tbody>
               </table>
             </div>
+          </Section>
+
+          {/* Token Scopes */}
+          <Section icon={Key} title="Token Scopes">
+            <p>
+              When you create a personal access token, you choose which scopes it carries. A request
+              using a PAT is rejected with <InlineCode>403 Forbidden</InlineCode> if the token does
+              not hold the scope required by the endpoint. Session-authenticated requests (browser
+              cookies) implicitly carry all scopes.
+            </p>
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/40 border-b border-border">
+                    <th className="text-left px-4 py-2.5 font-medium text-foreground text-xs">
+                      Scope
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium text-foreground text-xs">
+                      What it grants
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {[
+                    ["projects:read", "List projects and read project metadata"],
+                    ["projects:write", "Create new projects"],
+                    ["builds:read", "List build history and poll build status"],
+                    ["builds:trigger", "Trigger new AI builds and cancel active ones"],
+                    ["files:read", "List and download generated project files"],
+                    ["files:write", "Create or update project files via the API"],
+                    ["domains:read", "List custom domains attached to a project"],
+                    ["domains:write", "Attach, verify, and remove custom domains"],
+                    ["webhooks:read", "List registered webhooks and delivery history"],
+                    ["webhooks:write", "Create, update, and delete webhooks"],
+                  ].map(([scope, description]) => (
+                    <tr key={scope} className="bg-card">
+                      <td className="px-4 py-2.5">
+                        <InlineCode>{scope}</InlineCode>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs">{description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Tokens default to <InlineCode>projects:read</InlineCode>,{" "}
+              <InlineCode>builds:read</InlineCode>, and <InlineCode>files:read</InlineCode> when no
+              scopes are specified. You can also scope a token to a single project so it cannot
+              access any of your other projects even if the scope allows it.
+            </p>
           </Section>
 
           {/* Rate limits */}
