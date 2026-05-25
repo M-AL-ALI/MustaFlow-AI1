@@ -1204,6 +1204,9 @@ export function AgentThinkingBubble({
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
   const isCancelled = lastEvent?.eventType === "cancelled";
+  // True when the task is sitting in the queue (only event so far is "queued").
+  // Once the job starts running it emits additional events and this flips false.
+  const isQueued = events.length > 0 && events.every((e) => e.eventType === "queued");
 
   const handleCancel = () => {
     if (cancelling || isTerminal) return;
@@ -1341,6 +1344,8 @@ export function AgentThinkingBubble({
             ) : (
               <XCircle className="h-3 w-3 text-destructive shrink-0" />
             )
+          ) : isQueued ? (
+            <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
           ) : (
             <span className="relative flex h-2 w-2 shrink-0">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
@@ -1356,7 +1361,9 @@ export function AgentThinkingBubble({
                   ? "text-muted-foreground"
                   : isFailed
                     ? "text-destructive"
-                    : "text-primary",
+                    : isQueued
+                      ? "text-muted-foreground"
+                      : "text-primary",
             )}
           >
             {isDone
@@ -1367,7 +1374,9 @@ export function AgentThinkingBubble({
                   ? "Build failed"
                   : cancelling
                     ? "Cancelling…"
-                    : "Building"}
+                    : isQueued
+                      ? "Queued"
+                      : "Building"}
           </span>
           <button
             onClick={() => setHideThinking(!hideThinking)}
@@ -1376,7 +1385,7 @@ export function AgentThinkingBubble({
           >
             {hideThinking ? <EyeOff className="h-2.5 w-2.5" /> : <Eye className="h-2.5 w-2.5" />}
           </button>
-          {!isTerminal && (
+          {!isTerminal && !isQueued && (
             <button
               onClick={handleCancel}
               disabled={cancelling}
@@ -1437,8 +1446,16 @@ export function AgentThinkingBubble({
 
             {groups.length === 0 && !isTerminal && (
               <div className="flex items-center gap-2 text-muted-foreground">
-                <div className="animate-spin h-2.5 w-2.5 border border-primary border-t-transparent rounded-full shrink-0" />
-                <span className="text-[11px]">Waiting for first event…</span>
+                {isQueued ? (
+                  <Clock className="h-2.5 w-2.5 shrink-0" />
+                ) : (
+                  <div className="animate-spin h-2.5 w-2.5 border border-primary border-t-transparent rounded-full shrink-0" />
+                )}
+                <span className="text-[11px]">
+                  {isQueued
+                    ? "Waiting for the current build to finish — will start automatically…"
+                    : "Waiting for first event…"}
+                </span>
               </div>
             )}
           </div>

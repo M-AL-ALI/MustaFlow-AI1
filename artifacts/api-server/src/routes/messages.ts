@@ -435,6 +435,14 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       builderImageAttachments.length > 0 ? builderImageAttachments : undefined;
 
     if (hasActiveTask) {
+      // Emit a "queued" event immediately so the thinking bubble can show
+      // "Waiting in queue…" instead of a blank "Starting up…" forever.
+      await db.insert(taskEventsTable).values({
+        taskId: task.id,
+        eventType: "queued",
+        message: "Task queued — waiting for the current build to finish…",
+        filePath: null,
+      });
       assistantContent = `Your request has been queued as Task #${task.id}. It will run automatically when the current build finishes.`;
       plan = { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>;
     } else if (runInBackground) {
