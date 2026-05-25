@@ -15,7 +15,17 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 
 const TOKEN_PREFIX = "mfp_";
-const VALID_SCOPES = ["domains:read", "domains:write", "webhooks:read", "webhooks:write"];
+const VALID_SCOPES = [
+  "projects:read",
+  "projects:write",
+  "builds:read",
+  "builds:write",
+  "files:read",
+  "domains:read",
+  "domains:write",
+  "webhooks:read",
+  "webhooks:write",
+];
 
 function hashToken(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
@@ -65,7 +75,7 @@ router.post("/tokens", async (req, res): Promise<void> => {
 
   const resolvedScopes = Array.isArray(scopes)
     ? scopes.filter((s) => VALID_SCOPES.includes(s))
-    : ["domains:read", "domains:write"];
+    : ["projects:read", "builds:read", "files:read", "domains:read", "domains:write"];
 
   if (resolvedScopes.length === 0) {
     res.status(400).json({ error: "At least one valid scope is required." });

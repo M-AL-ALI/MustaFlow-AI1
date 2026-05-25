@@ -1159,6 +1159,63 @@ interface ApiToken {
 
 // ── Developer Tab ─────────────────────────────────────────────────────────────
 
+const ALL_SCOPES: { value: string; label: string; description: string; group: string }[] = [
+  {
+    value: "projects:read",
+    label: "projects:read",
+    description: "List and view projects",
+    group: "Projects",
+  },
+  {
+    value: "projects:write",
+    label: "projects:write",
+    description: "Create new projects",
+    group: "Projects",
+  },
+  {
+    value: "builds:read",
+    label: "builds:read",
+    description: "List and poll build status",
+    group: "Builds",
+  },
+  {
+    value: "builds:write",
+    label: "builds:write",
+    description: "Trigger and cancel builds",
+    group: "Builds",
+  },
+  {
+    value: "files:read",
+    label: "files:read",
+    description: "List and download generated files",
+    group: "Files",
+  },
+  {
+    value: "domains:read",
+    label: "domains:read",
+    description: "List and view custom domains",
+    group: "Domains",
+  },
+  {
+    value: "domains:write",
+    label: "domains:write",
+    description: "Add, verify, and remove custom domains",
+    group: "Domains",
+  },
+  {
+    value: "webhooks:read",
+    label: "webhooks:read",
+    description: "List and view webhooks",
+    group: "Webhooks",
+  },
+  {
+    value: "webhooks:write",
+    label: "webhooks:write",
+    description: "Create, update, and delete webhooks",
+    group: "Webhooks",
+  },
+];
+
 function DeveloperTab() {
   const { toast } = useToast();
 
@@ -1168,6 +1225,13 @@ function DeveloperTab() {
   const [showForm, setShowForm] = useState(false);
   const [newTokenName, setNewTokenName] = useState("");
   const [expiresInDays, setExpiresInDays] = useState("");
+  const [selectedScopes, setSelectedScopes] = useState<string[]>([
+    "projects:read",
+    "builds:read",
+    "files:read",
+    "domains:read",
+    "domains:write",
+  ]);
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [revoking, setRevoking] = useState<number | null>(null);
@@ -1191,13 +1255,27 @@ function DeveloperTab() {
     void fetchTokens();
   }, [fetchTokens]);
 
+  function toggleScope(scope: string) {
+    setSelectedScopes((prev) =>
+      prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
+    );
+  }
+
   async function handleCreate() {
     if (!newTokenName.trim()) return;
+    if (selectedScopes.length === 0) {
+      toast({
+        title: "Select at least one scope",
+        description: "A token must have at least one permission.",
+        variant: "destructive",
+      });
+      return;
+    }
     setCreating(true);
     try {
       const body: Record<string, unknown> = {
         name: newTokenName.trim(),
-        scopes: ["domains:read", "domains:write"],
+        scopes: selectedScopes,
       };
       const days = parseInt(expiresInDays, 10);
       if (!isNaN(days) && days > 0) body.expiresInDays = days;
@@ -1224,6 +1302,13 @@ function DeveloperTab() {
       setShowForm(false);
       setNewTokenName("");
       setExpiresInDays("");
+      setSelectedScopes([
+        "projects:read",
+        "builds:read",
+        "files:read",
+        "domains:read",
+        "domains:write",
+      ]);
       await fetchTokens();
     } catch {
       toast({
@@ -1373,10 +1458,61 @@ function DeveloperTab() {
                 className="w-32 px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Scopes</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {ALL_SCOPES.map((scope) => {
+                  const checked = selectedScopes.includes(scope.value);
+                  return (
+                    <button
+                      key={scope.value}
+                      type="button"
+                      onClick={() => toggleScope(scope.value)}
+                      className={`flex items-start gap-2.5 text-left px-3 py-2.5 rounded-md border text-sm transition-colors ${
+                        checked
+                          ? "border-primary/50 bg-primary/5"
+                          : "border-border bg-background hover:bg-muted/40"
+                      }`}
+                    >
+                      <span
+                        className={`mt-0.5 shrink-0 flex items-center justify-center h-4 w-4 rounded border transition-colors ${
+                          checked ? "bg-primary border-primary" : "border-border"
+                        }`}
+                      >
+                        {checked && (
+                          <svg
+                            className="h-2.5 w-2.5 text-primary-foreground"
+                            fill="none"
+                            viewBox="0 0 10 10"
+                          >
+                            <path
+                              d="M1.5 5l2.5 2.5 4.5-4.5"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        )}
+                      </span>
+                      <span>
+                        <span className="block font-mono text-xs font-medium">{scope.label}</span>
+                        <span className="block text-xs text-muted-foreground mt-0.5">
+                          {scope.description}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedScopes.length === 0 && (
+                <p className="text-xs text-destructive">Select at least one scope.</p>
+              )}
+            </div>
             <div className="flex items-center gap-2 pt-1">
               <button
                 onClick={() => void handleCreate()}
-                disabled={creating || !newTokenName.trim()}
+                disabled={creating || !newTokenName.trim() || selectedScopes.length === 0}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {creating ? (
@@ -1391,6 +1527,13 @@ function DeveloperTab() {
                   setShowForm(false);
                   setNewTokenName("");
                   setExpiresInDays("");
+                  setSelectedScopes([
+                    "projects:read",
+                    "builds:read",
+                    "files:read",
+                    "domains:read",
+                    "domains:write",
+                  ]);
                 }}
                 className="px-4 py-2 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
               >
@@ -1416,7 +1559,7 @@ function DeveloperTab() {
             {tokens.map((token) => (
               <div key={token.id} className="flex items-center gap-4 px-4 py-3 bg-background">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium truncate">{token.name}</span>
                     {token.expiresAt && new Date(token.expiresAt) < new Date() && (
                       <span className="text-xs px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-medium">
@@ -1424,7 +1567,17 @@ function DeveloperTab() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 mt-0.5">
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                    {token.scopes.map((scope) => (
+                      <span
+                        key={scope}
+                        className="inline-flex items-center font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border"
+                      >
+                        {scope}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-3 mt-1">
                     <code className="text-xs text-muted-foreground font-mono">
                       {token.tokenPreview}
                     </code>

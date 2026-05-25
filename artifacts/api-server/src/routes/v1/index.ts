@@ -117,6 +117,12 @@ router.use(filesRouter);
 
 // ── GET /api/v1/projects/:id/domains ─────────────────────────────────────────
 router.get("/projects/:id/domains", async (req, res): Promise<void> => {
+  // Scope check: PAT tokens must carry domains:read. Session auth is exempt.
+  if (isPatAuth(req) && !(req as unknown as PATRequest).patScopes?.includes("domains:read")) {
+    res.status(403).json({ error: "Token does not have domains:read scope." });
+    return;
+  }
+
   const projectId = Number(req.params.id);
   if (!(await checkV1ProjectAccess(req, projectId))) {
     res.status(404).json({ error: "Project not found." });
@@ -232,6 +238,12 @@ router.delete("/projects/:id/domains/:domainId", async (req, res): Promise<void>
 
 // ── POST /api/v1/projects/:id/domains/:domainId/verify ────────────────────────
 router.post("/projects/:id/domains/:domainId/verify", async (req, res): Promise<void> => {
+  // Scope check: PAT tokens must carry domains:write. Session auth is exempt.
+  if (isPatAuth(req) && !(req as unknown as PATRequest).patScopes?.includes("domains:write")) {
+    res.status(403).json({ error: "Token does not have domains:write scope." });
+    return;
+  }
+
   const projectId = Number(req.params.id);
   const domainId = Number(req.params.domainId);
 
@@ -294,9 +306,17 @@ router.post("/projects/:id/domains/:domainId/verify", async (req, res): Promise<
 });
 
 // ── PAT management routes ─────────────────────────────────────────────────────
+// Token management requires session auth — PATs cannot mint, revoke, or list
+// tokens because that would allow privilege escalation (a narrow-scope token
+// creating a new token with broader scopes).
 
 // GET /api/v1/tokens — list caller's tokens (masked)
 router.get("/tokens", async (req, res): Promise<void> => {
+  if (isPatAuth(req)) {
+    res.status(403).json({ error: "Token management requires session auth, not a PAT." });
+    return;
+  }
+
   const tokens = await db
     .select({
       id: personalAccessTokensTable.id,
@@ -322,6 +342,11 @@ router.get("/tokens", async (req, res): Promise<void> => {
 
 // POST /api/v1/tokens — create a new PAT
 router.post("/tokens", async (req, res): Promise<void> => {
+  if (isPatAuth(req)) {
+    res.status(403).json({ error: "Token management requires session auth, not a PAT." });
+    return;
+  }
+
   const { name, projectId, scopes, expiresInDays } = req.body as {
     name?: string;
     projectId?: number;
@@ -388,6 +413,11 @@ router.post("/tokens", async (req, res): Promise<void> => {
 
 // DELETE /api/v1/tokens/:tokenId — revoke a PAT
 router.delete("/tokens/:tokenId", async (req, res): Promise<void> => {
+  if (isPatAuth(req)) {
+    res.status(403).json({ error: "Token management requires session auth, not a PAT." });
+    return;
+  }
+
   const tokenId = Number(req.params.tokenId);
 
   const [existing] = await db
