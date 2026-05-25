@@ -5,10 +5,10 @@ import { useToast } from "@/hooks/use-toast";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ClerkProvider, SignIn, SignUp, Show, useClerk } from "@clerk/react";
+import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
-import { useGetAdminMe } from "@workspace/api-client-react";
+import { useGetAdminMe, setAuthTokenGetter } from "@workspace/api-client-react";
 import NotFound from "@/pages/not-found";
 
 // Pages
@@ -147,6 +147,21 @@ function ClerkQueryClientCacheInvalidator() {
     return unsub;
   }, [addListener, qc]);
 
+  return null;
+}
+
+// Registers Clerk's getToken() with the fetch client so every API call carries
+// Authorization: Bearer <token>. This makes auth work regardless of whether
+// the session cookie is sent (e.g. in embedded iframe / cross-site contexts).
+function ClerkTokenProvider() {
+  const { getToken, isSignedIn } = useAuth();
+  useEffect(() => {
+    if (isSignedIn) {
+      setAuthTokenGetter(() => getToken());
+    } else {
+      setAuthTokenGetter(null);
+    }
+  }, [isSignedIn, getToken]);
   return null;
 }
 
@@ -346,6 +361,7 @@ function ClerkProviderWithRoutes() {
       <QueryClientProvider client={queryClient}>
         <ThemeApplier />
         <ClerkQueryClientCacheInvalidator />
+        <ClerkTokenProvider />
         <WorkspaceProvider>
           <TooltipProvider>
             <Switch>
