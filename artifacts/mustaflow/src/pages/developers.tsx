@@ -280,12 +280,7 @@ function TryItPanel({ method, path, token, onTokenChange, hasAuth }: TryItPanelP
             </>
           )}
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleCopyCurl}
-          className="w-full sm:w-auto"
-        >
+        <Button size="sm" variant="outline" onClick={handleCopyCurl} className="w-full sm:w-auto">
           {copiedCurl ? (
             <>
               <Check className="h-3.5 w-3.5 mr-1.5 text-emerald-400" />
@@ -483,16 +478,36 @@ export default function DevelopersPage() {
     description: string;
     scope?: string;
   }> = [
-    { method: "GET", path: "/api/v1/projects", description: "List all your projects", scope: "projects:read" },
-    { method: "POST", path: "/api/v1/projects", description: "Create a new project", scope: "projects:write" },
-    { method: "GET", path: "/api/v1/projects/:id", description: "Get project details", scope: "projects:read" },
+    {
+      method: "GET",
+      path: "/api/v1/projects",
+      description: "List all your projects",
+      scope: "projects:read",
+    },
+    {
+      method: "POST",
+      path: "/api/v1/projects",
+      description: "Create a new project",
+      scope: "projects:write",
+    },
+    {
+      method: "GET",
+      path: "/api/v1/projects/:id",
+      description: "Get project details",
+      scope: "projects:read",
+    },
     {
       method: "POST",
       path: "/api/v1/projects/:id/builds",
       description: "Trigger an AI build from a prompt",
       scope: "builds:trigger",
     },
-    { method: "GET", path: "/api/v1/projects/:id/builds", description: "List build history", scope: "builds:read" },
+    {
+      method: "GET",
+      path: "/api/v1/projects/:id/builds",
+      description: "List build history",
+      scope: "builds:read",
+    },
     {
       method: "GET",
       path: "/api/v1/projects/:id/builds/:buildId",

@@ -184,10 +184,7 @@ router.put(
       .select({ id: projectFilesTable.id })
       .from(projectFilesTable)
       .where(
-        and(
-          eq(projectFilesTable.projectId, projectId),
-          eq(projectFilesTable.path, normalisedPath),
-        ),
+        and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, normalisedPath)),
       );
 
     if (existing) {

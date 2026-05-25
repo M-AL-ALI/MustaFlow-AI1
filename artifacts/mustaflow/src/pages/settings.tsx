@@ -417,7 +417,6 @@ function AppearanceOption({
   );
 }
 
-
 // Cache the loadStripe promise per publishable key so we don't re-init the
 // Stripe.js singleton across re-renders. Map keeps it safe if the key changes
 // at runtime (e.g. after Stripe connector reconfiguration).
@@ -1680,7 +1679,9 @@ function DeveloperTab() {
                     <div className="shrink-0 flex items-center gap-2">
                       <button
                         onClick={() => void handleTest(token.id)}
-                        disabled={testing === token.id || revoking === token.id || rotating === token.id}
+                        disabled={
+                          testing === token.id || revoking === token.id || rotating === token.id
+                        }
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-transparent hover:border-border disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         title="Test this token"
                       >
@@ -1693,7 +1694,9 @@ function DeveloperTab() {
                       </button>
                       <button
                         onClick={() => void handleRotate(token.id)}
-                        disabled={rotating === token.id || revoking === token.id || testing === token.id}
+                        disabled={
+                          rotating === token.id || revoking === token.id || testing === token.id
+                        }
                         title="Rotate token — generates a new secret value while keeping the same name and scopes"
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-transparent hover:border-border disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
@@ -1706,7 +1709,9 @@ function DeveloperTab() {
                       </button>
                       <button
                         onClick={() => void handleRevoke(token.id)}
-                        disabled={revoking === token.id || testing === token.id || rotating === token.id}
+                        disabled={
+                          revoking === token.id || testing === token.id || rotating === token.id
+                        }
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         {revoking === token.id ? (
