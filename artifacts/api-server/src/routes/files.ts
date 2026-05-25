@@ -592,17 +592,18 @@ router.get("/projects/:id/preview/{*splat}", async (req, res, next): Promise<voi
     return;
   }
 
-  // Auth: published projects are public; anything else requires owner or org-member access.
-  if (previewProject.status !== "published") {
-    if (!req.userId) {
-      res.status(401).json({ error: "Unauthenticated" });
-      return;
-    }
-    const allowed = await userCanPreviewProject(previewProject, req.userId);
-    if (!allowed) {
-      res.status(403).json({ error: "Forbidden" });
-      return;
-    }
+  // Auth: the editor preview route ALWAYS requires the caller to be the project
+  // owner or an org member — even when the project is published. Published projects
+  // are served publicly at /api/p/:slug/ and custom domains (serveSnapshot.ts).
+  // Draft edits made after publishing must never be visible without authentication.
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const allowed = await userCanPreviewProject(previewProject, req.userId);
+  if (!allowed) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
   }
 
   // Agentic projects → live container proxy. Static-legacy projects keep

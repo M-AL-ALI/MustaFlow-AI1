@@ -56,12 +56,23 @@ async function loadProjectFiles(projectId: number) {
  * Load all project secrets and return them as a plain { KEY: value } map
  * suitable for injecting into a container's environment.
  * Decryption errors for individual secrets are caught and skipped (best-effort).
+ *
+ * @param previewOnly — when true, only injects secrets where is_preview_safe = true.
+ *   Use this for the draft preview container so production secrets are never
+ *   automatically exposed in the development preview environment.
  */
-async function loadProjectSecretsAsEnv(projectId: number): Promise<Record<string, string>> {
+async function loadProjectSecretsAsEnv(
+  projectId: number,
+  previewOnly = false,
+): Promise<Record<string, string>> {
+  const conds = [eq(secretsTable.projectId, projectId)];
+  if (previewOnly) {
+    conds.push(eq(secretsTable.isPreviewSafe, true));
+  }
   const rows = await db
     .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
     .from(secretsTable)
-    .where(eq(secretsTable.projectId, projectId));
+    .where(and(...conds));
 
   const env: Record<string, string> = {};
   for (const row of rows) {
@@ -130,10 +141,13 @@ router.post(
 
     req.log.info({ projectId }, "Provisioning container");
 
-    // Load project files and decrypted secrets in parallel
+    // Load project files and decrypted secrets in parallel.
+    // previewOnly=true: only inject secrets marked is_preview_safe so that production
+    // secrets (API keys, payment credentials) are never automatically exposed in the
+    // development preview container.
     const [files, envVars] = await Promise.all([
       loadProjectFiles(projectId),
-      loadProjectSecretsAsEnv(projectId),
+      loadProjectSecretsAsEnv(projectId, true),
     ]);
 
     req.log.info(

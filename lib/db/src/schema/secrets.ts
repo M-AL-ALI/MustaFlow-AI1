@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, boolean } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export const SECRET_ENVIRONMENTS = ["development", "testing", "staging", "production"] as const;
@@ -40,6 +40,10 @@ export const secretsTable = pgTable("project_secrets", {
   // Minimum org role required to read the decrypted secret value.
   // 'viewer' (default) = all project members; 'owner' = org owner only.
   minRole: text("min_role").notNull().default("viewer"),
+  // When true, this secret is safe to inject into the draft preview container.
+  // Production secrets (API keys, payment keys) default to false so they are
+  // never automatically exposed in the development preview environment.
+  isPreviewSafe: boolean("is_preview_safe").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),

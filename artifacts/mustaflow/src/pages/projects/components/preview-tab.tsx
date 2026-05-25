@@ -1549,6 +1549,43 @@ export function PreviewTab({
           {project.status}
         </div>
 
+        {/* Runtime mode badge — shows which preview engine is active */}
+        {(() => {
+          const wcLive = isReactVite && wc.status === "ready" && wc.previewUrl != null;
+          const containerRunning = isAgentic && containerStatus === "running" && !!containerUrl;
+          let label: string;
+          let subtitle: string;
+          let badgeClass: string;
+          if (containerRunning) {
+            label = "Full App Preview — Container";
+            subtitle = "Live container; backend routes and server logs available";
+            badgeClass = "bg-blue-500/15 text-blue-400 border-blue-500/25";
+          } else if (wcLive) {
+            label = "Quick Preview — WebContainer";
+            subtitle = "In-browser sandbox; some Node.js APIs unavailable";
+            badgeClass = "bg-violet-500/15 text-violet-400 border-violet-500/25";
+          } else if (project.status === "published") {
+            label = "Published Version";
+            subtitle = "Showing the frozen published snapshot";
+            badgeClass = "bg-green-500/15 text-green-400 border-green-500/25";
+          } else {
+            label = "Quick Preview — Static";
+            subtitle = "Frontend only — backend routes not available";
+            badgeClass = "bg-muted text-muted-foreground border-border";
+          }
+          return (
+            <div
+              className={cn(
+                "hidden lg:flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border shrink-0 cursor-default",
+                badgeClass,
+              )}
+              title={subtitle}
+            >
+              <span>{label}</span>
+            </div>
+          );
+        })()}
+
         <div className="flex-1" />
 
         {/* Mock API badge */}

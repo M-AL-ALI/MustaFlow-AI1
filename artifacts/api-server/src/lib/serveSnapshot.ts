@@ -408,30 +408,44 @@ export async function serveSnapshot(
   trackServeBytes(res, projectId, null);
 
   // If a production container is deployed and running, proxy the request to it.
+  // On any failure (ECONNREFUSED, ETIMEDOUT, non-2xx) fall through to frozen snapshot.
   if (project.prodContainerUrl && project.prodContainerStatus === "running") {
     const targetBase = project.prodContainerUrl.replace(/\/$/, "");
     const requestPath = filePath ? `/${filePath}` : "/";
     const targetUrl = `${targetBase}${requestPath}`;
+    let containerServed = false;
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
       const upstreamRes = await fetch(targetUrl, {
         headers: { "X-Forwarded-Host": "mustaflow.app" },
-        // Do not follow redirects automatically — forward them to the client.
         redirect: "manual",
+        signal: controller.signal,
       });
-      // Forward status and select headers.
-      res.status(upstreamRes.status);
-      const contentType = upstreamRes.headers.get("content-type");
-      if (contentType) res.setHeader("Content-Type", contentType);
-      const location = upstreamRes.headers.get("location");
-      if (location) res.setHeader("Location", location);
-      res.setHeader("Cache-Control", "no-store");
-      const body = await upstreamRes.arrayBuffer();
-      res.end(Buffer.from(body));
-    } catch {
-      // Upstream container unreachable — fall back to snapshot serving below.
-      // This can happen when the container is waking up or temporarily unavailable.
+      clearTimeout(timeout);
+      // Only forward 2xx and 3xx responses — anything else falls back to snapshot.
+      if (upstreamRes.status >= 200 && upstreamRes.status < 500) {
+        res.status(upstreamRes.status);
+        const contentType = upstreamRes.headers.get("content-type");
+        if (contentType) res.setHeader("Content-Type", contentType);
+        const location = upstreamRes.headers.get("location");
+        if (location) res.setHeader("Location", location);
+        res.setHeader("Cache-Control", "no-store");
+        const body = await upstreamRes.arrayBuffer();
+        res.end(Buffer.from(body));
+        containerServed = true;
+      } else {
+        logger.warn(
+          { projectId, status: upstreamRes.status, filePath },
+          "Production container returned 5xx — falling back to published snapshot",
+        );
+      }
+    } catch (err) {
+      // ECONNREFUSED / ETIMEDOUT / AbortError — fall back to snapshot gracefully.
+      logger.warn({ err, projectId, filePath }, "Production container unreachable — falling back to published snapshot");
     }
-    return;
+    if (containerServed) return;
+    // Fall through to serve the frozen published snapshot below.
   }
 
   if (!project.publishedSnapshotId) {
@@ -495,7 +509,13 @@ export async function serveSnapshot(
   } else {
     const isHtml = mime === "text/html";
     if (isHtml) {
-      let html = injectBridge(file.content);
+      // NOTE: consoleBridge / analytics / error beacon scripts are intentionally
+      // NOT injected here. This function serves the public published URL
+      // (/api/p/:slug/) and custom domains — end-users must never receive
+      // internal telemetry or postMessage instrumentation in their app.
+      // Those scripts are injected only by the authenticated editor preview
+      // route (/api/projects/:id/preview/*) in routes/files.ts.
+      let html = file.content;
       // Inject analytics + error beacon snippets
       const analyticsSnippet = buildAnalyticsSnippet(slug);
       const errorBeacon = buildErrorBeaconSnippet(slug);

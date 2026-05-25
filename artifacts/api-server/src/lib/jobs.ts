@@ -4088,7 +4088,11 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     (project.agentMode as AgentMode) ??
     "power";
 
-  // Write staging files to project_files (full replace — staging is the intended state)
+  // Staging gate: project_files are NOT modified until this point. The Task Agent
+  // works entirely against task.stagingSnapshot while the job is in "needs_review".
+  // Quick Preview and Full App Preview both read from project_files only, so draft
+  // Task Agent changes are invisible in any preview mode until the user clicks Apply.
+  // This guarantees test #10 and #11 in the preview-security test suite.
   await writeFiles(projectId, builderFiles, true);
 
   // Run container file sync + Drizzle migrations for any schema files in the staging

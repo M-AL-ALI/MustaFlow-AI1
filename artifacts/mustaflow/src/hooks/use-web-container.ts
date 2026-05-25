@@ -40,6 +40,20 @@ export const STATUS_LABELS: Record<WebContainerStatus, string> = {
 let _wcInstance: WebContainer | null = null;
 let _wcBootPromise: Promise<WebContainer> | null = null;
 
+// Install cache: tracks the last package.json content hash per project so that
+// subsequent boots for the same project skip `npm install` when package.json is
+// unchanged (dependencies are already in node_modules from the previous mount).
+const _installHashCache = new Map<number, string>();
+
+/** Simple djb2-style hash — good enough to detect package.json drift. */
+function hashString(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h) ^ s.charCodeAt(i);
+  }
+  return (h >>> 0).toString(36);
+}
+
 async function acquireWebContainer(): Promise<WebContainer> {
   if (_wcInstance) return _wcInstance;
   if (_wcBootPromise) {
@@ -167,20 +181,32 @@ export function useWebContainer({
         devProcessRef.current?.kill();
         devProcessRef.current = null;
 
-        setStatus("installing");
-        addLog("[WC] Running npm install…");
-        const installProcess = await wc.spawn("npm", ["install"]);
-        installProcess.output.pipeTo(
-          new WritableStream({
-            write(chunk: string) {
-              addLog(chunk);
-            },
-          }),
-        );
-        const installExit = await installProcess.exit;
-        if (!mountedRef.current || projectIdRef.current !== pid) return;
-        if (installExit !== 0) {
-          throw new Error(`npm install failed (exit code ${installExit})`);
+        // Package install caching: hash the package.json to skip npm install
+        // when dependencies haven't changed since the last successful boot.
+        const pkgFile = files.find((f) => f.path === "package.json");
+        const pkgHash = pkgFile ? hashString(pkgFile.content) : "";
+        const cachedHash = _installHashCache.get(pid);
+        const installNeeded = !pkgHash || pkgHash !== cachedHash;
+
+        if (installNeeded) {
+          setStatus("installing");
+          addLog("[WC] Running npm install…");
+          const installProcess = await wc.spawn("npm", ["install"]);
+          installProcess.output.pipeTo(
+            new WritableStream({
+              write(chunk: string) {
+                addLog(chunk);
+              },
+            }),
+          );
+          const installExit = await installProcess.exit;
+          if (!mountedRef.current || projectIdRef.current !== pid) return;
+          if (installExit !== 0) {
+            throw new Error(`npm install failed (exit code ${installExit})`);
+          }
+          if (pkgHash) _installHashCache.set(pid, pkgHash);
+        } else {
+          addLog("[WC] Skipping npm install — package.json unchanged (cached).");
         }
 
         setStatus("starting");

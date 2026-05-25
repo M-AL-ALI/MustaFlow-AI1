@@ -63,6 +63,7 @@
     "migrate-secret-scoping": "tsx ./src/migrate-secret-scoping.ts",
     "migrate-agentic-provisioning": "tsx ./src/migrate-agentic-provisioning.ts",
     "migrate-task-agent-mode": "tsx ./src/migrate-task-agent-mode.ts",
+    "migrate-preview-secrets": "tsx ./src/migrate-preview-secrets.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },
