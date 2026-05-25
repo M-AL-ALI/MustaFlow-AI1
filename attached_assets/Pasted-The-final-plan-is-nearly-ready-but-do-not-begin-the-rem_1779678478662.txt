@@ -1,0 +1,60 @@
+The final plan is nearly ready, but do not begin the remaining implementation until these last architecture issues are corrected.
+
+First: Phase 0 verification
+
+You stated Task #766 is merged, but it is not yet visible in GitHub main. Before building later phases:
+
+- Preserve the Phase 0 changes in a committed/checkpointed state.
+- Show the exact changed files and the 14 passing test names/results.
+- Do not lose or overwrite those security fixes during the next phases.
+- When the work is ultimately pushed, confirm GitHub contains:
+  - owner-only `/api/projects/:id/preview/*`;
+  - no console bridge in public published HTML;
+  - working production-container fallback to snapshot.
+
+1. Do not reuse the existing live development container as the immutable test runtime
+
+The existing `containerId` development container is already connected to live draft editing, terminal actions and AI file synchronization.
+
+If Full App Preview reuses this same container, then:
+
+- the user can start testing snapshot A;
+- a file save, Main Agent build, Task Agent Apply or terminal edit can mutate the running container;
+- the UI may say snapshot A is being tested while the runtime no longer contains snapshot A.
+
+Required correction:
+
+Add a dedicated Full App Preview/Test container separate from the existing live development container:
+
+- `testContainerId`
+- `testContainerUrl`
+- `testContainerStatus`
+- `runningTestSnapshotId`
+
+Rules:
+
+- Quick Preview and live draft workflows may continue using the existing dev/WebContainer behavior.
+- Full App Preview must run only from the immutable Test Candidate snapshot.
+- Draft file writes and AI live sync must never modify the test container automatically.
+- When draft changes occur, mark the candidate stale, but keep the tested/running snapshot ID for audit and display.
+- The user must click `Rebuild Test Preview` to create and run a new immutable candidate.
+- Task Agent Apply and Main Agent changes invalidate approval, but must not silently mutate the currently running test candidate.
+
+Required tests:
+
+- A live draft edit does not change files inside the running test container.
+- A stale candidate remains identifiable by snapshot ID.
+- Approval applies only to `runningTestSnapshotId`.
+- A test container can never approve files introduced by live draft synchronization.
+
+2. Fix the static project publishing dead end
+
+The current plan says:
+
+- genuinely static frontend-only projects have no Full App Preview;
+- Quick Preview has no `Mark Testing Passed`;
+- publishing requires `testedSnapshotId`.
+
+That means static projects can never be published.
+
+Required
