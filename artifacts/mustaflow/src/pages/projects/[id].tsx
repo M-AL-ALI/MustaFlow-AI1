@@ -2257,6 +2257,11 @@ export default function ProjectWorkspacePage() {
           <span className="text-sm font-semibold text-foreground truncate max-w-[130px]">
             {project.name}
           </span>
+          {project.chipLabel && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0 bg-primary/5 text-primary/80 border-primary/20">
+              {project.chipLabel}
+            </span>
+          )}
           <span
             className={cn(
               "text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",

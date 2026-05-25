@@ -17,4 +17,6 @@ export interface ProjectInput {
   /** Technology stack to use. Defaults to react-vite for web projects. */
   stack?: ProjectInputStack;
   initialPrompt?: string;
+  /** Name of the capability chip that pre-filled the prompt (e.g. 'React SaaS app', 'REST API + Postgres'). Omit if no chip was used. */
+  chipLabel?: string;
 }

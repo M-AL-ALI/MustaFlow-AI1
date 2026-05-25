@@ -732,6 +732,7 @@ export const ListProjectsResponseItem = zod.object({
   "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
+  "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -750,7 +751,8 @@ export const CreateProjectBody = zod.object({
   "workspaceId": zod.number().optional(),
   "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'mobile-cross', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
   "stack": zod.enum(['react-vite', 'nextjs', 'node-api', 'python-flask', 'python-fastapi', 'go-gin']).optional().describe('Technology stack to use. Defaults to react-vite for web projects.'),
-  "initialPrompt": zod.string().optional()
+  "initialPrompt": zod.string().optional(),
+  "chipLabel": zod.string().optional().describe('Name of the capability chip that pre-filled the prompt (e.g. \'React SaaS app\', \'REST API + Postgres\'). Omit if no chip was used.')
 })
 
 
@@ -818,6 +820,7 @@ export const GetProjectResponse = zod.object({
   "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
+  "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -909,6 +912,7 @@ export const UpdateProjectResponse = zod.object({
   "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
+  "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -982,6 +986,7 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
+  "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -1055,6 +1060,7 @@ export const RestoreProjectResponse = zod.object({
   "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
+  "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -1127,6 +1133,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "runningTestSnapshotId": zod.number().nullish().describe('Task #768. Version ID currently running inside the test container. Used to detect stale containers after a rebuild.'),
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
+  "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))

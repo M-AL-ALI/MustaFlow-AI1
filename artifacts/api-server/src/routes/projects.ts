@@ -179,7 +179,7 @@ router.post("/projects", async (req, res): Promise<void> => {
     return;
   }
 
-  const { initialPrompt, ...projectInput } = parsed.data;
+  const { initialPrompt, chipLabel, ...projectInput } = parsed.data;
 
   // Derive platform from kind
   const platformMap: Record<string, string> = {
@@ -217,6 +217,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       builderMode: "agentic",
       provisioningStatus: "provisioning",
       lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
+      chipLabel: chipLabel ?? null,
     })
     .returning();
 

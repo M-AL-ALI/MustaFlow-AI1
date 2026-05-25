@@ -441,6 +441,11 @@ export interface Project {
      * @nullable
      */
   previewDbUrl?: string | null;
+  /**
+     * Name of the capability chip used when the project was created (e.g. 'React SaaS app'). Null when no chip was used.
+     * @nullable
+     */
+  chipLabel?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -497,6 +502,8 @@ export interface ProjectInput {
   /** Technology stack to use. Defaults to react-vite for web projects. */
   stack?: ProjectInputStack;
   initialPrompt?: string;
+  /** Name of the capability chip that pre-filled the prompt (e.g. 'React SaaS app', 'REST API + Postgres'). Omit if no chip was used. */
+  chipLabel?: string;
 }
 
 export type ProjectUpdateStatus = typeof ProjectUpdateStatus[keyof typeof ProjectUpdateStatus];

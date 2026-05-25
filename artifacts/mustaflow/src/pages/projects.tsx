@@ -395,7 +395,14 @@ export default function ProjectsPage() {
                   <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
                     <CardHeader className="pb-2">
                       <div className="flex justify-between items-start gap-2">
-                        <CardTitle className="text-lg leading-tight">{project.name}</CardTitle>
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <CardTitle className="text-lg leading-tight">{project.name}</CardTitle>
+                          {project.chipLabel && (
+                            <span className="text-[10px] font-medium text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-2 py-0.5 w-fit">
+                              {project.chipLabel}
+                            </span>
+                          )}
+                        </div>
                         <Badge
                           variant={project.status === "published" ? "default" : "secondary"}
                           className="shrink-0"

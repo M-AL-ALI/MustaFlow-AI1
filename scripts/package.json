@@ -70,6 +70,7 @@
     "migrate-mobile-deployment-columns": "tsx ./src/migrate-mobile-deployment-columns.ts",
     "migrate-deployment-logs-mobile": "tsx ./src/migrate-deployment-logs-mobile.ts",
     "migrate-token-count": "tsx ./src/migrate-token-count.ts",
+    "migrate-chip-label": "tsx ./src/migrate-chip-label.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"

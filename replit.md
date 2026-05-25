@@ -46,6 +46,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/scripts run migrate-testing-approval` — adds `testing_approved_at`, `testing_approved_by`, `migration_status`, `migration_log`, `testing_skipped` to `project_versions` (Task #767; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-preview-db` — adds `preview_db_url`, `preview_db_status` to `projects` (Task #767; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-mobile-deployment-columns` — adds `build_id`, `platform`, `download_url`, `testflight_url` to `deployment_logs` (Task #776; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-chip-label` — adds `chip_label` to `projects` (Task #794; run before deploy)
 
 ## Stack
 

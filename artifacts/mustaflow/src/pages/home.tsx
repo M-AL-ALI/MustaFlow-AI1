@@ -204,6 +204,7 @@ export default function HomePage() {
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | undefined>();
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [activePersona, setActivePersona] = useState(0);
+  const [activeChipLabel, setActiveChipLabel] = useState<string | undefined>();
   const queryClient = useQueryClient();
   const createProject = useCreateProject();
 
@@ -238,6 +239,7 @@ export default function HomePage() {
           description: prompt,
           kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
           initialPrompt: prompt,
+          ...(activeChipLabel ? { chipLabel: activeChipLabel } : {}),
         },
       },
       {
@@ -400,7 +402,10 @@ export default function HomePage() {
                 <button
                   key={chip.name}
                   type="button"
-                  onClick={() => setPrompt(chip.prompt)}
+                  onClick={() => {
+                    setPrompt(chip.prompt);
+                    setActiveChipLabel(chip.name);
+                  }}
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all",
                     prompt === chip.prompt
@@ -423,7 +428,12 @@ export default function HomePage() {
               </div>
               <Input
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={(e) => {
+                  setPrompt(e.target.value);
+                  if (e.target.value !== activeChipLabel && activeChipLabel) {
+                    setActiveChipLabel(undefined);
+                  }
+                }}
                 placeholder="e.g. A REST API with Postgres and auth, or a landing page for my startup..."
                 className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-lg h-14 bg-transparent shadow-none"
                 onKeyDown={(e) => {

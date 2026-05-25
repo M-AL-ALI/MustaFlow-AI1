@@ -176,6 +176,11 @@ export interface Project {
      * @nullable
      */
   previewDbUrl?: string | null;
+  /**
+     * Name of the capability chip used when the project was created (e.g. 'React SaaS app'). Null when no chip was used.
+     * @nullable
+     */
+  chipLabel?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

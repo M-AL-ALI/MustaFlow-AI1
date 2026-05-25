@@ -219,6 +219,10 @@ export const projectsTable = pgTable("projects", {
   // Cleared when preview is stopped or security-invalidated.
   activePreviewSessionId: text("active_preview_session_id"),
   // deletedAt: soft-delete timestamp. Null = active. Non-null = deleted.
+  // chipLabel: name of the capability chip that pre-filled the prompt on the landing page.
+  // E.g. "React SaaS app", "REST API + Postgres", "Mobile app". Null for projects created
+  // without a chip (direct prompt, template, or API). Immutable after creation.
+  chipLabel: text("chip_label"),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

@@ -5018,6 +5018,9 @@ components:
         previewDbUrl:
           type: ["string", "null"]
           description: "Task #767/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext."
+        chipLabel:
+          type: ["string", "null"]
+          description: "Name of the capability chip used when the project was created (e.g. 'React SaaS app'). Null when no chip was used."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -5062,6 +5065,9 @@ components:
           enum: [react-vite, nextjs, node-api, python-flask, python-fastapi, go-gin]
           description: "Technology stack to use. Defaults to react-vite for web projects."
         initialPrompt: { type: string }
+        chipLabel:
+          type: string
+          description: "Name of the capability chip that pre-filled the prompt (e.g. 'React SaaS app', 'REST API + Postgres'). Omit if no chip was used."
 
     ProjectUpdate:
       type: object
