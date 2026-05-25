@@ -26,6 +26,9 @@ import {
   Layers,
   Puzzle,
   Users,
+  Terminal,
+  GitBranch,
+  Key,
   Code2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -69,6 +72,80 @@ const TERTIARY_NAV_ITEMS = [
   { name: "Learn", href: "/learn", icon: GraduationCap },
   { name: "Help Center", href: "/help", icon: HelpCircle },
 ];
+
+function DevelopersNavGroup({ collapsed }: { collapsed?: boolean }) {
+  const [location] = useLocation();
+  const [lastProjectId, setLastProjectId] = useState<string | null>(() =>
+    typeof window !== "undefined" ? localStorage.getItem("mustaflow_last_project_id") : null,
+  );
+
+  useEffect(() => {
+    setLastProjectId(localStorage.getItem("mustaflow_last_project_id"));
+  }, [location]);
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "mustaflow_last_project_id") {
+        setLastProjectId(e.newValue);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const workspaceHref = (tab: string) =>
+    lastProjectId ? `/projects/${lastProjectId}?tab=${tab}` : "/projects";
+
+  const dynamicItems = [
+    { name: "Terminal", href: workspaceHref("terminal"), icon: Terminal, wsTab: "terminal" },
+    { name: "GitHub", href: workspaceHref("git"), icon: GitBranch, wsTab: "git" },
+    { name: "Security", href: workspaceHref("checks"), icon: ShieldCheck, wsTab: "checks" },
+    { name: "API Tokens", href: "/settings?tab=developer", icon: Key, wsTab: null },
+    { name: "Developers Portal", href: "/developers", icon: Code2, wsTab: null },
+  ];
+
+  const currentSearch =
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("tab") : null;
+
+  return (
+    <div className="px-3 py-2">
+      {!collapsed && (
+        <h3 className="mb-2 px-4 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
+          Developers
+        </h3>
+      )}
+      <div className="space-y-1">
+        {dynamicItems.map((item) => {
+          let isActive: boolean;
+          if (item.wsTab && lastProjectId) {
+            const basePath = `/projects/${lastProjectId}`;
+            isActive = location.startsWith(basePath) && currentSearch === item.wsTab;
+          } else if (item.wsTab && !lastProjectId) {
+            isActive = false;
+          } else {
+            const [itemPath] = item.href.split("?");
+            isActive = location === itemPath || (itemPath !== "/" && location.startsWith(itemPath));
+          }
+          return (
+            <Link key={item.name} href={item.href}>
+              <div
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
+                  isActive
+                    ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
+                    : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
+                )}
+              >
+                <item.icon className="h-4 w-4 shrink-0" />
+                {item.name}
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function NavGroup({
   items,
@@ -379,6 +456,7 @@ function SidebarInner({
           <SecurityNavItem />
           <BackgroundJobsPanel />
         </div>
+        {isSignedIn && <DevelopersNavGroup />}
         <AdminNavItem />
       </div>
 

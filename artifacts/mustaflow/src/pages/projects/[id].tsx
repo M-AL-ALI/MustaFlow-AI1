@@ -893,6 +893,12 @@ export default function ProjectWorkspacePage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (projectId && !isNaN(projectId)) {
+      localStorage.setItem("mustaflow_last_project_id", String(projectId));
+    }
+  }, [projectId]);
+
   const [prompt, setPrompt] = useState("");
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [_batchTotalCount, setBatchTotalCount] = useState(0);

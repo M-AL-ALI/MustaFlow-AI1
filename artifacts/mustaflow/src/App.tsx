@@ -565,7 +565,9 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                 </AppLayout>
               </Route>
               <Route path="/developers">
-                <DevelopersPage />
+                <AppLayout>
+                  <DevelopersPage />
+                </AppLayout>
               </Route>
 
               <Route component={NotFound} />
