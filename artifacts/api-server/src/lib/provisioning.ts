@@ -36,6 +36,51 @@ function neonProjectNameFor(projectId: number): string {
 }
 
 /**
+ * Cached Neon `org_id`. Org-scoped Neon API keys require `org_id` in the
+ * project-create body or the request fails with HTTP 400 `org_id is required`.
+ * Personal API keys ignore it. We prefer the explicit `NEON_ORG_ID` env var;
+ * otherwise we auto-detect via /users/me/organizations the first time we need
+ * it. A null cached value (after a resolved lookup) means "personal key, no
+ * org needed" and we won't keep re-checking.
+ */
+let cachedNeonOrgId: string | null | undefined;
+
+async function resolveNeonOrgId(apiKey: string): Promise<string | null> {
+  if (cachedNeonOrgId !== undefined) return cachedNeonOrgId;
+  const envOrgId = process.env.NEON_ORG_ID?.trim();
+  if (envOrgId) {
+    cachedNeonOrgId = envOrgId;
+    return cachedNeonOrgId;
+  }
+  try {
+    const res = await fetch(`${NEON_API_BASE}/users/me/organizations`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (res.status === 403 || res.status === 404) {
+      // Personal API key — endpoint isn't available. Cache "no org needed"
+      // so we don't keep retrying for the lifetime of the process.
+      cachedNeonOrgId = null;
+      return null;
+    }
+    if (!res.ok) {
+      // Transient (429/5xx) or unexpected status — do NOT cache, so a
+      // later call can retry. Returning null here lets the current
+      // create attempt fall through to Neon's own error response, which
+      // surfaces the real cause to the user via provisioningError.
+      logger.warn({ status: res.status }, "Neon org_id lookup returned non-OK status; not caching");
+      return null;
+    }
+    const data = (await res.json()) as { organizations?: Array<{ id: string }> };
+    cachedNeonOrgId = data.organizations?.[0]?.id ?? null;
+    return cachedNeonOrgId;
+  } catch (err) {
+    // Network error — also transient, don't cache.
+    logger.warn({ err }, "Neon org_id auto-detection failed; not caching");
+    return null;
+  }
+}
+
+/**
  * In-process set of project IDs whose provisioning job is currently running.
  * Prevents a duplicate background job from being kicked off if the user clicks
  * "Retry provisioning" twice in a row.
@@ -133,22 +178,32 @@ async function createNeonProject(
       .replace(/[^a-z0-9]/g, "-")
       .slice(0, 32) || `project_${projectId}`;
 
+  // Org-scoped Neon API keys require `org_id` in the body. Personal keys
+  // accept the request without it. We pass it when available either way —
+  // Neon ignores it for personal keys.
+  const orgId = await resolveNeonOrgId(apiKey);
+
   try {
+    const body: { project: Record<string, unknown> } = {
+      project: {
+        name: safeName,
+        pg_version: 16,
+        default_database_name: dbName,
+        default_role_name: "mustaflow",
+        region_id: "aws-us-east-1",
+      },
+    };
+    if (orgId) {
+      body.project.org_id = orgId;
+    }
+
     const res = await fetch(`${NEON_API_BASE}/projects`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        project: {
-          name: safeName,
-          pg_version: 16,
-          default_database_name: dbName,
-          default_role_name: "mustaflow",
-          region_id: "aws-us-east-1",
-        },
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
