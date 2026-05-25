@@ -182,6 +182,7 @@ router.post("/projects/:id/promote", publishLimiter);
 router.post("/projects/:id/deploy", publishLimiter);
 router.post("/projects/:id/duplicate", exportLimiter);
 router.get("/projects/:id/export", exportLimiter);
+router.post("/projects/:id/attachments/upload-url", exportLimiter);
 router.post("/billing/checkout", exportLimiter);
 
 router.use(workspacesRouter);

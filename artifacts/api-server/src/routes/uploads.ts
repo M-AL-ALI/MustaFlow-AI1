@@ -67,6 +67,48 @@ async function extractPdfPreview(buf: Buffer): Promise<string | null> {
   }
 }
 
+// POST /projects/:id/attachments/upload-url — get a signed PUT URL for image attachments
+// Used by the screenshot-to-code flow. Returns { uploadUrl, objectPath } using the
+// existing getObjectEntityUploadURL helper so vision-capable routes can fetch the image
+// back via fetchAttachmentAsDataUri(objectPath).
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB (matches client-side gate)
+const ALLOWED_ATTACHMENT_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+router.post(
+  "/projects/:id/attachments/upload-url",
+  requireProjectOwnership,
+  async (req: Request, res: Response) => {
+    const body = req.body as { contentType?: string; sizeBytes?: number } | undefined;
+    const contentType = body?.contentType ?? "";
+
+    if (!ALLOWED_ATTACHMENT_TYPES.has(contentType)) {
+      res.status(400).json({ error: "Only PNG, JPEG, and WebP image attachments are supported" });
+      return;
+    }
+
+    // Server-side size gate: reject if the declared size already exceeds the cap.
+    // The client may optionally omit sizeBytes (e.g. after canvas resize where the
+    // final size is unknown); in that case we skip the pre-check and rely on the
+    // object-storage layer to enforce quotas.
+    const sizeBytes = typeof body?.sizeBytes === "number" ? body.sizeBytes : null;
+    if (sizeBytes !== null && sizeBytes > MAX_ATTACHMENT_BYTES) {
+      res.status(413).json({
+        error: `Image too large (${(sizeBytes / 1024 / 1024).toFixed(1)} MB). Maximum is ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB.`,
+      });
+      return;
+    }
+
+    try {
+      const uploadUrl = await storage.getObjectEntityUploadURL();
+      const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
+      res.json({ uploadUrl, objectPath });
+    } catch (err) {
+      req.log.error({ err }, "attachments: failed to create signed URL");
+      res.status(500).json({ error: "Failed to create upload URL" });
+    }
+  },
+);
+
 // POST /projects/:id/uploads/request-url — get a presigned PUT URL
 router.post(
   "/projects/:id/uploads/request-url",

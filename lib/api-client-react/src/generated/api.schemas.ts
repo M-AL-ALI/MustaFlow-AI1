@@ -3381,6 +3381,15 @@ export type DeleteProjectUpload200 = {
   deleted?: boolean;
 };
 
+export type RequestAttachmentUploadUrlBody = {
+  contentType: string;
+};
+
+export type RequestAttachmentUploadUrl200 = {
+  uploadUrl: string;
+  objectPath: string;
+};
+
 export type ListSecurityFindingsParams = {
 status?: ListSecurityFindingsStatus;
 severity?: ListSecurityFindingsSeverity;

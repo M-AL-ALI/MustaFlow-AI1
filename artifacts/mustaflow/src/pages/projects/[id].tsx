@@ -1658,7 +1658,9 @@ export default function ProjectWorkspacePage() {
         }>;
       },
     ) => {
-      if (!content.trim()) return;
+      // Allow image-only sends — when no text prompt is given the server injects a default.
+      const hasImageAttachments = (opts?.attachments ?? []).length > 0;
+      if (!content.trim() && !hasImageAttachments) return;
       setActiveTaskId(null);
       chatAtBottomRef.current = true;
       setPendingBuildStartedAt(new Date());
@@ -2680,6 +2682,39 @@ export default function ProjectWorkspacePage() {
                                         : "bg-muted text-foreground rounded-bl-sm border border-border",
                                   )}
                                 >
+                                  {/* Image attachment thumbnails for user messages */}
+                                  {msg.role === "user" &&
+                                    (() => {
+                                      const imgAtts = (
+                                        msg.attachments as
+                                          | Array<{
+                                              kind: string;
+                                              url: string;
+                                              alt?: string;
+                                            }>
+                                          | null
+                                          | undefined
+                                      )?.filter((a) => a.kind === "image");
+                                      if (!imgAtts?.length) return null;
+                                      return (
+                                        <div className="flex flex-wrap gap-1.5 mb-2">
+                                          {imgAtts.map((a, i) => {
+                                            const src = a.url.startsWith("/objects/")
+                                              ? `/api/storage${a.url}`
+                                              : a.url;
+                                            return (
+                                              <img
+                                                key={i}
+                                                src={src}
+                                                alt={a.alt ?? "attachment"}
+                                                className="block rounded-md object-cover border border-primary-foreground/20"
+                                                style={{ maxWidth: 200, maxHeight: 150 }}
+                                              />
+                                            );
+                                          })}
+                                        </div>
+                                      );
+                                    })()}
                                   {msg.role === "assistant" && !isReport && !isError ? (
                                     <StreamingText
                                       content={msg.content}
@@ -3085,15 +3120,22 @@ export default function ProjectWorkspacePage() {
                             generated?: boolean;
                           } => a.kind === "image",
                         );
+                        const hasImages = (imageOnly?.length ?? 0) > 0;
                         // Auto-activate plan mode when the client detected a plan intent
                         // so the user never has to manually toggle it.
                         if (intent === "plan") setPlanMode(true);
                         send(content, {
                           ...(imageOnly && imageOnly.length > 0 ? { attachments: imageOnly } : {}),
-                          ...(intent === "plan"
-                            ? { planMode: true, agentIntent: "plan" as const }
-                            : {}),
-                          ...(intent === "converse" ? { agentIntent: "converse" as const } : {}),
+                          // When images are attached, force build intent so the regular messages
+                          // endpoint is used (vision model support). Streaming does not handle
+                          // image attachments.
+                          ...(hasImages
+                            ? { agentIntent: "build" as const }
+                            : intent === "plan"
+                              ? { planMode: true, agentIntent: "plan" as const }
+                              : intent === "converse"
+                                ? { agentIntent: "converse" as const }
+                                : {}),
                         });
                       }}
                       onBatchStarted={handleBatchStarted}

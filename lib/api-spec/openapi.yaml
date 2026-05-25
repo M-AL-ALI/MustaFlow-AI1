@@ -168,6 +168,39 @@ paths:
                 properties:
                   deleted: { type: boolean }
 
+  /projects/{id}/attachments/upload-url:
+    post:
+      operationId: requestAttachmentUploadUrl
+      tags: [storage]
+      summary: Get a signed PUT URL for uploading a screenshot or image attachment (screenshot-to-code).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contentType]
+              properties:
+                contentType: { type: string }
+      responses:
+        "200":
+          description: Signed upload URL and object path
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [uploadUrl, objectPath]
+                properties:
+                  uploadUrl: { type: string }
+                  objectPath: { type: string }
+        "400":
+          description: Bad request (non-image content type)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   /storage/uploads/request-url:
     post:
       operationId: requestUploadUrl

@@ -90,6 +90,66 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB hard limit
+const MAX_IMAGE_SIDE = 1500; // px — downscale if either dimension exceeds this
+const MAX_IMAGE_BYTES_BEFORE_RESIZE = 1 * 1024 * 1024; // 1 MB — also resize even if dimensions ok
+
+/**
+ * Downscale an image File using a hidden canvas element if it exceeds the
+ * MAX_IMAGE_SIDE or MAX_IMAGE_BYTES_BEFORE_RESIZE thresholds.  Returns the
+ * original File unchanged when no resizing is needed.
+ */
+async function resizeImageForVision(file: File): Promise<Blob> {
+  // Fast path: small image that fits within both limits — no canvas needed.
+  if (file.size <= MAX_IMAGE_BYTES_BEFORE_RESIZE) {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const fits = bitmap.width <= MAX_IMAGE_SIDE && bitmap.height <= MAX_IMAGE_SIDE;
+      bitmap.close();
+      if (fits) return file;
+    } catch {
+      // createImageBitmap unsupported — fall through to canvas path
+    }
+  }
+
+  return new Promise<Blob>((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(MAX_IMAGE_SIDE / img.width, MAX_IMAGE_SIDE / img.height, 1);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("Canvas 2D context unavailable"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(objectUrl);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error("Canvas toBlob returned null"));
+            return;
+          }
+          resolve(blob);
+        },
+        "image/jpeg",
+        0.85,
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Failed to load image for resizing"));
+    };
+    img.src = objectUrl;
+  });
+}
+
 export type ComposerAttachment =
   | {
       kind: "image";
@@ -204,6 +264,7 @@ export function QueueComposer({
   const [rows, setRows] = useState<QueueRow[]>([{ id: crypto.randomUUID(), text: "" }]);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [uploadingCount, setUploadingCount] = useState(0);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const [imagePrompt, setImagePrompt] = useState("");
   const [imagePanelOpen, setImagePanelOpen] = useState(false);
   const [generatingImage, setGeneratingImage] = useState(false);
@@ -213,30 +274,65 @@ export function QueueComposer({
 
   const uploadFile = useCallback(
     async (file: File): Promise<ComposerAttachment | null> => {
-      setUploadingCount((c) => c + 1);
-      try {
-        // Images keep the legacy /api/storage/uploads flow so the existing
-        // image attachment rendering keeps working.
-        if (file.type.startsWith("image/")) {
-          const meta = await fetch("/api/storage/uploads/request-url", {
+      // Image path — screenshot-to-code flow with client-side resizing.
+      if (file.type.startsWith("image/")) {
+        // Validate MIME type (PNG / JPG / WebP only)
+        if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+          setAttachError("Only PNG, JPG, and WebP images are supported.");
+          return null;
+        }
+        // Validate raw size before resizing (5 MB cap on original)
+        if (file.size > MAX_IMAGE_BYTES) {
+          setAttachError(
+            `Image too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB.`,
+          );
+          return null;
+        }
+        setAttachError(null);
+        setUploadingCount((c) => c + 1);
+        try {
+          // Downscale to ≤ 1500 px on either side if needed.
+          const blob = await resizeImageForVision(file);
+          const contentType = blob.type || file.type;
+
+          // Get a signed PUT URL from the project-scoped endpoint.
+          const meta = await fetch(`/api/projects/${projectId}/attachments/upload-url`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "include",
-            body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }),
+            body: JSON.stringify({ contentType, sizeBytes: blob.size }),
           });
-          if (!meta.ok) throw new Error("Failed to request upload URL");
-          const { uploadURL, objectPath } = (await meta.json()) as {
-            uploadURL: string;
+          if (!meta.ok) {
+            const err = (await meta.json().catch(() => ({}))) as { error?: string };
+            throw new Error(err.error ?? "Failed to request upload URL");
+          }
+          const { uploadUrl, objectPath } = (await meta.json()) as {
+            uploadUrl: string;
             objectPath: string;
           };
-          const put = await fetch(uploadURL, {
+
+          // PUT the (possibly resized) blob directly to the signed URL.
+          const put = await fetch(uploadUrl, {
             method: "PUT",
-            headers: { "Content-Type": file.type },
-            body: file,
+            headers: { "Content-Type": contentType },
+            body: blob,
           });
-          if (!put.ok) throw new Error("Upload failed");
+          if (!put.ok) throw new Error("Image upload failed");
+
           return { kind: "image", url: objectPath, alt: file.name };
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error("Image upload failed:", err);
+          setAttachError(err instanceof Error ? err.message : "Image upload failed");
+          return null;
+        } finally {
+          setUploadingCount((c) => Math.max(0, c - 1));
         }
+      }
+
+      setUploadingCount((c) => c + 1);
+      try {
+        // ── Non-image files handled below (original flow kept intact) ──────
 
         // Non-image files (CSV / PDF / TXT / JSON / etc.) → project-scoped
         // uploads (Task #540). Two-step: request presigned URL, PUT, then
@@ -743,7 +839,9 @@ export function QueueComposer({
 
   const handleSend = useCallback(async () => {
     const messages = rows.map((r) => r.text.trim()).filter(Boolean);
-    if (messages.length === 0) return;
+    // Allow image-only sends (no text required when a screenshot is attached).
+    const hasImageAttachment = attachments.some((a) => a.kind === "image");
+    if (messages.length === 0 && !hasImageAttachment) return;
     // Stop voice dictation before sending so late callbacks can't mutate the cleared composer.
     if (isListening || recognitionRef.current) {
       stopVoiceDictation();
@@ -778,8 +876,9 @@ export function QueueComposer({
       return;
     }
 
-    if (messages.length === 1) {
-      const text = messages[0]!;
+    if (messages.length <= 1 && (messages.length === 1 || hasImageAttachment)) {
+      // Image-only send: text is empty string; server injects the default screenshot prompt.
+      const text = messages[0] ?? "";
       const pending = attachments;
       setRows([{ id: crypto.randomUUID(), text: "" }]);
       setAttachments([]);
@@ -882,7 +981,8 @@ export function QueueComposer({
   }, []);
 
   const isBusy = disabled || isSubmitting;
-  const canSend = rows.some((r) => r.text.trim().length > 0) && !isBusy;
+  const hasImageAttached = attachments.some((a) => a.kind === "image");
+  const canSend = (rows.some((r) => r.text.trim().length > 0) || hasImageAttached) && !isBusy;
   const [fileDragActive, setFileDragActive] = useState(false);
   const fileDragDepthRef = useRef(0);
 
@@ -1015,6 +1115,23 @@ export function QueueComposer({
               <Plus className="h-3 w-3" />
               Add task to queue
             </button>
+          )}
+
+          {attachError && (
+            <div
+              className="mx-3 mt-1 mb-0.5 flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[10px] bg-destructive/10 text-destructive border border-destructive/20"
+              role="alert"
+            >
+              <span>{attachError}</span>
+              <button
+                type="button"
+                onClick={() => setAttachError(null)}
+                className="text-destructive/70 hover:text-destructive"
+                aria-label="Dismiss"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
           )}
 
           {(isListening || voiceError) && (

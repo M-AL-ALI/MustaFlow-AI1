@@ -209,6 +209,8 @@ import type {
   RenewPurchasedDomainBody,
   ReorderBlocksResponse,
   ReorderFileBlocksBody,
+  RequestAttachmentUploadUrl200,
+  RequestAttachmentUploadUrlBody,
   RequestProjectUploadUrl200,
   RequestProjectUploadUrlBody,
   RerunTestsResult,
@@ -650,6 +652,78 @@ export const useDeleteProjectUpload = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteProjectUploadMutationOptions(options));
+    }
+
+export const getRequestAttachmentUploadUrlUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/attachments/upload-url`
+}
+
+/**
+ * @summary Get a signed PUT URL for uploading a screenshot or image attachment (screenshot-to-code).
+ */
+export const requestAttachmentUploadUrl = async (id: number,
+    requestAttachmentUploadUrlBody: RequestAttachmentUploadUrlBody, options?: RequestInit): Promise<RequestAttachmentUploadUrl200> => {
+
+  return customFetch<RequestAttachmentUploadUrl200>(getRequestAttachmentUploadUrlUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      requestAttachmentUploadUrlBody,)
+  }
+);}
+
+
+
+
+export const getRequestAttachmentUploadUrlMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestAttachmentUploadUrl>>, TError,{id: number;data: BodyType<RequestAttachmentUploadUrlBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestAttachmentUploadUrl>>, TError,{id: number;data: BodyType<RequestAttachmentUploadUrlBody>}, TContext> => {
+
+const mutationKey = ['requestAttachmentUploadUrl'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestAttachmentUploadUrl>>, {id: number;data: BodyType<RequestAttachmentUploadUrlBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  requestAttachmentUploadUrl(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestAttachmentUploadUrlMutationResult = NonNullable<Awaited<ReturnType<typeof requestAttachmentUploadUrl>>>
+    export type RequestAttachmentUploadUrlMutationBody = BodyType<RequestAttachmentUploadUrlBody>
+    export type RequestAttachmentUploadUrlMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Get a signed PUT URL for uploading a screenshot or image attachment (screenshot-to-code).
+ */
+export const useRequestAttachmentUploadUrl = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestAttachmentUploadUrl>>, TError,{id: number;data: BodyType<RequestAttachmentUploadUrlBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof requestAttachmentUploadUrl>>,
+        TError,
+        {id: number;data: BodyType<RequestAttachmentUploadUrlBody>},
+        TContext
+      > => {
+      return useMutation(getRequestAttachmentUploadUrlMutationOptions(options));
     }
 
 export const getRequestUploadUrlUrl = () => {

@@ -84,6 +84,23 @@ export const DeleteProjectUploadResponse = zod.object({
 
 
 /**
+ * @summary Get a signed PUT URL for uploading a screenshot or image attachment (screenshot-to-code).
+ */
+export const RequestAttachmentUploadUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RequestAttachmentUploadUrlBody = zod.object({
+  "contentType": zod.string()
+})
+
+export const RequestAttachmentUploadUrlResponse = zod.object({
+  "uploadUrl": zod.string(),
+  "objectPath": zod.string()
+})
+
+
+/**
  * @summary Request a presigned URL for direct file upload to GCS.
  */
 

@@ -85,18 +85,26 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   }
 
   const {
-    content,
     agentMode,
     planMode,
     agentIdentity: explicitAgentIdentity,
     agentIntent: explicitAgentIntent,
     attachments: rawAttachments,
   } = parsed.data;
+  let { content } = parsed.data;
   const mode = agentMode as AgentMode;
   const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
   const imageAttachments = attachments.filter(
     (a) => a.kind === "image" && typeof a.url === "string",
   );
+
+  // Screenshot-to-code: if an image is attached with no meaningful text prompt,
+  // inject a sensible default so the build pipeline knows what to do.
+  const SCREENSHOT_DEFAULT_PROMPT =
+    "Replicate this UI as a React + Tailwind component, matching the layout, colours, spacing, and typography exactly.";
+  if (imageAttachments.length > 0 && content.trim().length < 10) {
+    content = SCREENSHOT_DEFAULT_PROMPT + (content.trim() ? " " + content.trim() : "");
+  }
   // Foreground requests that were queued by aiBuilderLimiter physically wait
   // in-line (HTTP connection held open) until a slot frees, then run here
   // synchronously. Only explicit background=true from the client triggers
@@ -148,16 +156,22 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     .slice(-8);
 
   // Intent detection — resolve the routing intent for this message.
-  // Priority: explicit agentIntent override > planMode flag > auto-classifier.
+  // Priority: image attachments (always build) > explicit agentIntent override > planMode > classifier.
   let resolvedIntent: "converse" | "plan" | "build" = "build";
   let intentConfidence = 1.0;
 
-  if (
+  if (imageAttachments.length > 0) {
+    // Screenshot-to-code: image attachments unconditionally route to build/refine —
+    // skip classifier AND ignore any explicit intent/planMode from the client so the
+    // vision model always runs (plan/converse don't support image inputs).
+    resolvedIntent = "build";
+    intentConfidence = 1.0;
+  } else if (
     explicitAgentIntent === "converse" ||
     explicitAgentIntent === "plan" ||
     explicitAgentIntent === "build"
   ) {
-    // Explicit client override takes highest priority — always honor it,
+    // Explicit client override takes second priority — always honor it,
     // even when the Plan Mode toggle is on (e.g. "Apply to app" must build).
     resolvedIntent = explicitAgentIntent;
   } else if (planMode) {
