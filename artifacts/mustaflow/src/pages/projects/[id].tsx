@@ -939,6 +939,9 @@ export default function ProjectWorkspacePage() {
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [liveCodeBuffer, setLiveCodeBuffer] = useState("");
   const taskEventSourceRef = useRef<EventSource | null>(null);
+  // Holds the latest pendingFeedTaskId so handleStopStream can cancel it even
+  // though that value is computed further down the component body.
+  const pendingFeedTaskIdRef = useRef<number | null>(null);
 
   // On initial load, if there is already an in-flight task (e.g. after a browser
   // refresh while a build is running), surface it in the AgentThinkingBubble.
@@ -1946,11 +1949,12 @@ export default function ProjectWorkspacePage() {
       taskEventSourceRef.current = null;
     }
     setLiveCodeBuffer("");
-    // Task #743: also cancel the server-side task so the agent loop unwinds
-    // cleanly (event stream emits "cancelled" and any in-flight tool call
-    // gets signalled via AbortSignal).
-    if (activeTaskId != null) {
-      cancelTask.mutate({ id: projectId, taskId: activeTaskId });
+    // Also cancel the server-side task so the agent loop unwinds cleanly.
+    // During sendMessage.isPending, activeTaskId is null but pendingFeedTaskIdRef
+    // may already hold the in-flight task — cancel whichever is available.
+    const taskToCancel = activeTaskId ?? pendingFeedTaskIdRef.current;
+    if (taskToCancel != null) {
+      cancelTask.mutate({ id: projectId, taskId: taskToCancel });
     }
     setIsStreaming(false);
     setStreamingText("");
@@ -2150,6 +2154,8 @@ export default function ProjectWorkspacePage() {
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.id ??
       null)
     : null;
+  // Keep the ref in sync so handleStopStream (defined earlier) can read it.
+  pendingFeedTaskIdRef.current = pendingFeedTaskId;
 
   const backgroundTasks = useMemo(
     () =>
@@ -3122,6 +3128,14 @@ export default function ProjectWorkspacePage() {
                                   ? "Thinking through the plan…"
                                   : "MustaFlow is working…"}
                               </span>
+                              <button
+                                onClick={handleStopStream}
+                                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+                                title="Cancel build"
+                              >
+                                <Square className="w-2.5 h-2.5 fill-current" />
+                                Cancel
+                              </button>
                             </div>
                           </div>
                         )

@@ -981,7 +981,7 @@ export function QueueComposer({
         const res = await fetch(`/api/projects/${projectId}/queue`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: variantMessages, agentMode, planMode }),
+          body: JSON.stringify({ messages: variantMessages, agentMode, planMode, agentIdentity: agentType }),
           credentials: "include",
         });
         if (!res.ok) {
@@ -1033,7 +1033,7 @@ export function QueueComposer({
       const res = await fetch(`/api/projects/${projectId}/queue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages, agentMode, planMode }),
+        body: JSON.stringify({ messages, agentMode, planMode, agentIdentity: agentType }),
         credentials: "include",
       });
       if (!res.ok) {
@@ -1645,7 +1645,7 @@ export function QueueComposer({
                   </div>
                 )}
               </div>
-              {activeTaskId != null ? (
+              {activeTaskId != null || (disabled && !isSubmitting) ? (
                 <button
                   onClick={onStopBuild}
                   title="Stop the current build"
