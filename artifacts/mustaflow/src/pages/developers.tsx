@@ -26,6 +26,8 @@ import {
   History,
   GitBranch,
   Webhook,
+  Copy,
+  Check,
 } from "lucide-react";
 
 const SESSION_TOKEN_KEY = "mf_dev_portal_token";
@@ -112,6 +114,31 @@ function TryItPanel({ method, path, token, onTokenChange, hasAuth }: TryItPanelP
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copiedCurl, setCopiedCurl] = useState(false);
+
+  const buildCurlCommand = useCallback(() => {
+    const resolvedPath = buildUrl(path, paramValues);
+    const absoluteUrl = `${window.location.origin}${resolvedPath}`;
+    const parts: string[] = [`curl -X ${method}`];
+    parts.push(`  -H "Content-Type: application/json"`);
+    if (token.trim()) {
+      parts.push(`  -H "Authorization: Bearer ${token.trim()}"`);
+    }
+    if (needsBody && body.trim()) {
+      const escaped = body.trim().replace(/'/g, "'\\''");
+      parts.push(`  -d '${escaped}'`);
+    }
+    parts.push(`  "${absoluteUrl}"`);
+    return parts.join(" \\\n");
+  }, [method, path, paramValues, token, body, needsBody]);
+
+  const handleCopyCurl = useCallback(() => {
+    const cmd = buildCurlCommand();
+    void navigator.clipboard.writeText(cmd).then(() => {
+      setCopiedCurl(true);
+      setTimeout(() => setCopiedCurl(false), 2000);
+    });
+  }, [buildCurlCommand]);
 
   const handleSend = useCallback(async () => {
     setLoading(true);
@@ -233,25 +260,45 @@ function TryItPanel({ method, path, token, onTokenChange, hasAuth }: TryItPanelP
         </span>
       </div>
 
-      {/* Send button */}
-      <Button
-        size="sm"
-        onClick={() => void handleSend()}
-        disabled={loading}
-        className="w-full sm:w-auto"
-      >
-        {loading ? (
-          <>
-            <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-            Sending…
-          </>
-        ) : (
-          <>
-            <Play className="h-3.5 w-3.5 mr-1.5" />
-            Send request
-          </>
-        )}
-      </Button>
+      {/* Actions */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          onClick={() => void handleSend()}
+          disabled={loading}
+          className="w-full sm:w-auto"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Sending…
+            </>
+          ) : (
+            <>
+              <Play className="h-3.5 w-3.5 mr-1.5" />
+              Send request
+            </>
+          )}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleCopyCurl}
+          className="w-full sm:w-auto"
+        >
+          {copiedCurl ? (
+            <>
+              <Check className="h-3.5 w-3.5 mr-1.5 text-emerald-400" />
+              Copied!
+            </>
+          ) : (
+            <>
+              <Copy className="h-3.5 w-3.5 mr-1.5" />
+              Copy as curl
+            </>
+          )}
+        </Button>
+      </div>
 
       {/* Error */}
       {error && (
