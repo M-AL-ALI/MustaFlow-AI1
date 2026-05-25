@@ -31,10 +31,10 @@
 import { Router, type IRouter } from "express";
 import type { Request, Response, NextFunction } from "express";
 import { and, asc, eq } from "drizzle-orm";
-import { randomBytes, createHash } from "crypto";
+import { randomBytes } from "crypto";
 import { promises as dns } from "dns";
 import { db, projectDomainsTable, personalAccessTokensTable } from "@workspace/db";
-import { patAuthMiddleware, type PATRequest } from "../../lib/pat-auth";
+import { patAuthMiddleware, generateRawToken, hashToken, type PATRequest } from "../../lib/pat-auth";
 import { publishDomainEvent } from "../../lib/event-bus";
 import { dispatchWebhookEvent } from "../../lib/webhook-dispatcher";
 import { getAuth } from "@clerk/express";
@@ -50,13 +50,6 @@ const router: IRouter = Router();
 const TOKEN_PREFIX = "mfp_";
 const CNAME_TARGET = process.env.PLATFORM_CNAME_TARGET ?? "hosted.mustaflow.app";
 
-function hashToken(raw: string): string {
-  return createHash("sha256").update(raw).digest("hex");
-}
-
-function generateRawToken(): string {
-  return `${TOKEN_PREFIX}${randomBytes(32).toString("hex")}`;
-}
 
 function normaliseHostname(raw: string): string | null {
   const cleaned = raw
@@ -332,6 +325,7 @@ router.get("/tokens", async (req, res): Promise<void> => {
       projectId: personalAccessTokensTable.projectId,
       lastUsedAt: personalAccessTokensTable.lastUsedAt,
       expiresAt: personalAccessTokensTable.expiresAt,
+      rotatedAt: personalAccessTokensTable.rotatedAt,
       createdAt: personalAccessTokensTable.createdAt,
     })
     .from(personalAccessTokensTable)
