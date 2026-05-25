@@ -7,7 +7,7 @@ import {
   useCancelTask,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useUser } from "@clerk/react";
+import { useClerkUser } from "@/lib/clerk-safe";
 import { cn } from "@/lib/utils";
 
 const ACTIVE = new Set(["queued", "planning", "building", "needs_review"]);
@@ -54,7 +54,7 @@ function elapsedLabel(startedAt: string | null, createdAt: string): string {
 }
 
 export function BackgroundJobsPanel() {
-  const { isSignedIn } = useUser();
+  const { isSignedIn } = useClerkUser();
   const [open, setOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const queryClient = useQueryClient();

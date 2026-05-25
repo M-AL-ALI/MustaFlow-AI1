@@ -4707,7 +4707,10 @@ export function PublishingTab({
               <>
                 {/* Version approval gate — agentic projects only (Task #767) */}
                 {isAgentic && versions.length > 0 && (
-                  <div className="border border-border rounded-xl bg-card overflow-hidden">
+                  <div
+                    data-testid="version-snapshots-panel"
+                    className="border border-border rounded-xl bg-card overflow-hidden"
+                  >
                     <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                       <div>
                         <h3 className="font-semibold text-sm">Version Snapshots</h3>
@@ -4756,6 +4759,7 @@ export function PublishingTab({
                             </div>
                             {!isApproved && (
                               <button
+                                data-testid="approve-version-btn"
                                 onClick={() => {
                                   approveVersionMutation.mutate(
                                     { id: projectId, versionId: v.id },
@@ -4769,7 +4773,10 @@ export function PublishingTab({
                               </button>
                             )}
                             {isApproved && (
-                              <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 font-semibold">
+                              <span
+                                data-testid="version-approved-badge"
+                                className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 font-semibold"
+                              >
                                 Approved
                               </span>
                             )}
@@ -4782,7 +4789,10 @@ export function PublishingTab({
 
                 {/* Agentic publish gate notice */}
                 {isAgentic && !latestApprovedVersion && versions.length > 0 && (
-                  <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 flex items-start gap-2">
+                  <div
+                    data-testid="testing-approval-warning"
+                    className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 flex items-start gap-2"
+                  >
                     <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
                     <p className="text-xs text-yellow-700 dark:text-yellow-400">
                       Approve at least one version snapshot above before publishing to production.

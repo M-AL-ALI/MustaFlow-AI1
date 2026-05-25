@@ -1,6 +1,6 @@
 import { Users, Wifi, WifiOff } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import { useUser } from "@clerk/react";
+import { useClerkUser } from "@/lib/clerk-safe";
 import { useMultiplayerPresence } from "@/hooks/use-multiplayer-presence";
 
 interface CollaborationCardProps {
@@ -16,7 +16,7 @@ export function CollaborationCard({
   isPending,
   onToggle,
 }: CollaborationCardProps) {
-  const { user } = useUser();
+  const { user } = useClerkUser();
   const displayName =
     user?.fullName || user?.firstName || user?.username || user?.id?.slice(0, 8) || null;
   const presence = useMultiplayerPresence(projectId, enabled, displayName);

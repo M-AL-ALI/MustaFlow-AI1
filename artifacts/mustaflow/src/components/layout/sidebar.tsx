@@ -28,7 +28,7 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useUser, useClerk } from "@clerk/react";
+import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
 import {
   useGetSecurityBadgeCount,
   getGetSecurityBadgeCountQueryKey,
@@ -113,7 +113,7 @@ function NavGroup({
 const LOW_CREDITS_THRESHOLD = 10;
 
 function CreditsWidget() {
-  const { isSignedIn } = useUser();
+  const { isSignedIn } = useClerkUser();
   const [balance, setBalance] = useState<number | null>(null);
 
   const fetchBalance = useCallback(async () => {
@@ -177,7 +177,7 @@ function CreditsWidget() {
 
 function SecurityNavItem() {
   const [location] = useLocation();
-  const { isSignedIn } = useUser();
+  const { isSignedIn } = useClerkUser();
   const { data } = useGetSecurityBadgeCount({
     query: {
       queryKey: getGetSecurityBadgeCountQueryKey(),
@@ -214,7 +214,7 @@ function SecurityNavItem() {
 
 function AdminNavItem() {
   const [isAdmin, setIsAdmin] = useState(false);
-  const { isLoaded, isSignedIn } = useUser();
+  const { isLoaded, isSignedIn } = useClerkUser();
   const [location] = useLocation();
 
   useEffect(() => {
@@ -251,8 +251,8 @@ function AdminNavItem() {
 }
 
 function UserSection() {
-  const { user, isLoaded } = useUser();
-  const { signOut } = useClerk();
+  const { user, isLoaded } = useClerkUser();
+  const { signOut } = useClerkActions();
   const [menuOpen, setMenuOpen] = useState(false);
 
   if (!isLoaded || !user) return null;
@@ -322,7 +322,7 @@ function SidebarInner({
   setCreateOpen: (v: boolean) => void;
   onClose: () => void;
 }) {
-  const { isSignedIn } = useUser();
+  const { isSignedIn } = useClerkUser();
   const [currentOrgId, setCurrentOrgId] = useState<number | null>(null);
   return (
     <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col overflow-y-auto">

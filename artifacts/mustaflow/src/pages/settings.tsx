@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useUser, useClerk } from "@clerk/react";
+import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
 import {
   Sun,
   Moon,
@@ -134,8 +134,8 @@ export default function SettingsPage() {
 }
 
 function AccountTab() {
-  const { user, isLoaded } = useUser();
-  const { openUserProfile } = useClerk();
+  const { user, isLoaded } = useClerkUser();
+  const { openUserProfile } = useClerkActions();
 
   const [displayName, setDisplayName] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);

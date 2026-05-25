@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/reac
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth } from "@clerk/react";
+import { ClerkUserProvider, ClerkActionsProvider } from "@/lib/clerk-safe";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
 import { useGetAdminMe, setAuthTokenGetter } from "@workspace/api-client-react";
@@ -331,37 +332,26 @@ function HomeRoute() {
   );
 }
 
-function ClerkProviderWithRoutes() {
-  const [, setLocation] = useLocation();
+// Dev-only: returns true when Playwright has injected the E2E test user.
+// import.meta.env.DEV is statically replaced with false in production bundles
+// so this function is dead-code-eliminated at build time.
+function isE2ETestMode(): boolean {
+  if (!import.meta.env.DEV) return false;
+  const win = window as unknown as { __E2E_TEST_USER__?: string };
+  return typeof win.__E2E_TEST_USER__ === "string" && win.__E2E_TEST_USER__.length > 0;
+}
 
+// Inner app shell: routes + providers, Clerk-agnostic.
+// Clerk-dependent components (ClerkQueryClientCacheInvalidator, ClerkTokenProvider,
+// Show when="signed-in") are skipped when isE2E=true to avoid crashes when
+// ClerkProvider is not in the tree (E2E test context).
+function AppShellBody({ isE2E }: { isE2E: boolean }) {
   return (
-    <ClerkProvider
-      publishableKey={clerkPubKey}
-      proxyUrl={clerkProxyUrl}
-      appearance={clerkAppearance}
-      signInUrl={`${basePath}/sign-in`}
-      signUpUrl={`${basePath}/sign-up`}
-      localization={{
-        signIn: {
-          start: {
-            title: "Welcome back",
-            subtitle: "Sign in to your MustaFlow AI workspace",
-          },
-        },
-        signUp: {
-          start: {
-            title: "Create your account",
-            subtitle: "Start building AI-powered apps",
-          },
-        },
-      }}
-      routerPush={(to) => setLocation(stripBase(to))}
-      routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
-    >
-      <QueryClientProvider client={queryClient}>
-        <ThemeApplier />
-        <ClerkQueryClientCacheInvalidator />
-        <ClerkTokenProvider />
+    <QueryClientProvider client={queryClient}>
+      <ThemeApplier />
+      {!isE2E && <ClerkQueryClientCacheInvalidator />}
+      {!isE2E && <ClerkTokenProvider />}
+      <MaybeClerkContextProviders isE2E={isE2E}>
         <WorkspaceProvider>
           <TooltipProvider>
             <Switch>
@@ -576,14 +566,72 @@ function ClerkProviderWithRoutes() {
 
               <Route component={NotFound} />
             </Switch>
-            <Show when="signed-in">
-              <OnboardingTour />
-            </Show>
+            {!isE2E && (
+              <Show when="signed-in">
+                <OnboardingTour />
+              </Show>
+            )}
             <OfflineIndicator />
             <Toaster />
           </TooltipProvider>
         </WorkspaceProvider>
-      </QueryClientProvider>
+      </MaybeClerkContextProviders>
+    </QueryClientProvider>
+  );
+}
+
+// Conditionally wraps children with ClerkUserProvider + ClerkActionsProvider.
+// In E2E mode, neither provider is mounted — components fall back to context
+// defaults (mock user, no-op actions).  In normal mode, both providers are
+// mounted inside ClerkProvider so they can safely call Clerk hooks.
+function MaybeClerkContextProviders({
+  isE2E,
+  children,
+}: {
+  isE2E: boolean;
+  children: React.ReactNode;
+}) {
+  if (isE2E) return <>{children}</>;
+  return (
+    <ClerkUserProvider>
+      <ClerkActionsProvider>{children}</ClerkActionsProvider>
+    </ClerkUserProvider>
+  );
+}
+
+function ClerkProviderWithRoutes() {
+  const [, setLocation] = useLocation();
+  const e2e = isE2ETestMode();
+
+  if (e2e) {
+    return <AppShellBody isE2E />;
+  }
+
+  return (
+    <ClerkProvider
+      publishableKey={clerkPubKey}
+      proxyUrl={clerkProxyUrl}
+      appearance={clerkAppearance}
+      signInUrl={`${basePath}/sign-in`}
+      signUpUrl={`${basePath}/sign-up`}
+      localization={{
+        signIn: {
+          start: {
+            title: "Welcome back",
+            subtitle: "Sign in to your MustaFlow AI workspace",
+          },
+        },
+        signUp: {
+          start: {
+            title: "Create your account",
+            subtitle: "Start building AI-powered apps",
+          },
+        },
+      }}
+      routerPush={(to) => setLocation(stripBase(to))}
+      routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
+    >
+      <AppShellBody isE2E={false} />
     </ClerkProvider>
   );
 }

@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { useUser } from "@clerk/react";
+import { useClerkUser } from "@/lib/clerk-safe";
 
 interface Comment {
   id: number;
@@ -279,7 +279,7 @@ function CommentThread({
 }
 
 export function CommentsPanel({ projectId, filePath }: CommentsPanelProps) {
-  const { user } = useUser();
+  const { user } = useClerkUser();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(false);
   const [newBody, setNewBody] = useState("");
