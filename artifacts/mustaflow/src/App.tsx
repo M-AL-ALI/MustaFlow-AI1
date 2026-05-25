@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { syncThemeDom, getStoredTheme } from "@/lib/theme";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQueryClient, QueryCache, MutationCache } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk } from "@clerk/react";
@@ -51,8 +51,27 @@ import { OnboardingTour } from "./components/onboarding-tour";
 import { OfflineIndicator } from "./components/offline-indicator";
 import TrustPage from "./pages/trust";
 
+function handle401(error: unknown) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "status" in error &&
+    (error as { status: number }).status === 401
+  ) {
+    // Session expired — redirect to sign-in without polluting browser history.
+    window.location.replace(
+      `${import.meta.env.BASE_URL.replace(/\/$/, "")}/sign-in`,
+    );
+  }
+}
+
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
+  queryCache: new QueryCache({ onError: handle401 }),
+  mutationCache: new MutationCache({ onError: handle401 }),
+  defaultOptions: { queries: { retry: (count, error) => {
+    if (error && typeof error === "object" && "status" in error && (error as { status: number }).status === 401) return false;
+    return count < 1;
+  }, staleTime: 30_000 } },
 });
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
