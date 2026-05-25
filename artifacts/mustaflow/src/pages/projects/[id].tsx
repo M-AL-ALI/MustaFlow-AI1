@@ -855,6 +855,8 @@ export default function ProjectWorkspacePage() {
     versionB: { id: number; userRequest: string; changelogEntry?: string | null };
   } | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+  const [liveCodeBuffer, setLiveCodeBuffer] = useState("");
+  const taskEventSourceRef = useRef<EventSource | null>(null);
 
   // On initial load, if there is already an in-flight task (e.g. after a browser
   // refresh while a build is running), surface it in the AgentThinkingBubble.
@@ -1459,8 +1461,10 @@ export default function ProjectWorkspacePage() {
     // Reset dedup set per task so it stays bounded across long sessions
     seenPageMapEventIdsRef.current = new Set();
     setAgentPrompts([]);
+    setLiveCodeBuffer("");
     const seenPromptIds = new Set<string>();
     const es = new EventSource(`/api/projects/${projectId}/tasks/${activeTaskId}/events/stream`);
+    taskEventSourceRef.current = es;
     es.onmessage = (e: MessageEvent<string>) => {
       try {
         const event = JSON.parse(e.data) as {
@@ -1476,6 +1480,8 @@ export default function ProjectWorkspacePage() {
           void queryClient.invalidateQueries({
             queryKey: getGetPageMapQueryKey(projectId),
           });
+        } else if (event.eventType === "token" && event.message) {
+          setLiveCodeBuffer((prev) => prev + event.message);
         } else if (event.eventType === "agent_prompt" && event.message) {
           try {
             const parsed = JSON.parse(event.message) as {
@@ -1502,8 +1508,9 @@ export default function ProjectWorkspacePage() {
           event.eventType === "failed" ||
           event.eventType === "cancelled"
         ) {
-          // Drop any unanswered prompts when the task ends.
+          // Drop any unanswered prompts and clear the live code buffer when task ends.
           setAgentPrompts([]);
+          setLiveCodeBuffer("");
           // Reload the preview iframe so the freshly-built files are visible.
           if (event.eventType === "completed") {
             setBuildRefreshCount((n) => n + 1);
@@ -1513,7 +1520,11 @@ export default function ProjectWorkspacePage() {
         // ignore malformed frames
       }
     };
-    return () => es.close();
+    return () => {
+      es.close();
+      taskEventSourceRef.current = null;
+      setLiveCodeBuffer("");
+    };
   }, [activeTaskId, projectId, queryClient]);
 
   const dismissAgentPrompt = useCallback((promptId: string) => {
@@ -1814,6 +1825,12 @@ export default function ProjectWorkspacePage() {
       streamAbortRef.current.abort();
       streamAbortRef.current = null;
     }
+    // Close the task SSE stream immediately so the client stops receiving events.
+    if (taskEventSourceRef.current) {
+      taskEventSourceRef.current.close();
+      taskEventSourceRef.current = null;
+    }
+    setLiveCodeBuffer("");
     // Task #743: also cancel the server-side task so the agent loop unwinds
     // cleanly (event stream emits "cancelled" and any in-flight tool call
     // gets signalled via AbortSignal).
@@ -2862,16 +2879,33 @@ export default function ProjectWorkspacePage() {
                           </div>
                         )
                       ) : activeTaskId !== null ? (
-                        <AgentThinkingBubble
-                          projectId={projectId}
-                          taskId={activeTaskId}
-                          startedAt={pendingBuildStartedAt}
-                          onDismiss={() => setActiveTaskId(null)}
-                          onViewHistory={(versionId) => {
-                            setHistoryFocusVersionId(versionId);
-                            switchLeftPanel("history");
-                          }}
-                        />
+                        <>
+                          <AgentThinkingBubble
+                            projectId={projectId}
+                            taskId={activeTaskId}
+                            startedAt={pendingBuildStartedAt}
+                            onDismiss={() => setActiveTaskId(null)}
+                            onViewHistory={(versionId) => {
+                              setHistoryFocusVersionId(versionId);
+                              switchLeftPanel("history");
+                            }}
+                          />
+                          {liveCodeBuffer.length > 0 && (
+                            <div className="flex justify-start animate-in fade-in duration-150">
+                              <div className="max-w-[92%] w-full rounded-xl bg-muted/60 border border-border text-[10px] font-mono text-muted-foreground overflow-hidden">
+                                <div className="px-2 py-1 border-b border-border/50 flex items-center gap-1.5">
+                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                                  <span className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground/70">
+                                    Generating — {liveCodeBuffer.length} chars
+                                  </span>
+                                </div>
+                                <pre className="px-2 py-1.5 max-h-24 overflow-hidden leading-relaxed whitespace-pre-wrap break-all">
+                                  {liveCodeBuffer.slice(-400)}
+                                </pre>
+                              </div>
+                            </div>
+                          )}
+                        </>
                       ) : null}
                     </div>
                     {chatScrolledUp && (
@@ -3037,6 +3071,8 @@ export default function ProjectWorkspacePage() {
                       variantMode={variantMode}
                       onVariantModeChange={setVariantMode}
                       disabled={isBusy}
+                      activeTaskId={activeTaskId}
+                      onStopBuild={handleStopStream}
                       onSingleSend={(content, intent, attachments) => {
                         setPrompt("");
                         const imageOnly = attachments?.filter(

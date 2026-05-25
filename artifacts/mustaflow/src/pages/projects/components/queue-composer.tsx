@@ -17,6 +17,7 @@ import {
   LayoutTemplate,
   Clock,
   Lock,
+  Square,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGetAgentRouting, useUpdateProject } from "@workspace/api-client-react";
@@ -116,6 +117,10 @@ interface QueueComposerProps {
   variantMode: boolean;
   onVariantModeChange: (v: boolean) => void;
   disabled: boolean;
+  /** The currently running task ID — when set alongside `disabled`, shows a Stop build button. */
+  activeTaskId?: number | null;
+  /** Called when the user clicks the Stop build button. */
+  onStopBuild?: () => void;
   onSingleSend: (
     content: string,
     agentIntent?: "converse" | "plan" | "build",
@@ -139,6 +144,8 @@ export function QueueComposer({
   variantMode,
   onVariantModeChange,
   disabled,
+  activeTaskId,
+  onStopBuild,
   onSingleSend,
   onBatchStarted,
   promptValue,
@@ -1279,15 +1286,26 @@ export function QueueComposer({
                         : "10 credits · most capable"}
                 </span>
               </div>
-              <button
-                onClick={() => void handleSend()}
-                disabled={!canSend}
-                title={isMultiRow ? `Send all ${rows.length} tasks (⌘↩)` : "Send (⌘↩)"}
-                className="h-8 px-3 bg-primary rounded-xl flex items-center gap-1.5 shadow-md shadow-primary/30 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground"
-              >
-                <Send style={{ width: 14, height: 14 }} />
-                {isMultiRow && <span className="text-[10px] font-bold">{rows.length}</span>}
-              </button>
+              {activeTaskId != null ? (
+                <button
+                  onClick={onStopBuild}
+                  title="Stop the current build"
+                  className="h-8 px-3 bg-destructive/90 rounded-xl flex items-center gap-1.5 shadow-md shadow-destructive/20 hover:bg-destructive transition-colors text-destructive-foreground"
+                >
+                  <Square style={{ width: 12, height: 12 }} className="fill-current" />
+                  <span className="text-[11px] font-semibold">Stop</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => void handleSend()}
+                  disabled={!canSend}
+                  title={isMultiRow ? `Send all ${rows.length} tasks (⌘↩)` : "Send (⌘↩)"}
+                  className="h-8 px-3 bg-primary rounded-xl flex items-center gap-1.5 shadow-md shadow-primary/30 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground"
+                >
+                  <Send style={{ width: 14, height: 14 }} />
+                  {isMultiRow && <span className="text-[10px] font-bold">{rows.length}</span>}
+                </button>
+              )}
             </div>
           </div>
         </div>

@@ -1775,6 +1775,69 @@ async function callWithRetry(
 }
 
 /**
+ * Stream a code-generation call token-by-token, accumulating the full text
+ * for post-stream JSON parsing.  Calls `onToken` for every incoming delta so
+ * the SSE channel can relay them to the frontend as a live typing effect.
+ *
+ * Strips markdown code fences from the accumulated text before parsing.
+ * Falls back to the non-streaming `callWithRetry` (JSON-mode) if the stream
+ * fails or the accumulated text is not valid JSON.
+ */
+async function streamAndAccumulate(
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  model: string,
+  maxTokens: number,
+  label: string,
+  signal: AbortSignal | undefined,
+  stage: "build" | "refine" | "plan",
+  agentMode: AgentMode,
+  onToken?: (delta: string) => void,
+): Promise<Record<string, unknown>> {
+  const { streamChatCompletion, resolveStageProvider } = await import("./ai-providers");
+  const { provider, model: effectiveModel } = resolveStageProvider(stage, agentMode, model);
+
+  let accumulated = "";
+  try {
+    for await (const delta of streamChatCompletion({
+      provider,
+      model: effectiveModel,
+      max_completion_tokens: maxTokens,
+      messages: messages as Parameters<typeof streamChatCompletion>[0]["messages"],
+      signal,
+    })) {
+      if (signal?.aborted) throw new Error("Build cancelled");
+      accumulated += delta;
+      onToken?.(delta);
+    }
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      (err.name === "AbortError" || err.message === "Build cancelled" || signal?.aborted)
+    ) {
+      throw new Error("Build cancelled");
+    }
+    logger.warn({ err, label }, "Streaming failed — falling back to batch completion");
+    return callWithRetry(messages, model, maxTokens, label, signal, stage, agentMode);
+  }
+
+  const stripped = accumulated
+    .trim()
+    .replace(/^```(?:json)?\n?/, "")
+    .replace(/\n?```$/, "")
+    .trim();
+
+  try {
+    return JSON.parse(stripped) as Record<string, unknown>;
+  } catch {
+    logger.warn(
+      { label, preview: accumulated.slice(0, 200) },
+      "Streamed JSON parse failed — falling back to batch completion",
+    );
+    return callWithRetry(messages, model, maxTokens, label, signal, stage, agentMode);
+  }
+}
+
+/**
  * Run correction pass after validation failure.
  *
  * Accepts the current full file set so it can merge corrections in — the model
@@ -2370,6 +2433,8 @@ export async function runBuildPipeline(args: {
   /** Task #743: skip service-worker / fetch mocks for agentic-mode projects (real containers handle backends). */
   builderMode?: string | null;
   onEvent?: (type: string, message: string) => Promise<void>;
+  /** Called with each streamed token delta during the primary code-generation call. */
+  onToken?: (delta: string) => void;
   signal?: AbortSignal;
 }): Promise<BuilderResult> {
   const {
@@ -2386,6 +2451,7 @@ export async function runBuildPipeline(args: {
     imageAttachments,
     builderMode,
     onEvent,
+    onToken,
     signal,
   } = args;
 
@@ -2536,7 +2602,7 @@ export async function runBuildPipeline(args: {
   pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Generating app blueprint and code…");
-  const parsed = await callWithRetry(
+  const parsed = await streamAndAccumulate(
     messages,
     modelFor(agentMode),
     32000,
@@ -2544,6 +2610,7 @@ export async function runBuildPipeline(args: {
     signal,
     "build",
     agentMode,
+    onToken,
   );
 
   const blueprint = (parsed.blueprint ?? {
@@ -2832,6 +2899,8 @@ export async function runRefinePipeline(args: {
   /** Task #743: skip service-worker / fetch mocks for agentic-mode projects (real containers handle backends). */
   builderMode?: string | null;
   onEvent?: (type: string, message: string) => Promise<void>;
+  /** Called with each streamed token delta during the primary code-generation call. */
+  onToken?: (delta: string) => void;
   signal?: AbortSignal;
 }): Promise<{
   changedFiles: BuilderFile[];
@@ -2859,6 +2928,7 @@ export async function runRefinePipeline(args: {
     imageAttachments,
     builderMode,
     onEvent,
+    onToken,
     signal,
   } = args;
 
@@ -2945,7 +3015,7 @@ export async function runRefinePipeline(args: {
   pushUserMessageWithImages(messages, userPrompt, imageAttachments);
 
   await onEvent?.("generating_code", "Applying change request with AI…");
-  const parsed = await callWithRetry(
+  const parsed = await streamAndAccumulate(
     messages,
     modelFor(agentMode),
     32000,
@@ -2953,6 +3023,7 @@ export async function runRefinePipeline(args: {
     signal,
     "refine",
     agentMode,
+    onToken,
   );
 
   // Build changedFiles from full replacements returned by AI

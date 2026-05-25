@@ -254,6 +254,22 @@ async function emitEvent(
   }
 }
 
+/**
+ * Emit a token delta directly to the event bus without persisting to the DB.
+ * Used for streaming code-generation output so the frontend can show a live
+ * typing effect while the builder accumulates the full response.
+ */
+function emitTokenEvent(taskId: number, delta: string): void {
+  publishTaskEvent({
+    id: 0,
+    taskId,
+    eventType: "token",
+    message: delta,
+    filePath: null,
+    createdAt: new Date(),
+  });
+}
+
 async function loadFiles(projectId: number): Promise<BuilderFile[]> {
   const rows = await db
     .select()
@@ -1879,6 +1895,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                             conversationSummary,
                             imageAttachments,
                             builderMode: project.builderMode,
+                            onEvent: async (type: string, message: string) =>
+                              emitEvent(taskId, type, message),
+                            onToken: (delta: string) => emitTokenEvent(taskId, delta),
                             signal,
                           });
 
@@ -1952,6 +1971,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                         planContext: input.planContext ?? null,
                         conversationSummary,
                         builderMode: project.builderMode,
+                        onEvent: async (type: string, message: string) =>
+                          emitEvent(taskId, type, message),
+                        onToken: (delta: string) => emitTokenEvent(taskId, delta),
                         signal,
                       });
           wasEscalated = true;
@@ -2276,6 +2298,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                             conversationSummary,
                             imageAttachments,
                             builderMode: project.builderMode,
+                            onEvent: async (type: string, message: string) =>
+                              emitEvent(taskId, type, message),
+                            onToken: (delta: string) => emitTokenEvent(taskId, delta),
                             signal,
                           });
 
@@ -2354,6 +2379,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           conversationSummary,
                           imageAttachments,
                           builderMode: project.builderMode,
+                          onEvent: async (type: string, message: string) =>
+                            emitEvent(taskId, type, message),
+                          onToken: (delta: string) => emitTokenEvent(taskId, delta),
                         });
           wasEscalated = true;
           agentMode = refineEscalationMode;
@@ -2466,6 +2494,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                               conversationSummary,
                               imageAttachments,
                               builderMode: project.builderMode,
+                              onEvent: async (type: string, message: string) =>
+                                emitEvent(taskId, type, message),
+                              onToken: (delta: string) => emitTokenEvent(taskId, delta),
                               signal,
                             });
             if (!retryResult.correctionFailed) {
