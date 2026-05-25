@@ -24,8 +24,6 @@ import {
   CheckCircle2,
   XCircle,
   History,
-  GitBranch,
-  Webhook,
   Copy,
   Check,
 } from "lucide-react";

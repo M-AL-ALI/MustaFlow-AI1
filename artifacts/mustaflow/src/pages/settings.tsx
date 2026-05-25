@@ -21,11 +21,9 @@ import {
   Shield,
   Trash2,
   Code2,
-  Key,
   Plus,
   Copy,
   Check,
-  TriangleAlert,
   KeyRound,
   FlaskConical,
   CheckCircle2,
@@ -419,6 +417,7 @@ function AppearanceOption({
     </button>
   );
 }
+
 
 // Cache the loadStripe promise per publishable key so we don't re-init the
 // Stripe.js singleton across re-renders. Map keeps it safe if the key changes
@@ -1685,7 +1684,7 @@ function DeveloperTab() {
                         <span
                           className={`font-medium ${result.ok ? "text-green-600 dark:text-green-400" : "text-destructive"}`}
                         >
-                          {result.ok ? "Token is valid" : result.reason ?? "Token check failed"}
+                          {result.ok ? "Token is valid" : (result.reason ?? "Token check failed")}
                         </span>
                       </div>
                       {result.ok && result.scopes && result.scopes.length > 0 && (

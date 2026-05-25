@@ -14,6 +14,7 @@ import { resumeStuckProvisioningOnBoot } from "./lib/provisioning";
 import { resumeContainerLogTailersOnBoot } from "./lib/container-logs";
 import { startContainerLogRetentionScheduler } from "./lib/container-log-retention";
 import { handleLivePreviewUpgrade, matchPreviewPath } from "./lib/livePreviewProxy";
+import { runStartupMigrations } from "./lib/startup-migrations";
 
 const execFileAsync = promisify(execFile);
 
@@ -110,11 +111,21 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-server.listen(port, (err?: Error) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
-  }
+// Task #859 — Run all outstanding schema migrations before accepting traffic.
+// Each step is idempotent (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS) so this
+// is safe on every boot and is a no-op when the schema is already current.
+void runStartupMigrations()
+  .catch((err) => {
+    // Non-fatal: log and continue — a partial schema is better than no server.
+    logger.error({ err }, "startup-migrations: unexpected error (continuing)");
+  })
+  .finally(() => {
+    server.listen(port, (err?: Error) => {
+      if (err) {
+        logger.error({ err }, "Error listening on port");
+        process.exit(1);
+      }
 
-  logger.info({ port }, "Server listening");
-});
+      logger.info({ port }, "Server listening");
+    });
+  });
