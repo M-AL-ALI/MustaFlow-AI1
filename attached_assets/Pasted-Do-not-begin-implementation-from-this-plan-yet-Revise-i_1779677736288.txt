@@ -1,0 +1,111 @@
+Do not begin implementation from this plan yet. Revise it to preserve the full product goal: a generated real app must be tested in an isolated real runtime, then the exact tested version must be safely promoted to production.
+
+Answers to your questions:
+
+1. Static-legacy projects
+- Full App Preview may be unavailable only for projects that are genuinely static frontend-only projects with no backend, auth, database, server environment variables or integrations.
+- Do not use `builderMode === "agentic"` alone to decide whether real preview is supported.
+- Any generated project that includes backend/API routes, auth, database access, secrets or integrations must support Full App Preview in its actual runtime.
+- Quick Preview/WebContainer is not a substitute for Full App Preview for those projects.
+
+2. Console bridge
+- Yes: keep console/crash instrumentation only for authenticated owner preview sessions where it is needed.
+- Remove it completely from public published HTML, public slug routes and custom-domain production output.
+- Add a test proving public published HTML does not include the editor bridge.
+
+3. Preview secrets
+- No: reusing whatever secrets already exist in the current container is not sufficient.
+- Implement separate environment scopes:
+  - Preview/Test secrets
+  - Production secrets
+- Full App Preview must inject only Preview/Test values.
+- Production publishing must inject only Production values after explicit user approval.
+- Secret values must be encrypted, masked in the UI, excluded from browser responses, excluded from AI prompts unless explicitly safe, and redacted from logs/errors.
+- Server-only secrets must never be exposed as frontend environment values.
+
+Required revisions to the plan:
+
+A. Preview/Test database isolation
+- Do not simply reuse the existing project `DATABASE_URL`.
+- Full App Preview must use an isolated preview/test database, schema, branch or equivalent isolated data environment.
+- It must not connect to production customer data by default.
+- Preview migrations must run before the app can be marked as tested.
+- Migration failures must be visible and prevent `Testing Passed`.
+- Include reset/recreate preview database behavior.
+
+B. Immutable testing approval and promotion
+Add a complete workflow:
+
+1. Agent modifies draft files.
+2. User starts Full App Preview for the current draft.
+3. System validates required Preview/Test secrets, runtime readiness and preview database migration status.
+4. User tests the real running app.
+5. User clicks `Mark Testing Passed`.
+6. The system creates or identifies an immutable tested version/snapshot and records its approval status.
+7. Only that exact approved immutable version can be published.
+8. Publishing deploys that approved version with Production secrets and production database/deployment configuration.
+9. The previous published version remains live until the new deployment passes health checks.
+10. Failed production deploys leave the previous stable version available and support rollback.
+
+Do not publish a moving draft.
+
+C. Fix the confirmed published fallback behavior
+- Do not merely audit the existing production container fallback comment.
+- Verify actual control flow in `serveSnapshot.ts`.
+- A failed/timed-out/non-successful production container request must fall through and successfully serve the last frozen published snapshot.
+- Add automated tests for failure and timeout paths.
+
+D. Agent execution integrity
+Include the AI-builder runtime issues in scope:
+
+- Preserve `agentIdentity` through queued jobs and background task execution.
+- Task Agent work must remain staged and must not update Quick Preview, Full App Preview or published output before Apply.
+- After Apply, accepted Task Agent changes may sync into the active Full App Preview.
+- Main Agent accepted draft changes should sync/reload Full App Preview.
+- Add tests proving queued Task Agent jobs never default to Main Agent/live-write behavior.
+
+E. Full App Preview requirements
+Full App Preview must:
+
+- render the actual running draft application runtime in the iframe through authenticated protected access;
+- support backend/API routes;
+- expose runtime logs/errors safely;
+- inject Preview/Test secrets server-side;
+- use isolated preview database behavior;
+- show missing secrets, failed migrations and failed runtime startup;
+- have Start, Restart, Stop and Rebuild controls;
+- clearly identify the runtime being viewed.
+
+F. Keep Quick Preview clearly separate
+Quick Preview may remain for fast UI feedback:
+- `Quick Preview - Static`
+- `Quick Preview - WebContainer`
+
+Full App Preview must be:
+- `Full App Preview - Test Runtime`
+
+Do not show container state or suggest full-stack testing while rendering static/WebContainer output.
+
+G. Required tests before completion
+Add tests proving:
+
+- editor preview remains private even after publish;
+- public output never exposes draft edits;
+- public HTML contains no studio bridge;
+- failed production runtime falls back to the last stable published snapshot;
+- Full App Preview loads the real app runtime and successfully executes a backend API route;
+- Preview/Test secrets are injected without being exposed in UI/logs/browser output;
+- Production secrets are not used in Preview/Test by default;
+- preview database is isolated and migrations are validated;
+- Task Agent staging and queued identity behavior are correct;
+- only a tested immutable version may be published;
+- failed publishing preserves the previous live version.
+
+Please return a revised phased plan, including:
+- exact existing code that can safely be reused;
+- exact new schema fields/tables needed for Preview/Test environments and Testing Passed versions;
+- routes and authorization boundaries;
+- secret and database isolation model;
+- tests for each phase.
+
+Only after I approve the revised plan should implementation begin.
