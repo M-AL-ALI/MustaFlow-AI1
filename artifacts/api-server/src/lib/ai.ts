@@ -154,7 +154,14 @@ export function buildInitialAssistantMessage(projectName: string, initialPrompt:
   return `Welcome to MustaFlow AI. I've spun up "${projectName}" for you. Here's what I heard:\n\n"${initialPrompt.trim()}"\n\nWhen you're ready, send me a message describing the first thing you want to see, or toggle Plan Mode and I'll lay out a full build plan for your approval.`;
 }
 
-export type StackId = "static-html" | "react-vite" | "node-api" | "mobile-cross";
+export type StackId =
+  | "static-html"
+  | "react-vite"
+  | "node-api"
+  | "mobile-cross"
+  | "python-flask"
+  | "python-fastapi"
+  | "go-gin";
 
 /**
  * Keyword signals that strongly suggest a native mobile app is needed.
@@ -213,6 +220,81 @@ const MOBILE_SIGNALS = [
   "social network",
   "messaging app",
   "chat app",
+];
+
+/**
+ * Keyword signals that strongly suggest a Go (Gin) backend is needed.
+ * Checked after mobile but before generic backend signals.
+ */
+const GO_SIGNALS = [
+  "golang",
+  "go lang",
+  "go rest api",
+  "go rest",
+  "go api",
+  "go service",
+  "go microservice",
+  "go server",
+  "go web",
+  "gin framework",
+  "gin-gonic",
+  "go-gin",
+  "go module",
+  "go.mod",
+  "go project",
+  "goroutine",
+  "go routine",
+  "gopher",
+  "go http",
+  "go backend",
+  "go application",
+  "written in go",
+  "built in go",
+  "build in go",
+  "using go",
+  "with go",
+];
+
+/**
+ * Keyword signals that strongly suggest a Python backend is needed.
+ * Flask and FastAPI signals are separated to pick the right framework.
+ */
+const PYTHON_FLASK_SIGNALS = [
+  "python flask",
+  "flask app",
+  "flask api",
+  "flask server",
+  "flask blueprint",
+  "flask route",
+  "flask web",
+  "flask backend",
+  "flask application",
+  "python web server",
+  "python rest api",
+  "python api server",
+  "python backend",
+  "python server",
+  "python script with endpoint",
+  "python microservice",
+  // Django prompts should still route to a Python pipeline (flask as closest match)
+  // rather than falling through to node-api. Django-specific builds are out of scope
+  // but we must not misclassify them as Node.js.
+  "django",
+  "python app",
+  "python application",
+  "python project",
+];
+
+const PYTHON_FASTAPI_SIGNALS = [
+  "fastapi",
+  "fast api",
+  "python fastapi",
+  "pydantic",
+  "uvicorn",
+  "async python",
+  "python async api",
+  "python async server",
+  "python async backend",
 ];
 
 /**
@@ -309,6 +391,23 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
   if (MOBILE_SIGNALS.some((s) => lower.includes(s))) {
     return "mobile-cross";
   }
+
+  // Go/Gin intent — checked before generic backend signals so Go prompts
+  // don't fall through to node-api.
+  if (GO_SIGNALS.some((s) => lower.includes(s))) {
+    return "go-gin";
+  }
+
+  // FastAPI takes priority over generic Flask/Python detection.
+  if (PYTHON_FASTAPI_SIGNALS.some((s) => lower.includes(s))) {
+    return "python-fastapi";
+  }
+
+  // Flask / generic Python backend.
+  if (PYTHON_FLASK_SIGNALS.some((s) => lower.includes(s))) {
+    return "python-flask";
+  }
+
   if (BACKEND_SIGNALS.some((s) => lower.includes(s))) {
     return "node-api";
   }
@@ -329,10 +428,13 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
             "Classify this app idea into exactly one category. Reply with a single word only.\n" +
             "Categories:\n" +
             "  mobile    — native phone/tablet app: something you'd install from the App Store or Play Store\n" +
-            "  fullstack — web app that needs a real backend: user auth, database, file uploads, payments, APIs\n" +
+            "  go        — Go (Golang) backend: REST API or microservice using Go / Gin framework\n" +
+            "  fastapi   — Python FastAPI backend: async Python API with Pydantic models\n" +
+            "  flask     — Python Flask backend: web app or REST API using Flask\n" +
+            "  fullstack — Node.js/TypeScript web app that needs a real backend: user auth, database, file uploads, payments, APIs\n" +
             "  react     — rich web single-page app, dashboard, or data viz with no server-side database\n" +
             "  static    — simple web page: landing page, portfolio, brochure, no persistent data\n" +
-            "Reply with ONLY one of: mobile | fullstack | react | static",
+            "Reply with ONLY one of: mobile | go | fastapi | flask | fullstack | react | static",
         },
         { role: "user", content: prompt.slice(0, 800) },
       ],
@@ -340,6 +442,9 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
     });
     const word = res.choices[0]?.message?.content?.trim().toLowerCase() ?? "";
     if (word.includes("mobile")) return "mobile-cross";
+    if (word.includes("go")) return "go-gin";
+    if (word.includes("fastapi")) return "python-fastapi";
+    if (word.includes("flask")) return "python-flask";
     if (word.includes("fullstack") || word.includes("full")) return "node-api";
     if (word.includes("react")) return "react-vite";
     return "static-html";

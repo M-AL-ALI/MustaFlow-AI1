@@ -38,6 +38,8 @@ import {
   runFlaskRefinePipeline,
   runFastapiBuildPipeline,
   runFastapiRefinePipeline,
+  runGoGinBuildPipeline,
+  runGoGinRefinePipeline,
   scanCodeSmells,
   sanitisePrompt,
   scanForSecrets,
@@ -1599,6 +1601,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               "react-vite": "Building an interactive React single-page app.",
               "static-html":
                 "Building a fast, lightweight static page with HTML, CSS, and JavaScript.",
+              "python-flask": "Building a Python Flask web app with REST endpoints.",
+              "python-fastapi":
+                "Building a Python FastAPI service with async handlers and Pydantic schemas.",
+              "go-gin":
+                "Building a Go + Gin REST API with idiomatic Go handlers and typed structs.",
             };
             const archMessage =
               architectureSummaries[detectedStack] ?? `Architecture selected: ${detectedStack}.`;
@@ -1688,6 +1695,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       const isNodeApiProject = !resolvedIsMobile && resolvedProjectStack === "node-api";
       const isPythonFlaskProject = !resolvedIsMobile && resolvedProjectStack === "python-flask";
       const isPythonFastapiProject = !resolvedIsMobile && resolvedProjectStack === "python-fastapi";
+      const isGoGinProject = !resolvedIsMobile && resolvedProjectStack === "go-gin";
 
       // For mobile projects: load last successful task's wired modules + project secret names once,
       // so both build and refine pipelines have durable module context.
@@ -1728,7 +1736,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 ? "Let me plan the Node.js project structure before writing any code."
                 : isPythonFlaskProject || isPythonFastapiProject
                   ? "Let me plan the Python project structure before writing any code."
-                  : "Let me plan the app structure before writing any code.",
+                  : isGoGinProject
+                    ? "Let me plan the Go + Gin project structure before writing any code."
+                    : "Let me plan the app structure before writing any code.",
         );
         await emitEvent(taskId, "planning", "Reading project configuration…");
         await emitEvent(
@@ -1741,8 +1751,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               : isNodeApiProject
                 ? "Generating Node.js / Express project with AI…"
                 : isPythonFlaskProject || isPythonFastapiProject
-                  ? "Generating Python / Flask project with AI…"
-                  : "Generating app blueprint and code with AI…",
+                  ? "Generating Python project with AI…"
+                  : isGoGinProject
+                    ? "Generating Go + Gin project with AI…"
+                    : "Generating app blueprint and code with AI…",
         );
 
         const stackBuildArgs = {
@@ -1853,20 +1865,22 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     ? await runFlaskBuildPipeline(stackBuildArgs)
                     : isPythonFastapiProject
                       ? await runFastapiBuildPipeline(stackBuildArgs)
-                      : await runBuildPipeline({
-                          projectName: project.name,
-                          projectKind: project.kind,
-                          userPrompt,
-                          agentMode,
-                          conversationHistory,
-                          knowledgeContext: knowledgeContext || undefined,
-                          databaseContext,
-                          planContext: input.planContext ?? null,
-                          conversationSummary,
-                          imageAttachments,
-                          builderMode: project.builderMode,
-                          signal,
-                        });
+                      : isGoGinProject
+                        ? await runGoGinBuildPipeline(stackBuildArgs)
+                        : await runBuildPipeline({
+                            projectName: project.name,
+                            projectKind: project.kind,
+                            userPrompt,
+                            agentMode,
+                            conversationHistory,
+                            knowledgeContext: knowledgeContext || undefined,
+                            databaseContext,
+                            planContext: input.planContext ?? null,
+                            conversationSummary,
+                            imageAttachments,
+                            builderMode: project.builderMode,
+                            signal,
+                          });
 
         analyticsCorrectionPasses = result.correctionPasses;
         analyticsErrorCategory = result.primaryErrorCategory;
@@ -2054,7 +2068,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   ? "Initial Flask build"
                   : isPythonFastapiProject
                     ? "Initial FastAPI build"
-                    : "Initial build";
+                    : isGoGinProject
+                      ? "Initial Go + Gin build"
+                      : "Initial build";
         filesToSmellScan = result.files;
       } else {
         await emitEvent(
@@ -2111,7 +2127,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 ? "Applying your changes to the Node.js project now."
                 : isPythonFlaskProject || isPythonFastapiProject
                   ? "Applying your changes to the Python project now."
-                  : "Applying your requested changes to the codebase now.",
+                  : isGoGinProject
+                    ? "Applying your changes to the Go + Gin project now."
+                    : "Applying your requested changes to the codebase now.",
         );
         await emitEvent(
           taskId,
@@ -2124,7 +2142,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 ? "Applying change to Node.js project with AI…"
                 : isPythonFlaskProject || isPythonFastapiProject
                   ? "Applying change to Python project with AI…"
-                  : "Applying change request with AI…",
+                  : isGoGinProject
+                    ? "Applying change to Go + Gin project with AI…"
+                    : "Applying change request with AI…",
         );
 
         const stackRefineArgs = {
@@ -2239,23 +2259,25 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     ? await runFlaskRefinePipeline(stackRefineArgs)
                     : isPythonFastapiProject
                       ? await runFastapiRefinePipeline(stackRefineArgs)
-                      : await runRefinePipeline({
-                          projectName: project.name,
-                          projectKind: project.kind,
-                          userPrompt,
-                          agentMode,
-                          existingFiles,
-                          conversationHistory,
-                          knowledgeContext: knowledgeContext || undefined,
-                          databaseContext,
-                          unchangedFilesHint:
-                            unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                          planContext: input.planContext ?? null,
-                          conversationSummary,
-                          imageAttachments,
-                          builderMode: project.builderMode,
-                          signal,
-                        });
+                      : isGoGinProject
+                        ? await runGoGinRefinePipeline(stackRefineArgs)
+                        : await runRefinePipeline({
+                            projectName: project.name,
+                            projectKind: project.kind,
+                            userPrompt,
+                            agentMode,
+                            existingFiles,
+                            conversationHistory,
+                            knowledgeContext: knowledgeContext || undefined,
+                            databaseContext,
+                            unchangedFilesHint:
+                              unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                            planContext: input.planContext ?? null,
+                            conversationSummary,
+                            imageAttachments,
+                            builderMode: project.builderMode,
+                            signal,
+                          });
 
         analyticsCorrectionPasses = refineResult.correctionPasses;
         analyticsErrorCategory = refineResult.primaryErrorCategory;
@@ -2315,22 +2337,24 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   ? await runFlaskRefinePipeline(escalatedStackRefineArgs)
                   : isPythonFastapiProject
                     ? await runFastapiRefinePipeline(escalatedStackRefineArgs)
-                    : await runRefinePipeline({
-                        projectName: project.name,
-                        projectKind: project.kind,
-                        userPrompt,
-                        agentMode: refineEscalationMode,
-                        existingFiles,
-                        conversationHistory,
-                        knowledgeContext: knowledgeContext || undefined,
-                        databaseContext,
-                        unchangedFilesHint:
-                          unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                        planContext: input.planContext ?? null,
-                        conversationSummary,
-                        imageAttachments,
-                        builderMode: project.builderMode,
-                      });
+                    : isGoGinProject
+                      ? await runGoGinRefinePipeline(escalatedStackRefineArgs)
+                      : await runRefinePipeline({
+                          projectName: project.name,
+                          projectKind: project.kind,
+                          userPrompt,
+                          agentMode: refineEscalationMode,
+                          existingFiles,
+                          conversationHistory,
+                          knowledgeContext: knowledgeContext || undefined,
+                          databaseContext,
+                          unchangedFilesHint:
+                            unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                          planContext: input.planContext ?? null,
+                          conversationSummary,
+                          imageAttachments,
+                          builderMode: project.builderMode,
+                        });
           wasEscalated = true;
           agentMode = refineEscalationMode;
           refineResult = escalatedResult;
@@ -2425,23 +2449,25 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                       ? await runFlaskRefinePipeline(retryStackArgs)
                       : isPythonFastapiProject
                         ? await runFastapiRefinePipeline(retryStackArgs)
-                        : await runRefinePipeline({
-                            projectName: project.name,
-                            projectKind: project.kind,
-                            userPrompt: stricterPrompt,
-                            agentMode,
-                            existingFiles,
-                            conversationHistory,
-                            knowledgeContext: knowledgeContext || undefined,
-                            databaseContext,
-                            unchangedFilesHint:
-                              unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                            planContext: input.planContext ?? null,
-                            conversationSummary,
-                            imageAttachments,
-                            builderMode: project.builderMode,
-                            signal,
-                          });
+                        : isGoGinProject
+                          ? await runGoGinRefinePipeline(retryStackArgs)
+                          : await runRefinePipeline({
+                              projectName: project.name,
+                              projectKind: project.kind,
+                              userPrompt: stricterPrompt,
+                              agentMode,
+                              existingFiles,
+                              conversationHistory,
+                              knowledgeContext: knowledgeContext || undefined,
+                              databaseContext,
+                              unchangedFilesHint:
+                                unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                              planContext: input.planContext ?? null,
+                              conversationSummary,
+                              imageAttachments,
+                              builderMode: project.builderMode,
+                              signal,
+                            });
             if (!retryResult.correctionFailed) {
               refineResult = retryResult;
               refineResult.report.warnings = [

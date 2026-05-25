@@ -71,6 +71,7 @@ const STACKS: Record<string, string> = {
   "node-api": "Node.js API",
   "python-flask": "Flask",
   "python-fastapi": "FastAPI",
+  "go-gin": "Go + Gin",
   "static-html": "HTML/CSS/JS",
 };
 

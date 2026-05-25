@@ -194,6 +194,7 @@ export const ProjectStack = {
   'node-api': 'node-api',
   'python-flask': 'python-flask',
   'python-fastapi': 'python-fastapi',
+  'go-gin': 'go-gin',
 } as const;
 
 /**
@@ -484,6 +485,7 @@ export const ProjectInputStack = {
   'node-api': 'node-api',
   'python-flask': 'python-flask',
   'python-fastapi': 'python-fastapi',
+  'go-gin': 'go-gin',
 } as const;
 
 export interface ProjectInput {

@@ -40,7 +40,7 @@ import { TemplatePicker } from "@/components/template-picker";
 import { type TemplateDefinition } from "@/lib/templates";
 import { useToast } from "@/hooks/use-toast";
 
-type Stack = "react-vite" | "nextjs" | "node-api" | "python-flask" | "python-fastapi";
+type Stack = "react-vite" | "nextjs" | "node-api" | "python-flask" | "python-fastapi" | "go-gin";
 
 const STACK_OPTIONS: Array<{
   value: Stack;
@@ -79,6 +79,12 @@ const STACK_OPTIONS: Array<{
     label: "FastAPI",
     description: "Async Python API",
     icon: Zap,
+  },
+  {
+    value: "go-gin",
+    label: "Go + Gin",
+    description: "Go REST API",
+    icon: Server,
   },
 ];
 
@@ -446,7 +452,9 @@ export function CreateProjectModal({
                               ? "My Python API"
                               : stack === "node-api"
                                 ? "My Node.js API"
-                                : "My web app"
+                                : stack === "go-gin"
+                                  ? "My Go API"
+                                  : "My web app"
                     }
                     autoFocus
                   />
@@ -528,7 +536,9 @@ export function CreateProjectModal({
                           ? "Describe your Python API — e.g. A REST API for a task management system with user authentication and CRUD endpoints."
                           : stack === "node-api"
                             ? "Describe your Node.js API — e.g. An Express REST API for a recipe book with search, categories, and user bookmarks."
-                            : "Describe what you want to build — e.g. A landing page for a local towing company with a hero section, services, and contact form."
+                            : stack === "go-gin"
+                              ? "Describe your Go API — e.g. A REST API for a URL shortener with Gin, in-memory store, and JSON responses."
+                              : "Describe what you want to build — e.g. A landing page for a local towing company with a hero section, services, and contact form."
                     }
                     rows={selectedTemplate ? 4 : 3}
                     className="resize-none"
