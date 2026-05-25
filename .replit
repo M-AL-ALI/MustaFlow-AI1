@@ -156,3 +156,13 @@ E2E_TEST_ENABLED = "true"
 
 [userenv.development]
 DEV_SLOW_BUILD_DELAY_MS = "30000"
+AI_PROVIDER_BUILD = "anthropic:claude-sonnet-4-6"
+AI_PROVIDER_REFINE = "anthropic:claude-sonnet-4-6"
+AI_PROVIDER_PLAN = "anthropic:claude-sonnet-4-6"
+AI_PROVIDER_ARCHITECT = "anthropic:claude-opus-4-7"
+
+[userenv.production]
+AI_PROVIDER_BUILD = "anthropic:claude-sonnet-4-6"
+AI_PROVIDER_REFINE = "anthropic:claude-sonnet-4-6"
+AI_PROVIDER_PLAN = "anthropic:claude-sonnet-4-6"
+AI_PROVIDER_ARCHITECT = "anthropic:claude-opus-4-7"
