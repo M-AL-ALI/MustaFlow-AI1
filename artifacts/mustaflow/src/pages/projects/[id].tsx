@@ -1878,7 +1878,14 @@ export default function ProjectWorkspacePage() {
                 finished = true;
                 setIsStreaming(false);
                 setStreamingText("");
-                const fallbackIntent = event.intent as "build" | "plan" | "debug" | "refactor" | "review" | "explain" | undefined;
+                const fallbackIntent = event.intent as
+                  | "build"
+                  | "plan"
+                  | "debug"
+                  | "refactor"
+                  | "review"
+                  | "explain"
+                  | undefined;
                 sendRegular(content, {
                   ...opts,
                   agentMode: effectiveMode,

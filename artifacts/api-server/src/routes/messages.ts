@@ -248,9 +248,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     // No files are written, no build report is generated.
     const isAmbiguous = resolvedIntent === "converse" && intentConfidence < 0.7;
     const systemPromptOverride =
-      resolvedIntent !== "converse"
-        ? DEVELOPER_INTENT_SYSTEM_PROMPTS[resolvedIntent]
-        : undefined;
+      resolvedIntent !== "converse" ? DEVELOPER_INTENT_SYSTEM_PROMPTS[resolvedIntent] : undefined;
     const [converseTask] = await db
       .insert(agentTasksTable)
       .values({
@@ -729,7 +727,14 @@ router.post(
       .slice(-8);
 
     // Intent detection
-    type StreamResolvedIntent = "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
+    type StreamResolvedIntent =
+      | "converse"
+      | "plan"
+      | "build"
+      | "debug"
+      | "refactor"
+      | "review"
+      | "explain";
     let resolvedIntent: StreamResolvedIntent = "build";
     let intentConfidence = 1.0;
 
@@ -787,9 +792,7 @@ router.post(
       explain: (await import("../lib/builder")).EXPLAIN_SYSTEM_PROMPT,
     };
     const streamSystemPromptOverride =
-      resolvedIntent !== "converse"
-        ? streamDeveloperIntentPrompts[resolvedIntent]
-        : undefined;
+      resolvedIntent !== "converse" ? streamDeveloperIntentPrompts[resolvedIntent] : undefined;
 
     // Save user message
     let userMessageId: number;

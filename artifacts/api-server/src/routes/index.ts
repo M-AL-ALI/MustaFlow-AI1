@@ -80,6 +80,7 @@ import sharingRouter, { publicShareRouter } from "./sharing";
 import notificationsCollabRouter from "./notifications-collab";
 import projectActivityRouter from "./project-activity";
 import gdprRouter from "./gdpr";
+import tokensRouter from "./tokens";
 import previewEnvRouter from "./preview-env";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
@@ -154,6 +155,7 @@ const KNOWN_PREFIXES = [
   "/usage",
   "/canvas",
   "/preview-env",
+  "/tokens",
   "/gallery-templates",
   "/extensions",
   "/profiles",
@@ -261,6 +263,7 @@ router.use(galleryTemplatesRouter);
 router.use(ecosystemExtensionsRouter);
 router.use(profilesRouter);
 router.use(gdprRouter); // GET /me/export, DELETE /me
+router.use(tokensRouter); // GET/POST /tokens, DELETE /tokens/:id
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

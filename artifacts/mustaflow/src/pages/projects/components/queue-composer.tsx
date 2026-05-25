@@ -1494,10 +1494,22 @@ export function QueueComposer({
                     <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
                       {(
                         [
-                          { mode: "lite", label: "Lite", desc: "1 credit · minimal correct change" },
+                          {
+                            mode: "lite",
+                            label: "Lite",
+                            desc: "1 credit · minimal correct change",
+                          },
                           { mode: "eco", label: "Eco", desc: "2 credits · clean typed code" },
-                          { mode: "power", label: "Power", desc: "5 credits · production-ready TypeScript" },
-                          { mode: "pro", label: "Pro", desc: "10 credits · security-first strict mode" },
+                          {
+                            mode: "power",
+                            label: "Power",
+                            desc: "5 credits · production-ready TypeScript",
+                          },
+                          {
+                            mode: "pro",
+                            label: "Pro",
+                            desc: "10 credits · security-first strict mode",
+                          },
                         ] as const
                       ).map(({ mode, label, desc }) => {
                         const locked = false;

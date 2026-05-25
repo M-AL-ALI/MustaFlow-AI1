@@ -20,6 +20,11 @@ import {
   Download,
   Shield,
   Trash2,
+  Code,
+  Plus,
+  Copy,
+  Check,
+  KeyRound,
 } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
@@ -63,6 +68,7 @@ const TABS = [
   { id: "account", label: "Account", icon: User },
   { id: "credits", label: "Credits & Billing", icon: CreditCard },
   { id: "privacy", label: "Privacy & Data", icon: Bell },
+  { id: "developer", label: "Developer", icon: Code },
 ];
 
 export default function SettingsPage() {
@@ -74,7 +80,9 @@ export default function SettingsPage() {
   const tabParam = searchParams.get("tab");
   const paymentParam = searchParams.get("payment");
 
-  const [activeTab, setActiveTab] = useState(tabParam === "credits" ? "credits" : "account");
+  const [activeTab, setActiveTab] = useState(
+    tabParam === "credits" ? "credits" : tabParam === "developer" ? "developer" : "account",
+  );
 
   useEffect(() => {
     if (paymentParam === "success") {
@@ -127,6 +135,7 @@ export default function SettingsPage() {
           {activeTab === "account" && <AccountTab />}
           {activeTab === "credits" && <CreditsTab />}
           {activeTab === "privacy" && <PrivacyTab />}
+          {activeTab === "developer" && <DeveloperTab />}
         </div>
       </div>
     </div>
@@ -1130,6 +1139,350 @@ function PrivacyTab() {
           )}
           {deleting ? "Deleting…" : "Delete my data"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface ApiToken {
+  id: number;
+  name: string;
+  tokenPreview: string;
+  scopes: string[];
+  projectId: number | null;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+// ── Developer Tab ─────────────────────────────────────────────────────────────
+
+function DeveloperTab() {
+  const { toast } = useToast();
+
+  const [tokens, setTokens] = useState<ApiToken[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [newTokenName, setNewTokenName] = useState("");
+  const [expiresInDays, setExpiresInDays] = useState("");
+  const [revealedToken, setRevealedToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [revoking, setRevoking] = useState<number | null>(null);
+
+  const fetchTokens = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/tokens");
+      if (res.ok) {
+        const data = (await res.json()) as { tokens: ApiToken[] };
+        setTokens(data.tokens);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchTokens();
+  }, [fetchTokens]);
+
+  async function handleCreate() {
+    if (!newTokenName.trim()) return;
+    setCreating(true);
+    try {
+      const body: Record<string, unknown> = {
+        name: newTokenName.trim(),
+        scopes: ["domains:read", "domains:write"],
+      };
+      const days = parseInt(expiresInDays, 10);
+      if (!isNaN(days) && days > 0) body.expiresInDays = days;
+
+      const res = await fetch("/api/tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json()) as {
+        token?: ApiToken;
+        rawToken?: string;
+        error?: string;
+      };
+      if (!res.ok || data.error) {
+        toast({
+          title: "Failed to create token",
+          description: data.error ?? "An error occurred.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setRevealedToken(data.rawToken ?? null);
+      setShowForm(false);
+      setNewTokenName("");
+      setExpiresInDays("");
+      await fetchTokens();
+    } catch {
+      toast({
+        title: "Failed to create token",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleRevoke(tokenId: number) {
+    setRevoking(tokenId);
+    try {
+      const res = await fetch(`/api/tokens/${tokenId}`, { method: "DELETE" });
+      if (res.ok) {
+        setTokens((prev) => prev.filter((t) => t.id !== tokenId));
+        toast({ title: "Token revoked" });
+      } else {
+        toast({ title: "Failed to revoke token", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Failed to revoke token", variant: "destructive" });
+    } finally {
+      setRevoking(null);
+    }
+  }
+
+  async function handleCopy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({ title: "Failed to copy", variant: "destructive" });
+    }
+  }
+
+  function formatDate(dateStr: string | null) {
+    if (!dateStr) return "—";
+    return new Date(dateStr).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* One-time token reveal */}
+      {revealedToken && (
+        <div className="border border-amber-500/40 rounded-xl bg-amber-500/5 p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+            <p className="text-sm font-medium text-amber-500">
+              Copy this token now — it won't be shown again
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 font-mono text-xs bg-muted px-3 py-2 rounded-md break-all">
+              {revealedToken}
+            </code>
+            <button
+              onClick={() => void handleCopy(revealedToken)}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-md border border-border bg-background text-sm font-medium hover:bg-muted/60 transition-colors"
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-green-500" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <button
+            onClick={() => setRevealedToken(null)}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            I've saved it — dismiss
+          </button>
+        </div>
+      )}
+
+      {/* API Tokens */}
+      <div className="border border-border rounded-xl bg-card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <KeyRound className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-base font-semibold">API Tokens</h2>
+          </div>
+          {!showForm && (
+            <button
+              onClick={() => setShowForm(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New Token
+            </button>
+          )}
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          Personal access tokens let you authenticate with the MustaFlow API from scripts and
+          external tools. Treat them like passwords.
+        </p>
+
+        {/* Create form */}
+        {showForm && (
+          <div className="border border-border rounded-lg p-4 space-y-3 bg-muted/20">
+            <h3 className="text-sm font-medium">New token</h3>
+            <div className="space-y-1">
+              <label htmlFor="token-name" className="text-xs font-medium text-muted-foreground">
+                Token name
+              </label>
+              <input
+                id="token-name"
+                type="text"
+                value={newTokenName}
+                onChange={(e) => setNewTokenName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleCreate();
+                  if (e.key === "Escape") {
+                    setShowForm(false);
+                    setNewTokenName("");
+                    setExpiresInDays("");
+                  }
+                }}
+                placeholder="e.g. CI deploy token"
+                autoFocus
+                className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="token-expires" className="text-xs font-medium text-muted-foreground">
+                Expires in days{" "}
+                <span className="text-muted-foreground/60">(leave blank for no expiry)</span>
+              </label>
+              <input
+                id="token-expires"
+                type="number"
+                min="1"
+                max="365"
+                value={expiresInDays}
+                onChange={(e) => setExpiresInDays(e.target.value)}
+                placeholder="e.g. 90"
+                className="w-32 px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={() => void handleCreate()}
+                disabled={creating || !newTokenName.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {creating ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Plus className="h-3.5 w-3.5" />
+                )}
+                {creating ? "Creating…" : "Create token"}
+              </button>
+              <button
+                onClick={() => {
+                  setShowForm(false);
+                  setNewTokenName("");
+                  setExpiresInDays("");
+                }}
+                className="px-4 py-2 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Token list */}
+        {loading ? (
+          <div className="space-y-2">
+            <div className="h-14 bg-muted rounded-lg animate-pulse" />
+            <div className="h-14 bg-muted rounded-lg animate-pulse" />
+          </div>
+        ) : tokens.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+            <KeyRound className="h-8 w-8 opacity-30" />
+            <p className="text-sm">No tokens yet — create one to get started</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+            {tokens.map((token) => (
+              <div key={token.id} className="flex items-center gap-4 px-4 py-3 bg-background">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium truncate">{token.name}</span>
+                    {token.expiresAt && new Date(token.expiresAt) < new Date() && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-medium">
+                        Expired
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 mt-0.5">
+                    <code className="text-xs text-muted-foreground font-mono">
+                      {token.tokenPreview}
+                    </code>
+                    <span className="text-xs text-muted-foreground">
+                      Created {formatDate(token.createdAt)}
+                    </span>
+                    {token.lastUsedAt && (
+                      <span className="text-xs text-muted-foreground">
+                        Last used {formatDate(token.lastUsedAt)}
+                      </span>
+                    )}
+                    {token.expiresAt && new Date(token.expiresAt) >= new Date() && (
+                      <span className="text-xs text-muted-foreground">
+                        Expires {formatDate(token.expiresAt)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => void handleRevoke(token.id)}
+                  disabled={revoking === token.id}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {revoking === token.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  Revoke
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* API Reference */}
+      <div className="border border-border rounded-xl bg-card p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Code className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-base font-semibold">Using the API</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Pass your token in the{" "}
+          <code className="font-mono text-xs bg-muted px-1 rounded">Authorization</code> header on
+          any <code className="font-mono text-xs bg-muted px-1 rounded">/api/v1/</code> request.
+        </p>
+        <pre className="bg-muted rounded-lg px-4 py-3 text-xs font-mono overflow-x-auto text-foreground">
+          {`curl -H "Authorization: Bearer mfp_..." \\
+  https://mustaflow.app/api/v1/projects/:id/domains`}
+        </pre>
+        <a
+          href="/developers"
+          className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          View the Developer Portal
+        </a>
       </div>
     </div>
   );

@@ -192,7 +192,7 @@ export default function DevelopersPage() {
                 icon: Key,
                 label: "Generate API token",
                 desc: "Create a personal access token",
-                href: "/settings",
+                href: "/settings?tab=developer",
                 internal: true,
               },
               {
@@ -262,7 +262,7 @@ export default function DevelopersPage() {
           <Section icon={Lock} title="Authentication">
             <p>
               All API requests require a personal access token (PAT). Generate one from{" "}
-              <Link href="/settings" className="text-primary hover:underline">
+              <Link href="/settings?tab=developer" className="text-primary hover:underline">
                 Settings
               </Link>
               . Pass it in every request using the <InlineCode>Authorization</InlineCode> header:
@@ -452,7 +452,7 @@ export default function DevelopersPage() {
               </p>
             </div>
             <Link
-              href="/settings"
+              href="/settings?tab=developer"
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors shrink-0"
             >
               <Key className="h-3.5 w-3.5" />
