@@ -13,7 +13,7 @@
  *
  * No emojis — lucide-react icons only.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ShieldCheck,
   CreditCard,
@@ -38,6 +38,7 @@ import {
   MessageSquare,
   Zap,
   Lock,
+  BadgeCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -55,6 +56,26 @@ interface BlueprintListItem {
   requiredSecrets: string[];
   packageCount: number;
   fileCount: number;
+}
+
+interface BlueprintSecretSpec {
+  name: string;
+  category?: string;
+  helpUrl?: string;
+  reason?: string;
+  optional?: boolean;
+}
+
+interface ExistingSecretEntry {
+  name: string;
+  masked: string;
+}
+
+interface PostInstallDialogState {
+  blueprintName: string;
+  blueprintUrl?: string;
+  secretSpecs: BlueprintSecretSpec[];
+  existingSecrets: ExistingSecretEntry[];
 }
 
 interface InstalledRow {
@@ -190,6 +211,7 @@ function BlueprintsPanel({ projectId }: { projectId: number }) {
   const [lastNotices, setLastNotices] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState<Category | "all">("all");
+  const [postInstallDialog, setPostInstallDialog] = useState<PostInstallDialogState | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -240,16 +262,52 @@ function BlueprintsPanel({ projectId }: { projectId: number }) {
         }
         const fw = body.filesWritten?.length ?? 0;
         const fs = body.filesSkipped?.length ?? 0;
-        setLastResult(
-          `Installed ${bp.name} — ${fw} file${fw === 1 ? "" : "s"} written` +
-            (fs > 0 ? `, ${fs} skipped (already existed)` : "") +
-            (bp.requiredSecrets.length > 0
-              ? `. Add required secrets in Tools & Files → Secrets: ${bp.requiredSecrets.join(", ")}.`
-              : "."),
-        );
+
         if (body.platformNotices?.length) {
           setLastNotices(body.platformNotices);
         }
+
+        // If the blueprint requires secrets, fetch full spec + existing secrets in parallel
+        // so we can show the post-install dialog instead of asking users to switch tabs.
+        if (bp.requiredSecrets.length > 0) {
+          const [bpDetailRes, secretsRes] = await Promise.all([
+            fetch(`/api/blueprints/${bp.id}`, { credentials: "include" }),
+            fetch(`/api/projects/${projectId}/secrets`, { credentials: "include" }),
+          ]);
+          const bpDetail = bpDetailRes.ok
+            ? ((await bpDetailRes.json()) as {
+                requiredSecrets?: BlueprintSecretSpec[];
+                url?: string;
+              })
+            : null;
+          const secretsList = secretsRes.ok
+            ? ((await secretsRes.json()) as ExistingSecretEntry[])
+            : [];
+
+          const specs: BlueprintSecretSpec[] = bpDetail?.requiredSecrets?.length
+            ? bpDetail.requiredSecrets
+            : bp.requiredSecrets.map((name) => ({ name }));
+
+          setPostInstallDialog({
+            blueprintName: bp.name,
+            blueprintUrl: bpDetail?.url ?? bp.url,
+            secretSpecs: specs,
+            existingSecrets: secretsList,
+          });
+
+          setLastResult(
+            `Installed ${bp.name} — ${fw} file${fw === 1 ? "" : "s"} written` +
+              (fs > 0 ? `, ${fs} skipped (already existed)` : "") +
+              ".",
+          );
+        } else {
+          setLastResult(
+            `Installed ${bp.name} — ${fw} file${fw === 1 ? "" : "s"} written` +
+              (fs > 0 ? `, ${fs} skipped (already existed)` : "") +
+              ".",
+          );
+        }
+
         await refresh();
       } catch (err) {
         setError(`Install failed: ${(err as Error).message}`);
@@ -311,238 +369,443 @@ function BlueprintsPanel({ projectId }: { projectId: number }) {
   for (const bp of filteredCatalog) grouped[bp.category]?.push(bp);
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      <div>
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <Plug className="h-4 w-4 text-cyan-400" /> Integrations Marketplace
-        </h2>
-        <p className="text-xs text-muted-foreground mt-1">
-          One-click scaffolds for auth, payments, databases, storage, and AI. Each blueprint writes
-          the necessary files into your project and lists the secrets you need to add.
-        </p>
-      </div>
+    <>
+      {postInstallDialog && (
+        <PostInstallSecretsDialog
+          projectId={projectId}
+          dialog={postInstallDialog}
+          onClose={() => setPostInstallDialog(null)}
+        />
+      )}
+      <div className="flex flex-col gap-6 p-6">
+        <div>
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <Plug className="h-4 w-4 text-cyan-400" /> Integrations Marketplace
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            One-click scaffolds for auth, payments, databases, storage, and AI. Each blueprint
+            writes the necessary files into your project and lists the secrets you need to add.
+          </p>
+        </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search blueprints by name, description, or required secret…"
-            className="w-full pl-9 pr-9 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            aria-label="Search integrations"
-          />
-          {search && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search blueprints by name, description, or required secret…"
+              className="w-full pl-9 pr-9 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              aria-label="Search integrations"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1">
             <button
               type="button"
-              onClick={() => setSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
-              aria-label="Clear search"
+              onClick={() => setFilterCategory("all")}
+              className={cn(
+                "px-2.5 py-1 text-xs rounded-md border",
+                filterCategory === "all"
+                  ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300"
+                  : "border-border text-muted-foreground hover:text-foreground",
+              )}
             >
-              <X className="h-3.5 w-3.5" />
+              All
             </button>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-1">
-          <button
-            type="button"
-            onClick={() => setFilterCategory("all")}
-            className={cn(
-              "px-2.5 py-1 text-xs rounded-md border",
-              filterCategory === "all"
-                ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300"
-                : "border-border text-muted-foreground hover:text-foreground",
-            )}
-          >
-            All
-          </button>
-          {CATEGORY_ORDER.filter((c) => c !== "other").map((cat) => {
-            const meta = CATEGORY_META[cat];
-            const Icon = meta.icon;
-            const active = filterCategory === cat;
-            return (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setFilterCategory(cat)}
-                className={cn(
-                  "px-2.5 py-1 text-xs rounded-md border flex items-center gap-1.5",
-                  active
-                    ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300"
-                    : "border-border text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Icon className={cn("h-3 w-3", active ? "" : meta.tint)} />
-                {meta.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {error && (
-        <div className="rounded-md border border-red-500/30 bg-red-500/10 text-red-300 text-xs p-3">
-          {error}
-        </div>
-      )}
-      {filteredCatalog.length === 0 && (
-        <div className="rounded-md border border-border bg-muted/20 text-xs text-muted-foreground p-4 text-center">
-          No blueprints match your search.
-        </div>
-      )}
-      {lastResult && (
-        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs p-3 flex items-start gap-2">
-          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
-          <div className="flex flex-col gap-1">
-            <span>{lastResult}</span>
-            {lastNotices.map((notice, i) => (
-              <span key={i} className="text-amber-300 flex items-center gap-1">
-                <Info className="h-3 w-3 shrink-0" />
-                {notice}
-              </span>
-            ))}
+            {CATEGORY_ORDER.filter((c) => c !== "other").map((cat) => {
+              const meta = CATEGORY_META[cat];
+              const Icon = meta.icon;
+              const active = filterCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setFilterCategory(cat)}
+                  className={cn(
+                    "px-2.5 py-1 text-xs rounded-md border flex items-center gap-1.5",
+                    active
+                      ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className={cn("h-3 w-3", active ? "" : meta.tint)} />
+                  {meta.label}
+                </button>
+              );
+            })}
           </div>
         </div>
-      )}
 
-      {CATEGORY_ORDER.map((cat) => {
-        const items = grouped[cat];
-        if (items.length === 0) return null;
-        const meta = CATEGORY_META[cat];
-        const Icon = meta.icon;
-        return (
-          <section key={cat} className="space-y-3">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-              <Icon className={cn("h-3.5 w-3.5", meta.tint)} />
-              {meta.label}
+        {error && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/10 text-red-300 text-xs p-3">
+            {error}
+          </div>
+        )}
+        {filteredCatalog.length === 0 && (
+          <div className="rounded-md border border-border bg-muted/20 text-xs text-muted-foreground p-4 text-center">
+            No blueprints match your search.
+          </div>
+        )}
+        {lastResult && (
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs p-3 flex items-start gap-2">
+            <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+            <div className="flex flex-col gap-1">
+              <span>{lastResult}</span>
+              {lastNotices.map((notice, i) => (
+                <span key={i} className="text-amber-300 flex items-center gap-1">
+                  <Info className="h-3 w-3 shrink-0" />
+                  {notice}
+                </span>
+              ))}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {items.map((bp) => {
-                const isInstalled = installedIds.has(bp.id);
-                const isBusy = installing === bp.id;
-                const platformNotice = PLATFORM_NOTICES[bp.id];
-                return (
-                  <div
-                    key={bp.id}
-                    className="rounded-lg border border-border bg-card/50 p-4 flex flex-col gap-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm truncate">{bp.name}</span>
-                          {isInstalled && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 inline-flex items-center gap-1">
-                              <CheckCircle2 className="h-2.5 w-2.5" /> Installed
-                            </span>
-                          )}
+          </div>
+        )}
+
+        {CATEGORY_ORDER.map((cat) => {
+          const items = grouped[cat];
+          if (items.length === 0) return null;
+          const meta = CATEGORY_META[cat];
+          const Icon = meta.icon;
+          return (
+            <section key={cat} className="space-y-3">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                <Icon className={cn("h-3.5 w-3.5", meta.tint)} />
+                {meta.label}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {items.map((bp) => {
+                  const isInstalled = installedIds.has(bp.id);
+                  const isBusy = installing === bp.id;
+                  const platformNotice = PLATFORM_NOTICES[bp.id];
+                  return (
+                    <div
+                      key={bp.id}
+                      className="rounded-lg border border-border bg-card/50 p-4 flex flex-col gap-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm truncate">{bp.name}</span>
+                            {isInstalled && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 inline-flex items-center gap-1">
+                                <CheckCircle2 className="h-2.5 w-2.5" /> Installed
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-3">
+                            {bp.description}
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-3">
-                          {bp.description}
-                        </p>
+                        {bp.url && (
+                          <a
+                            href={bp.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="text-muted-foreground hover:text-foreground shrink-0"
+                            title="Documentation"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        )}
                       </div>
-                      {bp.url && (
-                        <a
-                          href={bp.url}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          className="text-muted-foreground hover:text-foreground shrink-0"
-                          title="Documentation"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
+
+                      {/* Platform-managed credential notice — always visible on eligible cards */}
+                      {platformNotice && (
+                        <div className="rounded bg-amber-500/10 border border-amber-500/25 px-2.5 py-1.5 text-[10px] text-amber-300 flex items-start gap-1.5">
+                          <Info className="h-3 w-3 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-semibold">{platformNotice.label} — </span>
+                            {platformNotice.detail}
+                          </div>
+                        </div>
                       )}
-                    </div>
 
-                    {/* Platform-managed credential notice — always visible on eligible cards */}
-                    {platformNotice && (
-                      <div className="rounded bg-amber-500/10 border border-amber-500/25 px-2.5 py-1.5 text-[10px] text-amber-300 flex items-start gap-1.5">
-                        <Info className="h-3 w-3 shrink-0 mt-0.5" />
-                        <div>
-                          <span className="font-semibold">{platformNotice.label} — </span>
-                          {platformNotice.detail}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/50">
-                        <Package className="h-2.5 w-2.5" />
-                        {bp.fileCount} file{bp.fileCount === 1 ? "" : "s"}
-                      </span>
-                      {bp.packageCount > 0 && (
+                      <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/50">
                           <Package className="h-2.5 w-2.5" />
-                          {bp.packageCount} package{bp.packageCount === 1 ? "" : "s"}
+                          {bp.fileCount} file{bp.fileCount === 1 ? "" : "s"}
                         </span>
-                      )}
-                      {bp.requiredSecrets.length > 0 && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/50">
-                          <Key className="h-2.5 w-2.5" />
-                          {bp.requiredSecrets.length} secret
-                          {bp.requiredSecrets.length === 1 ? "" : "s"}
-                        </span>
-                      )}
-                      <span className="px-1.5 py-0.5 rounded bg-muted/50">v{bp.version}</span>
-                    </div>
-
-                    {bp.requiredSecrets.length > 0 && (
-                      <div className="text-[10px] text-muted-foreground">
-                        <span className="font-medium">Requires:</span>{" "}
-                        <code className="text-[10px]">{bp.requiredSecrets.join(", ")}</code>
+                        {bp.packageCount > 0 && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/50">
+                            <Package className="h-2.5 w-2.5" />
+                            {bp.packageCount} package{bp.packageCount === 1 ? "" : "s"}
+                          </span>
+                        )}
+                        {bp.requiredSecrets.length > 0 && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/50">
+                            <Key className="h-2.5 w-2.5" />
+                            {bp.requiredSecrets.length} secret
+                            {bp.requiredSecrets.length === 1 ? "" : "s"}
+                          </span>
+                        )}
+                        <span className="px-1.5 py-0.5 rounded bg-muted/50">v{bp.version}</span>
                       </div>
-                    )}
 
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      {isInstalled ? (
-                        <>
-                          <button
-                            onClick={() => handleUninstall(bp.id)}
-                            className="text-xs text-muted-foreground hover:text-red-400 inline-flex items-center gap-1 px-2 py-1 rounded border border-border"
-                          >
-                            <Trash2 className="h-3 w-3" /> Remove
-                          </button>
+                      {bp.requiredSecrets.length > 0 && (
+                        <div className="text-[10px] text-muted-foreground">
+                          <span className="font-medium">Requires:</span>{" "}
+                          <code className="text-[10px]">{bp.requiredSecrets.join(", ")}</code>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        {isInstalled ? (
+                          <>
+                            <button
+                              onClick={() => handleUninstall(bp.id)}
+                              className="text-xs text-muted-foreground hover:text-red-400 inline-flex items-center gap-1 px-2 py-1 rounded border border-border"
+                            >
+                              <Trash2 className="h-3 w-3" /> Remove
+                            </button>
+                            <button
+                              disabled={isBusy}
+                              onClick={() => handleInstall(bp)}
+                              className="text-xs text-foreground inline-flex items-center gap-1 px-2.5 py-1 rounded bg-muted hover:bg-muted/70 disabled:opacity-50"
+                            >
+                              {isBusy ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Package className="h-3 w-3" />
+                              )}
+                              Reinstall
+                            </button>
+                          </>
+                        ) : (
                           <button
                             disabled={isBusy}
                             onClick={() => handleInstall(bp)}
-                            className="text-xs text-foreground inline-flex items-center gap-1 px-2.5 py-1 rounded bg-muted hover:bg-muted/70 disabled:opacity-50"
+                            className="text-xs font-medium text-emerald-300 inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 disabled:opacity-50"
                           >
                             {isBusy ? (
                               <Loader2 className="h-3 w-3 animate-spin" />
                             ) : (
-                              <Package className="h-3 w-3" />
+                              <Plug className="h-3 w-3" />
                             )}
-                            Reinstall
+                            Install
                           </button>
-                        </>
-                      ) : (
-                        <button
-                          disabled={isBusy}
-                          onClick={() => handleInstall(bp)}
-                          className="text-xs font-medium text-emerald-300 inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 disabled:opacity-50"
-                        >
-                          {isBusy ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Plug className="h-3 w-3" />
-                          )}
-                          Install
-                        </button>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        );
-      })}
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
 
-      {catalog.length === 0 && (
-        <div className="text-sm text-muted-foreground p-6 text-center">
-          No integration blueprints available.
+        {catalog.length === 0 && (
+          <div className="text-sm text-muted-foreground p-6 text-center">
+            No integration blueprints available.
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── Post-install secrets dialog ──────────────────────────────────────────────
+
+function PostInstallSecretsDialog({
+  projectId,
+  dialog,
+  onClose,
+}: {
+  projectId: number;
+  dialog: PostInstallDialogState;
+  onClose: () => void;
+}) {
+  const existingMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of dialog.existingSecrets) m.set(s.name, s.masked);
+    return m;
+  }, [dialog.existingSecrets]);
+
+  // One input value per secret spec
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const spec of dialog.secretSpecs) init[spec.name] = "";
+    return init;
+  });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Close on backdrop click
+  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === overlayRef.current) onClose();
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    const toSave = dialog.secretSpecs.filter(
+      (spec) => !existingMap.has(spec.name) && values[spec.name]?.trim(),
+    );
+    try {
+      for (const spec of toSave) {
+        const res = await fetch(`/api/projects/${projectId}/secrets`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: spec.name, value: values[spec.name]!.trim() }),
+        });
+        if (!res.ok) {
+          const body = (await res.json()) as { error?: string };
+          throw new Error(body.error ?? `Failed to save ${spec.name} (HTTP ${res.status})`);
+        }
+      }
+      setSaved(true);
+      setTimeout(onClose, 900);
+    } catch (err) {
+      setSaveError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const hasAnyInput = dialog.secretSpecs.some(
+    (spec) => !existingMap.has(spec.name) && values[spec.name]?.trim(),
+  );
+  const allAlreadySet = dialog.secretSpecs.every((spec) => existingMap.has(spec.name));
+
+  return (
+    <div
+      ref={overlayRef}
+      onClick={handleOverlayClick}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+    >
+      <div className="relative w-full max-w-md rounded-xl border border-border bg-card shadow-xl flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Key className="h-4 w-4 text-cyan-400 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold truncate">Configure secrets</p>
+              <p className="text-[11px] text-muted-foreground truncate">
+                {dialog.blueprintName} requires the following environment variables
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded text-muted-foreground hover:text-foreground shrink-0"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-      )}
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
+          {dialog.secretSpecs.map((spec) => {
+            const maskedValue = existingMap.get(spec.name);
+            const alreadySet = maskedValue !== undefined;
+            return (
+              <div key={spec.name} className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <label className="text-xs font-medium font-mono">{spec.name}</label>
+                  {spec.optional && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/50 text-muted-foreground">
+                      optional
+                    </span>
+                  )}
+                  {alreadySet && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 inline-flex items-center gap-1">
+                      <BadgeCheck className="h-2.5 w-2.5" /> Already set
+                    </span>
+                  )}
+                  {spec.helpUrl && (
+                    <a
+                      href={spec.helpUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-[10px] text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-0.5 ml-auto"
+                    >
+                      Where to find this <ExternalLink className="h-2.5 w-2.5" />
+                    </a>
+                  )}
+                </div>
+                {spec.reason && <p className="text-[11px] text-muted-foreground">{spec.reason}</p>}
+                {alreadySet ? (
+                  <div className="px-3 py-2 rounded-md border border-border bg-muted/20 text-xs font-mono text-muted-foreground select-none">
+                    {maskedValue}
+                  </div>
+                ) : (
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={values[spec.name] ?? ""}
+                    onChange={(e) =>
+                      setValues((prev) => ({ ...prev, [spec.name]: e.target.value }))
+                    }
+                    placeholder={`Enter ${spec.name}…`}
+                    className="px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-1 focus:ring-cyan-500 font-mono"
+                  />
+                )}
+              </div>
+            );
+          })}
+
+          {saveError && (
+            <div className="rounded-md border border-red-500/30 bg-red-500/10 text-red-300 text-xs p-3 flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              {saveError}
+            </div>
+          )}
+
+          {saved && (
+            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs p-3 flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0" /> Secrets saved successfully.
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-border shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs text-muted-foreground hover:text-foreground px-3 py-1.5 rounded border border-border"
+          >
+            {allAlreadySet ? "Close" : "Skip for now"}
+          </button>
+          {!allAlreadySet && (
+            <button
+              type="button"
+              disabled={saving || !hasAnyInput || saved}
+              onClick={() => void handleSave()}
+              className="text-xs font-medium text-emerald-300 inline-flex items-center gap-1.5 px-4 py-1.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Key className="h-3 w-3" />}
+              Save secrets
+            </button>
+          )}
+          {dialog.blueprintUrl && !allAlreadySet && (
+            <a
+              href={dialog.blueprintUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+            >
+              Docs <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
