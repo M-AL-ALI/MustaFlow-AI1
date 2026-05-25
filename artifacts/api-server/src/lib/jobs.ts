@@ -2635,7 +2635,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                     knowledgeContext: knowledgeContext || undefined,
                                     databaseContext,
                                     unchangedFilesHint:
-                                      unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                                      unchangedFilesHint.length > 0
+                                        ? unchangedFilesHint
+                                        : undefined,
                                     planContext: input.planContext ?? null,
                                     conversationSummary,
                                     imageAttachments,
