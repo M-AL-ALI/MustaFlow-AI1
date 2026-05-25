@@ -783,7 +783,12 @@ export function QueueComposer({
       const inlineImages = pending.filter(
         (a): a is Extract<ComposerAttachment, { kind: "image" }> => a.kind === "image",
       );
-      onSingleSend(text, undefined, inlineImages.length > 0 ? inlineImages : undefined);
+      // Pass the client-detected intent so the server skips the classifier
+      // and routes directly — prevents the agent from asking the user to
+      // "switch to plan mode" when the message is clearly a planning request.
+      const detectedIntent =
+        clientIntent === "plan" || clientIntent === "converse" ? clientIntent : undefined;
+      onSingleSend(text, detectedIntent, inlineImages.length > 0 ? inlineImages : undefined);
       return;
     }
 
@@ -815,6 +820,7 @@ export function QueueComposer({
     planMode,
     variantMode,
     projectId,
+    clientIntent,
     onSingleSend,
     onBatchStarted,
     onPromptValueChange,
@@ -1333,22 +1339,20 @@ export function QueueComposer({
             </span>
           )}
 
-          {/* Routing hint badge — updates as user types */}
-          {routingHint?.agentIdentity && routingHint.agentIdentity !== agentType && (
-            <button
-              onClick={() => setAgentType(routingHint.agentIdentity as AgentType)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 transition-colors"
-              title={routingHint.reason ?? ""}
-            >
-              Switch to{" "}
-              {routingHint.agentIdentity === "planning"
-                ? "Planning"
-                : routingHint.agentIdentity === "task"
-                  ? "Task"
-                  : "Main"}{" "}
-              Agent
-            </button>
-          )}
+          {/* Routing hint badge — updates as user types.
+              "planning" is suppressed here because plan intent is auto-detected
+              and applied on send — no manual switch required. */}
+          {routingHint?.agentIdentity &&
+            routingHint.agentIdentity !== agentType &&
+            routingHint.agentIdentity !== "planning" && (
+              <button
+                onClick={() => setAgentType(routingHint.agentIdentity as AgentType)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 transition-colors"
+                title={routingHint.reason ?? ""}
+              >
+                Switch to {routingHint.agentIdentity === "task" ? "Task" : "Main"} Agent
+              </button>
+            )}
 
           <button
             onClick={() => onVariantModeChange(!variantMode)}

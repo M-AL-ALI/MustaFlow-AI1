@@ -1614,6 +1614,9 @@ export default function ProjectWorkspacePage() {
             // stuck even though the chat is free.
             const wasBackground = opts?.background ?? runInBackground;
             if (tid && !wasBackground) setActiveTaskId(tid);
+            // Auto-enable plan mode when the server detected a plan intent so
+            // subsequent messages continue planning without a manual toggle.
+            if (data?.assistantMessage?.planMode) setPlanMode(true);
           },
           onError: () => {
             setPendingBuildStartedAt(null);
@@ -3034,7 +3037,7 @@ export default function ProjectWorkspacePage() {
                       variantMode={variantMode}
                       onVariantModeChange={setVariantMode}
                       disabled={isBusy}
-                      onSingleSend={(content, _intent, attachments) => {
+                      onSingleSend={(content, intent, attachments) => {
                         setPrompt("");
                         const imageOnly = attachments?.filter(
                           (
@@ -3046,12 +3049,16 @@ export default function ProjectWorkspacePage() {
                             generated?: boolean;
                           } => a.kind === "image",
                         );
-                        send(
-                          content,
-                          imageOnly && imageOnly.length > 0
-                            ? { attachments: imageOnly }
-                            : undefined,
-                        );
+                        // Auto-activate plan mode when the client detected a plan intent
+                        // so the user never has to manually toggle it.
+                        if (intent === "plan") setPlanMode(true);
+                        send(content, {
+                          ...(imageOnly && imageOnly.length > 0 ? { attachments: imageOnly } : {}),
+                          ...(intent === "plan"
+                            ? { planMode: true, agentIntent: "plan" as const }
+                            : {}),
+                          ...(intent === "converse" ? { agentIntent: "converse" as const } : {}),
+                        });
                       }}
                       onBatchStarted={handleBatchStarted}
                       promptValue={prompt}

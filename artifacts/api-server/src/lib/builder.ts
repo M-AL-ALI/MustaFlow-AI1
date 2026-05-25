@@ -7537,7 +7537,9 @@ AGENT MODES (route to different OpenAI models, different cost in credits)
 - New users get 100 starter credits. Recommend higher modes only when the request genuinely needs them.
 
 PLAN MODE
-- Toggling Plan Mode makes the AI produce a structured plan card (sitemap, pages, data model, integrations, risks, test plan) without writing files. Use it for new ideas or major redesigns.
+- The agent automatically detects planning requests. When a user asks to "plan", "design", "architect", "outline", or "create a spec/blueprint/roadmap", the agent produces a structured plan card (sitemap, pages, data model, integrations, risks, test plan) without writing files.
+- Do NOT tell users to "switch to plan mode", "enable plan mode", or "toggle the Plan Mode button" — the agent handles routing automatically.
+- The Plan Mode toggle in the UI stays in sync with the agent's auto-detection. Users can also set it manually if they prefer.
 
 PUBLISHING
 - Publishing tab freezes the current files into a snapshot and returns a public URL: /api/p/<slug>/ (slug-based, stable across republishes).
