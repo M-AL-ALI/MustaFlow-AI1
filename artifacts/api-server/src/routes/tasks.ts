@@ -288,8 +288,9 @@ router.post(
       logger.info({ activeTaskId: active.id, projectId }, "Force-start: cancelled active task");
     }
 
-    // Drain the project queue — this picks up the queued task and starts it.
-    await drainNextProjectTask(projectId);
+    // Drain the project queue — preferring the specific task the user requested
+    // (without this hint, the drain would pick the oldest queued task instead).
+    await drainNextProjectTask(projectId, taskId);
 
     // Return the (now-enqueued) task row.
     const [updated] = await db

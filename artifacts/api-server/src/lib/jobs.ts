@@ -1039,7 +1039,10 @@ async function hydrateTaskAttachments(
  * routes/messages.ts and routes/tasks.ts). These never belong to a batch, so
  * drainNextBatchTask won't find them.
  */
-export async function drainNextProjectTask(projectId: number): Promise<void> {
+export async function drainNextProjectTask(
+  projectId: number,
+  preferTaskId?: number,
+): Promise<void> {
   // Staging gate: if any task for this project is awaiting review, block the queue
   const [blocked] = await db
     .select({ id: agentTasksTable.id })
@@ -1056,18 +1059,38 @@ export async function drainNextProjectTask(projectId: number): Promise<void> {
     return;
   }
 
-  const [nextTask] = await db
-    .select()
-    .from(agentTasksTable)
-    .where(
-      and(
-        eq(agentTasksTable.projectId, projectId),
-        eq(agentTasksTable.status, "queued"),
-        isNull(agentTasksTable.queueBatchId),
-      ),
-    )
-    .orderBy(asc(agentTasksTable.createdAt))
-    .limit(1);
+  // If a specific task was requested (e.g. force-start), try it first; fall back
+  // to the oldest queued task only if the preferred one isn't actually queued.
+  let nextTask: typeof agentTasksTable.$inferSelect | undefined;
+  if (preferTaskId !== undefined) {
+    const [preferred] = await db
+      .select()
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.id, preferTaskId),
+          eq(agentTasksTable.projectId, projectId),
+          eq(agentTasksTable.status, "queued"),
+        ),
+      )
+      .limit(1);
+    nextTask = preferred;
+  }
+  if (!nextTask) {
+    const [oldest] = await db
+      .select()
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.projectId, projectId),
+          eq(agentTasksTable.status, "queued"),
+          isNull(agentTasksTable.queueBatchId),
+        ),
+      )
+      .orderBy(asc(agentTasksTable.createdAt))
+      .limit(1);
+    nextTask = oldest;
+  }
 
   if (!nextTask) return;
 
