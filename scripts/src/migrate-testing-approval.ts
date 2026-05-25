@@ -26,9 +26,7 @@ async function main(): Promise<void> {
     await client.query(
       `ALTER TABLE project_versions ADD COLUMN IF NOT EXISTS migration_status text`,
     );
-    await client.query(
-      `ALTER TABLE project_versions ADD COLUMN IF NOT EXISTS migration_log text`,
-    );
+    await client.query(`ALTER TABLE project_versions ADD COLUMN IF NOT EXISTS migration_log text`);
     await client.query(
       `ALTER TABLE project_versions ADD COLUMN IF NOT EXISTS testing_skipped boolean NOT NULL DEFAULT false`,
     );

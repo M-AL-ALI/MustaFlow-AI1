@@ -125,10 +125,7 @@ export function injectHealthEndpoint(
   // Skip if the project already defines a health endpoint at the expected path.
   if (files.some((f) => f.path === config.path)) return files;
 
-  return [
-    ...files,
-    { path: config.path, content: config.content, mimeType: config.mimeType },
-  ];
+  return [...files, { path: config.path, content: config.content, mimeType: config.mimeType }];
 }
 
 /**

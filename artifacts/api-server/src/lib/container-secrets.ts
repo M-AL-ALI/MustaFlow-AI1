@@ -117,10 +117,7 @@ export function invalidateContainerSecretCache(projectId: number): void {
  * If secrets cannot be loaded, prepends `[redaction-unavailable] ` as a
  * marker and returns the line as-is.
  */
-export async function redactSecretValuesInLog(
-  projectId: number,
-  line: string,
-): Promise<string> {
+export async function redactSecretValuesInLog(projectId: number, line: string): Promise<string> {
   const secrets = await getCachedContainerSecretMap(projectId);
 
   if (secrets === null) {

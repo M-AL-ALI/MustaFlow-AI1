@@ -275,9 +275,7 @@ describe("Subdomain gateway — HMAC cookie validation", () => {
    */
   it("T07: accepts a valid HMAC-signed cookie", () => {
     const sessionId = "01HSABC123";
-    const mac = createHmac("sha256", SESSION_SECRET)
-      .update(`preview:${sessionId}`)
-      .digest("hex");
+    const mac = createHmac("sha256", SESSION_SECRET).update(`preview:${sessionId}`).digest("hex");
     const cookie = `${sessionId}.${mac}`;
 
     expect(validatePreviewCookie(cookie, sessionId, SESSION_SECRET)).toBe(true);

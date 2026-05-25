@@ -99,11 +99,7 @@ function extractPreviewSessionId(host: string | undefined): string | null {
  * Proxy a request to the test container URL.
  * Uses fetch + streams to avoid loading large responses into memory.
  */
-async function proxyToContainer(
-  containerUrl: string,
-  req: Request,
-  res: Response,
-): Promise<void> {
+async function proxyToContainer(containerUrl: string, req: Request, res: Response): Promise<void> {
   const targetPath = req.url || "/";
   const target = containerUrl.replace(/\/$/, "") + targetPath;
 
@@ -287,14 +283,18 @@ export async function previewSubdomainGateway(
     .where(and(eq(projectsTable.id, session.projectId), isNull(projectsTable.deletedAt)));
 
   if (!project || !project.testContainerUrl) {
-    res.status(503).send("Test container is not running. Start a test preview from your workspace.");
+    res
+      .status(503)
+      .send("Test container is not running. Start a test preview from your workspace.");
     return;
   }
 
   if (project.testContainerStatus !== "running") {
     res
       .status(503)
-      .send(`Test container is ${project.testContainerStatus}. Please wait or restart the preview.`);
+      .send(
+        `Test container is ${project.testContainerStatus}. Please wait or restart the preview.`,
+      );
     return;
   }
 

@@ -117,7 +117,10 @@ export async function revokePreviewForSecurityChange(
       const { destroyContainer } = await import("./container");
       await destroyContainer(project.testContainerId, projectId);
     } catch (err) {
-      logger.warn({ err, projectId }, "Failed to stop test container after security change — ignoring");
+      logger.warn(
+        { err, projectId },
+        "Failed to stop test container after security change — ignoring",
+      );
     }
   }
 

@@ -18,10 +18,9 @@ import { Router, type IRouter } from "express";
 // Scans: files ending in .sql, files whose path contains "migrat" (any case),
 // and Drizzle/Prisma/Knex migration files ending in .ts or .js in a migrations/
 // directory. Any match against dangerous DDL triggers a hard block.
-function detectSchemaMigrations(
-  files: Array<{ path: string; content: string | null }>,
-): string[] {
-  const DANGEROUS_DDL = /\b(ALTER\s+TABLE|DROP\s+TABLE|DROP\s+COLUMN|DROP\s+INDEX|TRUNCATE\s+TABLE|RENAME\s+TABLE|RENAME\s+COLUMN)\b/i;
+function detectSchemaMigrations(files: Array<{ path: string; content: string | null }>): string[] {
+  const DANGEROUS_DDL =
+    /\b(ALTER\s+TABLE|DROP\s+TABLE|DROP\s+COLUMN|DROP\s+INDEX|TRUNCATE\s+TABLE|RENAME\s+TABLE|RENAME\s+COLUMN)\b/i;
   const violations: string[] = [];
   for (const f of files) {
     if (!f.content) continue;
@@ -496,10 +495,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         prodContainerStatus = prodResult.status;
       }
     } catch (err) {
-      req.log.error(
-        { err, projectId },
-        "Prod container deployment failed",
-      );
+      req.log.error({ err, projectId }, "Prod container deployment failed");
     }
   }
 

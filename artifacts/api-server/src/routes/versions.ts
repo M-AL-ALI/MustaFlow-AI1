@@ -654,7 +654,8 @@ router.post(
       .where(eq(projectVersionsTable.id, versionId));
     if (versionDetails?.migrationStatus === "failed") {
       res.status(422).json({
-        error: "Preview database migration failed for this version. Fix migrations before approving.",
+        error:
+          "Preview database migration failed for this version. Fix migrations before approving.",
         code: "migration_failed",
       });
       return;

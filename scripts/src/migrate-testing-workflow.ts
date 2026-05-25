@@ -28,12 +28,8 @@ async function main(): Promise<void> {
     await client.query("BEGIN");
 
     // ── projects: testing workflow columns ────────────────────────────────────
-    await client.query(
-      `ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_container_id text`,
-    );
-    await client.query(
-      `ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_container_url text`,
-    );
+    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_container_id text`);
+    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_container_url text`);
     await client.query(
       `ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_container_status text NOT NULL DEFAULT 'stopped'`,
     );
@@ -49,9 +45,7 @@ async function main(): Promise<void> {
     await client.query(
       `ALTER TABLE projects ADD COLUMN IF NOT EXISTS testing_status text NOT NULL DEFAULT 'idle'`,
     );
-    await client.query(
-      `ALTER TABLE projects ADD COLUMN IF NOT EXISTS tested_snapshot_id integer`,
-    );
+    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS tested_snapshot_id integer`);
     await client.query(
       `ALTER TABLE projects ADD COLUMN IF NOT EXISTS previous_published_snapshot_id integer`,
     );

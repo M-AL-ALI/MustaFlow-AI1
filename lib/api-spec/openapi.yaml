@@ -1400,9 +1400,21 @@ paths:
                   candidateVersionId: { type: integer }
                   testingStatus: { type: string }
                   containerUrl: { type: ["string", "null"] }
-        "402": { description: Insufficient credits, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "409": { description: Container already running, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "402":
+          {
+            description: Insufficient credits,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
+        "404":
+          {
+            description: Project not found,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
+        "409":
+          {
+            description: Container already running,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
 
   /projects/{id}/preview-env/rebuild:
     post:
@@ -1423,7 +1435,11 @@ paths:
                   ok: { type: boolean }
                   candidateVersionId: { type: integer }
                   testingStatus: { type: string }
-        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404":
+          {
+            description: Project not found,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
 
   /projects/{id}/preview-env/stop:
     post:
@@ -1442,7 +1458,11 @@ paths:
                 required: [ok]
                 properties:
                   ok: { type: boolean }
-        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404":
+          {
+            description: Project not found,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
 
   /projects/{id}/preview-env/status:
     get:
@@ -1470,7 +1490,11 @@ paths:
                   testedSnapshotId: { type: ["integer", "null"] }
                   migrationStatus: { type: ["string", "null"] }
                   previewSessionUrl: { type: ["string", "null"] }
-        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404":
+          {
+            description: Project not found,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
 
   /projects/{id}/preview-env/approve:
     post:
@@ -1498,7 +1522,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
-        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404":
+          {
+            description: Project not found,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
 
   /projects/{id}/preview-env/session:
     post:
@@ -1519,8 +1547,16 @@ paths:
                   sessionId: { type: string }
                   previewUrl: { type: string }
                   expiresAt: { type: string, format: date-time }
-        "404": { description: Project not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "409": { description: No running test container, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404":
+          {
+            description: Project not found,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
+        "409":
+          {
+            description: No running test container,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
 
   /projects/{id}/versions/{versionId}/rollback:
     post:

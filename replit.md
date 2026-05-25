@@ -151,6 +151,7 @@ Full architecture spec lives in `docs/changelog.md`. Key implementation files:
 - **Approve preconditions**: `artifacts/api-server/src/routes/versions.ts` — 3 preconditions added to `approve-testing` endpoint; also sets `project.testedSnapshotId` + `testingStatus=passed`
 
 ### Env / deployment notes
+
 - `PLATFORM_DOMAIN` (default `mustaflow.app`) — used by gateway to identify preview subdomains
 - The migration adds columns to `projects`, `project_versions`, and `project_secrets`, and creates `preview_sessions`. Run it before deploying.
 - Full-stack projects (`containerId` set) now **require** a tested snapshot before publishing to production. Static projects continue to publish directly.

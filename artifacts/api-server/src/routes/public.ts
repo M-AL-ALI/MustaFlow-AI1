@@ -26,10 +26,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable, previewSnapshotsTable } from "@workspace/db";
 import { serveSnapshot, serveSnapshotForEnv, servePreviewSnapshot } from "../lib/serveSnapshot";
 import { r2GetObject } from "../lib/cloudflare";
-import {
-  loadPreviewProject,
-  userCanPreviewProject,
-} from "../lib/livePreviewProxy";
+import { loadPreviewProject, userCanPreviewProject } from "../lib/livePreviewProxy";
 
 const router: IRouter = Router();
 
@@ -41,7 +38,11 @@ router.get("/p/:slug/staging/{*splat}", async (req, res): Promise<void> => {
 
   // Auth gate: look up the project by publicSlug and verify the caller has access.
   const [projectRow] = await db
-    .select({ id: projectsTable.id, ownerId: projectsTable.ownerId, organizationId: projectsTable.organizationId })
+    .select({
+      id: projectsTable.id,
+      ownerId: projectsTable.ownerId,
+      organizationId: projectsTable.organizationId,
+    })
     .from(projectsTable)
     .where(and(eq(projectsTable.publicSlug, slug), isNull(projectsTable.deletedAt)));
 
