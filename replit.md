@@ -121,6 +121,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - Required env for full auto-provisioning: `FLY_API_TOKEN` (+ `FLY_APP_NAME`, `FLY_ORG_SLUG`, `FLY_REGION`) and `NEON_API_KEY`. When missing, the corresponding step no-ops and the project still settles into `ready` (matches dev-mode degradation elsewhere).
 - The workspace top bar shows a provisioning badge (`provisioning → ready → hibernated → error`) with a "Retry" link when the last attempt failed (`artifacts/mustaflow/src/pages/projects/[id].tsx`).
 - Existing projects are untouched — they keep `builder_mode = 'static-legacy'` and `provisioning_status = 'idle'` so the badge stays hidden.
+- **Verification status (Task #762, 2026-05-25): Fly side PASS, Neon side FAIL.** End-to-end run via `tsx artifacts/api-server/src/verify-agentic-provisioning.ts` confirmed Fly machine creation works; Neon project creation fails with HTTP 400 `org_id is required` because `createNeonProject` in `provisioning.ts` doesn't include `org_id` in the request body and the available `NEON_API_KEY` is org-scoped (org id `org-winter-credit-85928353`). The pipeline correctly settles the project into `provisioning_status='error'` and the workspace badge shows Retry. Fix is small (add `org_id` to the Neon POST body, sourced from a new `NEON_ORG_ID` env var or auto-detected via `/api/v2/users/me/organizations`) but is intentionally NOT done in this verification task. Full details in `docs/changelog.md` under "Task #762".
 
 ## Known limitations (honest status)
 

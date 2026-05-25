@@ -549,3 +549,30 @@ The intended user journey is: Login → create project → build app → preview
 - **Builder pipelines**: `runPlanDecomposePipeline` and `runGuidedRefinementPipeline` appended to `artifacts/api-server/src/lib/builder.ts` (after `guessMime`). Both use `callWithRetry` with stage=`"plan"` for correct model routing.
 - **Key new frontend files**: `plan-templates-picker.tsx`, `plan-history.tsx`, `plan-decompose.tsx`, `guided-refinement.tsx`.
 - **Plan card updates**: `PlanCard` now accepts `onRestorePlan?` prop; footer has "Build in steps" and "Plan history" secondary action links.
+
+## Task #762 — Agentic provisioning verification (2026-05-25)
+
+- **Outcome: FAIL** — Fly side works, Neon side is broken.
+- **Setup**: Restarted `API Server` workflow with `FLY_API_TOKEN` and `NEON_API_KEY` both set. No startup errors from the provisioning module (one transient `ensureFlyApp` ETIMEDOUT on boot, but direct `curl` to `api.machines.dev` afterward returned 200 in ~150ms — looks like a one-off cold-start blip, not blocking).
+- **Method**: Wrote `artifacts/api-server/src/verify-agentic-provisioning.ts` — a self-contained harness that inserts a throwaway `builder_mode='agentic'` project, calls `runProvisionProjectJob` directly (same code path as the API server), inspects the resulting row + `DATABASE_URL` secret, runs `SELECT 1` against the real Neon connection string, then tears down (Fly machine destroy + Neon project delete + DB row hard-delete). Safe to re-run.
+- **Fly: PASS** — Machine `e826310a0e9458` was created in ~1.7s, `containerUrl=https://mustaflow-containers.fly.dev/container/e826310a0e9458`, `containerStatus=starting`. Cleanup `DELETE /apps/.../machines/...?force=true` returned 200.
+- **Neon: FAIL** — `createNeonProject` got HTTP 400 from `POST https://console.neon.tech/api/v2/projects`:
+  ```
+  {"code":"","message":"org_id is required, you can find it on your organization settings page"}
+  ```
+  The current request body in `artifacts/api-server/src/lib/provisioning.ts` (line ~143) omits `project.org_id`. The Neon account behind `NEON_API_KEY` is org-scoped (personal account has `projects_limit: 0`; only the `MustaFlow AI` organization with id `org-winter-credit-85928353` can hold projects), and Neon refuses project creation without an explicit `org_id` for org-scoped keys.
+- **End-to-end pipeline behaviour was correct**: after Neon failed, the row settled into `provisioning_status='error'`, `provisioning_error='Failed to create Neon Postgres project.'`, no `neon_project_id`, no `DATABASE_URL` secret. The workspace top bar would show the Retry link. So `markError` and the strict success criteria work as designed — the failure is purely the missing field in the API request.
+- **Manual `curl` confirms the fix**: `POST /api/v2/projects` with `{"project":{"name":"mf-verify-test","pg_version":16,"region_id":"aws-us-east-1","org_id":"org-winter-credit-85928353"}}` returned 200 and created Neon project `shy-haze-77595478` (deleted immediately after).
+- **Pre-existing schema gap surfaced as a side-effect**: the verification script's `SELECT` on `project_secrets` failed with `column "min_role" does not exist`. This is the `migrate-secret-scoping` migration that hasn't been applied to this DB (already documented in `replit.md` known limitations). Not caused by this task — but worth re-running `pnpm --filter @workspace/scripts run migrate-secret-scoping` against dev to clean it up.
+- **No orphaned cloud resources**: Fly machine + DB row torn down by the harness; no Neon project was ever created by the pipeline.
+- **Recommended next step** (separate task): add `NEON_ORG_ID` env var (or autodetect via `GET /api/v2/users/me/organizations` and pick the first one when the key is org-scoped), and include `org_id` in the `createNeonProject` POST body. Then re-run `tsx artifacts/api-server/src/verify-agentic-provisioning.ts` — the verdict should flip to PASS.
+- **Key log excerpts**:
+  ```
+  [01:37:17.002] INFO  Fly machine created  machineId="e826310a0e9458"
+  [01:37:17.276] ERROR Neon project creation failed  status=400
+                       err='{"message":"org_id is required, you can find it on your organization settings page"}'
+  [result] provisioningStatus: error
+           provisioningError:  Failed to create Neon Postgres project.
+           containerId:        e826310a0e9458
+           neonProjectId:      (none)
+  ```
