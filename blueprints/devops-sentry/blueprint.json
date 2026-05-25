@@ -1,0 +1,31 @@
+{
+  "id": "devops-sentry",
+  "name": "Sentry Error Tracking",
+  "category": "other",
+  "description": "Real-time error monitoring and performance tracing with Sentry — captures exceptions, stack traces, and user context.",
+  "version": "1.0.0",
+  "url": "https://docs.sentry.io/",
+  "requiredSecrets": [
+    {
+      "name": "SENTRY_DSN",
+      "category": "other",
+      "reason": "Sentry Data Source Name (DSN) for your project",
+      "helpUrl": "https://sentry.io/settings/projects/"
+    },
+    {
+      "name": "SENTRY_AUTH_TOKEN",
+      "category": "other",
+      "reason": "Sentry auth token for source map uploads during build",
+      "helpUrl": "https://sentry.io/settings/auth-tokens/",
+      "optional": true
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "@sentry/node", "version": "^8.20.0" }],
+  "files": [
+    {
+      "path": "src/lib/sentry.ts",
+      "content": "import * as Sentry from \"@sentry/node\";\n\nexport function initSentry() {\n  if (!process.env.SENTRY_DSN) return;\n  Sentry.init({\n    dsn: process.env.SENTRY_DSN,\n    environment: process.env.NODE_ENV ?? \"development\",\n    tracesSampleRate: process.env.NODE_ENV === \"production\" ? 0.1 : 1.0,\n    integrations: [Sentry.httpIntegration(), Sentry.expressIntegration()],\n  });\n}\n\nexport function captureError(err: Error, context?: Record<string, unknown>) {\n  Sentry.withScope((scope) => {\n    if (context) scope.setExtras(context);\n    Sentry.captureException(err);\n  });\n}\n\nexport function setUser(user: { id: string; email?: string; username?: string }) {\n  Sentry.setUser(user);\n}\n\nexport const sentryHandlers = {\n  requestHandler: Sentry.expressErrorHandler,\n};\n\nexport { Sentry };\n"
+    }
+  ],
+  "postInstallNotes": "1. Call `initSentry()` at the very top of your server entry point before any other imports.\n2. Add `Sentry.expressErrorHandler()` as the last middleware in your Express app to capture unhandled errors.\n3. Set `SENTRY_AUTH_TOKEN` in your CI environment to upload source maps and get readable stack traces."
+}

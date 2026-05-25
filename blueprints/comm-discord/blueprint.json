@@ -1,0 +1,31 @@
+{
+  "id": "comm-discord",
+  "name": "Discord Bot & Webhooks",
+  "category": "other",
+  "description": "Send Discord messages via webhooks or build a full bot with discord.js — commands, embeds, and channel notifications.",
+  "version": "1.0.0",
+  "url": "https://discord.js.org/",
+  "requiredSecrets": [
+    {
+      "name": "DISCORD_WEBHOOK_URL",
+      "category": "other",
+      "reason": "Discord channel webhook URL for sending messages",
+      "helpUrl": "https://support.discord.com/hc/en-us/articles/228383668"
+    },
+    {
+      "name": "DISCORD_BOT_TOKEN",
+      "category": "other",
+      "reason": "Discord bot token (for full bot functionality)",
+      "helpUrl": "https://discord.com/developers/applications",
+      "optional": true
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "discord.js", "version": "^14.15.0" }],
+  "files": [
+    {
+      "path": "src/lib/discord.ts",
+      "content": "export async function sendWebhook(\n  text: string,\n  opts?: { username?: string; avatarUrl?: string; embeds?: object[] },\n): Promise<void> {\n  const url = process.env.DISCORD_WEBHOOK_URL;\n  if (!url) throw new Error(\"DISCORD_WEBHOOK_URL not set\");\n  await fetch(url, {\n    method: \"POST\",\n    headers: { \"content-type\": \"application/json\" },\n    body: JSON.stringify({\n      content: text,\n      username: opts?.username,\n      avatar_url: opts?.avatarUrl,\n      embeds: opts?.embeds,\n    }),\n  });\n}\n\nexport async function sendEmbed(opts: {\n  title: string;\n  description?: string;\n  color?: number;\n  fields?: Array<{ name: string; value: string; inline?: boolean }>;\n}): Promise<void> {\n  await sendWebhook(\"\", {\n    embeds: [\n      {\n        title: opts.title,\n        description: opts.description,\n        color: opts.color ?? 0x5865f2,\n        fields: opts.fields,\n      },\n    ],\n  });\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Create a webhook: Discord channel settings → Integrations → Webhooks → New Webhook.\n2. Copy the webhook URL into `DISCORD_WEBHOOK_URL`.\n3. Use `sendEmbed` for rich formatted messages with titles, fields, and colors.\n4. For a full bot with slash commands, add `DISCORD_BOT_TOKEN` and use discord.js `Client`."
+}

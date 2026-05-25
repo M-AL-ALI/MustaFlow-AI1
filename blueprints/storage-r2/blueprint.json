@@ -1,0 +1,45 @@
+{
+  "id": "storage-r2",
+  "name": "Cloudflare R2 Storage",
+  "category": "storage",
+  "description": "S3-compatible object storage with Cloudflare R2 — zero egress fees, global CDN, and presigned URLs.",
+  "version": "1.0.0",
+  "url": "https://developers.cloudflare.com/r2/",
+  "requiredSecrets": [
+    {
+      "name": "CF_R2_ACCESS_KEY_ID",
+      "category": "storage",
+      "reason": "R2 API token access key ID",
+      "helpUrl": "https://dash.cloudflare.com/?to=/:account/r2/api-tokens"
+    },
+    {
+      "name": "CF_R2_SECRET_ACCESS_KEY",
+      "category": "storage",
+      "reason": "R2 API token secret access key",
+      "helpUrl": "https://dash.cloudflare.com/?to=/:account/r2/api-tokens"
+    },
+    {
+      "name": "CF_R2_BUCKET",
+      "category": "storage",
+      "reason": "R2 bucket name",
+      "helpUrl": "https://dash.cloudflare.com/?to=/:account/r2/buckets"
+    },
+    {
+      "name": "CF_ACCOUNT_ID",
+      "category": "storage",
+      "reason": "Cloudflare account ID",
+      "helpUrl": "https://dash.cloudflare.com/"
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "@aws-sdk/client-s3", "version": "^3.600.0" },
+    { "runtime": "node", "name": "@aws-sdk/s3-request-presigner", "version": "^3.600.0" }
+  ],
+  "files": [
+    {
+      "path": "src/lib/r2.ts",
+      "content": "import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from \"@aws-sdk/client-s3\";\nimport { getSignedUrl } from \"@aws-sdk/s3-request-presigner\";\n\nconst accountId = process.env.CF_ACCOUNT_ID!;\nconst bucket = process.env.CF_R2_BUCKET!;\n\nexport const r2 = new S3Client({\n  region: \"auto\",\n  endpoint: `https://${accountId}.r2.cloudflarestorage.com`,\n  credentials: {\n    accessKeyId: process.env.CF_R2_ACCESS_KEY_ID!,\n    secretAccessKey: process.env.CF_R2_SECRET_ACCESS_KEY!,\n  },\n});\n\nexport async function upload(\n  key: string,\n  body: Buffer | Uint8Array | string,\n  contentType = \"application/octet-stream\",\n): Promise<string> {\n  await r2.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));\n  return key;\n}\n\nexport async function getPresignedUrl(key: string, expiresIn = 3600): Promise<string> {\n  return getSignedUrl(r2, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn });\n}\n\nexport async function remove(key: string): Promise<void> {\n  await r2.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Create an R2 API token at Cloudflare Dashboard → R2 → Manage R2 API Tokens.\n2. Use `upload(key, buffer, contentType)` to store files and `getPresignedUrl(key)` for time-limited access links.\n3. For public file access, enable public access on your R2 bucket or use a Cloudflare Workers custom domain."
+}

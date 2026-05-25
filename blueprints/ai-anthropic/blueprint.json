@@ -1,0 +1,24 @@
+{
+  "id": "ai-anthropic",
+  "name": "Anthropic Claude",
+  "category": "ai",
+  "description": "Anthropic Claude models for text generation, analysis, and code — claude-3-5-sonnet and claude-3-haiku.",
+  "version": "1.0.0",
+  "url": "https://docs.anthropic.com",
+  "requiredSecrets": [
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "category": "ai",
+      "reason": "Anthropic API key from console.anthropic.com",
+      "helpUrl": "https://console.anthropic.com/settings/keys"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "@anthropic-ai/sdk", "version": "^0.32.0" }],
+  "files": [
+    {
+      "path": "src/lib/anthropic.ts",
+      "content": "import Anthropic from \"@anthropic-ai/sdk\";\n\nconst client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });\n\nexport async function chat(\n  userMessage: string,\n  opts?: {\n    system?: string;\n    model?: string;\n    maxTokens?: number;\n  },\n): Promise<string> {\n  const response = await client.messages.create({\n    model: opts?.model ?? \"claude-3-5-sonnet-20241022\",\n    max_tokens: opts?.maxTokens ?? 1024,\n    system: opts?.system,\n    messages: [{ role: \"user\", content: userMessage }],\n  });\n  const block = response.content[0];\n  return block?.type === \"text\" ? block.text : \"\";\n}\n\nexport { client as anthropic };\n"
+    }
+  ],
+  "postInstallNotes": "```ts\nimport { chat } from \"./lib/anthropic\";\nconst reply = await chat(\"Explain quantum computing in one paragraph.\", {\n  system: \"You are a helpful science teacher.\",\n});\n```"
+}

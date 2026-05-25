@@ -1,0 +1,36 @@
+{
+  "id": "db-neon",
+  "name": "Neon Serverless Postgres",
+  "category": "database",
+  "description": "Serverless Postgres powered by Neon — instant branching, scale-to-zero, and HTTP-based queries.",
+  "version": "1.0.0",
+  "url": "https://neon.tech/docs",
+  "requiredSecrets": [
+    {
+      "name": "DATABASE_URL",
+      "category": "database",
+      "reason": "Neon connection string (postgresql://...)",
+      "helpUrl": "https://console.neon.tech/"
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "@neondatabase/serverless", "version": "^0.9.0" },
+    { "runtime": "node", "name": "drizzle-orm", "version": "^0.36.0" },
+    { "runtime": "node", "name": "drizzle-kit", "version": "^0.28.0", "dev": true }
+  ],
+  "files": [
+    {
+      "path": "src/db/client.ts",
+      "content": "import { neon } from \"@neondatabase/serverless\";\nimport { drizzle } from \"drizzle-orm/neon-http\";\nimport * as schema from \"./schema\";\n\nconst sql = neon(process.env.DATABASE_URL!);\nexport const db = drizzle(sql, { schema });\n"
+    },
+    {
+      "path": "src/db/schema.ts",
+      "content": "import { pgTable, serial, text, timestamp } from \"drizzle-orm/pg-core\";\n\nexport const usersTable = pgTable(\"users\", {\n  id: serial(\"id\").primaryKey(),\n  email: text(\"email\").notNull().unique(),\n  name: text(\"name\"),\n  createdAt: timestamp(\"created_at\", { withTimezone: true }).notNull().defaultNow(),\n});\n\nexport type User = typeof usersTable.$inferSelect;\nexport type InsertUser = typeof usersTable.$inferInsert;\n"
+    },
+    {
+      "path": "drizzle.config.ts",
+      "content": "import type { Config } from \"drizzle-kit\";\n\nexport default {\n  schema: \"./src/db/schema.ts\",\n  out: \"./drizzle\",\n  dialect: \"postgresql\",\n  dbCredentials: { url: process.env.DATABASE_URL! },\n} satisfies Config;\n"
+    }
+  ],
+  "postInstallNotes": "1. Run `npx drizzle-kit push` to apply the schema to your Neon database.\n2. Import `db` from `./src/db/client` and query with Drizzle's typed API.\n3. The Neon HTTP driver works in serverless and edge environments without a connection pool."
+}

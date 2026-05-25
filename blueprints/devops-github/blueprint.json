@@ -1,0 +1,31 @@
+{
+  "id": "devops-github",
+  "name": "GitHub API",
+  "category": "other",
+  "description": "Read repos, manage issues, trigger Actions workflows, and post commit statuses with the GitHub REST API.",
+  "version": "1.0.0",
+  "url": "https://docs.github.com/en/rest",
+  "requiredSecrets": [
+    {
+      "name": "GITHUB_TOKEN",
+      "category": "other",
+      "reason": "GitHub Personal Access Token or GitHub App installation token",
+      "helpUrl": "https://github.com/settings/tokens"
+    },
+    {
+      "name": "GITHUB_WEBHOOK_SECRET",
+      "category": "other",
+      "reason": "Shared secret for verifying incoming GitHub webhook payloads",
+      "helpUrl": "https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries",
+      "optional": true
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "@octokit/rest", "version": "^21.0.0" }],
+  "files": [
+    {
+      "path": "src/lib/github.ts",
+      "content": "import { Octokit } from \"@octokit/rest\";\nimport { createHmac } from \"crypto\";\n\nexport const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });\n\nexport async function listRepos(owner: string) {\n  const { data } = await octokit.repos.listForUser({ username: owner });\n  return data;\n}\n\nexport async function createIssue(\n  owner: string,\n  repo: string,\n  title: string,\n  body?: string,\n  labels?: string[],\n) {\n  const { data } = await octokit.issues.create({ owner, repo, title, body, labels });\n  return data;\n}\n\nexport async function triggerWorkflow(\n  owner: string,\n  repo: string,\n  workflowId: string,\n  ref = \"main\",\n  inputs?: Record<string, string>,\n) {\n  await octokit.actions.createWorkflowDispatch({ owner, repo, workflow_id: workflowId, ref, inputs });\n}\n\nexport function verifyWebhookSignature(payload: string, signature: string): boolean {\n  const secret = process.env.GITHUB_WEBHOOK_SECRET;\n  if (!secret) return false;\n  const expected = `sha256=${createHmac(\"sha256\", secret).update(payload).digest(\"hex\")}`;\n  return expected === signature;\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Create a fine-grained PAT at github.com/settings/tokens — grant only the permissions your app needs.\n2. Use `GITHUB_WEBHOOK_SECRET` + `verifyWebhookSignature` to safely handle incoming webhook events.\n3. For GitHub Apps (recommended for production), use `@octokit/auth-app` instead of a PAT."
+}

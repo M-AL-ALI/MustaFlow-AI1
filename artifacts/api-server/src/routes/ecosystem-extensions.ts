@@ -12,6 +12,7 @@
  *   Admin:
  *   PATCH /admin/extensions/:id            — vet / feature (admin)
  */
+import crypto from "crypto";
 import { Router, type IRouter } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
@@ -19,11 +20,13 @@ import {
   extensionsTable,
   projectExtensionsTable,
   projectsTable,
+  secretsTable,
   type ExtensionScope,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { requireAdmin } from "../lib/adminAuth";
 import { logger } from "../lib/logger";
+import { encryptionService } from "../lib/encryption";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -204,6 +207,7 @@ router.post(
           id: extensionsTable.id,
           slug: extensionsTable.slug,
           status: extensionsTable.status,
+          scopes: extensionsTable.scopes,
         })
         .from(extensionsTable)
         .where(eq(extensionsTable.slug, parsed.data.slug));
@@ -235,7 +239,27 @@ router.post(
         .where(eq(extensionsTable.id, ext.id))
         .catch(() => {});
 
-      res.status(201).json({ ok: true });
+      // Mint a project-scoped extension token and store it as a project secret.
+      // The token is a random 32-byte hex string, encrypted at rest. It is
+      // injected into the project environment as EXT_TOKEN_<SLUG> so extension
+      // callbacks can authenticate against /api/v1/extensions/context.
+      const rawToken = crypto.randomBytes(32).toString("hex");
+      const tokenSecretName = `EXT_TOKEN_${ext.slug.toUpperCase().replace(/-/g, "_")}`;
+      const encrypted = encryptionService.encrypt(rawToken);
+      await db
+        .insert(secretsTable)
+        .values({
+          projectId,
+          name: tokenSecretName,
+          valueEncrypted: encrypted,
+          category: "other",
+          environment: "development",
+          isPreviewSafe: true,
+          exposureType: "server",
+        })
+        .onConflictDoNothing();
+
+      res.status(201).json({ ok: true, tokenSecretName, scopes: ext.scopes });
     } catch (err) {
       logger.error({ err }, "Failed to install extension");
       res.status(500).json({ error: "Failed to install extension" });

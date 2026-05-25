@@ -1,0 +1,24 @@
+{
+  "id": "storage-uploadthing",
+  "name": "UploadThing File Uploads",
+  "category": "storage",
+  "description": "Type-safe file uploads for full-stack TypeScript apps — drag-and-drop UI components and secure server-side handling.",
+  "version": "1.0.0",
+  "url": "https://docs.uploadthing.com/",
+  "requiredSecrets": [
+    {
+      "name": "UPLOADTHING_TOKEN",
+      "category": "storage",
+      "reason": "UploadThing API token from uploadthing.com/dashboard",
+      "helpUrl": "https://uploadthing.com/dashboard"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "uploadthing", "version": "^7.0.0" }],
+  "files": [
+    {
+      "path": "src/lib/uploadthing.ts",
+      "content": "import { createUploadthing, type FileRouter } from \"uploadthing/server\";\n\nconst f = createUploadthing();\n\nexport const uploadRouter = {\n  imageUploader: f({ image: { maxFileSize: \"4MB\", maxFileCount: 4 } })\n    .middleware(async ({ req }) => {\n      // Add auth check here if needed\n      return { uploadedBy: \"user\" };\n    })\n    .onUploadComplete(async ({ metadata, file }) => {\n      console.log(\"Upload complete\", file.url);\n      return { url: file.url };\n    }),\n  documentUploader: f({ pdf: { maxFileSize: \"16MB\" }, text: { maxFileSize: \"2MB\" } })\n    .middleware(async () => ({ uploadedBy: \"user\" }))\n    .onUploadComplete(async ({ file }) => ({ url: file.url })),\n} satisfies FileRouter;\n\nexport type UploadRouter = typeof uploadRouter;\n"
+    }
+  ],
+  "postInstallNotes": "1. Mount the upload handler in your API: `app.use('/api/uploadthing', createRouteHandler({ router: uploadRouter }))`.\n2. On the frontend, install `@uploadthing/react` and use the `<UploadButton>` or `<UploadDropzone>` component.\n3. Generate the frontend types client with `npx uploadthing generate` after setting your `UPLOADTHING_TOKEN`."
+}

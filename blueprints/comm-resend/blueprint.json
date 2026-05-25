@@ -1,0 +1,24 @@
+{
+  "id": "comm-resend",
+  "name": "Resend Email",
+  "category": "other",
+  "description": "Transactional emails with Resend — developer-friendly API, React Email templates, and built-in analytics.",
+  "version": "1.0.0",
+  "url": "https://resend.com/docs",
+  "requiredSecrets": [
+    {
+      "name": "RESEND_API_KEY",
+      "category": "other",
+      "reason": "Resend API key from resend.com/api-keys",
+      "helpUrl": "https://resend.com/api-keys"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "resend", "version": "^3.5.0" }],
+  "files": [
+    {
+      "path": "src/lib/email.ts",
+      "content": "import { Resend } from \"resend\";\n\nexport const resend = new Resend(process.env.RESEND_API_KEY);\n\nexport interface EmailOptions {\n  to: string | string[];\n  subject: string;\n  html?: string;\n  text?: string;\n  from?: string;\n  replyTo?: string;\n}\n\nexport async function sendEmail(opts: EmailOptions): Promise<{ id: string }> {\n  const from = opts.from ?? process.env.EMAIL_FROM ?? \"noreply@yourdomain.com\";\n  const { data, error } = await resend.emails.send({\n    from,\n    to: Array.isArray(opts.to) ? opts.to : [opts.to],\n    subject: opts.subject,\n    html: opts.html,\n    text: opts.text,\n    reply_to: opts.replyTo,\n  });\n  if (error) throw new Error(error.message);\n  return { id: data!.id };\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Verify your sending domain in the Resend dashboard to avoid emails landing in spam.\n2. Set `EMAIL_FROM` to your verified sender address (e.g. `App Name <hello@yourdomain.com>`).\n3. For rich templates, add the `react-email` package and pass React components as the `react` option."
+}

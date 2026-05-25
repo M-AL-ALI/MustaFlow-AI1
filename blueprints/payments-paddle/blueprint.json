@@ -1,0 +1,36 @@
+{
+  "id": "payments-paddle",
+  "name": "Paddle Billing",
+  "category": "payments",
+  "description": "Merchant of record payments with Paddle — handles global tax compliance, subscriptions, and checkout.",
+  "version": "1.0.0",
+  "url": "https://developer.paddle.com/",
+  "requiredSecrets": [
+    {
+      "name": "PADDLE_API_KEY",
+      "category": "payment",
+      "reason": "Paddle server-side API key",
+      "helpUrl": "https://vendors.paddle.com/authentication"
+    },
+    {
+      "name": "PADDLE_WEBHOOK_SECRET",
+      "category": "payment",
+      "reason": "Webhook signature secret for verifying event payloads",
+      "helpUrl": "https://developer.paddle.com/webhooks/overview"
+    },
+    {
+      "name": "PADDLE_CLIENT_TOKEN",
+      "category": "payment",
+      "reason": "Client-side token for Paddle.js checkout",
+      "helpUrl": "https://developer.paddle.com/api-reference/client-token"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "@paddle/paddle-node-sdk", "version": "^1.6.0" }],
+  "files": [
+    {
+      "path": "src/lib/paddle.ts",
+      "content": "import { Paddle, Environment } from \"@paddle/paddle-node-sdk\";\n\nexport const paddle = new Paddle(process.env.PADDLE_API_KEY!, {\n  environment:\n    process.env.NODE_ENV === \"production\" ? Environment.production : Environment.sandbox,\n});\n\nexport async function createSubscriptionCheckout(opts: {\n  priceId: string;\n  email?: string;\n  customData?: Record<string, string>;\n}) {\n  return paddle.transactions.create({\n    items: [{ price: { id: opts.priceId }, quantity: 1 }],\n    customerEmail: opts.email,\n    customData: opts.customData,\n  });\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Paddle is a merchant of record — they handle VAT/tax globally so you don't have to.\n2. Use sandbox mode during development; set `NODE_ENV=production` when going live.\n3. Include the Paddle.js script and use `PADDLE_CLIENT_TOKEN` on the frontend for overlay checkout."
+}

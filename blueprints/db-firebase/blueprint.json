@@ -1,0 +1,36 @@
+{
+  "id": "db-firebase",
+  "name": "Firebase Firestore",
+  "category": "database",
+  "description": "NoSQL cloud database with real-time sync, offline support, and automatic scaling via Google Firebase.",
+  "version": "1.0.0",
+  "url": "https://firebase.google.com/docs/firestore",
+  "requiredSecrets": [
+    {
+      "name": "FIREBASE_PROJECT_ID",
+      "category": "database",
+      "reason": "Firebase project identifier",
+      "helpUrl": "https://console.firebase.google.com/"
+    },
+    {
+      "name": "FIREBASE_CLIENT_EMAIL",
+      "category": "database",
+      "reason": "Service account client email",
+      "helpUrl": "https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk"
+    },
+    {
+      "name": "FIREBASE_PRIVATE_KEY",
+      "category": "database",
+      "reason": "Service account private key (PEM)",
+      "helpUrl": "https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "firebase-admin", "version": "^12.0.0" }],
+  "files": [
+    {
+      "path": "src/db/firebase.ts",
+      "content": "import admin from \"firebase-admin\";\n\nif (!admin.apps.length) {\n  admin.initializeApp({\n    credential: admin.credential.cert({\n      projectId: process.env.FIREBASE_PROJECT_ID,\n      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,\n      privateKey: (process.env.FIREBASE_PRIVATE_KEY ?? \"\").replace(/\\\\n/g, \"\\n\"),\n    }),\n  });\n}\n\nexport const db = admin.firestore();\nexport const auth = admin.auth();\n\nexport async function getDoc<T>(collection: string, id: string): Promise<T | null> {\n  const snap = await db.collection(collection).doc(id).get();\n  if (!snap.exists) return null;\n  return { id: snap.id, ...snap.data() } as T;\n}\n\nexport async function setDoc(collection: string, id: string, data: Record<string, unknown>) {\n  await db.collection(collection).doc(id).set(data, { merge: true });\n}\n\nexport async function listDocs<T>(collection: string, limit = 100): Promise<T[]> {\n  const snap = await db.collection(collection).limit(limit).get();\n  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as T);\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Download a service account key from Firebase Console → Project Settings → Service accounts.\n2. Paste the `private_key` value (including `-----BEGIN...`) into `FIREBASE_PRIVATE_KEY`.\n3. Use `db.collection('users').doc(uid).get()` for reads, `.set()` / `.update()` for writes."
+}

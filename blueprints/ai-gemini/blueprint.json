@@ -1,0 +1,24 @@
+{
+  "id": "ai-gemini",
+  "name": "Google Gemini",
+  "category": "ai",
+  "description": "Google's Gemini models for text, vision, and multimodal tasks via the Generative AI SDK.",
+  "version": "1.0.0",
+  "url": "https://ai.google.dev/docs",
+  "requiredSecrets": [
+    {
+      "name": "GEMINI_API_KEY",
+      "category": "ai",
+      "reason": "Google AI Studio API key",
+      "helpUrl": "https://aistudio.google.com/app/apikey"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "@google/generative-ai", "version": "^0.21.0" }],
+  "files": [
+    {
+      "path": "src/lib/gemini.ts",
+      "content": "import { GoogleGenerativeAI, type GenerateContentResult } from \"@google/generative-ai\";\n\nconst genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);\n\nexport async function generateText(\n  prompt: string,\n  modelName = \"gemini-1.5-flash\",\n): Promise<string> {\n  const model = genAI.getGenerativeModel({ model: modelName });\n  const result: GenerateContentResult = await model.generateContent(prompt);\n  return result.response.text();\n}\n\nexport async function chat(\n  messages: Array<{ role: \"user\" | \"model\"; text: string }>,\n  modelName = \"gemini-1.5-flash\",\n): Promise<string> {\n  const model = genAI.getGenerativeModel({ model: modelName });\n  const chatSession = model.startChat({\n    history: messages.slice(0, -1).map((m) => ({\n      role: m.role,\n      parts: [{ text: m.text }],\n    })),\n  });\n  const lastMessage = messages[messages.length - 1]?.text ?? \"\";\n  const result = await chatSession.sendMessage(lastMessage);\n  return result.response.text();\n}\n"
+    }
+  ],
+  "postInstallNotes": "```ts\nimport { generateText } from \"./lib/gemini\";\nconst answer = await generateText(\"What is the capital of France?\");\n```"
+}

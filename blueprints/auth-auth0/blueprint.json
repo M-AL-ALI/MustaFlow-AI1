@@ -1,0 +1,36 @@
+{
+  "id": "auth-auth0",
+  "name": "Auth0",
+  "category": "auth",
+  "description": "Universal authentication with Auth0 — supports email/password, social logins, MFA, and enterprise SSO.",
+  "version": "1.0.0",
+  "url": "https://auth0.com/docs",
+  "requiredSecrets": [
+    {
+      "name": "AUTH0_DOMAIN",
+      "category": "auth",
+      "reason": "Your Auth0 tenant domain (e.g. your-app.us.auth0.com)",
+      "helpUrl": "https://manage.auth0.com/"
+    },
+    {
+      "name": "AUTH0_CLIENT_ID",
+      "category": "auth",
+      "reason": "Application client ID",
+      "helpUrl": "https://manage.auth0.com/"
+    },
+    {
+      "name": "AUTH0_CLIENT_SECRET",
+      "category": "auth",
+      "reason": "Application client secret",
+      "helpUrl": "https://manage.auth0.com/"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "express-openid-connect", "version": "^2.17.0" }],
+  "files": [
+    {
+      "path": "src/lib/auth0.ts",
+      "content": "import { auth, requiresAuth } from \"express-openid-connect\";\nimport type { Express } from \"express\";\n\nexport const auth0Config = {\n  authRequired: false,\n  auth0Logout: true,\n  secret: process.env.SESSION_SECRET ?? \"change-me-in-production\",\n  baseURL: process.env.BASE_URL ?? \"http://localhost:3000\",\n  clientID: process.env.AUTH0_CLIENT_ID!,\n  issuerBaseURL: `https://${process.env.AUTH0_DOMAIN}`,\n};\n\nexport function mountAuth0(app: Express) {\n  app.use(auth(auth0Config));\n}\n\nexport { requiresAuth };\n"
+    }
+  ],
+  "postInstallNotes": "1. Call `mountAuth0(app)` before your routes in your Express server entry point.\n2. Protect routes with `requiresAuth()` middleware.\n3. Access the logged-in user via `req.oidc.user`.\n4. Set `BASE_URL` to your app's public URL for callbacks to work."
+}

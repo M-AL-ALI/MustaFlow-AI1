@@ -1,0 +1,36 @@
+{
+  "id": "db-supabase",
+  "name": "Supabase Database",
+  "category": "database",
+  "description": "Postgres database via Supabase with real-time subscriptions, auto-generated REST/GraphQL APIs, and row-level security.",
+  "version": "1.0.0",
+  "url": "https://supabase.com/docs/guides/database",
+  "requiredSecrets": [
+    {
+      "name": "SUPABASE_URL",
+      "category": "database",
+      "reason": "Your Supabase project URL",
+      "helpUrl": "https://app.supabase.com/project/_/settings/api"
+    },
+    {
+      "name": "SUPABASE_ANON_KEY",
+      "category": "database",
+      "reason": "Public anon key",
+      "helpUrl": "https://app.supabase.com/project/_/settings/api"
+    },
+    {
+      "name": "SUPABASE_SERVICE_ROLE_KEY",
+      "category": "database",
+      "reason": "Service role key for server-side admin operations",
+      "helpUrl": "https://app.supabase.com/project/_/settings/api"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "@supabase/supabase-js", "version": "^2.45.0" }],
+  "files": [
+    {
+      "path": "src/db/supabase.ts",
+      "content": "import { createClient } from \"@supabase/supabase-js\";\n\nconst url = process.env.SUPABASE_URL!;\n\nexport const supabase = createClient(url, process.env.SUPABASE_ANON_KEY!);\n\nexport const supabaseAdmin = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!, {\n  auth: { autoRefreshToken: false, persistSession: false },\n});\n\nexport async function query<T = unknown>(table: string, filters?: Record<string, unknown>) {\n  let q = supabaseAdmin.from(table).select(\"*\");\n  if (filters) {\n    for (const [key, value] of Object.entries(filters)) {\n      q = q.eq(key, value as string);\n    }\n  }\n  const { data, error } = await q;\n  if (error) throw error;\n  return data as T[];\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Use `supabase` (anon key) for client-facing queries subject to row-level security.\n2. Use `supabaseAdmin` (service role) for server-side operations that bypass RLS.\n3. Define your tables in the Supabase dashboard or via SQL migrations.\n4. Enable real-time on tables in the Supabase dashboard, then subscribe with `supabase.channel(...)`."
+}

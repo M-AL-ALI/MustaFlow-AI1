@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Search,
   Puzzle,
@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Clock,
   Lock,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -40,6 +41,11 @@ interface Extension {
   vetted: boolean;
   featured: boolean;
   isSystem: boolean;
+}
+
+interface ProjectOption {
+  id: number;
+  name: string;
 }
 
 const CATEGORIES = [
@@ -84,7 +90,48 @@ const DOCS_SECTIONS = [
   },
 ];
 
-function ExtensionCard({ ext }: { ext: Extension }) {
+interface ExtensionCardProps {
+  ext: Extension;
+  projects: ProjectOption[];
+  onInstall: (extSlug: string, projectId: number) => Promise<void>;
+  installing: boolean;
+}
+
+function ExtensionCard({ ext, projects, onInstall, installing }: ExtensionCardProps) {
+  const [showPicker, setShowPicker] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!showPicker) return;
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowPicker(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showPicker]);
+
+  const handleInstallClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (projects.length === 0) return;
+    if (projects.length === 1) {
+      void onInstall(ext.slug, projects[0].id);
+      return;
+    }
+    setSelectedProjectId(null);
+    setShowPicker((v) => !v);
+  };
+
+  const handleConfirm = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (selectedProjectId == null) return;
+    setShowPicker(false);
+    void onInstall(ext.slug, selectedProjectId);
+  };
+
   return (
     <div className="rounded-xl border border-border bg-card p-4 hover:border-primary/30 transition-colors">
       <div className="flex items-start gap-3">
@@ -123,16 +170,22 @@ function ExtensionCard({ ext }: { ext: Extension }) {
               <span
                 key={scope}
                 className="flex items-center gap-1 text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full"
+                title={`Requires: ${scope}`}
               >
                 {info ? <info.icon className="h-2.5 w-2.5" /> : null}
                 {info?.label ?? scope}
               </span>
             );
           })}
+          {ext.scopes.length > 4 && (
+            <span className="text-[10px] text-muted-foreground px-2 py-0.5">
+              +{ext.scopes.length - 4} more
+            </span>
+          )}
         </div>
       )}
 
-      <div className="mt-3 flex items-center justify-between">
+      <div className="mt-3 flex items-center justify-between relative">
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1">
             <Download className="h-3 w-3" />
@@ -141,7 +194,7 @@ function ExtensionCard({ ext }: { ext: Extension }) {
           <span>v{ext.version}</span>
           {ext.authorName && <span>by {ext.authorName}</span>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" ref={pickerRef}>
           {ext.homepageUrl && (
             <a
               href={ext.homepageUrl}
@@ -153,13 +206,74 @@ function ExtensionCard({ ext }: { ext: Extension }) {
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           )}
-          <button className="text-xs bg-primary/10 text-primary hover:bg-primary/20 px-3 py-1 rounded-md font-medium transition-colors">
-            Install
-          </button>
+          <div className="relative">
+            <button
+              onClick={handleInstallClick}
+              disabled={installing || projects.length === 0}
+              className="flex items-center gap-1.5 text-xs bg-primary/10 text-primary hover:bg-primary/20 px-3 py-1 rounded-md font-medium transition-colors disabled:opacity-50"
+            >
+              {installing ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <>
+                  Install
+                  {projects.length > 1 && <ChevronDown className="h-3 w-3" />}
+                </>
+              )}
+            </button>
+
+            {/* Project picker dropdown */}
+            {showPicker && projects.length > 1 && (
+              <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-lg border border-border bg-popover shadow-lg">
+                <div className="p-2">
+                  <p className="text-[10px] text-muted-foreground font-medium px-2 pb-1.5">
+                    Select a project
+                  </p>
+                  {projects.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedProjectId(p.id);
+                      }}
+                      className={cn(
+                        "w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors",
+                        selectedProjectId === p.id
+                          ? "bg-primary/10 text-primary"
+                          : "text-foreground hover:bg-muted",
+                      )}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                  <div className="mt-1.5 pt-1.5 border-t border-border flex justify-end px-1">
+                    <button
+                      onClick={handleConfirm}
+                      disabled={selectedProjectId == null}
+                      className="text-xs px-3 py-1 bg-primary text-primary-foreground rounded-md disabled:opacity-40 transition-colors hover:bg-primary/90"
+                    >
+                      Install
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+interface InstallResponse {
+  ok: boolean;
+  tokenSecretName?: string;
+  scopes?: string[];
+}
+
+interface ProjectListItem {
+  id: number;
+  name: string;
 }
 
 export default function ExtensionsPage() {
@@ -180,6 +294,56 @@ export default function ExtensionsPage() {
     homepageUrl: "",
   });
   const [submitting, setSubmitting] = useState(false);
+
+  // Project list for the install picker
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  // Which extension slug is currently mid-install (to show spinner on that card only)
+  const [installingSlug, setInstallingSlug] = useState<string | null>(null);
+
+  // Fetch user's projects once on mount so the install picker is ready
+  useEffect(() => {
+    fetch("/api/projects", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: unknown) => {
+        const rows = Array.isArray(data) ? (data as ProjectListItem[]) : [];
+        setProjects(rows.map((p) => ({ id: p.id, name: p.name })));
+      })
+      .catch(() => {
+        /* projects unavailable — install buttons stay disabled */
+      });
+  }, []);
+
+  // One-click install handler wired to ExtensionCard
+  const handleInstall = async (extSlug: string, projectId: number): Promise<void> => {
+    setInstallingSlug(extSlug);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/extensions/install`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ slug: extSlug }),
+      });
+      if (!res.ok) {
+        const d = (await res.json()) as { error?: string };
+        throw new Error(d.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as InstallResponse;
+      toast({
+        title: "Extension installed",
+        description: data.tokenSecretName
+          ? `A scoped access token has been added to your project secrets as ${data.tokenSecretName}.`
+          : "The extension has been added to your project.",
+      });
+    } catch (err) {
+      toast({
+        title: "Install failed",
+        description: err instanceof Error ? err.message : "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setInstallingSlug(null);
+    }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -310,7 +474,13 @@ export default function ExtensionsPage() {
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {featuredExts.map((e) => (
-                  <ExtensionCard key={e.id} ext={e} />
+                  <ExtensionCard
+                    key={e.id}
+                    ext={e}
+                    projects={projects}
+                    onInstall={handleInstall}
+                    installing={installingSlug === e.slug}
+                  />
                 ))}
               </div>
             </section>
@@ -324,7 +494,13 @@ export default function ExtensionsPage() {
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {otherExts.map((e) => (
-                  <ExtensionCard key={e.id} ext={e} />
+                  <ExtensionCard
+                    key={e.id}
+                    ext={e}
+                    projects={projects}
+                    onInstall={handleInstall}
+                    installing={installingSlug === e.slug}
+                  />
                 ))}
               </div>
             </section>

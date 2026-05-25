@@ -1,0 +1,36 @@
+{
+  "id": "comm-twilio",
+  "name": "Twilio SMS & Voice",
+  "category": "other",
+  "description": "Send SMS, make voice calls, and build 2FA flows with the Twilio API.",
+  "version": "1.0.0",
+  "url": "https://www.twilio.com/docs",
+  "requiredSecrets": [
+    {
+      "name": "TWILIO_ACCOUNT_SID",
+      "category": "other",
+      "reason": "Twilio account SID",
+      "helpUrl": "https://console.twilio.com/"
+    },
+    {
+      "name": "TWILIO_AUTH_TOKEN",
+      "category": "other",
+      "reason": "Twilio auth token",
+      "helpUrl": "https://console.twilio.com/"
+    },
+    {
+      "name": "TWILIO_PHONE_NUMBER",
+      "category": "other",
+      "reason": "Your Twilio phone number (e.g. +15551234567)",
+      "helpUrl": "https://console.twilio.com/us1/develop/phone-numbers/manage/incoming"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "twilio", "version": "^5.3.0" }],
+  "files": [
+    {
+      "path": "src/lib/twilio.ts",
+      "content": "import twilio from \"twilio\";\n\nconst client = twilio(\n  process.env.TWILIO_ACCOUNT_SID,\n  process.env.TWILIO_AUTH_TOKEN,\n);\n\nexport async function sendSms(to: string, body: string): Promise<string> {\n  const message = await client.messages.create({\n    body,\n    from: process.env.TWILIO_PHONE_NUMBER!,\n    to,\n  });\n  return message.sid;\n}\n\nexport async function sendOtp(to: string): Promise<string> {\n  const otp = Math.floor(100000 + Math.random() * 900000).toString();\n  await sendSms(to, `Your verification code is: ${otp}`);\n  return otp;\n}\n\nexport { client as twilio };\n"
+    }
+  ],
+  "postInstallNotes": "1. Phone numbers must be E.164 format (e.g. `+15551234567`).\n2. In trial mode, you can only send to verified numbers. Upgrade for production use.\n3. Use `sendOtp` to implement 2FA — store the OTP in Redis with a 5-minute TTL for verification."
+}

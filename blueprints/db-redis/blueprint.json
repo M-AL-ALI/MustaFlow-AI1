@@ -1,0 +1,30 @@
+{
+  "id": "db-redis",
+  "name": "Redis (Upstash)",
+  "category": "database",
+  "description": "Serverless Redis via Upstash — caching, rate limiting, pub/sub, and queues with an HTTP-based SDK.",
+  "version": "1.0.0",
+  "url": "https://upstash.com/docs/redis/overall/getstarted",
+  "requiredSecrets": [
+    {
+      "name": "UPSTASH_REDIS_REST_URL",
+      "category": "database",
+      "reason": "Upstash Redis REST endpoint URL",
+      "helpUrl": "https://console.upstash.com/"
+    },
+    {
+      "name": "UPSTASH_REDIS_REST_TOKEN",
+      "category": "database",
+      "reason": "Upstash Redis REST token",
+      "helpUrl": "https://console.upstash.com/"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "@upstash/redis", "version": "^1.34.0" }],
+  "files": [
+    {
+      "path": "src/lib/redis.ts",
+      "content": "import { Redis } from \"@upstash/redis\";\n\nexport const redis = new Redis({\n  url: process.env.UPSTASH_REDIS_REST_URL!,\n  token: process.env.UPSTASH_REDIS_REST_TOKEN!,\n});\n\nexport async function getCache<T>(key: string): Promise<T | null> {\n  return redis.get<T>(key);\n}\n\nexport async function setCache(key: string, value: unknown, ttlSeconds?: number): Promise<void> {\n  if (ttlSeconds) {\n    await redis.setex(key, ttlSeconds, value);\n  } else {\n    await redis.set(key, value);\n  }\n}\n\nexport async function deleteCache(key: string): Promise<void> {\n  await redis.del(key);\n}\n\nexport async function rateLimit(\n  key: string,\n  limit: number,\n  windowSeconds: number,\n): Promise<{ allowed: boolean; remaining: number }> {\n  const current = await redis.incr(key);\n  if (current === 1) await redis.expire(key, windowSeconds);\n  return { allowed: current <= limit, remaining: Math.max(0, limit - current) };\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Create a free Redis database at console.upstash.com and copy the REST URL and token.\n2. Use `getCache` / `setCache` for simple key-value storage with optional TTL.\n3. Use `rateLimit('user:123', 10, 60)` to allow 10 requests per minute per user."
+}

@@ -1,0 +1,25 @@
+{
+  "id": "ai-openai",
+  "name": "OpenAI",
+  "category": "ai",
+  "description": "OpenAI Chat Completions, embeddings, and image generation. Platform proxy available — no API key required to get started.",
+  "version": "1.0.0",
+  "url": "https://platform.openai.com/docs",
+  "requiredSecrets": [
+    {
+      "name": "OPENAI_API_KEY",
+      "category": "ai",
+      "reason": "OpenAI API key — or leave blank to use the platform proxy (rate-limited to 100 req/day).",
+      "helpUrl": "https://platform.openai.com/api-keys",
+      "optional": true
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "openai", "version": "^4.70.0" }],
+  "files": [
+    {
+      "path": "src/lib/openai.ts",
+      "content": "import OpenAI from \"openai\";\n\nexport const openai = new OpenAI({\n  apiKey: process.env.OPENAI_API_KEY,\n  baseURL: process.env.OPENAI_BASE_URL,\n});\n\nexport async function chat(\n  messages: OpenAI.Chat.ChatCompletionMessageParam[],\n  model = \"gpt-4o-mini\",\n): Promise<string> {\n  const response = await openai.chat.completions.create({ model, messages });\n  return response.choices[0]?.message?.content ?? \"\";\n}\n\nexport async function embed(text: string): Promise<number[]> {\n  const response = await openai.embeddings.create({\n    model: \"text-embedding-3-small\",\n    input: text,\n  });\n  return response.data[0]?.embedding ?? [];\n}\n"
+    }
+  ],
+  "postInstallNotes": "The platform automatically injects a proxied OpenAI key when no `OPENAI_API_KEY` is present, so your app can make real AI calls right away (rate-limited to 100 req/day). Add your own key in the Secrets tab to remove the rate limit.\n\n```ts\nimport { chat } from \"./lib/openai\";\nconst reply = await chat([{ role: \"user\", content: \"Hello!\" }]);\n```"
+}

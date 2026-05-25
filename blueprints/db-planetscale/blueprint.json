@@ -1,0 +1,36 @@
+{
+  "id": "db-planetscale",
+  "name": "PlanetScale MySQL",
+  "category": "database",
+  "description": "Serverless MySQL with branching, non-blocking schema changes, and a Vitess-powered HTTP driver.",
+  "version": "1.0.0",
+  "url": "https://planetscale.com/docs",
+  "requiredSecrets": [
+    {
+      "name": "DATABASE_URL",
+      "category": "database",
+      "reason": "PlanetScale connection URL (mysql://...)",
+      "helpUrl": "https://app.planetscale.com/"
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "@planetscale/database", "version": "^1.18.0" },
+    { "runtime": "node", "name": "drizzle-orm", "version": "^0.36.0" },
+    { "runtime": "node", "name": "drizzle-kit", "version": "^0.28.0", "dev": true }
+  ],
+  "files": [
+    {
+      "path": "src/db/client.ts",
+      "content": "import { connect } from \"@planetscale/database\";\nimport { drizzle } from \"drizzle-orm/planetscale-serverless\";\nimport * as schema from \"./schema\";\n\nconst connection = connect({ url: process.env.DATABASE_URL });\nexport const db = drizzle(connection, { schema });\n"
+    },
+    {
+      "path": "src/db/schema.ts",
+      "content": "import { mysqlTable, serial, varchar, timestamp } from \"drizzle-orm/mysql-core\";\n\nexport const usersTable = mysqlTable(\"users\", {\n  id: serial(\"id\").primaryKey(),\n  email: varchar(\"email\", { length: 255 }).notNull(),\n  name: varchar(\"name\", { length: 255 }),\n  createdAt: timestamp(\"created_at\").notNull().defaultNow(),\n});\n\nexport type User = typeof usersTable.$inferSelect;\nexport type InsertUser = typeof usersTable.$inferInsert;\n"
+    },
+    {
+      "path": "drizzle.config.ts",
+      "content": "import type { Config } from \"drizzle-kit\";\n\nexport default {\n  schema: \"./src/db/schema.ts\",\n  out: \"./drizzle\",\n  dialect: \"mysql\",\n  dbCredentials: { url: process.env.DATABASE_URL! },\n} satisfies Config;\n"
+    }
+  ],
+  "postInstallNotes": "1. Enable the HTTP driver in your PlanetScale connection settings.\n2. Run `npx drizzle-kit push` to push schema changes.\n3. PlanetScale doesn't support foreign key constraints — use application-level relationships."
+}

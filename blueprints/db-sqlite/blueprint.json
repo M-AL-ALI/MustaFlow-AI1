@@ -1,0 +1,30 @@
+{
+  "id": "db-sqlite",
+  "name": "SQLite (Drizzle)",
+  "category": "database",
+  "description": "Embedded SQLite database with Drizzle ORM — zero-config, single-file storage, ideal for small projects and prototypes.",
+  "version": "1.0.0",
+  "url": "https://orm.drizzle.team/docs/get-started-sqlite",
+  "requiredSecrets": [],
+  "packages": [
+    { "runtime": "node", "name": "drizzle-orm", "version": "^0.36.0" },
+    { "runtime": "node", "name": "better-sqlite3", "version": "^11.0.0" },
+    { "runtime": "node", "name": "@types/better-sqlite3", "version": "^7.6.0", "dev": true },
+    { "runtime": "node", "name": "drizzle-kit", "version": "^0.28.0", "dev": true }
+  ],
+  "files": [
+    {
+      "path": "src/db/client.ts",
+      "content": "import Database from \"better-sqlite3\";\nimport { drizzle } from \"drizzle-orm/better-sqlite3\";\nimport * as schema from \"./schema\";\n\nconst sqlite = new Database(process.env.DB_PATH ?? \"./data.db\");\nexport const db = drizzle(sqlite, { schema });\n"
+    },
+    {
+      "path": "src/db/schema.ts",
+      "content": "import { sqliteTable, integer, text } from \"drizzle-orm/sqlite-core\";\n\nexport const usersTable = sqliteTable(\"users\", {\n  id: integer(\"id\").primaryKey({ autoIncrement: true }),\n  email: text(\"email\").notNull().unique(),\n  name: text(\"name\"),\n  createdAt: text(\"created_at\").notNull().default(new Date().toISOString()),\n});\n\nexport type User = typeof usersTable.$inferSelect;\nexport type InsertUser = typeof usersTable.$inferInsert;\n"
+    },
+    {
+      "path": "drizzle.config.ts",
+      "content": "import type { Config } from \"drizzle-kit\";\n\nexport default {\n  schema: \"./src/db/schema.ts\",\n  out: \"./drizzle\",\n  dialect: \"sqlite\",\n  dbCredentials: { url: process.env.DB_PATH ?? \"./data.db\" },\n} satisfies Config;\n"
+    }
+  ],
+  "postInstallNotes": "1. Run `npx drizzle-kit push` to create the tables in `data.db`.\n2. The database file is stored locally — add `data.db` to `.gitignore`.\n3. Set `DB_PATH` env var to change the database file location."
+}

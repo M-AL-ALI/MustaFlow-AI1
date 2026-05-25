@@ -1,0 +1,24 @@
+{
+  "id": "ai-replicate",
+  "name": "Replicate",
+  "category": "ai",
+  "description": "Run open-source AI models in the cloud — image generation (SDXL, Flux), video, audio, and language models.",
+  "version": "1.0.0",
+  "url": "https://replicate.com/docs",
+  "requiredSecrets": [
+    {
+      "name": "REPLICATE_API_TOKEN",
+      "category": "ai",
+      "reason": "Replicate API token from replicate.com/account",
+      "helpUrl": "https://replicate.com/account/api-tokens"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "replicate", "version": "^0.32.0" }],
+  "files": [
+    {
+      "path": "src/lib/replicate.ts",
+      "content": "import Replicate from \"replicate\";\n\nexport const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });\n\nexport async function generateImage(\n  prompt: string,\n  model = \"black-forest-labs/flux-schnell\",\n): Promise<string[]> {\n  const output = await replicate.run(model as `${string}/${string}`, {\n    input: { prompt, num_outputs: 1 },\n  });\n  return Array.isArray(output) ? (output as string[]) : [output as string];\n}\n\nexport async function runModel<TInput extends object, TOutput>(\n  model: `${string}/${string}`,\n  input: TInput,\n): Promise<TOutput> {\n  return replicate.run(model, { input }) as Promise<TOutput>;\n}\n"
+    }
+  ],
+  "postInstallNotes": "```ts\nimport { generateImage } from \"./lib/replicate\";\nconst [imageUrl] = await generateImage(\"A cat riding a bicycle through Paris\");\n```\nBrowse models at replicate.com/explore. Billing is per-second of compute time."
+}

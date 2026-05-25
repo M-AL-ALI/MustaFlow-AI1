@@ -1,0 +1,45 @@
+{
+  "id": "comm-pusher",
+  "name": "Pusher Channels (Real-time)",
+  "category": "other",
+  "description": "Real-time WebSocket messaging with Pusher Channels — live dashboards, chat, notifications, and collaborative features.",
+  "version": "1.0.0",
+  "url": "https://pusher.com/docs/channels/",
+  "requiredSecrets": [
+    {
+      "name": "PUSHER_APP_ID",
+      "category": "other",
+      "reason": "Pusher application ID",
+      "helpUrl": "https://dashboard.pusher.com/"
+    },
+    {
+      "name": "PUSHER_KEY",
+      "category": "other",
+      "reason": "Pusher app key (safe for client-side use)",
+      "helpUrl": "https://dashboard.pusher.com/"
+    },
+    {
+      "name": "PUSHER_SECRET",
+      "category": "other",
+      "reason": "Pusher app secret (server-side only)",
+      "helpUrl": "https://dashboard.pusher.com/"
+    },
+    {
+      "name": "PUSHER_CLUSTER",
+      "category": "other",
+      "reason": "Pusher cluster (e.g. us2, eu, ap1)",
+      "helpUrl": "https://dashboard.pusher.com/"
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "pusher", "version": "^5.2.0" },
+    { "runtime": "node", "name": "pusher-js", "version": "^8.4.0" }
+  ],
+  "files": [
+    {
+      "path": "src/lib/pusher-server.ts",
+      "content": "import Pusher from \"pusher\";\n\nexport const pusher = new Pusher({\n  appId: process.env.PUSHER_APP_ID!,\n  key: process.env.PUSHER_KEY!,\n  secret: process.env.PUSHER_SECRET!,\n  cluster: process.env.PUSHER_CLUSTER!,\n  useTLS: true,\n});\n\nexport async function broadcast(\n  channel: string,\n  event: string,\n  data: unknown,\n): Promise<void> {\n  await pusher.trigger(channel, event, data);\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Use `broadcast(channel, event, data)` on the server to push events.\n2. On the client, connect with `pusher-js` using `PUSHER_KEY` and `PUSHER_CLUSTER`.\n3. Expose `VITE_PUSHER_KEY` and `VITE_PUSHER_CLUSTER` for the frontend (same values, different env var names)."
+}

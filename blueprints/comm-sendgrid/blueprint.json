@@ -1,0 +1,24 @@
+{
+  "id": "comm-sendgrid",
+  "name": "SendGrid Email",
+  "category": "other",
+  "description": "Transactional and marketing emails with SendGrid — dynamic templates, analytics, and deliverability tools.",
+  "version": "1.0.0",
+  "url": "https://docs.sendgrid.com/",
+  "requiredSecrets": [
+    {
+      "name": "SENDGRID_API_KEY",
+      "category": "other",
+      "reason": "SendGrid API key with Mail Send permissions",
+      "helpUrl": "https://app.sendgrid.com/settings/api_keys"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "@sendgrid/mail", "version": "^8.1.0" }],
+  "files": [
+    {
+      "path": "src/lib/sendgrid.ts",
+      "content": "import sgMail from \"@sendgrid/mail\";\n\nsgMail.setApiKey(process.env.SENDGRID_API_KEY!);\n\nexport async function sendEmail(opts: {\n  to: string | string[];\n  from?: string;\n  subject: string;\n  text?: string;\n  html?: string;\n  templateId?: string;\n  dynamicTemplateData?: Record<string, unknown>;\n}): Promise<void> {\n  const from = opts.from ?? process.env.EMAIL_FROM ?? \"noreply@yourdomain.com\";\n  await sgMail.send({\n    to: opts.to,\n    from,\n    subject: opts.subject,\n    text: opts.text,\n    html: opts.html,\n    templateId: opts.templateId,\n    dynamicTemplateData: opts.dynamicTemplateData,\n  });\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Verify your sender email or domain in SendGrid → Settings → Sender Authentication.\n2. Set `EMAIL_FROM` to your verified sender address.\n3. Create dynamic templates in SendGrid and pass `templateId` + `dynamicTemplateData` for rich emails."
+}

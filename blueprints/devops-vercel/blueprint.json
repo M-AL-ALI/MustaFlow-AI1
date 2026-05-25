@@ -1,0 +1,42 @@
+{
+  "id": "devops-vercel",
+  "name": "Vercel Edge Config & KV",
+  "category": "other",
+  "description": "Vercel Edge Config for ultra-low latency feature flags and KV storage for fast key-value data at the edge.",
+  "version": "1.0.0",
+  "url": "https://vercel.com/docs/storage",
+  "requiredSecrets": [
+    {
+      "name": "EDGE_CONFIG",
+      "category": "other",
+      "reason": "Vercel Edge Config connection string",
+      "helpUrl": "https://vercel.com/dashboard/stores",
+      "optional": true
+    },
+    {
+      "name": "KV_REST_API_URL",
+      "category": "other",
+      "reason": "Vercel KV (Upstash Redis) REST API URL",
+      "helpUrl": "https://vercel.com/dashboard/stores",
+      "optional": true
+    },
+    {
+      "name": "KV_REST_API_TOKEN",
+      "category": "other",
+      "reason": "Vercel KV REST API token",
+      "helpUrl": "https://vercel.com/dashboard/stores",
+      "optional": true
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "@vercel/edge-config", "version": "^1.3.0" },
+    { "runtime": "node", "name": "@vercel/kv", "version": "^3.0.0" }
+  ],
+  "files": [
+    {
+      "path": "src/lib/vercel-storage.ts",
+      "content": "import { get as edgeConfigGet } from \"@vercel/edge-config\";\nimport { kv } from \"@vercel/kv\";\n\nexport async function getFlag(key: string): Promise<unknown> {\n  return edgeConfigGet(key);\n}\n\nexport const cache = {\n  async get<T>(key: string): Promise<T | null> {\n    return kv.get<T>(key);\n  },\n  async set(key: string, value: unknown, ttlSeconds?: number): Promise<void> {\n    if (ttlSeconds) {\n      await kv.set(key, value, { ex: ttlSeconds });\n    } else {\n      await kv.set(key, value);\n    }\n  },\n  async del(key: string): Promise<void> {\n    await kv.del(key);\n  },\n};\n"
+    }
+  ],
+  "postInstallNotes": "1. Create Edge Config and KV stores in the Vercel dashboard and link them to your project.\n2. `getFlag('maintenance_mode')` reads from Edge Config — changes propagate globally in milliseconds without redeployment.\n3. `cache.set('session:xyz', data, 3600)` stores data in KV with a 1-hour TTL."
+}

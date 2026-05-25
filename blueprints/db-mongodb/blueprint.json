@@ -1,0 +1,31 @@
+{
+  "id": "db-mongodb",
+  "name": "MongoDB Atlas",
+  "category": "database",
+  "description": "Document database via MongoDB Atlas with flexible schemas, aggregation pipelines, and global clusters.",
+  "version": "1.0.0",
+  "url": "https://www.mongodb.com/docs/atlas/",
+  "requiredSecrets": [
+    {
+      "name": "MONGODB_URI",
+      "category": "database",
+      "reason": "MongoDB Atlas connection string (mongodb+srv://...)",
+      "helpUrl": "https://www.mongodb.com/cloud/atlas"
+    },
+    {
+      "name": "MONGODB_DB_NAME",
+      "category": "database",
+      "reason": "Name of the database to use",
+      "helpUrl": "https://www.mongodb.com/cloud/atlas",
+      "optional": true
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "mongodb", "version": "^6.8.0" }],
+  "files": [
+    {
+      "path": "src/db/mongo.ts",
+      "content": "import { MongoClient, type Db } from \"mongodb\";\n\nconst uri = process.env.MONGODB_URI!;\nconst dbName = process.env.MONGODB_DB_NAME ?? \"app\";\n\nlet client: MongoClient | null = null;\nlet db: Db | null = null;\n\nexport async function getDb(): Promise<Db> {\n  if (db) return db;\n  client = new MongoClient(uri);\n  await client.connect();\n  db = client.db(dbName);\n  return db;\n}\n\nexport async function getCollection<T extends object>(name: string) {\n  const database = await getDb();\n  return database.collection<T>(name);\n}\n\nprocess.on(\"SIGINT\", async () => {\n  await client?.close();\n  process.exit(0);\n});\n"
+    }
+  ],
+  "postInstallNotes": "1. Whitelist your server's IP in Atlas → Network Access.\n2. Use `getCollection<YourType>('collectionName')` to query with full TypeScript types.\n3. Add indexes in Atlas or via `db.createIndex(...)` for production performance."
+}

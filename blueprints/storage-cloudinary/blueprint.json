@@ -1,0 +1,36 @@
+{
+  "id": "storage-cloudinary",
+  "name": "Cloudinary Media",
+  "category": "storage",
+  "description": "Image and video hosting with Cloudinary — on-the-fly transformations, AI-powered optimization, and CDN delivery.",
+  "version": "1.0.0",
+  "url": "https://cloudinary.com/documentation",
+  "requiredSecrets": [
+    {
+      "name": "CLOUDINARY_CLOUD_NAME",
+      "category": "storage",
+      "reason": "Your Cloudinary cloud name",
+      "helpUrl": "https://cloudinary.com/console"
+    },
+    {
+      "name": "CLOUDINARY_API_KEY",
+      "category": "storage",
+      "reason": "Cloudinary API key",
+      "helpUrl": "https://cloudinary.com/console"
+    },
+    {
+      "name": "CLOUDINARY_API_SECRET",
+      "category": "storage",
+      "reason": "Cloudinary API secret (server-side only)",
+      "helpUrl": "https://cloudinary.com/console"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "cloudinary", "version": "^2.4.0" }],
+  "files": [
+    {
+      "path": "src/lib/cloudinary.ts",
+      "content": "import { v2 as cloudinary } from \"cloudinary\";\n\ncloudinary.config({\n  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,\n  api_key: process.env.CLOUDINARY_API_KEY,\n  api_secret: process.env.CLOUDINARY_API_SECRET,\n  secure: true,\n});\n\nexport async function uploadImage(\n  source: string,\n  opts?: { folder?: string; publicId?: string; transformation?: object[] },\n): Promise<{ url: string; publicId: string }> {\n  const result = await cloudinary.uploader.upload(source, {\n    folder: opts?.folder,\n    public_id: opts?.publicId,\n    transformation: opts?.transformation,\n  });\n  return { url: result.secure_url, publicId: result.public_id };\n}\n\nexport function getImageUrl(\n  publicId: string,\n  opts?: { width?: number; height?: number; quality?: string | number; format?: string },\n): string {\n  return cloudinary.url(publicId, {\n    width: opts?.width,\n    height: opts?.height,\n    quality: opts?.quality ?? \"auto\",\n    fetch_format: opts?.format ?? \"auto\",\n    secure: true,\n  });\n}\n\nexport async function deleteImage(publicId: string): Promise<void> {\n  await cloudinary.uploader.destroy(publicId);\n}\n\nexport { cloudinary };\n"
+    }
+  ],
+  "postInstallNotes": "1. Use `uploadImage(filePath, { folder: 'avatars' })` to upload images.\n2. Use `getImageUrl(publicId, { width: 400, height: 400 })` to generate optimized transformation URLs — no storage duplication.\n3. For direct browser uploads, generate signed upload presets in the Cloudinary dashboard."
+}

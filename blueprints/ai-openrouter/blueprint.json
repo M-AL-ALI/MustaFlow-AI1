@@ -1,0 +1,24 @@
+{
+  "id": "ai-openrouter",
+  "name": "OpenRouter",
+  "category": "ai",
+  "description": "Unified gateway to 200+ LLMs (GPT-4, Claude, Gemini, Llama, Mistral) via a single OpenAI-compatible API.",
+  "version": "1.0.0",
+  "url": "https://openrouter.ai/docs",
+  "requiredSecrets": [
+    {
+      "name": "OPENROUTER_API_KEY",
+      "category": "ai",
+      "reason": "OpenRouter API key from openrouter.ai/keys",
+      "helpUrl": "https://openrouter.ai/keys"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "openai", "version": "^4.70.0" }],
+  "files": [
+    {
+      "path": "src/lib/openrouter.ts",
+      "content": "import OpenAI from \"openai\";\n\nexport const openrouter = new OpenAI({\n  baseURL: \"https://openrouter.ai/api/v1\",\n  apiKey: process.env.OPENROUTER_API_KEY,\n  defaultHeaders: {\n    \"HTTP-Referer\": process.env.SITE_URL ?? \"\",\n    \"X-Title\": process.env.SITE_NAME ?? \"My App\",\n  },\n});\n\nexport async function chat(\n  messages: OpenAI.Chat.ChatCompletionMessageParam[],\n  model = \"openai/gpt-4o-mini\",\n): Promise<string> {\n  const response = await openrouter.chat.completions.create({ model, messages });\n  return response.choices[0]?.message?.content ?? \"\";\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Browse 200+ models at openrouter.ai/models — use the model ID as the `model` parameter.\n2. Example models: `openai/gpt-4o`, `anthropic/claude-3-5-sonnet`, `meta-llama/llama-3.1-70b-instruct`.\n3. OpenRouter uses pay-as-you-go pricing per model — no separate API key per provider needed."
+}

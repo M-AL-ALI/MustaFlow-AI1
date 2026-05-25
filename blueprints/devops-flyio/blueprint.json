@@ -1,0 +1,30 @@
+{
+  "id": "devops-flyio",
+  "name": "Fly.io Deployment",
+  "category": "other",
+  "description": "Deploy and manage containerized apps on Fly.io — Machines API, secrets management, and log streaming.",
+  "version": "1.0.0",
+  "url": "https://fly.io/docs/",
+  "requiredSecrets": [
+    {
+      "name": "FLY_API_TOKEN",
+      "category": "other",
+      "reason": "Fly.io personal access token from fly.io/user/personal_access_tokens",
+      "helpUrl": "https://fly.io/user/personal_access_tokens"
+    },
+    {
+      "name": "FLY_APP_NAME",
+      "category": "other",
+      "reason": "Your Fly.io application name",
+      "helpUrl": "https://fly.io/dashboard"
+    }
+  ],
+  "packages": [],
+  "files": [
+    {
+      "path": "src/lib/fly.ts",
+      "content": "const FLY_API = \"https://api.machines.dev/v1\";\nconst TOKEN = process.env.FLY_API_TOKEN!;\nconst APP = process.env.FLY_APP_NAME!;\n\nasync function flyFetch(path: string, opts?: RequestInit): Promise<unknown> {\n  const res = await fetch(`${FLY_API}${path}`, {\n    ...opts,\n    headers: {\n      \"Content-Type\": \"application/json\",\n      Authorization: `Bearer ${TOKEN}`,\n      ...opts?.headers,\n    },\n  });\n  if (!res.ok) {\n    const body = await res.text();\n    throw new Error(`Fly API ${res.status}: ${body}`);\n  }\n  return res.status === 204 ? null : res.json();\n}\n\nexport async function listMachines() {\n  return flyFetch(`/apps/${APP}/machines`) as Promise<unknown[]>;\n}\n\nexport async function getMachine(machineId: string) {\n  return flyFetch(`/apps/${APP}/machines/${machineId}`);\n}\n\nexport async function stopMachine(machineId: string) {\n  return flyFetch(`/apps/${APP}/machines/${machineId}/stop`, { method: \"POST\" });\n}\n\nexport async function startMachine(machineId: string) {\n  return flyFetch(`/apps/${APP}/machines/${machineId}/start`, { method: \"POST\" });\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Generate a Fly.io token at fly.io/user/personal_access_tokens.\n2. `listMachines()` returns all Machines in the app — useful for monitoring or orchestration.\n3. For deployments, use the `flyctl` CLI in CI/CD pipelines with `FLY_API_TOKEN` set."
+}

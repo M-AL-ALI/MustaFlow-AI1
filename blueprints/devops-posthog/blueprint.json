@@ -1,0 +1,31 @@
+{
+  "id": "devops-posthog",
+  "name": "PostHog Analytics",
+  "category": "other",
+  "description": "Open-source product analytics with event tracking, session recordings, feature flags, and A/B testing.",
+  "version": "1.0.0",
+  "url": "https://posthog.com/docs",
+  "requiredSecrets": [
+    {
+      "name": "POSTHOG_API_KEY",
+      "category": "other",
+      "reason": "PostHog project API key (safe for frontend use)",
+      "helpUrl": "https://app.posthog.com/project/settings"
+    },
+    {
+      "name": "POSTHOG_HOST",
+      "category": "other",
+      "reason": "PostHog host URL (https://app.posthog.com or self-hosted URL)",
+      "helpUrl": "https://posthog.com/docs/libraries/node",
+      "optional": true
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "posthog-node", "version": "^4.2.0" }],
+  "files": [
+    {
+      "path": "src/lib/posthog.ts",
+      "content": "import { PostHog } from \"posthog-node\";\n\nexport const posthog = new PostHog(process.env.POSTHOG_API_KEY!, {\n  host: process.env.POSTHOG_HOST ?? \"https://app.posthog.com\",\n});\n\nexport function track(\n  distinctId: string,\n  event: string,\n  properties?: Record<string, unknown>,\n): void {\n  posthog.capture({ distinctId, event, properties });\n}\n\nexport async function isFeatureEnabled(\n  flag: string,\n  distinctId: string,\n): Promise<boolean> {\n  const enabled = await posthog.isFeatureEnabled(flag, distinctId);\n  return enabled ?? false;\n}\n\n// Flush events on process exit to avoid losing queued events\nprocess.on(\"exit\", async () => {\n  await posthog.shutdown();\n});\n"
+    }
+  ],
+  "postInstallNotes": "1. For frontend tracking, install `posthog-js` and initialize with `POSTHOG_API_KEY`.\n2. Use `track(userId, 'button_clicked', { page: '/checkout' })` for server-side events.\n3. Define feature flags in the PostHog dashboard and use `isFeatureEnabled` for gradual rollouts."
+}

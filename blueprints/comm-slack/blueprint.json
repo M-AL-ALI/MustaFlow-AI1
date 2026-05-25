@@ -1,0 +1,31 @@
+{
+  "id": "comm-slack",
+  "name": "Slack Notifications",
+  "category": "other",
+  "description": "Send messages, alerts, and rich blocks to Slack channels via the Bolt SDK or incoming webhooks.",
+  "version": "1.0.0",
+  "url": "https://api.slack.com/",
+  "requiredSecrets": [
+    {
+      "name": "SLACK_BOT_TOKEN",
+      "category": "other",
+      "reason": "Slack Bot OAuth token (xoxb-...)",
+      "helpUrl": "https://api.slack.com/apps"
+    },
+    {
+      "name": "SLACK_WEBHOOK_URL",
+      "category": "other",
+      "reason": "Incoming webhook URL for simple channel notifications",
+      "helpUrl": "https://api.slack.com/messaging/webhooks",
+      "optional": true
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "@slack/web-api", "version": "^7.6.0" }],
+  "files": [
+    {
+      "path": "src/lib/slack.ts",
+      "content": "import { WebClient } from \"@slack/web-api\";\n\nexport const slack = new WebClient(process.env.SLACK_BOT_TOKEN);\n\nexport async function postMessage(\n  channel: string,\n  text: string,\n  blocks?: object[],\n): Promise<void> {\n  await slack.chat.postMessage({ channel, text, blocks });\n}\n\nexport async function sendWebhook(text: string): Promise<void> {\n  const url = process.env.SLACK_WEBHOOK_URL;\n  if (!url) throw new Error(\"SLACK_WEBHOOK_URL not set\");\n  await fetch(url, {\n    method: \"POST\",\n    headers: { \"content-type\": \"application/json\" },\n    body: JSON.stringify({ text }),\n  });\n}\n\nexport async function postAlert(opts: {\n  channel: string;\n  title: string;\n  message: string;\n  severity?: \"info\" | \"warning\" | \"error\";\n}): Promise<void> {\n  const color = opts.severity === \"error\" ? \"#e53e3e\" : opts.severity === \"warning\" ? \"#dd6b20\" : \"#3182ce\";\n  await slack.chat.postMessage({\n    channel: opts.channel,\n    text: opts.title,\n    attachments: [{ color, text: opts.message }],\n  });\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Create a Slack app at api.slack.com/apps, add the `chat:write` scope, and install to your workspace.\n2. Use `postMessage('#general', 'Hello!')` to send a simple message.\n3. For webhooks-only use (no bot), set `SLACK_WEBHOOK_URL` and use `sendWebhook(text)`."
+}

@@ -1,0 +1,40 @@
+{
+  "id": "auth-supabase",
+  "name": "Supabase Auth",
+  "category": "auth",
+  "description": "Supabase-powered authentication with email/password, magic links, OAuth providers, and row-level security.",
+  "version": "1.0.0",
+  "url": "https://supabase.com/docs/guides/auth",
+  "requiredSecrets": [
+    {
+      "name": "SUPABASE_URL",
+      "category": "auth",
+      "reason": "Your Supabase project URL",
+      "helpUrl": "https://app.supabase.com/project/_/settings/api"
+    },
+    {
+      "name": "SUPABASE_ANON_KEY",
+      "category": "auth",
+      "reason": "Public anon key for client-side calls",
+      "helpUrl": "https://app.supabase.com/project/_/settings/api"
+    },
+    {
+      "name": "SUPABASE_SERVICE_ROLE_KEY",
+      "category": "auth",
+      "reason": "Service role key for server-side admin operations",
+      "helpUrl": "https://app.supabase.com/project/_/settings/api",
+      "optional": true
+    }
+  ],
+  "packages": [
+    { "runtime": "node", "name": "@supabase/supabase-js", "version": "^2.45.0" },
+    { "runtime": "node", "name": "@supabase/ssr", "version": "^0.5.0" }
+  ],
+  "files": [
+    {
+      "path": "src/lib/supabase.ts",
+      "content": "import { createClient } from \"@supabase/supabase-js\";\n\nconst supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? \"\";\nconst supabaseAnonKey = process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY ?? \"\";\n\nexport const supabase = createClient(supabaseUrl, supabaseAnonKey);\n\nexport const supabaseAdmin = process.env.SUPABASE_SERVICE_ROLE_KEY\n  ? createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY, {\n      auth: { autoRefreshToken: false, persistSession: false },\n    })\n  : null;\n\nexport async function getUser(accessToken: string) {\n  const { data, error } = await supabase.auth.getUser(accessToken);\n  if (error) return null;\n  return data.user;\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. For frontend Vite projects, expose `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (same values).\n2. Use `supabase.auth.signInWithPassword({ email, password })` for email/password login.\n3. Use `supabase.auth.signInWithOAuth({ provider: 'github' })` for OAuth.\n4. `supabaseAdmin` is only available server-side when `SUPABASE_SERVICE_ROLE_KEY` is set."
+}

@@ -1,0 +1,31 @@
+{
+  "id": "auth-nextauth",
+  "name": "NextAuth.js",
+  "category": "auth",
+  "description": "Authentication for Next.js apps with 50+ built-in OAuth providers, JWT sessions, and database adapters.",
+  "version": "1.0.0",
+  "url": "https://next-auth.js.org/",
+  "webOnly": true,
+  "requiredSecrets": [
+    {
+      "name": "NEXTAUTH_SECRET",
+      "category": "auth",
+      "reason": "Used to encrypt JWT tokens — must be a random 32+ char string",
+      "helpUrl": "https://next-auth.js.org/configuration/options#secret"
+    },
+    {
+      "name": "NEXTAUTH_URL",
+      "category": "auth",
+      "reason": "Your app's canonical URL (e.g. https://myapp.com)",
+      "helpUrl": "https://next-auth.js.org/configuration/options#nextauth_url"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "next-auth", "version": "^4.24.0" }],
+  "files": [
+    {
+      "path": "src/lib/auth.ts",
+      "content": "import type { NextAuthOptions } from \"next-auth\";\nimport GithubProvider from \"next-auth/providers/github\";\nimport CredentialsProvider from \"next-auth/providers/credentials\";\n\nexport const authOptions: NextAuthOptions = {\n  secret: process.env.NEXTAUTH_SECRET,\n  providers: [\n    GithubProvider({\n      clientId: process.env.GITHUB_CLIENT_ID ?? \"\",\n      clientSecret: process.env.GITHUB_CLIENT_SECRET ?? \"\",\n    }),\n    CredentialsProvider({\n      name: \"Credentials\",\n      credentials: {\n        email: { label: \"Email\", type: \"email\" },\n        password: { label: \"Password\", type: \"password\" },\n      },\n      async authorize(credentials) {\n        // TODO: validate credentials against your user DB\n        if (!credentials?.email || !credentials?.password) return null;\n        return { id: \"1\", email: credentials.email, name: \"User\" };\n      },\n    }),\n  ],\n  callbacks: {\n    async session({ session, token }) {\n      if (session.user && token.sub) {\n        (session.user as { id?: string }).id = token.sub;\n      }\n      return session;\n    },\n  },\n};\n"
+    }
+  ],
+  "postInstallNotes": "1. Create `src/app/api/auth/[...nextauth]/route.ts` and export handlers from `NextAuth(authOptions)`.\n2. Wrap your layout with `<SessionProvider>`.\n3. Use `useSession()` on the client and `getServerSession(authOptions)` on the server.\n4. Add `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` if using GitHub OAuth."
+}

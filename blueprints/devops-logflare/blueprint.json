@@ -1,0 +1,30 @@
+{
+  "id": "devops-logflare",
+  "name": "Logflare Logging",
+  "category": "other",
+  "description": "Structured log ingestion and search with Logflare — real-time tailing, alerting, and BigQuery export.",
+  "version": "1.0.0",
+  "url": "https://logflare.app/",
+  "requiredSecrets": [
+    {
+      "name": "LOGFLARE_API_KEY",
+      "category": "other",
+      "reason": "Logflare API key from your account settings",
+      "helpUrl": "https://logflare.app/auth/login"
+    },
+    {
+      "name": "LOGFLARE_SOURCE_ID",
+      "category": "other",
+      "reason": "Logflare source UUID to route logs to",
+      "helpUrl": "https://logflare.app/"
+    }
+  ],
+  "packages": [],
+  "files": [
+    {
+      "path": "src/lib/logflare.ts",
+      "content": "const API_KEY = process.env.LOGFLARE_API_KEY!;\nconst SOURCE = process.env.LOGFLARE_SOURCE_ID!;\nconst ENDPOINT = `https://api.logflare.app/logs?source=${SOURCE}`;\n\ntype LogLevel = \"info\" | \"warn\" | \"error\" | \"debug\";\n\nexport async function log(\n  level: LogLevel,\n  message: string,\n  metadata?: Record<string, unknown>,\n): Promise<void> {\n  if (!API_KEY || !SOURCE) return;\n  void fetch(ENDPOINT, {\n    method: \"POST\",\n    headers: {\n      \"Content-Type\": \"application/json\",\n      \"X-API-KEY\": API_KEY,\n    },\n    body: JSON.stringify({\n      log_entry: message,\n      metadata: { level, ...metadata },\n    }),\n  }).catch(() => {});\n}\n\nexport const logger = {\n  info: (msg: string, meta?: Record<string, unknown>) => log(\"info\", msg, meta),\n  warn: (msg: string, meta?: Record<string, unknown>) => log(\"warn\", msg, meta),\n  error: (msg: string, meta?: Record<string, unknown>) => log(\"error\", msg, meta),\n  debug: (msg: string, meta?: Record<string, unknown>) => log(\"debug\", msg, meta),\n};\n"
+    }
+  ],
+  "postInstallNotes": "1. Create a source in your Logflare dashboard and copy the UUID into `LOGFLARE_SOURCE_ID`.\n2. Log calls are fire-and-forget — they never block your request path.\n3. For pino integration, use `pino-logflare` transport to pipe all logs to Logflare automatically."
+}

@@ -1,0 +1,24 @@
+{
+  "id": "payments-whop",
+  "name": "Whop Payments",
+  "category": "payments",
+  "description": "Sell digital products, subscriptions, and memberships with Whop's creator commerce platform.",
+  "version": "1.0.0",
+  "url": "https://dev.whop.com/",
+  "requiredSecrets": [
+    {
+      "name": "WHOP_API_KEY",
+      "category": "payment",
+      "reason": "Whop API key from your developer dashboard",
+      "helpUrl": "https://whop.com/dashboard/settings/api"
+    }
+  ],
+  "packages": [{ "runtime": "node", "name": "@whop-sdk/api", "version": "^5.0.0" }],
+  "files": [
+    {
+      "path": "src/lib/whop.ts",
+      "content": "import { WhopAPI } from \"@whop-sdk/api\";\n\nexport const whop = WhopAPI({ token: process.env.WHOP_API_KEY });\n\nexport async function verifyAccess(userToken: string, productId: string): Promise<boolean> {\n  try {\n    const membership = await whop.GET(\"/v5/memberships\", {\n      params: { query: { product_id: productId } },\n      headers: { Authorization: `Bearer ${userToken}` },\n    });\n    return (membership.data?.data?.length ?? 0) > 0;\n  } catch {\n    return false;\n  }\n}\n"
+    }
+  ],
+  "postInstallNotes": "1. Create products and plans in your Whop seller dashboard.\n2. Use the Whop checkout link to sell memberships.\n3. Verify user access server-side with `verifyAccess(userToken, productId)` before serving gated content."
+}
