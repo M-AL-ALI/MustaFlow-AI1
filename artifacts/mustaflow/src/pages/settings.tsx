@@ -20,11 +20,12 @@ import {
   Download,
   Shield,
   Trash2,
-  Code,
+  Code2,
+  Key,
   Plus,
   Copy,
   Check,
-  KeyRound,
+  TriangleAlert,
 } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
@@ -68,7 +69,7 @@ const TABS = [
   { id: "account", label: "Account", icon: User },
   { id: "credits", label: "Credits & Billing", icon: CreditCard },
   { id: "privacy", label: "Privacy & Data", icon: Bell },
-  { id: "developer", label: "Developer", icon: Code },
+  { id: "developer", label: "Developer", icon: Code2 },
 ];
 
 export default function SettingsPage() {
@@ -80,9 +81,9 @@ export default function SettingsPage() {
   const tabParam = searchParams.get("tab");
   const paymentParam = searchParams.get("payment");
 
-  const [activeTab, setActiveTab] = useState(
-    tabParam === "credits" ? "credits" : tabParam === "developer" ? "developer" : "account",
-  );
+  const validTabs = ["account", "credits", "privacy", "developer"];
+  const initialTab = tabParam && validTabs.includes(tabParam) ? tabParam : "account";
+  const [activeTab, setActiveTab] = useState(initialTab);
 
   useEffect(() => {
     if (paymentParam === "success") {
@@ -411,6 +412,393 @@ function AppearanceOption({
       <Icon className="h-5 w-5" />
       {label}
     </button>
+  );
+}
+
+// ── Types for PAT management ──────────────────────────────────────────────────
+
+interface PatEntry {
+  id: number;
+  name: string;
+  tokenPreview: string;
+  scopes: string[];
+  projectId: number | null;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+interface CreatedPat {
+  token: PatEntry;
+  rawToken: string;
+}
+
+const ALL_SCOPES: { value: string; label: string; description: string }[] = [
+  { value: "domains:read", label: "Domains (read)", description: "List and inspect custom domains" },
+  { value: "domains:write", label: "Domains (write)", description: "Add, remove, and verify domains" },
+  { value: "webhooks:read", label: "Webhooks (read)", description: "List webhook configurations" },
+  { value: "webhooks:write", label: "Webhooks (write)", description: "Create and delete webhooks" },
+];
+
+function DeveloperTab() {
+  const { toast } = useToast();
+
+  const [tokens, setTokens] = useState<PatEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [createdPat, setCreatedPat] = useState<CreatedPat | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // Create-token form state
+  const [showForm, setShowForm] = useState(false);
+  const [formName, setFormName] = useState("");
+  const [formScopes, setFormScopes] = useState<string[]>(["domains:read", "domains:write"]);
+  const [formExpiry, setFormExpiry] = useState<string>("");
+  const [creating, setCreating] = useState(false);
+
+  const [revokingId, setRevokingId] = useState<number | null>(null);
+
+  const fetchTokens = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/me/tokens");
+      if (res.ok) {
+        const data = (await res.json()) as { tokens: PatEntry[] };
+        setTokens(data.tokens);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchTokens();
+  }, [fetchTokens]);
+
+  const handleCreate = async () => {
+    if (!formName.trim()) return;
+    setCreating(true);
+    try {
+      const body: {
+        name: string;
+        scopes: string[];
+        expiresInDays?: number;
+      } = { name: formName.trim(), scopes: formScopes };
+      const days = parseInt(formExpiry, 10);
+      if (!isNaN(days) && days > 0) body.expiresInDays = days;
+
+      const res = await fetch("/api/me/tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json()) as
+        | CreatedPat
+        | { error: string };
+
+      if (!res.ok || "error" in data) {
+        toast({
+          title: "Failed to create token",
+          description: "error" in data ? data.error : "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setCreatedPat(data as CreatedPat);
+      setShowForm(false);
+      setFormName("");
+      setFormScopes(["domains:read", "domains:write"]);
+      setFormExpiry("");
+      void fetchTokens();
+    } catch {
+      toast({ title: "Failed to create token", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleRevoke = async (id: number, name: string) => {
+    setRevokingId(id);
+    try {
+      const res = await fetch(`/api/me/tokens/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setTokens((prev) => prev.filter((t) => t.id !== id));
+        toast({ title: "Token revoked", description: `"${name}" has been revoked.` });
+        if (createdPat?.token.id === id) setCreatedPat(null);
+      } else {
+        toast({ title: "Failed to revoke token", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Failed to revoke token", variant: "destructive" });
+    } finally {
+      setRevokingId(null);
+    }
+  };
+
+  const handleCopy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback
+    }
+  };
+
+  const toggleScope = (scope: string) => {
+    setFormScopes((prev) =>
+      prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
+    );
+  };
+
+  function formatDate(iso: string | null) {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+
+  function isExpired(expiresAt: string | null) {
+    if (!expiresAt) return false;
+    return new Date(expiresAt) < new Date();
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header card */}
+      <div className="border border-border rounded-xl bg-card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Key className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-base font-semibold">API Tokens</h2>
+          </div>
+          <a
+            href="/developers"
+            className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Developer docs
+          </a>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Personal access tokens let you authenticate with the REST API from scripts, CI pipelines, and
+          GitHub Actions without browser cookies. Pass the token as a{" "}
+          <code className="text-xs font-mono bg-muted px-1 rounded">Bearer</code> header in every
+          request.
+        </p>
+        <div className="rounded-lg border border-border bg-zinc-950 px-4 py-3 font-mono text-xs text-zinc-300">
+          Authorization: Bearer mfp_xxxxxxxxxxxxxxxxxxxxxxxx
+        </div>
+
+        {/* New-token reveal */}
+        {createdPat && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/8 p-4 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <TriangleAlert className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-300">
+                  Copy your token now — it will not be shown again.
+                </p>
+                <p className="text-xs text-amber-400/80 mt-0.5">
+                  Token: <strong>{createdPat.token.name}</strong>
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs font-mono bg-zinc-950 border border-border rounded px-3 py-2 text-zinc-200 break-all select-all">
+                {createdPat.rawToken}
+              </code>
+              <button
+                onClick={() => void handleCopy(createdPat.rawToken)}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-md border border-border bg-muted/50 hover:bg-muted text-xs font-medium transition-colors"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <button
+              onClick={() => setCreatedPat(null)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Create form */}
+        {showForm ? (
+          <div className="border border-border rounded-lg p-4 space-y-4">
+            <p className="text-sm font-medium">New API token</p>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Token name</label>
+              <input
+                type="text"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="e.g. GitHub Actions deploy"
+                maxLength={100}
+                className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground">Scopes</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {ALL_SCOPES.map(({ value, label, description }) => (
+                  <label
+                    key={value}
+                    className="flex items-start gap-2.5 p-3 rounded-lg border border-border cursor-pointer hover:bg-muted/40 transition-colors"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={formScopes.includes(value)}
+                      onChange={() => toggleScope(value)}
+                      className="mt-0.5 h-3.5 w-3.5 accent-primary shrink-0"
+                    />
+                    <div>
+                      <div className="text-xs font-medium">{label}</div>
+                      <div className="text-xs text-muted-foreground">{description}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Expiry (days, optional)
+              </label>
+              <input
+                type="number"
+                value={formExpiry}
+                onChange={(e) => setFormExpiry(e.target.value)}
+                placeholder="e.g. 90 — leave blank for no expiry"
+                min={1}
+                max={3650}
+                className="w-full max-w-xs px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void handleCreate()}
+                disabled={creating || !formName.trim() || formScopes.length === 0}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {creating ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Key className="h-3.5 w-3.5" />
+                )}
+                {creating ? "Creating…" : "Create token"}
+              </button>
+              <button
+                onClick={() => {
+                  setShowForm(false);
+                  setFormName("");
+                  setFormScopes(["domains:read", "domains:write"]);
+                  setFormExpiry("");
+                }}
+                className="px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-muted/60 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-md border border-border bg-background text-sm font-medium hover:bg-muted/60 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New API token
+          </button>
+        )}
+      </div>
+
+      {/* Token list */}
+      <div className="border border-border rounded-xl bg-card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold">Active Tokens</h2>
+          <button
+            onClick={() => void fetchTokens()}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Refresh
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="space-y-2">
+            {[1, 2].map((i) => (
+              <div key={i} className="h-16 bg-muted rounded-lg animate-pulse" />
+            ))}
+          </div>
+        ) : tokens.length === 0 ? (
+          <div className="text-center py-8 text-sm text-muted-foreground">
+            No active tokens. Create one above to start using the API.
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {tokens.map((token) => (
+              <div key={token.id} className="py-3 flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium">{token.name}</span>
+                    {isExpired(token.expiresAt) && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-medium">
+                        Expired
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <code className="text-xs font-mono text-muted-foreground">
+                      {token.tokenPreview}
+                    </code>
+                    <span className="text-xs text-muted-foreground">
+                      Created {formatDate(token.createdAt)}
+                    </span>
+                    {token.lastUsedAt && (
+                      <span className="text-xs text-muted-foreground">
+                        Last used {formatDate(token.lastUsedAt)}
+                      </span>
+                    )}
+                    {token.expiresAt && !isExpired(token.expiresAt) && (
+                      <span className="text-xs text-muted-foreground">
+                        Expires {formatDate(token.expiresAt)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-1 flex-wrap">
+                    {(token.scopes as string[]).map((scope) => (
+                      <span
+                        key={scope}
+                        className="text-xs px-1.5 py-0.5 rounded bg-primary/8 text-primary font-mono"
+                      >
+                        {scope}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={() => void handleRevoke(token.id, token.name)}
+                  disabled={revokingId === token.id}
+                  className="shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-md border border-destructive/30 text-destructive text-xs font-medium hover:bg-destructive/8 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {revokingId === token.id ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3 w-3" />
+                  )}
+                  Revoke
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

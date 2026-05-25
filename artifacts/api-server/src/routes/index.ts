@@ -82,6 +82,7 @@ import projectActivityRouter from "./project-activity";
 import gdprRouter from "./gdpr";
 import tokensRouter from "./tokens";
 import previewEnvRouter from "./preview-env";
+import tokensRouter from "./tokens";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -263,7 +264,7 @@ router.use(galleryTemplatesRouter);
 router.use(ecosystemExtensionsRouter);
 router.use(profilesRouter);
 router.use(gdprRouter); // GET /me/export, DELETE /me
-router.use(tokensRouter); // GET/POST /tokens, DELETE /tokens/:id
+router.use(tokensRouter); // GET/POST/DELETE /me/tokens
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

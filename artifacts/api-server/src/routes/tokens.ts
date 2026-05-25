@@ -1,15 +1,17 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Personal Access Token (PAT) management — session-authenticated
-//
-//   GET    /api/tokens          — list caller's active PATs (masked)
-//   POST   /api/tokens          — create a new PAT (raw token shown once)
-//   DELETE /api/tokens/:id      — revoke a PAT
-// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Cookie-auth PAT management routes.
+ * Mounted under the auth wall so users can manage their tokens from the web UI.
+ *
+ * Routes:
+ *   GET    /me/tokens            — list caller's active tokens (masked)
+ *   POST   /me/tokens            — create a new PAT; returns raw token once
+ *   DELETE /me/tokens/:tokenId   — revoke a PAT
+ */
 
 import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
-import { randomBytes, createHash } from "crypto";
 import { db, personalAccessTokensTable } from "@workspace/db";
+import { generateRawToken, hashToken } from "../lib/pat-auth";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -27,41 +29,45 @@ const VALID_SCOPES = [
   "webhooks:write",
 ];
 
-function hashToken(raw: string): string {
-  return createHash("sha256").update(raw).digest("hex");
-}
-
-function generateRawToken(): string {
-  return `${TOKEN_PREFIX}${randomBytes(32).toString("hex")}`;
-}
-
-// ── GET /api/tokens ───────────────────────────────────────────────────────────
-router.get("/tokens", async (req, res): Promise<void> => {
-  const userId = req.userId!;
-
-  const tokens = await db
-    .select({
-      id: personalAccessTokensTable.id,
-      name: personalAccessTokensTable.name,
-      tokenPreview: personalAccessTokensTable.tokenPreview,
-      scopes: personalAccessTokensTable.scopes,
-      projectId: personalAccessTokensTable.projectId,
-      lastUsedAt: personalAccessTokensTable.lastUsedAt,
-      expiresAt: personalAccessTokensTable.expiresAt,
-      createdAt: personalAccessTokensTable.createdAt,
-    })
-    .from(personalAccessTokensTable)
-    .where(
-      and(eq(personalAccessTokensTable.userId, userId), eq(personalAccessTokensTable.active, true)),
-    )
-    .orderBy(asc(personalAccessTokensTable.createdAt));
-
-  res.json({ tokens });
+// ── GET /me/tokens ────────────────────────────────────────────────────────────
+router.get("/me/tokens", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  try {
+    const tokens = await db
+      .select({
+        id: personalAccessTokensTable.id,
+        name: personalAccessTokensTable.name,
+        tokenPreview: personalAccessTokensTable.tokenPreview,
+        scopes: personalAccessTokensTable.scopes,
+        projectId: personalAccessTokensTable.projectId,
+        lastUsedAt: personalAccessTokensTable.lastUsedAt,
+        expiresAt: personalAccessTokensTable.expiresAt,
+        createdAt: personalAccessTokensTable.createdAt,
+      })
+      .from(personalAccessTokensTable)
+      .where(
+        and(
+          eq(personalAccessTokensTable.userId, req.userId),
+          eq(personalAccessTokensTable.active, true),
+        ),
+      )
+      .orderBy(asc(personalAccessTokensTable.createdAt));
+    res.json({ tokens });
+  } catch (err) {
+    logger.warn({ err }, "GET /me/tokens error");
+    res.status(500).json({ error: "Failed to list tokens" });
+  }
 });
 
-// ── POST /api/tokens ──────────────────────────────────────────────────────────
-router.post("/tokens", async (req, res): Promise<void> => {
-  const userId = req.userId!;
+// ── POST /me/tokens ───────────────────────────────────────────────────────────
+router.post("/me/tokens", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const { name, scopes, expiresInDays } = req.body as {
     name?: string;
     scopes?: string[];
@@ -82,9 +88,24 @@ router.post("/tokens", async (req, res): Promise<void> => {
     return;
   }
 
+  // Max 20 active tokens per user
+  const existing = await db
+    .select({ id: personalAccessTokensTable.id })
+    .from(personalAccessTokensTable)
+    .where(
+      and(
+        eq(personalAccessTokensTable.userId, req.userId),
+        eq(personalAccessTokensTable.active, true),
+      ),
+    );
+  if (existing.length >= 20) {
+    res.status(422).json({ error: "Maximum of 20 active tokens allowed. Revoke one first." });
+    return;
+  }
+
   const raw = generateRawToken();
   const tokenHash = hashToken(raw);
-  const tokenPreview = `${raw.slice(0, 10)}•••••${raw.slice(-4)}`;
+  const tokenPreview = `${raw.slice(0, 10)}•••••••${raw.slice(-4)}`;
 
   const expiresAt =
     typeof expiresInDays === "number" && expiresInDays > 0
@@ -95,7 +116,7 @@ router.post("/tokens", async (req, res): Promise<void> => {
     const [created] = await db
       .insert(personalAccessTokensTable)
       .values({
-        userId,
+        userId: req.userId,
         name: name.trim().slice(0, 100),
         tokenHash,
         tokenPreview,
@@ -109,52 +130,59 @@ router.post("/tokens", async (req, res): Promise<void> => {
         name: personalAccessTokensTable.name,
         tokenPreview: personalAccessTokensTable.tokenPreview,
         scopes: personalAccessTokensTable.scopes,
+        projectId: personalAccessTokensTable.projectId,
         expiresAt: personalAccessTokensTable.expiresAt,
         createdAt: personalAccessTokensTable.createdAt,
       });
 
-    logger.info({ userId, tokenId: created?.id }, "PAT created");
+    logger.info({ userId: req.userId, tokenId: created?.id }, "PAT created");
 
     res.status(201).json({
       token: created,
       rawToken: raw,
+      note: "Store the raw token now — it will not be shown again.",
     });
   } catch (err) {
-    logger.error({ err, userId }, "Failed to create PAT");
-    throw err;
+    logger.warn({ err }, "POST /me/tokens error");
+    res.status(500).json({ error: "Failed to create token" });
   }
 });
 
-// ── DELETE /api/tokens/:id ────────────────────────────────────────────────────
-router.delete("/tokens/:id", async (req, res): Promise<void> => {
-  const userId = req.userId!;
-  const tokenId = parseInt(req.params.id ?? "", 10);
-
+// ── DELETE /me/tokens/:tokenId ────────────────────────────────────────────────
+router.delete("/me/tokens/:tokenId", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const tokenId = Number(req.params.tokenId);
   if (!Number.isFinite(tokenId)) {
-    res.status(400).json({ error: "Invalid token id." });
+    res.status(400).json({ error: "Invalid token id" });
     return;
   }
 
-  const [existing] = await db
-    .select({ id: personalAccessTokensTable.id, userId: personalAccessTokensTable.userId })
-    .from(personalAccessTokensTable)
-    .where(
-      and(eq(personalAccessTokensTable.id, tokenId), eq(personalAccessTokensTable.active, true)),
-    );
+  try {
+    const [existing] = await db
+      .select({ id: personalAccessTokensTable.id, userId: personalAccessTokensTable.userId })
+      .from(personalAccessTokensTable)
+      .where(eq(personalAccessTokensTable.id, tokenId));
 
-  if (!existing || existing.userId !== userId) {
-    res.status(404).json({ error: "Token not found." });
-    return;
+    if (!existing || existing.userId !== req.userId) {
+      res.status(404).json({ error: "Token not found." });
+      return;
+    }
+
+    await db
+      .update(personalAccessTokensTable)
+      .set({ active: false })
+      .where(eq(personalAccessTokensTable.id, tokenId));
+
+    logger.info({ userId: req.userId, tokenId }, "PAT revoked");
+
+    res.json({ revoked: true });
+  } catch (err) {
+    logger.warn({ err }, "DELETE /me/tokens/:tokenId error");
+    res.status(500).json({ error: "Failed to revoke token" });
   }
-
-  await db
-    .update(personalAccessTokensTable)
-    .set({ active: false })
-    .where(eq(personalAccessTokensTable.id, tokenId));
-
-  logger.info({ userId, tokenId }, "PAT revoked");
-
-  res.json({ revoked: true });
 });
 
 export default router;
