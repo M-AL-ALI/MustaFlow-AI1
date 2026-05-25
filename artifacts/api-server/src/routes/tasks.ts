@@ -101,6 +101,7 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
       kind: parsed.data.kind,
       status: hasActiveBuild ? "queued" : "planning",
       prompt,
+      taskAgentMode: project.agentMode,
     })
     .returning();
   if (!task) {

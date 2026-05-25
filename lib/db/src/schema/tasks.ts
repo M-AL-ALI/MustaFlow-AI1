@@ -317,6 +317,10 @@ export const agentTasksTable = pgTable(
     // Credits reserved at enqueue for a background job. Held until apply (finalises),
     // discard/cancel (refund), or terminal failure (refund).
     creditsReserved: integer("credits_reserved"),
+    // Agent mode frozen at task-creation time so queued tasks always execute at the
+    // mode the user intended, even if project.agentMode changes before the task drains.
+    // Nullable: NULL means "read from project.agentMode at execution time" (legacy rows).
+    taskAgentMode: text("task_agent_mode"),
     pausedAt: timestamp("paused_at", { withTimezone: true }),
     appliedAt: timestamp("applied_at", { withTimezone: true }),
     discardedAt: timestamp("discarded_at", { withTimezone: true }),

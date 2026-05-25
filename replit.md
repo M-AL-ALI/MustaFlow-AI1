@@ -41,6 +41,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/scripts run migrate-runtime-breadth` — creates `scheduled_job_runs`, `managed_addons`, `project_environments`, `environment_promotions`, `usage_events` tables (Task #628)
 - `pnpm --filter @workspace/scripts run migrate-secret-scoping` — adds `min_role` column + check constraint to `project_secrets` (Task #632; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-agentic-provisioning` — adds `builder_mode`, `neon_project_id`, `provisioning_status`, `provisioning_error` to `projects` (Task #738; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-task-agent-mode` — adds `task_agent_mode` to `agent_tasks` (correctness fix: freeze mode at enqueue time; run before deploy)
 
 ## Stack
 

@@ -417,6 +417,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         runMode: runInBackground ? "background" : "foreground",
         wallClockCapMs,
         creditsReserved: reservedCredits,
+        taskAgentMode: mode,
       })
       .returning();
     if (!task) {
