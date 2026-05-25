@@ -4660,7 +4660,12 @@ export async function runAppTestingJob(
           s.message,
           ...(s.consoleErrors.length ? [`Console: ${s.consoleErrors.slice(0, 2).join("; ")}`] : []),
           ...(s.networkFailures.length
-            ? [`Network: ${s.networkFailures.slice(0, 1).map((n) => n.url).join(", ")}`]
+            ? [
+                `Network: ${s.networkFailures
+                  .slice(0, 1)
+                  .map((n) => n.url)
+                  .join(", ")}`,
+              ]
             : []),
         ]
           .filter(Boolean)
@@ -4774,10 +4779,7 @@ export async function runAppTestingJob(
         .select({ content: projectFilesTable.content })
         .from(projectFilesTable)
         .where(
-          and(
-            eq(projectFilesTable.projectId, projectId),
-            eq(projectFilesTable.path, "index.html"),
-          ),
+          and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, "index.html")),
         )
         .limit(1);
 
