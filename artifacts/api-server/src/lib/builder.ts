@@ -7981,6 +7981,109 @@ export async function runTestGenerationPipeline(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Browser Test Auto-Fix Pipeline
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BROWSER_FIX_SYSTEM_PROMPT = `You are a senior web developer fixing specific browser test failures.
+The app was loaded in headless Chromium and these issues were found at runtime.
+Your job is to fix ONLY the reported failures — do not redesign, restructure, or rewrite working parts.
+
+OUTPUT STRICT JSON:
+{
+  "files": [{ "path": string, "content": string, "mimeType": string }]
+}
+
+Rules:
+- Return ONLY the files that genuinely need changes, with their full corrected content
+- If a JavaScript console error occurred (e.g. "Uncaught ReferenceError: foo is not defined"), fix the JS
+- If a network request failed, replace it with a local fallback or remove it
+- If an element selector was not found, ensure that element exists in the HTML with the expected tag/class
+- If a button click threw an error, fix the event handler
+- Do NOT return files you did not change
+- Do NOT change styles, colours, layout, or content that was not involved in the failure`;
+
+/**
+ * AI pipeline that fixes specific browser test failures found by headless Chromium.
+ * Targeted: only touches files involved in the reported failures.
+ * Non-fatal — returns null on any error.
+ */
+export async function runBrowserTestFixPipeline(
+  files: BuilderFile[],
+  failures: Array<{
+    name: string;
+    message: string;
+    consoleErrors?: string[];
+    networkFailures?: Array<{ url: string; message: string }>;
+  }>,
+  projectDescription: string,
+): Promise<BuilderFile[] | null> {
+  try {
+    const failureText = failures
+      .map((f, i) => {
+        const lines: string[] = [`${i + 1}. "${f.name}" — FAILED`];
+        if (f.message) lines.push(`   Error: ${f.message}`);
+        if (f.consoleErrors?.length) {
+          lines.push(`   Console errors: ${f.consoleErrors.slice(0, 3).join("; ")}`);
+        }
+        if (f.networkFailures?.length) {
+          lines.push(
+            `   Network failures: ${f.networkFailures
+              .slice(0, 2)
+              .map((n) => `${n.url} (${n.message})`)
+              .join("; ")}`,
+          );
+        }
+        return lines.join("\n");
+      })
+      .join("\n");
+
+    const fileContext = files
+      .map((f) => `=== ${f.path} ===\n${f.content.slice(0, 4000)}`)
+      .join("\n\n")
+      .slice(0, 20000);
+
+    const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+    const { provider, model } = resolveStageProvider("build", "eco", "gpt-5-mini");
+    const response = await createChatCompletion({
+      provider,
+      model,
+      max_completion_tokens: 4000,
+      messages: [
+        { role: "system", content: BROWSER_FIX_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `Project: ${projectDescription.slice(0, 200)}\n\nBrowser test failures:\n${failureText}\n\nCurrent files:\n${fileContext}`,
+        },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const raw = response.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(raw) as {
+      files?: Array<{ path: string; content: string; mimeType?: string }>;
+    };
+
+    if (!Array.isArray(parsed.files) || parsed.files.length === 0) {
+      logger.info("Browser fix pipeline returned no file changes");
+      return null;
+    }
+
+    const fixedFiles: BuilderFile[] = parsed.files
+      .filter((f) => f.path && typeof f.content === "string")
+      .map((f) => ({
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType ?? guessMime(f.path),
+      }));
+
+    return fixedFiles.length > 0 ? fixedFiles : null;
+  } catch (err) {
+    logger.warn({ err }, "Browser test fix pipeline failed (non-fatal)");
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CVE Auto-Protect Patch Pipeline
 // ─────────────────────────────────────────────────────────────────────────────
 

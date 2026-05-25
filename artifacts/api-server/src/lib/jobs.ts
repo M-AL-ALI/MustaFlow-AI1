@@ -4600,6 +4600,9 @@ export async function runAppTestingJob(
 ): Promise<void> {
   logger.info({ projectId, taskId, hasSavedScript: !!savedTestScript }, "App testing job starting");
 
+  // Emit SSE so users see the testing phase in their chat stream
+  await emitEvent(taskId, "narration", "Running browser tests in headless Chromium…");
+
   // Load index.html from DB
   const [indexFile] = await db
     .select({ content: projectFilesTable.content })
@@ -4617,10 +4620,83 @@ export async function runAppTestingJob(
     return;
   }
 
+  // ── Phase 1: Smoke pass — JS runtime health via runE2eScenarios ────────────
+  // Captures console.error, pageerror, and network failures that step-based
+  // tests miss. Uses setContent() (fallbackHtml) so no live server is needed.
+  const { runE2eScenarios } = await import("./checks/e2e-runner");
+  type E2eFailure = {
+    name: string;
+    message: string;
+    consoleErrors: string[];
+    networkFailures: Array<{ url: string; message: string }>;
+  };
+
+  const smokeSummary = await runE2eScenarios({
+    targetUrl: null,
+    fallbackHtml: indexFile.content,
+    totalBudgetMs: 20_000,
+    scenarios: [
+      {
+        name: "Page loads without JavaScript errors",
+        source: "smoke",
+        steps: [{ action: "noConsoleErrors" }],
+      },
+      {
+        name: "Interactive elements respond without errors",
+        source: "smoke",
+        steps: [{ action: "clickEach", selector: "button, [role='button']", max: 3 }],
+      },
+    ],
+  });
+
+  // Convert E2e smoke failures to the unified TestResult shape stored in app_test_runs
+  type TestResult = import("@workspace/db").TestResult;
+  const smokeResults: TestResult[] = smokeSummary.scenarios.map((s) => ({
+    name: s.name,
+    passed: s.passed,
+    message: s.passed
+      ? s.message
+      : [
+          s.message,
+          ...(s.consoleErrors.length ? [`Console: ${s.consoleErrors.slice(0, 2).join("; ")}`] : []),
+          ...(s.networkFailures.length
+            ? [`Network: ${s.networkFailures.slice(0, 1).map((n) => n.url).join(", ")}`]
+            : []),
+        ]
+          .filter(Boolean)
+          .join(" | "),
+    screenshotBase64: s.screenshotBase64 ?? null,
+    durationMs: s.durationMs,
+  }));
+
+  // Collect smoke failures enriched with console/network detail for the fix prompt
+  const smokeFailures: E2eFailure[] = smokeSummary.scenarios
+    .filter((s) => !s.passed && !smokeSummary.skippedReason)
+    .map((s) => ({
+      name: s.name,
+      message: s.message,
+      consoleErrors: s.consoleErrors,
+      networkFailures: s.networkFailures.map((n) => ({
+        url: n.url,
+        message: n.message ?? `HTTP ${n.status ?? "?"}`,
+      })),
+    }));
+
+  logger.info(
+    {
+      projectId,
+      taskId,
+      smokePassed: smokeSummary.passed,
+      smokeFailed: smokeSummary.failed,
+      skippedReason: smokeSummary.skippedReason,
+    },
+    "Smoke E2E pass complete",
+  );
+
+  // ── Phase 2: AI-generated step tests via runTestPlan ────────────────────────
   let testPlan: Awaited<ReturnType<typeof import("./builder").runTestGenerationPipeline>>;
 
   if (savedTestScript) {
-    // Use user-saved test script instead of AI generation
     try {
       testPlan = JSON.parse(savedTestScript) as typeof testPlan;
       logger.info({ projectId, taskId }, "Using saved custom test script");
@@ -4633,44 +4709,166 @@ export async function runAppTestingJob(
       testPlan = await runTestGenerationPipeline(indexFile.content, projectDescription);
     }
   } else {
-    // Generate test plan via AI
     const { runTestGenerationPipeline } = await import("./builder");
     testPlan = await runTestGenerationPipeline(indexFile.content, projectDescription);
   }
 
-  if (!testPlan) {
-    logger.warn({ projectId, taskId }, "Test generation returned null — skipping");
-    return;
+  let stepResults: TestResult[] = [];
+  let testScriptJson = "";
+
+  if (testPlan) {
+    logger.info(
+      { projectId, taskId, stepCount: testPlan.steps.length },
+      "Running Playwright step tests",
+    );
+    const { runTestPlan } = await import("./checks/playwright-runner");
+    stepResults = await runTestPlan(indexFile.content, testPlan, { timeoutMs: 5000 });
+    testScriptJson = JSON.stringify(testPlan, null, 2);
+  } else {
+    logger.warn({ projectId, taskId }, "Test generation returned null — skipping step tests");
   }
 
-  logger.info({ projectId, taskId, stepCount: testPlan.steps.length }, "Running Playwright tests");
+  // ── Phase 3: Combine results and decide if auto-fix is needed ───────────────
+  let allResults: TestResult[] = [...smokeResults, ...stepResults];
+  let autoFixed = false;
 
-  // Run tests against the loaded HTML
-  const { runTestPlan } = await import("./checks/playwright-runner");
-  const testResults = await runTestPlan(indexFile.content, testPlan, { timeoutMs: 5000 });
+  const stepFailures: E2eFailure[] = stepResults
+    .filter((r) => !r.passed)
+    .map((r) => ({ name: r.name, message: r.message, consoleErrors: [], networkFailures: [] }));
 
-  const passed = testResults.filter((r) => r.passed).length;
-  const failed = testResults.filter((r) => !r.passed).length;
+  const combinedFailures: E2eFailure[] = [...smokeFailures, ...stepFailures];
 
-  logger.info({ projectId, taskId, passed, failed }, "Browser tests complete");
+  if (combinedFailures.length > 0) {
+    logger.info(
+      { projectId, taskId, failureCount: combinedFailures.length },
+      "Browser test failures detected — attempting auto-fix",
+    );
+    await emitEvent(
+      taskId,
+      "narration",
+      `Browser tests found ${combinedFailures.length} issue${combinedFailures.length === 1 ? "" : "s"} — running auto-fix…`,
+    );
 
+    // Load all project files for the fix pipeline
+    const allFiles = await loadFiles(projectId);
+
+    const { runBrowserTestFixPipeline } = await import("./builder");
+    const fixedFiles = await runBrowserTestFixPipeline(
+      allFiles,
+      combinedFailures,
+      projectDescription,
+    );
+
+    if (fixedFiles && fixedFiles.length > 0) {
+      // Write the patched files to DB (partial update — replaceAll=false)
+      await writeFiles(projectId, fixedFiles, false);
+      autoFixed = true;
+      logger.info(
+        { projectId, taskId, patchedFiles: fixedFiles.map((f) => f.path) },
+        "Browser auto-fix applied — re-running tests",
+      );
+      await emitEvent(taskId, "narration", "Auto-fix applied — re-running browser tests…");
+
+      // Reload index.html after the fix
+      const [reloadedIndex] = await db
+        .select({ content: projectFilesTable.content })
+        .from(projectFilesTable)
+        .where(
+          and(
+            eq(projectFilesTable.projectId, projectId),
+            eq(projectFilesTable.path, "index.html"),
+          ),
+        )
+        .limit(1);
+
+      if (reloadedIndex?.content) {
+        // Re-run smoke + step tests on the fixed HTML
+        const reSmokeSum = await runE2eScenarios({
+          targetUrl: null,
+          fallbackHtml: reloadedIndex.content,
+          totalBudgetMs: 20_000,
+          scenarios: [
+            {
+              name: "Page loads without JavaScript errors",
+              source: "smoke",
+              steps: [{ action: "noConsoleErrors" }],
+            },
+            {
+              name: "Interactive elements respond without errors",
+              source: "smoke",
+              steps: [{ action: "clickEach", selector: "button, [role='button']", max: 3 }],
+            },
+          ],
+        });
+        const reSmokeResults: TestResult[] = reSmokeSum.scenarios.map((s) => ({
+          name: s.name,
+          passed: s.passed,
+          message: s.passed
+            ? s.message
+            : [
+                s.message,
+                ...(s.consoleErrors.length
+                  ? [`Console: ${s.consoleErrors.slice(0, 2).join("; ")}`]
+                  : []),
+              ]
+                .filter(Boolean)
+                .join(" | "),
+          screenshotBase64: s.screenshotBase64 ?? null,
+          durationMs: s.durationMs,
+        }));
+
+        let reStepResults: TestResult[] = [];
+        if (testPlan) {
+          const { runTestPlan } = await import("./checks/playwright-runner");
+          reStepResults = await runTestPlan(reloadedIndex.content, testPlan, { timeoutMs: 5000 });
+        }
+
+        allResults = [...reSmokeResults, ...reStepResults];
+        logger.info(
+          {
+            projectId,
+            taskId,
+            passed: allResults.filter((r) => r.passed).length,
+            failed: allResults.filter((r) => !r.passed).length,
+          },
+          "Post-fix browser tests complete",
+        );
+      }
+    } else {
+      logger.info(
+        { projectId, taskId },
+        "Browser fix pipeline returned no changes — keeping original results",
+      );
+    }
+  }
+
+  // ── Phase 4: Persist results ─────────────────────────────────────────────────
+  const passed = allResults.filter((r) => r.passed).length;
+  const failed = allResults.filter((r) => !r.passed).length;
   const ranAt = new Date();
-  const testScriptJson = JSON.stringify(testPlan, null, 2);
 
-  // Persist results into the dedicated app_test_runs table.
+  logger.info({ projectId, taskId, passed, failed, autoFixed }, "Browser tests complete");
+
+  // Emit a user-visible summary
+  const summaryMsg =
+    failed === 0
+      ? `Browser tests passed (${passed}/${allResults.length})${autoFixed ? " — auto-fix was applied" : ""}`
+      : `Browser tests: ${passed} passed, ${failed} failed${autoFixed ? " (after auto-fix attempt)" : ""}`;
+  await emitEvent(taskId, "narration", summaryMsg);
+
   await db.insert(appTestRunsTable).values({
     projectId,
     taskId,
     ranAt,
-    testScript: testScriptJson,
-    results: testResults,
+    testScript: testScriptJson || null,
+    results: allResults,
     passed,
     failed,
   });
 
   logger.info({ projectId, taskId, passed, failed }, "Test results saved to app_test_runs");
 
-  // Also update the task report so the existing InlineReportCard continues to work.
+  // Update the task report so InlineReportCard continues to work
   const [latestTask] = await db
     .select({ report: agentTasksTable.report })
     .from(agentTasksTable)
@@ -4682,8 +4880,8 @@ export async function runAppTestingJob(
   const latestReport = (latestTask.report ?? {}) as import("@workspace/db").TaskReport;
   const updatedReport: import("@workspace/db").TaskReport = {
     ...latestReport,
-    testResults,
-    testScript: testScriptJson,
+    testResults: allResults,
+    testScript: testScriptJson || undefined,
     testRanAt: ranAt.toISOString(),
   };
 
