@@ -4244,6 +4244,78 @@ export const useCancelTask = <TError = ErrorType<ApiError>,
       return useMutation(getCancelTaskMutationOptions(options));
     }
 
+export const getForceStartTaskUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}/force-start`
+}
+
+/**
+ * @summary Cancel the current active build and start this queued task immediately
+ */
+export const forceStartTask = async (id: number,
+    taskId: number, options?: RequestInit): Promise<AgentTask> => {
+
+  return customFetch<AgentTask>(getForceStartTaskUrl(id,taskId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getForceStartTaskMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forceStartTask>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof forceStartTask>>, TError,{id: number;taskId: number}, TContext> => {
+
+const mutationKey = ['forceStartTask'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof forceStartTask>>, {id: number;taskId: number}> = (props) => {
+          const {id,taskId} = props ?? {};
+
+          return  forceStartTask(id,taskId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ForceStartTaskMutationResult = NonNullable<Awaited<ReturnType<typeof forceStartTask>>>
+
+    export type ForceStartTaskMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Cancel the current active build and start this queued task immediately
+ */
+export const useForceStartTask = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forceStartTask>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof forceStartTask>>,
+        TError,
+        {id: number;taskId: number},
+        TContext
+      > => {
+      return useMutation(getForceStartTaskMutationOptions(options));
+    }
+
 export const getUpdateTaskUrl = (id: number,
     taskId: number,) => {
 

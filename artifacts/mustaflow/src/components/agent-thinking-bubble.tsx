@@ -6,6 +6,7 @@ import {
   getListVersionsQueryKey,
   usePatchVersion,
   useCancelTask,
+  useForceStartTask,
 } from "@workspace/api-client-react";
 import { useTaskEventStream } from "@/hooks/use-task-event-stream";
 import { useQueryClient } from "@tanstack/react-query";
@@ -1194,8 +1195,10 @@ export function AgentThinkingBubble({
   const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
   const [groupsExpanded, setGroupsExpanded] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  const [forceStarting, setForceStarting] = useState(false);
   const [hideThinking, setHideThinking] = useHideThinking();
   const cancelTask = useCancelTask();
+  const forceStartTask = useForceStartTask();
 
   const events = useTaskEventStream(projectId, taskId);
 
@@ -1216,6 +1219,19 @@ export function AgentThinkingBubble({
       {
         onSettled: () => {
           setCancelling(false);
+        },
+      },
+    );
+  };
+
+  const handleForceStart = () => {
+    if (forceStarting) return;
+    setForceStarting(true);
+    forceStartTask.mutate(
+      { id: projectId, taskId },
+      {
+        onSettled: () => {
+          setForceStarting(false);
         },
       },
     );
@@ -1378,13 +1394,39 @@ export function AgentThinkingBubble({
                       ? "Queued"
                       : "Building"}
           </span>
-          <button
-            onClick={() => setHideThinking(!hideThinking)}
-            title={hideThinking ? "Show agent thinking" : "Hide agent thinking"}
-            className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground transition-colors shrink-0"
-          >
-            {hideThinking ? <EyeOff className="h-2.5 w-2.5" /> : <Eye className="h-2.5 w-2.5" />}
-          </button>
+          {!isQueued && (
+            <button
+              onClick={() => setHideThinking(!hideThinking)}
+              title={hideThinking ? "Show agent thinking" : "Hide agent thinking"}
+              className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            >
+              {hideThinking ? (
+                <EyeOff className="h-2.5 w-2.5" />
+              ) : (
+                <Eye className="h-2.5 w-2.5" />
+              )}
+            </button>
+          )}
+          {isQueued && (
+            <button
+              onClick={handleForceStart}
+              disabled={forceStarting}
+              title="Cancel the current build and start this task now"
+              className={cn(
+                "flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors shrink-0",
+                forceStarting
+                  ? "text-muted-foreground border-border cursor-not-allowed opacity-50"
+                  : "text-muted-foreground border-border hover:text-primary hover:border-primary/50",
+              )}
+            >
+              {forceStarting ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              ) : (
+                <Timer className="h-2.5 w-2.5" />
+              )}
+              Run now
+            </button>
+          )}
           {!isTerminal && !isQueued && (
             <button
               onClick={handleCancel}

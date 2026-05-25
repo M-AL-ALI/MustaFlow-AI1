@@ -1039,7 +1039,7 @@ async function hydrateTaskAttachments(
  * routes/messages.ts and routes/tasks.ts). These never belong to a batch, so
  * drainNextBatchTask won't find them.
  */
-async function drainNextProjectTask(projectId: number): Promise<void> {
+export async function drainNextProjectTask(projectId: number): Promise<void> {
   // Staging gate: if any task for this project is awaiting review, block the queue
   const [blocked] = await db
     .select({ id: agentTasksTable.id })

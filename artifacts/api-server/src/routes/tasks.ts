@@ -9,6 +9,7 @@ import {
   SubmitTaskFeedbackParams,
   SubmitTaskFeedbackBody,
   CancelTaskParams,
+  ForceStartTaskParams,
   ApplyTaskStagingParams,
   DiscardTaskStagingParams,
   RerunTaskTestsParams,
@@ -22,6 +23,7 @@ import {
   discardTaskAgentStaging,
   runAppTestingJob,
   cancelActiveJob,
+  drainNextProjectTask,
 } from "../lib/jobs";
 import { refundCredits } from "./credits";
 import { logger } from "../lib/logger";
@@ -229,6 +231,74 @@ router.post(
     }
 
     res.json(task);
+  },
+);
+
+router.post(
+  "/projects/:id/tasks/:taskId/force-start",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = ForceStartTaskParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    const { id: projectId, taskId } = params.data;
+
+    // Verify the task exists, belongs to this project, and is actually queued.
+    const [target] = await db
+      .select()
+      .from(agentTasksTable)
+      .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)))
+      .limit(1);
+
+    if (!target) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+    if (target.status !== "queued") {
+      res.status(409).json({
+        error: `Task is in state "${target.status}" — only queued tasks can be force-started`,
+      });
+      return;
+    }
+
+    // Cancel any currently active (building/planning) tasks for this project.
+    const activeTasks = await db
+      .select({ id: agentTasksTable.id })
+      .from(agentTasksTable)
+      .where(
+        and(
+          eq(agentTasksTable.projectId, projectId),
+          inArray(agentTasksTable.status, ["building", "planning"]),
+        ),
+      );
+
+    for (const active of activeTasks) {
+      cancelActiveJob(active.id);
+      await db
+        .update(agentTasksTable)
+        .set({ status: "canceled", completedAt: sql`now()` })
+        .where(
+          and(
+            eq(agentTasksTable.id, active.id),
+            inArray(agentTasksTable.status, ["building", "planning"]),
+          ),
+        );
+      logger.info({ activeTaskId: active.id, projectId }, "Force-start: cancelled active task");
+    }
+
+    // Drain the project queue — this picks up the queued task and starts it.
+    await drainNextProjectTask(projectId);
+
+    // Return the (now-enqueued) task row.
+    const [updated] = await db
+      .select()
+      .from(agentTasksTable)
+      .where(eq(agentTasksTable.id, taskId))
+      .limit(1);
+
+    res.json(updated ?? target);
   },
 );
 
