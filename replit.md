@@ -137,8 +137,9 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **Soft-deleted projects**: not self-recoverable from the UI — needs an admin SQL update.
 - **Credits**: enforced but no self-serve Stripe top-up flow yet. Use the `grantCredits` helper or direct SQL.
 - **Post-merge `pnpm db push`**: occasionally requires TTY confirmation for the `projects_custom_domain_unique` constraint — falls back to a non-fatal stderr warning. Apply manually with `pnpm --filter @workspace/db run push` in an interactive shell if needed.
-- **Pre-existing migration gaps** (non-fatal warnings in API logs): `preview_snapshots`, `purchased_domains` tables and `knowledge_entries.scope` column missing on some DBs. Re-run the relevant migration scripts in `scripts/src/migrate-*.ts` to apply.
+- **Schema drift catch-up (Task #776)**: all outstanding migration scripts have been applied to the dev DB (notifications, knowledge_entries.scope, project_secrets.exposure_type, project_secrets.min_role, project_secrets.is_preview_safe, preview_sessions, testing workflow columns, and more). Use `pnpm --filter @workspace/scripts run migrate-all-outstanding` to apply all migrations in one shot on a fresh DB.
 - **Preview secrets default is_preview_safe=false**: newly added secrets require the user to explicitly toggle "Preview safe" in the Secrets tab before they are injected into the live preview container. Run `migrate-preview-secrets` before deploy.
+- **Agentic provisioning dev-mode (Task #776)**: when `FLY_API_TOKEN` or `NEON_API_KEY` are absent, provisioning now degrades gracefully to `provisioningStatus = 'idle'` (no red badge, no error toast) instead of marking the project as `'error'`. The project can be provisioned later via Retry once secrets are added.
 
 ## Test-then-publish workflow (Task #768)
 

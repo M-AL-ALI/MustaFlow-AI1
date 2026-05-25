@@ -280,21 +280,25 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       .set({ provisioningStatus: "provisioning", provisioningError: null })
       .where(eq(projectsTable.id, projectId));
 
-    // Strict pre-flight: both providers must be configured. Otherwise the
-    // project would silently end up without real infra, which contradicts the
-    // agentic-mode contract.
-    if (!process.env.FLY_API_TOKEN) {
-      await markError(
-        projectId,
-        "FLY_API_TOKEN is not configured. Add it in Secrets, then click Retry.",
+    // Pre-flight: both providers must be configured for full agentic provisioning.
+    // When credentials are absent (common in dev/CI), gracefully degrade to
+    // "idle" rather than "error" so the workspace badge stays neutral and no
+    // alarming toast appears. The user can still add the secrets and retry.
+    if (!process.env.FLY_API_TOKEN || !process.env.NEON_API_KEY) {
+      const missing: string[] = [];
+      if (!process.env.FLY_API_TOKEN) missing.push("FLY_API_TOKEN");
+      if (!process.env.NEON_API_KEY) missing.push("NEON_API_KEY");
+      logger.info(
+        { projectId, missing },
+        "Agentic provisioning skipped — credentials not configured (dev mode). Add secrets and retry.",
       );
-      return;
-    }
-    if (!process.env.NEON_API_KEY) {
-      await markError(
-        projectId,
-        "NEON_API_KEY is not configured. Add it in Secrets, then click Retry.",
-      );
+      await db
+        .update(projectsTable)
+        .set({ provisioningStatus: "idle", provisioningError: null })
+        .where(eq(projectsTable.id, projectId))
+        .catch(() => {
+          /* best-effort */
+        });
       return;
     }
 

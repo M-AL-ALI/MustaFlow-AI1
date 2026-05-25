@@ -68,6 +68,8 @@
     "migrate-preview-db": "tsx ./src/migrate-preview-db.ts",
     "migrate-testing-workflow": "tsx ./src/migrate-testing-workflow.ts",
     "migrate-mobile-deployment-columns": "tsx ./src/migrate-mobile-deployment-columns.ts",
+    "migrate-deployment-logs-mobile": "tsx ./src/migrate-deployment-logs-mobile.ts",
+    "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },
