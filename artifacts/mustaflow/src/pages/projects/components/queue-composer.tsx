@@ -223,6 +223,41 @@ export function QueueComposer({
     return (stored as AgentType | null) ?? "main";
   });
 
+  // ── Persistent developer intent ────────────────────────────────────────────
+  type DeveloperIntent = "debug" | "refactor" | "review" | "explain";
+  const intentLsKey = `mustaflow_active_intent_${projectId}`;
+  const [activeIntent, setActiveIntentRaw] = useState<DeveloperIntent | null>(() => {
+    try {
+      const stored = localStorage.getItem(intentLsKey);
+      if (
+        stored === "debug" ||
+        stored === "refactor" ||
+        stored === "review" ||
+        stored === "explain"
+      ) {
+        return stored as DeveloperIntent;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+  const setActiveIntent = useCallback(
+    (intent: DeveloperIntent | null) => {
+      setActiveIntentRaw(intent);
+      try {
+        if (intent) {
+          localStorage.setItem(intentLsKey, intent);
+        } else {
+          localStorage.removeItem(intentLsKey);
+        }
+      } catch {
+        /* ignore */
+      }
+    },
+    [intentLsKey],
+  );
+
   const chatModeLsKey = `mustaflow_chat_mode_${projectId}`;
   const [chatMode, setChatModeRaw] = useState<"agent" | "assistant">(() => {
     try {
@@ -980,11 +1015,11 @@ export function QueueComposer({
       const inlineImages = pending.filter(
         (a): a is Extract<ComposerAttachment, { kind: "image" }> => a.kind === "image",
       );
-      // Pass the client-detected intent so the server skips the classifier
-      // and routes directly — prevents the agent from asking the user to
-      // "switch to plan mode" when the message is clearly a planning request.
-      const detectedIntent =
-        chatMode === "assistant"
+      // Pass the active developer intent (persisted badge) first; fall back to
+      // client-detected intent so the server skips the classifier when possible.
+      const detectedIntent: Parameters<typeof onSingleSend>[1] = activeIntent
+        ? activeIntent
+        : chatMode === "assistant"
           ? "converse"
           : clientIntent === "plan" || clientIntent === "converse"
             ? clientIntent
@@ -1022,6 +1057,7 @@ export function QueueComposer({
     variantMode,
     projectId,
     clientIntent,
+    activeIntent,
     chatMode,
     onSingleSend,
     onBatchStarted,
@@ -1391,6 +1427,46 @@ export function QueueComposer({
               </div>
             </div>
           )}
+          {activeIntent && (
+            <div className="flex items-center gap-1.5 px-3 pt-1 pb-0.5">
+              <span className="text-[10px] text-muted-foreground/60">Mode:</span>
+              <span
+                className={cn(
+                  "flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold border",
+                  activeIntent === "debug"
+                    ? "border-red-500/30 bg-red-500/10 text-red-400"
+                    : activeIntent === "refactor"
+                      ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-400"
+                      : activeIntent === "review"
+                        ? "border-blue-500/30 bg-blue-500/10 text-blue-400"
+                        : "border-violet-500/30 bg-violet-500/10 text-violet-400",
+                )}
+              >
+                {activeIntent === "debug" ? (
+                  <Bug className="h-2.5 w-2.5" />
+                ) : activeIntent === "refactor" ? (
+                  <Wrench className="h-2.5 w-2.5" />
+                ) : activeIntent === "review" ? (
+                  <CheckSquare className="h-2.5 w-2.5" />
+                ) : (
+                  <BookOpenIcon className="h-2.5 w-2.5" />
+                )}
+                {activeIntent.charAt(0).toUpperCase() + activeIntent.slice(1)}
+                <button
+                  type="button"
+                  onClick={() => setActiveIntent(null)}
+                  className="ml-0.5 opacity-60 hover:opacity-100 transition-opacity"
+                  aria-label="Clear intent"
+                  title="Reset to auto-detect"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
+              <span className="text-[9px] text-muted-foreground/40">
+                Active for all messages — click × to reset
+              </span>
+            </div>
+          )}
           <div className="h-px bg-border/40 mx-4 mt-1.5" />
           <div className="flex items-center gap-2 px-3 py-1.5">
             {!isMultiRow && (
@@ -1678,6 +1754,7 @@ export function QueueComposer({
               title:
                 "Paste a stack trace or error message and get a root-cause analysis · 1 credit",
               cls: "border-red-500/20 text-red-400/70 hover:text-red-400 hover:border-red-500/40",
+              activeCls: "border-red-500/40 text-red-400 bg-red-500/10",
             },
             {
               intent: "refactor" as const,
@@ -1686,6 +1763,7 @@ export function QueueComposer({
               starter: "Refactor ",
               title: "Improve code structure without changing behaviour · 1 credit",
               cls: "border-yellow-500/20 text-yellow-400/70 hover:text-yellow-400 hover:border-yellow-500/40",
+              activeCls: "border-yellow-500/40 text-yellow-400 bg-yellow-500/10",
             },
             {
               intent: "review" as const,
@@ -1694,6 +1772,7 @@ export function QueueComposer({
               starter: "Review my code for ",
               title: "Get a structured code review — Critical / Warnings / Suggestions · 1 credit",
               cls: "border-blue-500/20 text-blue-400/70 hover:text-blue-400 hover:border-blue-500/40",
+              activeCls: "border-blue-500/40 text-blue-400 bg-blue-500/10",
             },
             {
               intent: "explain" as const,
@@ -1702,23 +1781,42 @@ export function QueueComposer({
               starter: "Explain how ",
               title: "Get a deep technical explanation with architectural context · 1 credit",
               cls: "border-violet-500/20 text-violet-400/70 hover:text-violet-400 hover:border-violet-500/40",
+              activeCls: "border-violet-500/40 text-violet-400 bg-violet-500/10",
             },
-          ].map(({ intent, icon: Icon, label, starter, title, cls }) => (
-            <button
-              key={intent}
-              title={title}
-              onClick={() => {
-                onSingleSend(starter, intent);
-              }}
-              className={cn(
-                "flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border bg-transparent",
-                cls,
-              )}
-            >
-              <Icon className="h-3 w-3" />
-              {label}
-            </button>
-          ))}
+          ].map(({ intent, icon: Icon, label, starter, title, cls, activeCls }) => {
+            const isActive = activeIntent === intent;
+            return (
+              <button
+                key={intent}
+                title={isActive ? `${label} mode is active — click to deactivate` : title}
+                onClick={() => {
+                  if (isActive) {
+                    setActiveIntent(null);
+                    return;
+                  }
+                  // Set the intent mode and prefill the textarea with the starter text
+                  setActiveIntent(intent);
+                  const newId = crypto.randomUUID();
+                  setRows([{ id: newId, text: starter }]);
+                  if (onPromptValueChange) onPromptValueChange(starter);
+                  setTimeout(() => {
+                    const ta = textareaRefs.current.get(newId);
+                    if (ta) {
+                      ta.focus();
+                      ta.setSelectionRange(ta.value.length, ta.value.length);
+                    }
+                  }, 50);
+                }}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border bg-transparent",
+                  isActive ? activeCls : cls,
+                )}
+              >
+                <Icon className="h-3 w-3" />
+                {label}
+              </button>
+            );
+          })}
 
           {/* Template picker + plan history — shown in Planning mode */}
           {agentType === "planning" && (
