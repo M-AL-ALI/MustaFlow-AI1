@@ -624,27 +624,33 @@ router.post(
       return;
     }
 
-    // Precondition: this version must be the active testing candidate.
-    if (
-      project.testingCandidateSnapshotId !== null &&
-      project.testingCandidateSnapshotId !== versionId
-    ) {
-      res.status(422).json({
-        error: `Version ${versionId} is not the active testing candidate (candidate is version ${project.testingCandidateSnapshotId}). Use POST /preview-env/approve to approve the current candidate.`,
-        code: "not_active_candidate",
-        activeCandidate: project.testingCandidateSnapshotId,
-      });
-      return;
-    }
+    // Preconditions below apply only to full-stack projects that have a real
+    // test container. Static/web projects (containerId=null) have no container
+    // to start, so testingStatus stays 'idle' forever — skip these checks and
+    // allow direct approval.
+    if (project.containerId) {
+      // Precondition: this version must be the active testing candidate.
+      if (
+        project.testingCandidateSnapshotId !== null &&
+        project.testingCandidateSnapshotId !== versionId
+      ) {
+        res.status(422).json({
+          error: `Version ${versionId} is not the active testing candidate (candidate is version ${project.testingCandidateSnapshotId}). Use POST /preview-env/approve to approve the current candidate.`,
+          code: "not_active_candidate",
+          activeCandidate: project.testingCandidateSnapshotId,
+        });
+        return;
+      }
 
-    // Precondition: testing status must indicate the environment was ready.
-    if (project.testingStatus === "stale" || project.testingStatus === "idle") {
-      res.status(422).json({
-        error: `Testing status is '${project.testingStatus}'. The test environment must be started and ready before approving.`,
-        code: "testing_not_ready",
-        testingStatus: project.testingStatus,
-      });
-      return;
+      // Precondition: testing status must indicate the environment was ready.
+      if (project.testingStatus === "stale" || project.testingStatus === "idle") {
+        res.status(422).json({
+          error: `Testing status is '${project.testingStatus}'. The test environment must be started and ready before approving.`,
+          code: "testing_not_ready",
+          testingStatus: project.testingStatus,
+        });
+        return;
+      }
     }
 
     // Precondition: migration status must not be failed.

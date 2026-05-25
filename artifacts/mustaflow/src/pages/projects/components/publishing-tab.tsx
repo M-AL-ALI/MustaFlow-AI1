@@ -3248,9 +3248,7 @@ export function PublishingTab({
   });
   const approveVersionMutation = useApproveVersionForTesting();
   const provisionPreviewDbMutation = useProvisionPreviewDatabase();
-  const latestApprovedVersion = versions.find(
-    (v) => v.testingApprovedAt != null,
-  );
+  const latestApprovedVersion = versions.find((v) => v.testingApprovedAt != null);
 
   // Deployment history state
   const [deployments, setDeployments] = useState<
@@ -4764,8 +4762,16 @@ export function PublishingTab({
                                     { onSuccess: () => void refetchVersions() },
                                   );
                                 }}
-                                disabled={approveVersionMutation.isPending}
-                                className="shrink-0 text-[11px] px-2.5 py-1 rounded-md border border-primary/40 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                                disabled={
+                                  approveVersionMutation.isPending ||
+                                  (!!containerId && testingStatus !== "ready")
+                                }
+                                title={
+                                  !!containerId && testingStatus !== "ready"
+                                    ? "Start the test environment first — navigate to the Preview tab and launch a test run before approving."
+                                    : undefined
+                                }
+                                className="shrink-0 text-[11px] px-2.5 py-1 rounded-md border border-primary/40 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {approveVersionMutation.isPending ? "Approving…" : "Approve"}
                               </button>

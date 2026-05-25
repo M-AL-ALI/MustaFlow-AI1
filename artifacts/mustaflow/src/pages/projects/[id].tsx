@@ -3518,6 +3518,9 @@ export default function ProjectWorkspacePage() {
                 builderMode={project.builderMode}
                 containerStatus={containerStatus}
                 containerUrl={containerUrl}
+                containerId={project.containerId}
+                testedSnapshotId={project.testedSnapshotId}
+                testingStatus={project.testingStatus}
                 onNavigateToSecret={handleAddKey}
                 onNavigateToMobileSettings={() => {
                   setScrollManageToMobileSettings(true);
@@ -3525,6 +3528,7 @@ export default function ProjectWorkspacePage() {
                 }}
                 onNavigateToChecks={() => setActiveTab("checks")}
                 onNavigateToLogs={() => setActiveTab("logs")}
+                onNavigateToTestEnv={() => setActiveTab("preview")}
               />
             )}
             {activeTab === "logs" && (

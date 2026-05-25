@@ -18,13 +18,13 @@ Testing-approval migration complete.
 
 **Columns added to `project_versions`:**
 
-| Column | Type | Nullable | Default |
-|---|---|---|---|
-| migration_log | text | YES | — |
-| migration_status | text | YES | — |
-| testing_approved_at | timestamptz | YES | — |
-| testing_approved_by | text | YES | — |
-| testing_skipped | boolean | NO | false |
+| Column              | Type        | Nullable | Default |
+| ------------------- | ----------- | -------- | ------- |
+| migration_log       | text        | YES      | —       |
+| migration_status    | text        | YES      | —       |
+| testing_approved_at | timestamptz | YES      | —       |
+| testing_approved_by | text        | YES      | —       |
+| testing_skipped     | boolean     | NO       | false   |
 
 ### 2. migrate-preview-db
 
@@ -39,10 +39,10 @@ Preview-db migration complete.
 
 **Columns added to `projects`:**
 
-| Column | Type | Nullable | Default |
-|---|---|---|---|
-| preview_db_status | text | NO | 'none' |
-| preview_db_url | text | YES | — |
+| Column            | Type | Nullable | Default |
+| ----------------- | ---- | -------- | ------- |
+| preview_db_status | text | NO       | 'none'  |
+| preview_db_url    | text | YES      | —       |
 
 ## Schema Verification
 
