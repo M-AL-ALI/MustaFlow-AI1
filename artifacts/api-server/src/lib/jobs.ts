@@ -2798,10 +2798,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           report.warnings = [...(report.warnings ?? []), migResult.info];
         }
         if (!migResult.ok) {
-          logger.warn(
-            { projectId, taskId },
-            "Drizzle migration failed — marking task as failed",
-          );
+          logger.warn({ projectId, taskId }, "Drizzle migration failed — marking task as failed");
           await emitEvent(taskId, "failed", migResult.error);
           await db
             .update(agentTasksTable)
@@ -4040,20 +4037,13 @@ async function runPostWriteMigrationSync(
     migrationCmd = ["npx", "drizzle-kit", "migrate"];
   }
 
-  await emitEvent(
-    taskId,
-    "narration",
-    `Running database migrations: ${migrationCmd.join(" ")}…`,
-  );
+  await emitEvent(taskId, "narration", `Running database migrations: ${migrationCmd.join(" ")}…`);
 
   const migrationResult = await execInContainer(activeContainerId, migrationCmd, projectId);
 
   if (!migrationResult.ok) {
     const errorMsg = `Database migration failed: ${migrationResult.output.slice(0, 400)}`;
-    logger.warn(
-      { projectId, taskId, output: migrationResult.output },
-      "Drizzle migration failed",
-    );
+    logger.warn({ projectId, taskId, output: migrationResult.output }, "Drizzle migration failed");
     return { ok: false, error: errorMsg };
   }
 
@@ -4169,10 +4159,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     }),
     // Merge any post-write migration warnings (item 2) into the report so the
     // user sees them in the task result card even though Apply still succeeded.
-    warnings: [
-      ...((report?.warnings ?? []) as string[]),
-      ...postWriteWarnings,
-    ],
+    warnings: [...((report?.warnings ?? []) as string[]), ...postWriteWarnings],
     versionId: version?.id ?? null,
   };
 
