@@ -43,6 +43,8 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/scripts run migrate-agentic-provisioning` — adds `builder_mode`, `neon_project_id`, `provisioning_status`, `provisioning_error` to `projects` (Task #738; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-task-agent-mode` — adds `task_agent_mode` to `agent_tasks` (correctness fix: freeze mode at enqueue time; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-preview-secrets` — adds `is_preview_safe` to `project_secrets` (Task #766; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-testing-approval` — adds `testing_approved_at`, `testing_approved_by`, `migration_status`, `migration_log`, `testing_skipped` to `project_versions` (Task #767; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-preview-db` — adds `preview_db_url`, `preview_db_status` to `projects` (Task #767; run before deploy)
 
 ## Stack
 
