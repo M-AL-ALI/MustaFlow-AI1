@@ -83,7 +83,30 @@ export const SUBSCRIPTION_TIERS_META = [
     priceUsd: TIER_PRICE_USD.free,
     maxConcurrentBuilds: 1,
     priceIdEnv: null,
-    features: ["100 credits / month", "1 concurrent build", "Community support"],
+    features: [
+      "100 credits / month",
+      "1 concurrent build",
+      '"Built with MustaFlow" badge on published apps',
+      "Shared compute",
+      "Community support",
+    ],
+  },
+  {
+    id: "core" as const,
+    name: "MustaFlow Core",
+    monthlyCredits: TIER_MONTHLY_CREDITS.core,
+    priceUsd: TIER_PRICE_USD.core,
+    maxConcurrentBuilds: 3,
+    priceIdEnv: "STRIPE_CORE_PRICE_ID",
+    features: [
+      "500 credits / month",
+      "3 concurrent builds",
+      "No badge on published apps",
+      "Autoscale deployment",
+      "8 GiB RAM / 4 vCPU",
+      "Priority queue",
+      "Email support",
+    ],
   },
   {
     id: "pro" as const,
@@ -976,7 +999,7 @@ router.post("/billing/subscribe", async (req, res): Promise<void> => {
 
   const tierMeta = SUBSCRIPTION_TIERS_META.find((t) => t.id === tier);
   if (!tierMeta || tier === "free") {
-    res.status(400).json({ error: "Invalid tier. Choose 'pro' or 'team'." });
+    res.status(400).json({ error: "Invalid tier. Choose 'core', 'pro', or 'team'." });
     return;
   }
 
@@ -1408,8 +1431,13 @@ router.get("/billing/subscription/:workspaceId", async (req, res): Promise<void>
 });
 
 // POST /api/billing/subscription/checkout — create a Stripe Checkout session in
-// subscription mode for a plan upgrade. Workspace owner only. Returns the
-// hosted checkout URL.
+// subscription mode for a plan upgrade.
+//
+// Two modes:
+//   1. User-level Core subscription: { tier: 'core', successUrl, cancelUrl }
+//      Uses STRIPE_CORE_PRICE_ID; sets user_subscriptions.tier on checkout.session.completed.
+//   2. Workspace plan upgrade (legacy): { workspaceId, planTier, successUrl, cancelUrl }
+//      Uses workspace-scoped plan prices (PLAN_PRICE_*).
 router.post("/billing/subscription/checkout", async (req, res): Promise<void> => {
   const userId = req.userId;
   if (!userId) {
@@ -1417,25 +1445,83 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     return;
   }
 
-  const { workspaceId, planTier, successUrl, cancelUrl } = req.body as {
+  const { tier, workspaceId, planTier, successUrl, cancelUrl } = req.body as {
+    tier?: string;
     workspaceId?: number;
     planTier?: string;
     successUrl?: string;
     cancelUrl?: string;
   };
 
+  if (!successUrl || !cancelUrl) {
+    res.status(400).json({ error: "successUrl and cancelUrl are required" });
+    return;
+  }
+
+  // ── Mode 1: User-level Core subscription ────────────────────────────────────
+  if (tier === "core") {
+    const corePriceId = process.env.STRIPE_CORE_PRICE_ID?.trim();
+    if (!corePriceId) {
+      res.json({
+        setupRequired: true,
+        message: "STRIPE_CORE_PRICE_ID is not configured. Contact your administrator.",
+      });
+      return;
+    }
+
+    const stripe = await getUncachableStripeClient();
+    if (!stripe) {
+      res.json({
+        setupRequired: true,
+        message:
+          "Stripe is not configured. Connect the Stripe integration to enable plan upgrades.",
+      });
+      return;
+    }
+
+    try {
+      const customerId = await ensureStripeCustomer(userId, stripe);
+      const { stripeCircuit, withRetry, isTransientError } = await import("../lib/resilience");
+      const session = await stripeCircuit.call(() =>
+        withRetry(
+          () =>
+            stripe.checkout.sessions.create({
+              mode: "subscription",
+              customer: customerId,
+              line_items: [{ price: corePriceId, quantity: 1 }],
+              success_url: successUrl,
+              cancel_url: cancelUrl,
+              metadata: { userId, tier: "core" },
+              subscription_data: { metadata: { userId, tier: "core" } },
+              allow_promotion_codes: true,
+              automatic_tax: { enabled: process.env.STRIPE_TAX_ENABLED === "true" },
+            }),
+          {
+            maxAttempts: 2,
+            baseDelayMs: 1_000,
+            shouldRetry: isTransientError,
+            label: "stripe:core.subscription.checkout",
+          },
+        ),
+      );
+      res.json({ sessionId: session.id, checkoutUrl: session.url ?? undefined, tier: "core" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unexpected error";
+      if (/api key|authentication|invalid_api_key/i.test(msg)) invalidateStripeCredentialCache();
+      res.status(502).json({ error: `Stripe API error: ${msg}` });
+    }
+    return;
+  }
+
+  // ── Mode 2: Workspace plan upgrade ──────────────────────────────────────────
   if (typeof workspaceId !== "number" || !Number.isFinite(workspaceId)) {
-    res.status(400).json({ error: "workspaceId is required" });
+    res.status(400).json({ error: "workspaceId is required for workspace plan upgrades" });
     return;
   }
   if (!planTier || !(PLAN_TIERS as readonly string[]).includes(planTier) || planTier === "free") {
     res.status(400).json({
       error: "planTier must be one of: starter, pro, enterprise",
     });
-    return;
-  }
-  if (!successUrl || !cancelUrl) {
-    res.status(400).json({ error: "successUrl and cancelUrl are required" });
     return;
   }
 

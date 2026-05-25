@@ -45,6 +45,7 @@ import {
   deploymentLogsTable,
   projectDomainsTable,
   secretsTable,
+  userSubscriptionsTable,
   type FileSnapshotEntry,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
@@ -453,11 +454,29 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   let prodContainerStatus = project.prodContainerStatus ?? "stopped";
   let prodContainerId = project.prodContainerId ?? null;
 
+  // ── Gate: autoscale requires Core/pro/team subscription ──────────────────
+  const deploymentType = project.deploymentType ?? "static";
+  if (env === "production" && deploymentType === "autoscale" && project.ownerId) {
+    const [ownerSub] = await db
+      .select({ tier: userSubscriptionsTable.tier })
+      .from(userSubscriptionsTable)
+      .where(eq(userSubscriptionsTable.userId, project.ownerId))
+      .limit(1);
+    const ownerTier = ownerSub?.tier ?? "free";
+    if (ownerTier === "free") {
+      res.status(403).json({
+        error: "Autoscale requires MustaFlow Core",
+        upgradeUrl: "/billing",
+        code: "autoscale_requires_core",
+      });
+      return;
+    }
+  }
+
   // Task #543: respect deployment type. "static" never deploys a container,
   // even if the project has a dev container. "autoscale" + "reserved_vm"
   // both go through the blue/green path; container.ts reads the type to
   // set min_machines_running appropriately.
-  const deploymentType = project.deploymentType ?? "static";
   const shouldDeployContainer =
     deploymentType !== "static" && !!project.containerId && !!process.env.FLY_API_TOKEN;
 

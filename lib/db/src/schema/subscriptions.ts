@@ -1,6 +1,6 @@
 import { pgTable, serial, text, boolean, timestamp } from "drizzle-orm/pg-core";
 
-export const SUBSCRIPTION_TIERS = ["free", "pro", "team"] as const;
+export const SUBSCRIPTION_TIERS = ["free", "core", "pro", "team"] as const;
 export type SubscriptionTier = (typeof SUBSCRIPTION_TIERS)[number];
 
 export const SUBSCRIPTION_STATUSES = [
@@ -15,18 +15,21 @@ export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
 
 export const TIER_MONTHLY_CREDITS: Record<SubscriptionTier, number> = {
   free: 100,
+  core: 500,
   pro: 2000,
   team: 5000,
 };
 
 export const TIER_MAX_CONCURRENT_BUILDS: Record<SubscriptionTier, number> = {
   free: 1,
+  core: 3,
   pro: 3,
   team: 10,
 };
 
 export const TIER_PRICE_USD: Record<SubscriptionTier, number> = {
   free: 0,
+  core: 20,
   pro: 19,
   team: 49,
 };

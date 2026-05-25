@@ -11,12 +11,46 @@ import {
   domainServeEventsTable,
   projectDomainsTable,
   projectBandwidthTable,
+  userSubscriptionsTable,
 } from "@workspace/db";
 import { guessMime } from "./builder";
 import { injectBridge } from "./consoleBridge";
 import { isBinaryMime } from "./binary-mime";
 import { recordProdLog, hashIp } from "./prodLogs";
 import { logger } from "./logger";
+
+// ── "Built with MustaFlow" badge — free-tier injection ────────────────────────
+// Injected into published HTML pages for free-tier project owners.
+// Core/pro/team subscribers are exempt. Cache TTL: 60 seconds.
+
+const BADGE_HTML =
+  '<div style="position:fixed;bottom:12px;right:12px;font-size:11px;z-index:9999;background:rgba(0,0,0,0.6);color:#fff;padding:4px 8px;border-radius:4px"><a href="https://mustaflow.app" target="_blank" style="color:#fff;text-decoration:none">Built with MustaFlow</a></div>';
+
+interface TierCacheEntry {
+  tier: string;
+  fetchedAt: number;
+}
+const tierCache = new Map<string, TierCacheEntry>();
+const TIER_CACHE_TTL_MS = 60_000;
+
+async function getOwnerTier(userId: string): Promise<string> {
+  const now = Date.now();
+  const cached = tierCache.get(userId);
+  if (cached && now - cached.fetchedAt < TIER_CACHE_TTL_MS) return cached.tier;
+
+  try {
+    const [sub] = await db
+      .select({ tier: userSubscriptionsTable.tier })
+      .from(userSubscriptionsTable)
+      .where(eq(userSubscriptionsTable.userId, userId))
+      .limit(1);
+    const tier = sub?.tier ?? "free";
+    tierCache.set(userId, { tier, fetchedAt: now });
+    return tier;
+  } catch {
+    return "free";
+  }
+}
 
 // ── Bandwidth metering (Task #624) ────────────────────────────────────────────
 // In-memory accumulator keyed by "projectId:YYYY-MM". Flushed to DB every 30 s.
@@ -381,6 +415,7 @@ export async function serveSnapshot(
   const [project] = await db
     .select({
       id: projectsTable.id,
+      ownerId: projectsTable.ownerId,
       name: projectsTable.name,
       description: projectsTable.description,
       status: projectsTable.status,
@@ -536,6 +571,18 @@ export async function serveSnapshot(
         ogImageUrl: ogUrl,
         slug,
       });
+      // Inject "Built with MustaFlow" badge for free-tier owners.
+      // Paid subscribers (core/pro/team) are exempt.
+      if (project.ownerId) {
+        const ownerTier = await getOwnerTier(project.ownerId);
+        if (ownerTier === "free") {
+          if (/<\/body>/i.test(html)) {
+            html = html.replace(/<\/body>/i, `${BADGE_HTML}</body>`);
+          } else {
+            html += BADGE_HTML;
+          }
+        }
+      }
       bwAccumulate(projectId, Buffer.byteLength(html, "utf8"));
       res.send(html);
     } else {

@@ -11,11 +11,9 @@ import {
   TrendingUp,
   BarChart3,
   Crown,
-  Users,
   ArrowUpRight,
   FileText,
   Download,
-  ChevronRight,
   AlertTriangle,
   Settings,
 } from "lucide-react";
@@ -304,7 +302,7 @@ export default function BillingPage() {
   async function handleSubscribe(tier: string) {
     setCheckoutLoading(tier);
     try {
-      const res = await fetch("/api/billing/subscribe", {
+      const res = await fetch("/api/billing/subscription/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -317,11 +315,12 @@ export default function BillingPage() {
         setupRequired?: boolean;
         checkoutUrl?: string;
         error?: string;
+        message?: string;
       };
       if (data.setupRequired) {
         toast({
           title: "Subscriptions not configured",
-          description: data.error ?? "Contact your administrator.",
+          description: data.message ?? data.error ?? "Contact your administrator.",
           variant: "destructive",
         });
         return;
@@ -703,7 +702,7 @@ function SubscriptionTab({
   onCancel,
   onPortal,
   portalLoading,
-  recommendedTier,
+  recommendedTier: _recommendedTier,
 }: {
   subscription: SubscriptionResponse | null;
   loading: boolean;
@@ -720,17 +719,34 @@ function SubscriptionTab({
 
   const currentTier = subscription?.tier ?? "free";
 
-  const TIER_COLORS: Record<string, string> = {
-    free: "border-border",
-    pro: "border-primary/40",
-    team: "border-purple-500/40",
-  };
-
-  const TIER_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-    free: Zap,
-    pro: Crown,
-    team: Users,
-  };
+  // Hardcoded plan definitions — only Starter and Core are user-level plans.
+  const PLANS = [
+    {
+      id: "free",
+      name: "Starter",
+      priceUsd: 0,
+      features: [
+        "100 starter credits on sign-up",
+        "1 concurrent build",
+        '"Built with MustaFlow" badge on published apps',
+        "Shared compute",
+        "Community support",
+      ],
+    },
+    {
+      id: "core",
+      name: "MustaFlow Core",
+      priceUsd: 20,
+      features: [
+        "500 credits / month",
+        "3 concurrent builds",
+        "No badge on published apps",
+        "Autoscale deployment",
+        "Priority build queue",
+        "Email support",
+      ],
+    },
+  ] as const;
 
   return (
     <div className="space-y-6">
@@ -742,7 +758,9 @@ function SubscriptionTab({
               Current plan
             </p>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-lg capitalize">{subscription.tier}</span>
+              <span className="font-bold text-lg capitalize">
+                {subscription.tier === "core" ? "MustaFlow Core" : "Starter"}
+              </span>
               <span
                 className={cn(
                   "text-[10px] px-2 py-0.5 rounded-full font-semibold border",
@@ -750,9 +768,7 @@ function SubscriptionTab({
                     ? "bg-green-500/10 text-green-400 border-green-500/20"
                     : subscription.status === "grace_period"
                       ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
-                      : subscription.status === "canceled"
-                        ? "bg-muted text-muted-foreground border-border"
-                        : "bg-muted text-muted-foreground border-border",
+                      : "bg-muted text-muted-foreground border-border",
                 )}
               >
                 {subscription.status}
@@ -775,23 +791,25 @@ function SubscriptionTab({
         </div>
       )}
 
-      {/* Tier cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {(subscription?.tiers ?? []).map((tier) => {
-          const Icon = TIER_ICONS[tier.id] ?? Zap;
-          const isCurrent = tier.id === currentTier;
-          const isRecommended = !isCurrent && recommendedTier === tier.id;
+      {/* Starter vs Core plan cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {PLANS.map((plan) => {
+          const isCurrent =
+            plan.id === currentTier || (plan.id === "free" && currentTier === "free");
+          const isCore = plan.id === "core";
           return (
             <div
-              key={tier.id}
-              id={`plan-card-${tier.id}`}
+              key={plan.id}
+              id={`plan-card-${plan.id}`}
               className={cn(
                 "border rounded-xl bg-card p-5 flex flex-col gap-3 relative",
-                isCurrent
-                  ? "border-primary/40 ring-1 ring-primary/20"
-                  : isRecommended
-                    ? "border-primary ring-2 ring-primary/40 shadow-lg"
-                    : (TIER_COLORS[tier.id] ?? "border-border"),
+                isCore
+                  ? isCurrent
+                    ? "border-primary ring-1 ring-primary/20"
+                    : "border-primary/60 ring-1 ring-primary/20"
+                  : isCurrent
+                    ? "border-primary/40 ring-1 ring-primary/10"
+                    : "border-border",
               )}
             >
               {isCurrent && (
@@ -799,60 +817,48 @@ function SubscriptionTab({
                   Current
                 </div>
               )}
-              {isRecommended && (
-                <div className="absolute top-3 right-3 text-[10px] bg-primary text-primary-foreground border border-primary px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
-                  Recommended
-                </div>
-              )}
               <div className="flex items-center gap-2">
-                <Icon className="h-4 w-4 text-primary" />
-                <p className="font-semibold">{tier.name}</p>
+                {isCore ? (
+                  <Crown className="h-4 w-4 text-primary" />
+                ) : (
+                  <Zap className="h-4 w-4 text-muted-foreground" />
+                )}
+                <p className="font-semibold">{plan.name}</p>
               </div>
               <div className="flex items-baseline gap-1">
-                {tier.priceUsd === 0 ? (
+                {plan.priceUsd === 0 ? (
                   <span className="text-2xl font-bold">Free</span>
                 ) : (
                   <>
-                    <span className="text-2xl font-bold">${tier.priceUsd}</span>
+                    <span className="text-2xl font-bold">${plan.priceUsd}</span>
                     <span className="text-xs text-muted-foreground">/month</span>
                   </>
                 )}
               </div>
               <ul className="space-y-1.5 flex-1">
-                {tier.features.map((f) => (
+                {plan.features.map((f) => (
                   <li key={f} className="flex items-start gap-1.5 text-xs text-muted-foreground">
                     <CheckCircle className="h-3 w-3 shrink-0 mt-0.5 text-green-500" />
                     {f}
                   </li>
                 ))}
               </ul>
-              {!isCurrent && tier.id !== "free" && (
+              {!isCurrent && isCore && (
                 <button
-                  onClick={() => onSubscribe(tier.id)}
-                  disabled={!tier.available || checkoutLoading === tier.id}
-                  className={cn(
-                    "w-full py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors",
-                    !tier.available
-                      ? "bg-muted text-muted-foreground cursor-not-allowed"
-                      : "bg-primary text-primary-foreground hover:bg-primary/90",
-                  )}
+                  onClick={() => onSubscribe("core")}
+                  disabled={checkoutLoading === "core"}
+                  className="w-full py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors bg-primary text-primary-foreground hover:bg-primary/90"
                 >
-                  {checkoutLoading === tier.id ? (
+                  {checkoutLoading === "core" ? (
                     <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                  ) : !tier.available ? (
-                    "Coming soon"
-                  ) : currentTier === "free" ? (
-                    <>
-                      Upgrade to {tier.name} <ArrowUpRight className="h-3 w-3" />
-                    </>
                   ) : (
                     <>
-                      Switch to {tier.name} <ChevronRight className="h-3 w-3" />
+                      Upgrade to Core <ArrowUpRight className="h-3 w-3" />
                     </>
                   )}
                 </button>
               )}
-              {isCurrent && tier.id !== "free" && !subscription?.cancelAtPeriodEnd && (
+              {isCurrent && isCore && !subscription?.cancelAtPeriodEnd && (
                 <button
                   onClick={onCancel}
                   disabled={cancelLoading}
@@ -865,7 +871,7 @@ function SubscriptionTab({
                   )}
                 </button>
               )}
-              {isCurrent && subscription?.cancelAtPeriodEnd && (
+              {isCurrent && isCore && subscription?.cancelAtPeriodEnd && (
                 <p className="text-xs text-center text-yellow-500">
                   Cancels{" "}
                   {subscription.currentPeriodEnd

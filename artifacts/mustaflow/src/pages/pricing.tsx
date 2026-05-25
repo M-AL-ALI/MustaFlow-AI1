@@ -1,201 +1,213 @@
-import { Link } from "wouter";
+import { useState } from "react";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Zap, ArrowRight, CheckCircle2, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { CheckCircle2, Zap, ArrowRight, Star } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { useUser } from "@clerk/react";
 
-const TIERS = [
-  {
-    id: "lite",
-    name: "Lite",
-    cost: 1,
-    model: "gpt-5-mini",
-    tagline: "Fast and lightweight",
-    color: "text-muted-foreground",
-    bg: "bg-muted/30",
-    border: "border-border",
-    badge: null,
-    features: [
-      "Quick single-page builds",
-      "Ideal for simple ideas",
-      "Fastest response time",
-      "HTML/CSS/JS output",
-    ],
-  },
-  {
-    id: "eco",
-    name: "Eco",
-    cost: 2,
-    model: "gpt-5-mini",
-    tagline: "Balanced quality and speed",
-    color: "text-green-400",
-    bg: "bg-green-500/5",
-    border: "border-green-500/20",
-    badge: null,
-    features: [
-      "Multi-section pages",
-      "Smarter layout decisions",
-      "Good for landing pages",
-      "HTML/CSS/JS output",
-    ],
-  },
-  {
-    id: "power",
-    name: "Power",
-    cost: 5,
-    model: "gpt-5-nano",
-    tagline: "High-quality multi-file builds",
-    color: "text-primary",
-    bg: "bg-primary/5",
-    border: "border-primary/30",
-    badge: "Most popular",
-    features: [
-      "Full multi-file projects",
-      "Rich interactivity",
-      "Detailed planning phase",
-      "Recommended for most apps",
-    ],
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    cost: 10,
-    model: "gpt-5.4",
-    tagline: "Maximum quality, extended context",
-    color: "text-purple-400",
-    bg: "bg-purple-500/5",
-    border: "border-purple-500/20",
-    badge: "Best quality",
-    features: [
-      "Highest-quality output",
-      "Extended reasoning context",
-      "Complex multi-file apps",
-      "Best for production apps",
-    ],
-  },
+const STARTER_FEATURES = [
+  "100 starter credits on sign-up",
+  "1 concurrent build",
+  '"Built with MustaFlow" badge on published apps',
+  "Shared compute",
+  "Static, React SPA, and full-stack projects",
+  "Community support",
 ];
 
-const CREDIT_PACKAGES = [
-  { credits: 50, price: 5, desc: "Great for getting started" },
-  { credits: 150, price: 12, desc: "Most popular package", highlight: true },
-  { credits: 500, price: 35, desc: "Best value for power users" },
+const CORE_FEATURES = [
+  "500 credits / month",
+  "3 concurrent builds",
+  "No badge on published apps",
+  "Autoscale deployment",
+  "8 GiB RAM / 4 vCPU",
+  "Priority build queue",
+  "Email support",
 ];
 
 export default function PricingPage() {
+  const { isSignedIn } = useUser();
+  const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
+
+  async function handleGetCore() {
+    if (!isSignedIn) {
+      navigate("/sign-up?redirect=/pricing");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/billing/subscription/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tier: "core",
+          successUrl: `${window.location.origin}/billing?subscribed=1`,
+          cancelUrl: `${window.location.origin}/pricing`,
+        }),
+      });
+      const data = (await res.json()) as {
+        setupRequired?: boolean;
+        checkoutUrl?: string;
+        error?: string;
+        message?: string;
+      };
+      if (data.setupRequired) {
+        toast({
+          title: "Billing not configured",
+          description: data.message ?? "Contact your administrator.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      } else if (data.error) {
+        toast({ title: "Checkout error", description: data.error, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Checkout failed", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="pb-24">
       {/* Hero */}
       <div className="max-w-4xl mx-auto px-6 pt-16 pb-12 text-center">
         <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-6">
           <Zap className="h-3 w-3" />
-          Simple credit pricing
+          Simple, transparent pricing
         </div>
         <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight gradient-text mb-4">
-          Pay for what you build
+          Build more. Pay less.
         </h1>
         <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-          No subscriptions. Buy credits, spend them on builds. Choose the agent mode that fits your
-          project.
+          Start free and upgrade when you need more power — no hidden fees, no surprises.
         </p>
       </div>
 
-      {/* Agent Mode Tiers */}
-      <div className="max-w-5xl mx-auto px-6 mb-16">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider text-center mb-6">
-          Agent modes — credit cost per build
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {TIERS.map((tier) => (
-            <div
-              key={tier.id}
-              className={cn(
-                "relative rounded-2xl border p-5 flex flex-col gap-4",
-                tier.bg,
-                tier.border,
-              )}
-            >
-              {tier.badge && (
-                <div
-                  className={cn(
-                    "absolute -top-2.5 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase tracking-wide px-3 py-0.5 rounded-full border whitespace-nowrap",
-                    tier.id === "power"
-                      ? "bg-primary text-primary-foreground border-primary/50"
-                      : "bg-purple-500 text-white border-purple-500/50",
-                  )}
-                >
-                  {tier.badge}
-                </div>
-              )}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className={cn("text-lg font-bold", tier.color)}>{tier.name}</span>
-                  <span className="text-xs text-muted-foreground font-mono">{tier.model}</span>
-                </div>
-                <p className="text-xs text-muted-foreground">{tier.tagline}</p>
+      {/* Plan cards */}
+      <div className="max-w-3xl mx-auto px-6 mb-16">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {/* Starter */}
+          <div className="relative rounded-2xl border border-border bg-card p-7 flex flex-col gap-5">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                Starter
+              </p>
+              <div className="flex items-baseline gap-1 mb-1">
+                <span className="text-4xl font-extrabold">Free</span>
               </div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-extrabold">{tier.cost}</span>
-                <span className="text-sm text-muted-foreground">
-                  credit{tier.cost !== 1 ? "s" : ""}
-                </span>
-              </div>
-              <ul className="space-y-1.5 flex-1">
-                {tier.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2 text-xs text-muted-foreground">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
+              <p className="text-sm text-muted-foreground">No credit card required</p>
             </div>
-          ))}
+
+            <ul className="space-y-2 flex-1">
+              {STARTER_FEATURES.map((f) => (
+                <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+
+            <Link href={isSignedIn ? "/projects" : "/sign-up"}>
+              <Button variant="outline" className="w-full">
+                {isSignedIn ? "Go to dashboard" : "Get started free"}
+              </Button>
+            </Link>
+          </div>
+
+          {/* Core */}
+          <div className="relative rounded-2xl border-2 border-primary bg-primary/5 p-7 flex flex-col gap-5 shadow-lg">
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide px-3 py-0.5 rounded-full bg-primary text-primary-foreground whitespace-nowrap">
+              <Star className="h-3 w-3" />
+              Most popular
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary/80 mb-1">
+                MustaFlow Core
+              </p>
+              <div className="flex items-baseline gap-1 mb-1">
+                <span className="text-4xl font-extrabold">$20</span>
+                <span className="text-sm text-muted-foreground">/month</span>
+              </div>
+              <p className="text-sm text-muted-foreground">Cancel anytime</p>
+            </div>
+
+            <ul className="space-y-2 flex-1">
+              {CORE_FEATURES.map((f) => (
+                <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <CheckCircle2 className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+
+            <Button
+              className="w-full gap-2"
+              onClick={() => void handleGetCore()}
+              disabled={loading}
+            >
+              {loading ? (
+                "Redirecting…"
+              ) : isSignedIn ? (
+                <>
+                  Get Core <ArrowRight className="h-4 w-4" />
+                </>
+              ) : (
+                <>
+                  Get started <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Credit Packages */}
+      {/* Credit costs reference */}
       <div className="border-t border-border bg-muted/20">
-        <div className="max-w-4xl mx-auto px-6 py-16">
-          <div className="text-center mb-10">
-            <h2 className="text-2xl font-bold mb-2">Top up your credits</h2>
+        <div className="max-w-3xl mx-auto px-6 py-16">
+          <div className="text-center mb-8">
+            <h2 className="text-xl font-bold mb-2">How credits work</h2>
             <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              Credits never expire. Buy once and use them whenever you're ready to build.
+              Each build consumes credits based on the agent mode you choose.
             </p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-2xl mx-auto">
-            {CREDIT_PACKAGES.map((pkg) => (
-              <div
-                key={pkg.credits}
-                className={cn(
-                  "relative rounded-2xl border p-6 flex flex-col gap-4 text-center",
-                  pkg.highlight ? "border-primary/40 bg-primary/5" : "border-border bg-card",
-                )}
-              >
-                {pkg.highlight && (
-                  <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase tracking-wide px-3 py-0.5 rounded-full bg-primary text-primary-foreground whitespace-nowrap">
-                    Most popular
-                  </div>
-                )}
-                <div>
-                  <div className="text-4xl font-extrabold mb-1">{pkg.credits}</div>
-                  <div className="text-sm text-muted-foreground">credits</div>
+          <div className="border border-border rounded-xl bg-card overflow-hidden">
+            <div className="divide-y divide-border">
+              {[
+                { mode: "Lite", cost: 1, desc: "Fast, lightweight builds" },
+                { mode: "Eco", cost: 2, desc: "Balanced quality and speed" },
+                { mode: "Power", cost: 5, desc: "High-quality multi-file builds" },
+                { mode: "Pro", cost: 10, desc: "Maximum quality, extended context" },
+              ].map((row) => (
+                <div key={row.mode} className="flex items-center justify-between px-5 py-3 text-sm">
+                  <span className="text-muted-foreground">
+                    <span className="font-semibold text-foreground">{row.mode}</span> — {row.desc}
+                  </span>
+                  <span className="font-semibold shrink-0 ml-4">
+                    {row.cost} credit{row.cost !== 1 ? "s" : ""}
+                  </span>
                 </div>
-                <div className="text-2xl font-bold">${pkg.price}</div>
-                <p className="text-xs text-muted-foreground">{pkg.desc}</p>
-                <Link href="/billing">
-                  <Button className="w-full" variant={pkg.highlight ? "default" : "outline"}>
-                    Buy credits
-                  </Button>
-                </Link>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-          <p className="text-center text-xs text-muted-foreground mt-6">
-            Stripe payments coming soon — join the waitlist or contact us to get early access.
+          <p className="text-center text-xs text-muted-foreground mt-4">
+            Need more credits? Top them up anytime from your{" "}
+            <Link href="/billing" className="text-primary hover:underline">
+              billing dashboard
+            </Link>
+            .
           </p>
         </div>
       </div>
 
-      {/* FAQ strip */}
-      <div className="max-w-3xl mx-auto px-6 py-16 space-y-6">
+      {/* FAQ */}
+      <div className="max-w-3xl mx-auto px-6 py-12 space-y-5">
         <h2 className="text-xl font-bold text-center mb-8">Common questions</h2>
         {[
           {
@@ -203,16 +215,20 @@ export default function PricingPage() {
             a: "No. Credits you purchase stay in your account indefinitely.",
           },
           {
-            q: "What do I get when I sign up?",
-            a: "Every new account gets 100 free starter credits — enough to run 10 Power builds or 100 Lite builds.",
+            q: "What is the badge on published apps?",
+            a: 'Free-tier published apps display a small "Built with MustaFlow" badge. Upgrade to Core to remove it.',
           },
           {
             q: "Can I change agent mode mid-project?",
             a: "Yes. You choose the agent mode on each message, so you can use Lite for quick tweaks and Power for major builds.",
           },
           {
+            q: "What happens if I cancel Core?",
+            a: "You keep access until the end of your billing period, then your account reverts to the free plan. Published apps stay live.",
+          },
+          {
             q: "What if a build fails?",
-            a: "Credits are only deducted from a successful build. Failed builds due to platform errors are not charged.",
+            a: "Credits are only deducted for successful builds. Platform errors are not charged.",
           },
         ].map((item) => (
           <div key={item.q} className="border-b border-border pb-5">
@@ -222,17 +238,17 @@ export default function PricingPage() {
         ))}
       </div>
 
-      {/* CTA */}
+      {/* Bottom CTA */}
       <div className="max-w-xl mx-auto px-6 text-center">
         <div className="rounded-2xl bg-primary/5 border border-primary/20 p-10 space-y-4">
-          <Sparkles className="h-8 w-8 text-primary mx-auto" />
+          <Zap className="h-8 w-8 text-primary mx-auto" />
           <h2 className="text-2xl font-bold">Start building today</h2>
           <p className="text-sm text-muted-foreground">
             100 free credits on sign-up. No credit card required.
           </p>
-          <Link href="/sign-up">
+          <Link href={isSignedIn ? "/projects" : "/sign-up"}>
             <Button size="lg" className="gap-2">
-              Get started for free
+              {isSignedIn ? "Go to dashboard" : "Get started for free"}
               <ArrowRight className="h-4 w-4" />
             </Button>
           </Link>

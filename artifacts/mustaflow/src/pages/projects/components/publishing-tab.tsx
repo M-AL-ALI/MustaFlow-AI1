@@ -631,6 +631,7 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
   const [newCron, setNewCron] = useState("0 * * * *");
   const [newKind, setNewKind] = useState<Schedule["kind"]>("health_probe");
   const [newNote, setNewNote] = useState("");
+  const [userTier, setUserTier] = useState<string>("free");
 
   const refresh = useCallback(async () => {
     try {
@@ -649,6 +650,20 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [projectId]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/billing/subscription");
+        if (res.ok) {
+          const data = (await res.json()) as { tier?: string };
+          setUserTier(data.tier ?? "free");
+        }
+      } catch {
+        /* best-effort */
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -760,21 +775,41 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
           {config.availableTypes.map((t) => {
             const meta = config.pricing[t];
             const active = config.deploymentType === t;
+            const autoscaleLocked = t === "autoscale" && userTier === "free";
             return (
-              <button
-                key={t}
-                type="button"
-                disabled={busy}
-                onClick={() => void patch({ deploymentType: t })}
-                className={cn(
-                  "text-left rounded-lg border p-3 transition-colors",
-                  active ? "border-primary bg-primary/5" : "border-border hover:border-primary/40",
+              <div key={t} className="relative group">
+                <button
+                  type="button"
+                  disabled={busy || autoscaleLocked}
+                  onClick={() => !autoscaleLocked && void patch({ deploymentType: t })}
+                  className={cn(
+                    "w-full text-left rounded-lg border p-3 transition-colors",
+                    active
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-primary/40",
+                    autoscaleLocked && "opacity-50 cursor-not-allowed",
+                  )}
+                >
+                  <div className="text-sm font-medium">{meta?.label ?? t}</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">{meta?.price}</div>
+                  <div className="text-[11px] text-muted-foreground mt-1">{meta?.description}</div>
+                  {autoscaleLocked && (
+                    <div className="text-[10px] text-primary font-semibold mt-1">
+                      Core plan required
+                    </div>
+                  )}
+                </button>
+                {autoscaleLocked && (
+                  <div className="absolute inset-x-0 -bottom-7 hidden group-hover:block z-10">
+                    <div className="bg-popover border border-border rounded px-2 py-1 text-[11px] text-center shadow-lg whitespace-nowrap">
+                      <a href="/billing" className="text-primary hover:underline">
+                        Upgrade to Core
+                      </a>{" "}
+                      to use autoscale
+                    </div>
+                  </div>
                 )}
-              >
-                <div className="text-sm font-medium">{meta?.label ?? t}</div>
-                <div className="text-[11px] text-muted-foreground mt-0.5">{meta?.price}</div>
-                <div className="text-[11px] text-muted-foreground mt-1">{meta?.description}</div>
-              </button>
+              </div>
             );
           })}
         </div>
