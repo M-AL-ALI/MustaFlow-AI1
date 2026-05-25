@@ -7284,8 +7284,9 @@ Reasoning principles (apply in order, BEFORE judging):
 4. **Repeat / rephrase detection**: If the user's current message is the same as, or a rephrasing of, something they already said and you responded to — especially if your previous response was a build report and they now seem to want an explanation instead — treat it as "converse". The user is course-correcting, not asking for another build.
 5. **Discussion mode**: If the message describes, theorizes, complains, philosophizes, or asks you to behave differently ("you should understand intent, not just keywords") → "converse".
 6. **Bug reports, problem descriptions, AND diagnostic requests are all "build"**: If the user describes a symptom OR asks the agent to investigate — "the app is not running", "it's broken", "find the issue", "open the logs", "check what's wrong", "look at the errors", "read the code", "investigate the crash", "debug this", "what's causing the problem", "examine the files" — classify as "build". The agent must read the actual files, identify the root cause, and fix it. It must not respond conversationally with guesses.
-7. "build" generally requires an explicit action verb (add/remove/change/fix/build/create/make/update/refactor/style/etc.) OR a problem description as described in rule 6. Being on-topic about the app without either is not enough.
-8. When genuinely torn between "converse" and "build", choose "converse". A misrouted question is far more annoying than a missed build request — the user can always re-ask with an action verb.
+7. **Run / test / execute / verify requests are always "build"**: If the user asks the agent to run, execute, perform, launch, verify, or validate something — "run a full test", "run the checks", "test the app", "run end-to-end tests", "verify everything works", "execute the tests", "run all checks", "validate the build", "run a full end-to-end test", "perform a test", "run it" — classify as "build". The agent must actually perform the action, not explain what would need to happen.
+8. "build" generally requires an explicit action verb (add/remove/change/fix/build/create/make/update/run/test/verify/execute/etc.) OR a problem description as described in rule 6. Being on-topic about the app without either is not enough.
+9. When genuinely torn between "converse" and "build", choose "converse". A misrouted question is far more annoying than a missed build request — the user can always re-ask with an action verb.
 
 Respond with ONLY valid JSON: {"intent": "converse"|"plan"|"build", "confidence": 0.0-1.0}
 
@@ -7324,7 +7325,7 @@ const SHORT_REACTIONS = new Set([
 // build action verb — questions like "why isn't this fixed?" or "nothing is
 // fixed, why?" use the same vocabulary but are NOT imperatives.
 const STARTS_WITH_BUILD_IMPERATIVE =
-  /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge|deploy|publish|undo|rollback|retry|try\s+again|find|look\s+at|look\s+into|check|open|read|examine|investigate|diagnose|debug|inspect|scan|search|analyze|analyse|review|trace|test|resolve|identify|locate|explore)\b/i;
+  /^\s*(please\s+|pls\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+(?:to\s+)?|i'?d\s+like\s+(?:to\s+)?|let'?s\s+|now\s+|just\s+)?(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge|deploy|publish|undo|rollback|retry|try\s+again|find|look\s+at|look\s+into|check|open|read|examine|investigate|diagnose|debug|inspect|scan|search|analyze|analyse|review|trace|test|run|execute|perform|verify|validate|launch|start|apply|confirm|ensure|complete|finish)\b/i;
 
 // Detect problem / bug reports AND diagnostic requests that are implicit fix
 // requests even without an explicit action verb. "The app is not running",
@@ -7596,11 +7597,18 @@ BUG REPORTS & DIAGNOSTIC REQUESTS — always investigate, never deflect:
 - After your diagnosis, say: "I'll fix this now — just send any message (or tap the send button) and the builder will apply the repair."
 - If the file content snippets are too short to confirm the cause, say exactly which file you need to read in full and redirect the user to send any message so the builder can run a complete file inspection and fix loop.
 
+NEVER DO THESE THINGS — absolute prohibitions:
+- NEVER write a pre-written message for the user to copy-paste and send.
+- NEVER say "Send this as your next message", "Copy this message", "Paste this into the chat", "Use this prompt", or anything that asks the user to manually trigger an action you should be doing yourself.
+- NEVER produce a "Next steps:" section that instructs the user to copy-paste text or re-send a request. The agent can do the work — it must not delegate work back to the user through copy-paste instructions.
+- NEVER analyze what needs to happen, list it out, and then tell the user to trigger it. If the user asked to run something, test something, verify something, or execute something — respond with one sentence: "I'll do that now — just send any message and I'll run it." Do NOT explain what the test would cover in detail. Do NOT pre-write the command.
+- NEVER explain what YOU would do "if asked to build". If there's work to be done, say you'll do it and tell the user to trigger it with any message.
+
 Your responses:
 - Are clear, concise, and in plain Markdown (use headings, lists, bold, code blocks as appropriate)
 - Reference the user's actual files and code when relevant
 - Reference the specific MustaFlow tab/button/setting by its real name when guiding the user
-- Suggest next steps when helpful, prefixed with a clear "Next steps:" heading
+- Only suggest "Next steps:" for things the USER controls (UI settings, external config, third-party services) — never for actions the agent should take itself
 - Stay friendly and practical — you're a knowledgeable co-pilot AND a builder, not just a code generator
 - Never produce JSON, build reports, or file modifications in this mode
 - Keep responses focused — 2-4 paragraphs for explanations, shorter for simple questions
