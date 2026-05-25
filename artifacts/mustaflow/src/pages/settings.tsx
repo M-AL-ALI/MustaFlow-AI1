@@ -26,6 +26,11 @@ import {
   Copy,
   Check,
   TriangleAlert,
+  KeyRound,
+  FlaskConical,
+  CheckCircle2,
+  XCircle,
+  Code,
 } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
@@ -1641,6 +1646,10 @@ function DeveloperTab() {
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [revoking, setRevoking] = useState<number | null>(null);
+  const [testing, setTesting] = useState<number | null>(null);
+  const [testResults, setTestResults] = useState<
+    Record<number, { ok: boolean; scopes?: string[]; reason?: string }>
+  >({});
 
   const fetchTokens = useCallback(async () => {
     setLoading(true);
@@ -1724,6 +1733,31 @@ function DeveloperTab() {
       });
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleTest(tokenId: number) {
+    setTesting(tokenId);
+    setTestResults((prev) => {
+      const next = { ...prev };
+      delete next[tokenId];
+      return next;
+    });
+    try {
+      const res = await fetch(`/api/tokens/${tokenId}/test`);
+      const data = (await res.json()) as {
+        ok: boolean;
+        scopes?: string[];
+        reason?: string;
+      };
+      setTestResults((prev) => ({ ...prev, [tokenId]: data }));
+    } catch {
+      setTestResults((prev) => ({
+        ...prev,
+        [tokenId]: { ok: false, reason: "Network error — could not reach the API." },
+      }));
+    } finally {
+      setTesting(null);
     }
   }
 
@@ -1962,60 +1996,114 @@ function DeveloperTab() {
           </div>
         ) : (
           <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-            {tokens.map((token) => (
-              <div key={token.id} className="flex items-center gap-4 px-4 py-3 bg-background">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium truncate">{token.name}</span>
-                    {token.expiresAt && new Date(token.expiresAt) < new Date() && (
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-medium">
-                        Expired
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                    {token.scopes.map((scope) => (
-                      <span
-                        key={scope}
-                        className="inline-flex items-center font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border"
+            {tokens.map((token) => {
+              const result = testResults[token.id];
+              return (
+                <div key={token.id} className="bg-background">
+                  <div className="flex items-center gap-4 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium truncate">{token.name}</span>
+                        {token.expiresAt && new Date(token.expiresAt) < new Date() && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-medium">
+                            Expired
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        {token.scopes.map((scope) => (
+                          <span
+                            key={scope}
+                            className="inline-flex items-center font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border"
+                          >
+                            {scope}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1">
+                        <code className="text-xs text-muted-foreground font-mono">
+                          {token.tokenPreview}
+                        </code>
+                        <span className="text-xs text-muted-foreground">
+                          Created {formatDate(token.createdAt)}
+                        </span>
+                        {token.lastUsedAt && (
+                          <span className="text-xs text-muted-foreground">
+                            Last used {formatDate(token.lastUsedAt)}
+                          </span>
+                        )}
+                        {token.expiresAt && new Date(token.expiresAt) >= new Date() && (
+                          <span className="text-xs text-muted-foreground">
+                            Expires {formatDate(token.expiresAt)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-2">
+                      <button
+                        onClick={() => void handleTest(token.id)}
+                        disabled={testing === token.id || revoking === token.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-transparent hover:border-border disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        title="Test this token"
                       >
-                        {scope}
-                      </span>
-                    ))}
+                        {testing === token.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <FlaskConical className="h-3.5 w-3.5" />
+                        )}
+                        Test
+                      </button>
+                      <button
+                        onClick={() => void handleRevoke(token.id)}
+                        disabled={revoking === token.id || testing === token.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {revoking === token.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                        Revoke
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 mt-1">
-                    <code className="text-xs text-muted-foreground font-mono">
-                      {token.tokenPreview}
-                    </code>
-                    <span className="text-xs text-muted-foreground">
-                      Created {formatDate(token.createdAt)}
-                    </span>
-                    {token.lastUsedAt && (
-                      <span className="text-xs text-muted-foreground">
-                        Last used {formatDate(token.lastUsedAt)}
-                      </span>
-                    )}
-                    {token.expiresAt && new Date(token.expiresAt) >= new Date() && (
-                      <span className="text-xs text-muted-foreground">
-                        Expires {formatDate(token.expiresAt)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={() => void handleRevoke(token.id)}
-                  disabled={revoking === token.id}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {revoking === token.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
+                  {result !== undefined && (
+                    <div
+                      className={`mx-4 mb-3 px-3 py-2 rounded-md text-sm flex flex-col gap-1 ${
+                        result.ok
+                          ? "bg-green-500/8 border border-green-500/25"
+                          : "bg-destructive/8 border border-destructive/25"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {result.ok ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                        ) : (
+                          <XCircle className="h-4 w-4 text-destructive shrink-0" />
+                        )}
+                        <span
+                          className={`font-medium ${result.ok ? "text-green-600 dark:text-green-400" : "text-destructive"}`}
+                        >
+                          {result.ok ? "Token is valid" : result.reason ?? "Token check failed"}
+                        </span>
+                      </div>
+                      {result.ok && result.scopes && result.scopes.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pl-6">
+                          {result.scopes.map((scope) => (
+                            <span
+                              key={scope}
+                              className="text-xs px-2 py-0.5 rounded-full bg-green-500/15 text-green-700 dark:text-green-300 font-mono"
+                            >
+                              {scope}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
-                  Revoke
-                </button>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

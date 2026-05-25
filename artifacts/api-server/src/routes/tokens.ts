@@ -148,13 +148,52 @@ router.post("/me/tokens", async (req, res): Promise<void> => {
   }
 });
 
-// ── DELETE /me/tokens/:tokenId ────────────────────────────────────────────────
-router.delete("/me/tokens/:tokenId", async (req, res): Promise<void> => {
-  if (!req.userId) {
-    res.status(401).json({ error: "Unauthenticated" });
+// ── GET /api/tokens/:id/test ──────────────────────────────────────────────────
+// Validates that a token owned by the caller is still active and not expired.
+// Returns { ok: true, scopes } on success, or { ok: false, reason } on failure.
+// Auth: session cookie (same as other /api/tokens routes).
+router.get("/tokens/:id/test", async (req, res): Promise<void> => {
+  const userId = req.userId!;
+  const tokenId = parseInt(req.params.id ?? "", 10);
+
+  if (!Number.isFinite(tokenId)) {
+    res.status(400).json({ ok: false, reason: "Invalid token id." });
     return;
   }
-  const tokenId = Number(req.params.tokenId);
+
+  const [token] = await db
+    .select({
+      id: personalAccessTokensTable.id,
+      userId: personalAccessTokensTable.userId,
+      active: personalAccessTokensTable.active,
+      scopes: personalAccessTokensTable.scopes,
+      expiresAt: personalAccessTokensTable.expiresAt,
+    })
+    .from(personalAccessTokensTable)
+    .where(eq(personalAccessTokensTable.id, tokenId));
+
+  if (!token || token.userId !== userId) {
+    res.status(404).json({ ok: false, reason: "Token not found." });
+    return;
+  }
+
+  if (!token.active) {
+    res.json({ ok: false, reason: "Token has been revoked." });
+    return;
+  }
+
+  if (token.expiresAt && new Date(token.expiresAt) < new Date()) {
+    res.json({ ok: false, reason: "Token has expired." });
+    return;
+  }
+
+  res.json({ ok: true, scopes: token.scopes ?? [] });
+});
+
+// ── DELETE /api/tokens/:id ────────────────────────────────────────────────────
+router.delete("/tokens/:id", async (req, res): Promise<void> => {
+  const userId = req.userId!;
+  const tokenId = parseInt(req.params.id ?? "", 10);
   if (!Number.isFinite(tokenId)) {
     res.status(400).json({ error: "Invalid token id" });
     return;
