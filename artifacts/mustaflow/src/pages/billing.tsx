@@ -599,10 +599,10 @@ function OverviewTab({
         </div>
         <div className="divide-y divide-border">
           {[
-            { mode: "Lite", cost: 1, desc: "Fast, lightweight builds" },
-            { mode: "Eco", cost: 2, desc: "Balanced quality and speed" },
-            { mode: "Power", cost: 5, desc: "High-quality multi-file builds" },
-            { mode: "Pro", cost: 10, desc: "Maximum quality, extended context" },
+            { mode: "Lite", cost: 1, desc: "Minimal correct change, fastest" },
+            { mode: "Eco", cost: 2, desc: "Clean typed code, no over-engineering" },
+            { mode: "Power", cost: 5, desc: "Production-ready TypeScript, full error handling" },
+            { mode: "Pro", cost: 10, desc: "Security-first strict mode, architectural clarity" },
           ].map((row) => (
             <div key={row.mode} className="flex items-center justify-between px-4 py-2.5 text-sm">
               <span className="text-muted-foreground">

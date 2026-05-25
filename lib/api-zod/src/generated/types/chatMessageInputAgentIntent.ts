@@ -7,7 +7,7 @@
  */
 
 /**
- * Optional explicit intent override. If provided, skips server-side intent detection.
+ * Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt.
  */
 export type ChatMessageInputAgentIntent = typeof ChatMessageInputAgentIntent[keyof typeof ChatMessageInputAgentIntent];
 
@@ -16,4 +16,8 @@ export const ChatMessageInputAgentIntent = {
   converse: 'converse',
   plan: 'plan',
   build: 'build',
+  debug: 'debug',
+  refactor: 'refactor',
+  review: 'review',
+  explain: 'explain',
 } as const;

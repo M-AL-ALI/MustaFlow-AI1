@@ -18,6 +18,10 @@ import {
   Clock,
   Lock,
   Square,
+  Bug,
+  Wrench,
+  CheckSquare,
+  BookOpen as BookOpenIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGetAgentRouting, useUpdateProject } from "@workspace/api-client-react";
@@ -184,7 +188,7 @@ interface QueueComposerProps {
   onStopBuild?: () => void;
   onSingleSend: (
     content: string,
-    agentIntent?: "converse" | "plan" | "build",
+    agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain",
     attachments?: ComposerAttachment[],
   ) => void;
   onBatchStarted: (batchId: string, totalCount: number) => void;
@@ -1490,10 +1494,10 @@ export function QueueComposer({
                     <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
                       {(
                         [
-                          { mode: "lite", label: "Lite", desc: "1 credit · fastest" },
-                          { mode: "eco", label: "Eco", desc: "2 credits · fast & lightweight" },
-                          { mode: "power", label: "Power", desc: "5 credits · better quality" },
-                          { mode: "pro", label: "Pro", desc: "10 credits · most capable" },
+                          { mode: "lite", label: "Lite", desc: "1 credit · minimal correct change" },
+                          { mode: "eco", label: "Eco", desc: "2 credits · clean typed code" },
+                          { mode: "power", label: "Power", desc: "5 credits · production-ready TypeScript" },
+                          { mode: "pro", label: "Pro", desc: "10 credits · security-first strict mode" },
                         ] as const
                       ).map(({ mode, label, desc }) => {
                         const locked = false;
@@ -1529,12 +1533,12 @@ export function QueueComposer({
                     </div>
                     <span className="text-[9px] text-muted-foreground/50 pr-0.5">
                       {agentMode === "lite"
-                        ? "1 credit · fastest"
+                        ? "1 credit · minimal correct change"
                         : agentMode === "eco"
-                          ? "2 credits · fast & lightweight"
+                          ? "2 credits · clean typed code"
                           : agentMode === "power"
-                            ? "5 credits · better quality"
-                            : "10 credits · most capable"}
+                            ? "5 credits · production-ready TypeScript"
+                            : "10 credits · security-first strict mode"}
                     </span>
                   </>
                 )}
@@ -1651,6 +1655,57 @@ export function QueueComposer({
           >
             <Layers2 className="h-3 w-3" /> 2 Variants
           </button>
+
+          {/* Developer intent quick-action buttons */}
+          {[
+            {
+              intent: "debug" as const,
+              icon: Bug,
+              label: "Debug",
+              starter: "Debug this error: ",
+              title: "Paste a stack trace or error message and get a root-cause analysis",
+              cls: "border-red-500/20 text-red-400/70 hover:text-red-400 hover:border-red-500/40",
+            },
+            {
+              intent: "refactor" as const,
+              icon: Wrench,
+              label: "Refactor",
+              starter: "Refactor ",
+              title: "Improve code structure without changing behaviour",
+              cls: "border-yellow-500/20 text-yellow-400/70 hover:text-yellow-400 hover:border-yellow-500/40",
+            },
+            {
+              intent: "review" as const,
+              icon: CheckSquare,
+              label: "Review",
+              starter: "Review my code for ",
+              title: "Get a structured code review — Critical / Warnings / Suggestions",
+              cls: "border-blue-500/20 text-blue-400/70 hover:text-blue-400 hover:border-blue-500/40",
+            },
+            {
+              intent: "explain" as const,
+              icon: BookOpenIcon,
+              label: "Explain",
+              starter: "Explain how ",
+              title: "Get a deep technical explanation with architectural context",
+              cls: "border-violet-500/20 text-violet-400/70 hover:text-violet-400 hover:border-violet-500/40",
+            },
+          ].map(({ intent, icon: Icon, label, starter, title, cls }) => (
+            <button
+              key={intent}
+              title={title}
+              onClick={() => {
+                onSingleSend(starter, intent);
+              }}
+              className={cn(
+                "flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border bg-transparent",
+                cls,
+              )}
+            >
+              <Icon className="h-3 w-3" />
+              {label}
+            </button>
+          ))}
 
           {/* Template picker + plan history — shown in Planning mode */}
           {agentType === "planning" && (

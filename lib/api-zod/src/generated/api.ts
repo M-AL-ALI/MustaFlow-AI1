@@ -1290,7 +1290,7 @@ export const SendMessageBody = zod.object({
   "planMode": zod.boolean(),
   "background": zod.boolean().optional(),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.'),
-  "agentIntent": zod.enum(['converse', 'plan', 'build']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection.'),
+  "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt.'),
   "attachments": zod.array(zod.object({
   "kind": zod.enum(['image']),
   "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),

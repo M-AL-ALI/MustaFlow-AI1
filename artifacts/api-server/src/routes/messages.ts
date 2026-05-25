@@ -162,7 +162,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
   // Intent detection — resolve the routing intent for this message.
   // Priority: image attachments (always build) > explicit agentIntent override > planMode > classifier.
-  let resolvedIntent: "converse" | "plan" | "build" = "build";
+  type ResolvedIntent = "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
+  let resolvedIntent: ResolvedIntent = "build";
   let intentConfidence = 1.0;
 
   if (imageAttachments.length > 0) {
@@ -174,11 +175,15 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   } else if (
     explicitAgentIntent === "converse" ||
     explicitAgentIntent === "plan" ||
-    explicitAgentIntent === "build"
+    explicitAgentIntent === "build" ||
+    explicitAgentIntent === "debug" ||
+    explicitAgentIntent === "refactor" ||
+    explicitAgentIntent === "review" ||
+    explicitAgentIntent === "explain"
   ) {
     // Explicit client override takes second priority — always honor it,
     // even when the Plan Mode toggle is on (e.g. "Apply to app" must build).
-    resolvedIntent = explicitAgentIntent;
+    resolvedIntent = explicitAgentIntent as ResolvedIntent;
   } else if (planMode) {
     resolvedIntent = "plan";
   } else {
@@ -224,11 +229,28 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   // eslint-disable-next-line no-useless-assignment
   let plan: Record<string, unknown> | null = null;
 
-  if (resolvedIntent === "converse") {
-    // ── Conversational path ─────────────────────────────────────────────────
+  const DEVELOPER_INTENT_SYSTEM_PROMPTS: Record<string, string> = {
+    debug: (await import("../lib/builder")).DEBUG_SYSTEM_PROMPT,
+    refactor: (await import("../lib/builder")).REFACTOR_SYSTEM_PROMPT,
+    review: (await import("../lib/builder")).REVIEW_SYSTEM_PROMPT,
+    explain: (await import("../lib/builder")).EXPLAIN_SYSTEM_PROMPT,
+  };
+
+  if (
+    resolvedIntent === "converse" ||
+    resolvedIntent === "debug" ||
+    resolvedIntent === "refactor" ||
+    resolvedIntent === "review" ||
+    resolvedIntent === "explain"
+  ) {
+    // ── Conversational / developer-intent path ───────────────────────────────
     // Creates a lightweight task record (kind="converse") for history tracking.
     // No files are written, no build report is generated.
-    const isAmbiguous = intentConfidence < 0.7;
+    const isAmbiguous = resolvedIntent === "converse" && intentConfidence < 0.7;
+    const systemPromptOverride =
+      resolvedIntent !== "converse"
+        ? DEVELOPER_INTENT_SYSTEM_PROMPTS[resolvedIntent]
+        : undefined;
     const [converseTask] = await db
       .insert(agentTasksTable)
       .values({
@@ -259,6 +281,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         isAmbiguous,
         imageAttachments: visionParts.length > 0 ? visionParts : undefined,
         conversationSummary,
+        systemPromptOverride,
       });
 
       if (converseTask) {
@@ -278,7 +301,12 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
           streaming: true,
         } as unknown as Record<string, unknown>;
       } else {
-        plan = { kind: "converse", taskId, streaming: true } as unknown as Record<string, unknown>;
+        plan = {
+          kind: "converse",
+          taskId,
+          intent: resolvedIntent !== "converse" ? resolvedIntent : undefined,
+          streaming: true,
+        } as unknown as Record<string, unknown>;
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Conversation failed";
@@ -701,15 +729,20 @@ router.post(
       .slice(-8);
 
     // Intent detection
-    let resolvedIntent: "converse" | "plan" | "build" = "build";
+    type StreamResolvedIntent = "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
+    let resolvedIntent: StreamResolvedIntent = "build";
     let intentConfidence = 1.0;
 
     if (
       explicitAgentIntent === "converse" ||
       explicitAgentIntent === "plan" ||
-      explicitAgentIntent === "build"
+      explicitAgentIntent === "build" ||
+      explicitAgentIntent === "debug" ||
+      explicitAgentIntent === "refactor" ||
+      explicitAgentIntent === "review" ||
+      explicitAgentIntent === "explain"
     ) {
-      resolvedIntent = explicitAgentIntent;
+      resolvedIntent = explicitAgentIntent as StreamResolvedIntent;
     } else if (planMode) {
       resolvedIntent = "plan";
     } else {
@@ -720,7 +753,7 @@ router.post(
           conversationHistory,
           hasFiles,
         );
-        resolvedIntent = classified.intent;
+        resolvedIntent = classified.intent as StreamResolvedIntent;
         intentConfidence = classified.confidence;
       } catch (err) {
         logger.warn({ err }, "Intent classifier failed in stream route, defaulting");
@@ -731,15 +764,32 @@ router.post(
       }
     }
 
+    const isConverseFamily =
+      resolvedIntent === "converse" ||
+      resolvedIntent === "debug" ||
+      resolvedIntent === "refactor" ||
+      resolvedIntent === "review" ||
+      resolvedIntent === "explain";
+
     // Non-converse: tell client to fall back to the regular endpoint
-    if (resolvedIntent !== "converse") {
+    if (!isConverseFamily) {
       sendEvent({ type: "fallback", intent: resolvedIntent });
       res.end();
       return;
     }
 
     const effectivePlanMode = planMode;
-    const isAmbiguous = intentConfidence < 0.7;
+    const isAmbiguous = resolvedIntent === "converse" && intentConfidence < 0.7;
+    const streamDeveloperIntentPrompts: Record<string, string> = {
+      debug: (await import("../lib/builder")).DEBUG_SYSTEM_PROMPT,
+      refactor: (await import("../lib/builder")).REFACTOR_SYSTEM_PROMPT,
+      review: (await import("../lib/builder")).REVIEW_SYSTEM_PROMPT,
+      explain: (await import("../lib/builder")).EXPLAIN_SYSTEM_PROMPT,
+    };
+    const streamSystemPromptOverride =
+      resolvedIntent !== "converse"
+        ? streamDeveloperIntentPrompts[resolvedIntent]
+        : undefined;
 
     // Save user message
     let userMessageId: number;
@@ -849,7 +899,11 @@ router.post(
           taskId,
         };
       } else {
-        plan = { kind: "converse", taskId };
+        plan = {
+          kind: "converse",
+          taskId,
+          intent: resolvedIntent !== "converse" ? resolvedIntent : undefined,
+        };
       }
 
       // Save the assistant message

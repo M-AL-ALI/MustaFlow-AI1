@@ -80,6 +80,8 @@ import {
   Loader2,
   AlertCircle,
   Moon,
+  Bug,
+  CheckSquare,
 } from "lucide-react";
 
 function SubscriptionTierBadge({ tier }: { tier: "free" | "pro" | "team" }) {
@@ -1652,7 +1654,7 @@ export default function ProjectWorkspacePage() {
         planMode?: boolean;
         background?: boolean;
         agentMode?: AgentMode;
-        agentIntent?: "converse" | "plan" | "build";
+        agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
         attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
       },
     ) => {
@@ -1726,7 +1728,7 @@ export default function ProjectWorkspacePage() {
         planMode?: boolean;
         background?: boolean;
         agentMode?: AgentMode;
-        agentIntent?: "converse" | "plan" | "build";
+        agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
         attachments?: Array<{
           kind: "image";
           url: string;
@@ -1771,6 +1773,10 @@ export default function ProjectWorkspacePage() {
         /^(what|how|why|when|where|who|can you|tell me|explain|does|is there|will|should|could|help me|is it|are there|what is|what are|what does)/i;
       const isLikelyConverse =
         effectiveAgentIntent === "converse" ||
+        effectiveAgentIntent === "debug" ||
+        effectiveAgentIntent === "refactor" ||
+        effectiveAgentIntent === "review" ||
+        effectiveAgentIntent === "explain" ||
         (converseKeywords.test(content.trim()) && !effectivePlanMode);
       pendingIsConverseRef.current = isLikelyConverse;
       setPendingIsConverse(isLikelyConverse);
@@ -1872,7 +1878,7 @@ export default function ProjectWorkspacePage() {
                 finished = true;
                 setIsStreaming(false);
                 setStreamingText("");
-                const fallbackIntent = event.intent as "build" | "plan" | undefined;
+                const fallbackIntent = event.intent as "build" | "plan" | "debug" | "refactor" | "review" | "explain" | undefined;
                 sendRegular(content, {
                   ...opts,
                   agentMode: effectiveMode,
@@ -2825,6 +2831,61 @@ export default function ProjectWorkspacePage() {
                                         </div>
                                       );
                                     })()}
+                                  {msg.role === "assistant" &&
+                                    !isReport &&
+                                    !isError &&
+                                    payloadKind === "converse" &&
+                                    (() => {
+                                      const intentLabel = (
+                                        planPayload as { intent?: string } | null | undefined
+                                      )?.intent;
+                                      if (!intentLabel) return null;
+                                      const INTENT_CHIP_CONFIG: Record<
+                                        string,
+                                        {
+                                          label: string;
+                                          icon: React.ElementType;
+                                          cls: string;
+                                        }
+                                      > = {
+                                        debug: {
+                                          label: "Debug",
+                                          icon: Bug,
+                                          cls: "border-red-500/30 bg-red-500/8 text-red-400",
+                                        },
+                                        refactor: {
+                                          label: "Refactor",
+                                          icon: Wrench,
+                                          cls: "border-yellow-500/30 bg-yellow-500/8 text-yellow-400",
+                                        },
+                                        review: {
+                                          label: "Review",
+                                          icon: CheckSquare,
+                                          cls: "border-blue-500/30 bg-blue-500/8 text-blue-400",
+                                        },
+                                        explain: {
+                                          label: "Explain",
+                                          icon: BookOpen,
+                                          cls: "border-violet-500/30 bg-violet-500/8 text-violet-400",
+                                        },
+                                      };
+                                      const cfg = INTENT_CHIP_CONFIG[intentLabel];
+                                      if (!cfg) return null;
+                                      const ChipIcon = cfg.icon;
+                                      return (
+                                        <div className="mb-1.5 -mt-0.5">
+                                          <span
+                                            className={cn(
+                                              "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-semibold uppercase tracking-wide border pointer-events-none select-none",
+                                              cfg.cls,
+                                            )}
+                                          >
+                                            <ChipIcon className="h-2.5 w-2.5" />
+                                            {cfg.label}
+                                          </span>
+                                        </div>
+                                      );
+                                    })()}
                                   {msg.role === "assistant" && !isReport && !isError ? (
                                     <>
                                       {payloadKind === "converse" && (
@@ -3273,7 +3334,15 @@ export default function ProjectWorkspacePage() {
                               ? { planMode: true, agentIntent: "plan" as const }
                               : intent === "converse"
                                 ? { agentIntent: "converse" as const }
-                                : {}),
+                                : intent === "debug"
+                                  ? { agentIntent: "debug" as const }
+                                  : intent === "refactor"
+                                    ? { agentIntent: "refactor" as const }
+                                    : intent === "review"
+                                      ? { agentIntent: "review" as const }
+                                      : intent === "explain"
+                                        ? { agentIntent: "explain" as const }
+                                        : {}),
                         });
                       }}
                       onBatchStarted={handleBatchStarted}

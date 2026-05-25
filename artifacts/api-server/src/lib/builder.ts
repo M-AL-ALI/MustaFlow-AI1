@@ -40,33 +40,17 @@ const MODEL_FOR_MODE: Record<AgentMode, string> = {
 };
 
 const MODE_QUALITY_STANDARDS: Record<AgentMode, string> = {
-  lite: `QUALITY STANDARD — Lite (speed-first):
-- Minimal working implementation only. Prioritise speed and correctness over polish.
-- Single-page preferred. Skip decorative animations and complex layouts.
-- Functional forms, basic responsive layout, readable typography.
-- Skip empty states, loading skeletons, and complex error handling unless directly requested.`,
+  lite: `QUALITY STANDARD — Lite (quick fix):
+Produce the smallest correct change. Fix the specific issue described. Do not add unrequested features. Use correct types for any new variables. Avoid introducing new dependencies. Output must be immediately runnable.`,
 
-  eco: `QUALITY STANDARD — Eco (balanced):
-- Clean, readable code without over-engineering.
-- Responsive layout with a sensible grid or flex structure.
-- Functional and clean UI — avoid decorative complexity.
-- Basic error messaging on forms. Consistent spacing and colour usage.`,
+  eco: `QUALITY STANDARD — Eco (everyday dev):
+Write clean, readable, idiomatic code. Use TypeScript types for all new interfaces and function signatures. Handle the happy path and common error cases (null checks, empty arrays, failed fetches). Follow existing naming and file conventions in the project. No over-engineering.`,
 
   power: `QUALITY STANDARD — Power (production-grade):
-- Production-quality code. Completeness and robustness are non-negotiable.
-- Full responsive design: mobile-first, tablet, and desktop breakpoints handled.
-- Accessible: colour contrast ≥4.5:1 for text, focus-visible outlines on interactive elements, aria-labels on icon-only buttons, semantic HTML elements.
-- Loading states on async actions, empty states with helpful copy, client-side form validation with inline error messages.
-- Polished UX: smooth hover/focus transitions (150–200ms), consistent spacing scale, no orphaned UI elements.`,
+Write production-ready code. Full TypeScript types — no \`any\`. Comprehensive error handling: network failures, validation errors, empty/null states, and edge cases all handled explicitly. Accessible UI: WCAG AA contrast, semantic HTML, aria-labels, keyboard navigation. Structured code: separation of concerns, no magic numbers, consistent patterns throughout. Loading and empty states for every async operation.`,
 
-  pro: `QUALITY STANDARD — Pro (highest quality):
-- Highest standard of UX, accessibility, and code structure.
-- WCAG AA accessibility: contrast ratios, keyboard navigation, screen-reader labels, focus management.
-- Full responsive: fluid grids, no overflow on any viewport, touch targets ≥44px.
-- Complete error handling: network failures, empty data, validation errors — all states designed.
-- Loading skeletons or spinners for every async operation. Optimistic UI where appropriate.
-- Rich micro-interactions: hover lift effects, active states, animated transitions. Never feel static.
-- Long-term maintainability: logical file structure, named CSS custom properties for theme tokens, no magic numbers.`,
+  pro: `QUALITY STANDARD — Pro (complex systems):
+Security-first: sanitise all user inputs, follow OWASP patterns, never expose secrets, validate on both client and server, use parameterised queries. Full TypeScript strict mode: no implicit any, exhaustive union handling, typed errors. Architectural clarity: clear module boundaries, single-responsibility functions, documented public APIs (JSDoc). Performance-aware: lazy loading, memoize expensive computations, avoid N+1 query patterns. WCAG AA throughout. Long-term maintainability: named constants, no magic strings, composable abstractions.`,
 };
 
 const _MODE_QUALITY_HINTS: Record<AgentMode, string> = {
@@ -7445,7 +7429,7 @@ export async function runPythonRefinePipeline(args: {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type IntentResult = {
-  intent: "converse" | "plan" | "build";
+  intent: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
   confidence: number;
 };
 
@@ -7522,6 +7506,16 @@ function normalizeForRepeatCheck(s: string): string {
     .trim();
 }
 
+// Developer intent patterns — checked before the general converse/build routing.
+const DEBUG_PATTERNS =
+  /\b(stack\s*trace|TypeError|ReferenceError|SyntaxError|exception|is\s+broken|error\s+at|unhandled\s+rejection|crash|debug\s+this|why\s+is\s+this\s+(?:failing|broken|erroring)|traceback|cannot\s+read\s+propert|undefined\s+is\s+not|null\s+is\s+not)\b/i;
+const REFACTOR_PATTERNS =
+  /\b(refactor|clean\s*up|restructure|improve\s+(?:the\s+)?code|simplify|reorganise|reorganize|extract\s+(?:a\s+)?(?:function|component|class|module)|split\s+(?:this\s+)?(?:into|up)|dry\s+(?:this\s+)?(?:up|out)|remove\s+duplication|make\s+(?:it\s+)?more\s+(?:readable|maintainable|clean))\b/i;
+const REVIEW_PATTERNS =
+  /\b(review|code\s*review|check\s+my\s+code|audit|look\s+over|critique|give\s+(?:me\s+)?feedback\s+on|what\s+do\s+you\s+think\s+of\s+(?:this\s+)?code|any\s+(?:issues|problems|improvements)\s+(?:with|in)\s+(?:this\s+)?code)\b/i;
+const EXPLAIN_PATTERNS =
+  /\b(explain|what\s+does\s+(?:this|the)\b|how\s+does\s+(?:this|the)\b|walk\s+me\s+through|take\s+me\s+through|help\s+me\s+understand|break\s+(?:this\s+)?down|what\s+is\s+(?:this\s+)?(?:doing|for|used\s+for)|how\s+(?:does|do)\s+(?:this|the|it)\b|what\s+(?:is|are)\s+(?:this|these)\b)\b/i;
+
 function fastClassify(
   userPrompt: string,
   conversationHistory: ConversationTurn[] = [],
@@ -7533,6 +7527,24 @@ function fastClassify(
   const normalized = trimmed.toLowerCase().replace(/[.!?…]+$/g, "");
   if (SHORT_REACTIONS.has(normalized)) {
     return { intent: "converse", confidence: 0.95 };
+  }
+
+  // Developer-specific intents — check early so they take precedence over generic
+  // build/converse routing. Only trigger on non-imperative messages (questions or
+  // descriptions) that don't look like direct code-change commands.
+  if (!STARTS_WITH_BUILD_IMPERATIVE.test(trimmed) || trimmed.endsWith("?")) {
+    if (hasFiles && DEBUG_PATTERNS.test(trimmed)) {
+      return { intent: "debug", confidence: 0.9 };
+    }
+    if (REFACTOR_PATTERNS.test(trimmed)) {
+      return { intent: "refactor", confidence: 0.9 };
+    }
+    if (REVIEW_PATTERNS.test(trimmed)) {
+      return { intent: "review", confidence: 0.9 };
+    }
+    if (EXPLAIN_PATTERNS.test(trimmed)) {
+      return { intent: "explain", confidence: 0.9 };
+    }
   }
 
   const isImperative = STARTS_WITH_BUILD_IMPERATIVE.test(trimmed);
@@ -7757,7 +7769,83 @@ HELPING USERS BUILD THEIR OWN APPS
 - If a request is genuinely beyond what static previews can do (real auth, persistent DB, file uploads to S3), say so honestly and suggest the React+Vite or backend kinds, or external services they can integrate.
 - Cite the user's own files and existing code when answering. Be specific, not generic.`;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Developer-intent system prompts
+// Each prompt is injected as a systemPromptOverride into runConverseStreamPipeline
+// when the corresponding intent is detected (debug / refactor / review / explain).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DEVELOPER_TONE_ADAPTIVE = `Adaptive tone: if the message contains code blocks, file extensions (.js/.ts/.py/.go/.tsx), stack-trace keywords (TypeError, Traceback, at Object, ReferenceError, Exception), or explicit technical terminology — respond with precise technical language, exact symbol names, and concrete code examples. Otherwise use plain, accessible language.`;
+
+export const DEBUG_SYSTEM_PROMPT = `You are a senior debugger embedded in the MustaFlow AI builder. Your job is root-cause analysis and minimal targeted fixes.
+
+${DEVELOPER_TONE_ADAPTIVE}
+
+When the user shares an error, stack trace, or symptom:
+1. Read every file snippet in your context that could be related.
+2. Identify the EXACT root cause — name the file, function, and line/pattern where the fault originates.
+3. Explain why it fails (one short paragraph, technical precision welcome).
+4. Provide the minimal fix: show only the changed code, not the whole file. Use a diff-style \`\`\`diff block when the change is surgical.
+5. If the fix is simple enough for the builder to apply automatically, end with: "Ready to apply — send any message to let the builder patch it."
+
+Never speculate with multiple "maybe" causes. Pick the most likely one. If you genuinely cannot determine the cause from the snippets available, name exactly which file you need in full and ask the user to trigger the builder.`;
+
+export const REFACTOR_SYSTEM_PROMPT = `You are a senior software engineer reviewing code for quality and maintainability. Your goal: preserve existing behaviour while improving structure.
+
+${DEVELOPER_TONE_ADAPTIVE}
+
+Refactoring principles to apply:
+- Extract repeated logic into named functions or hooks.
+- Replace magic strings/numbers with named constants.
+- Simplify deeply nested conditionals (early returns, guard clauses).
+- Enforce consistent naming conventions across the file.
+- Remove dead code and unused imports.
+- Break large functions (>40 lines) into well-named sub-functions with a single responsibility.
+- For TypeScript: tighten loose types, replace \`any\` with proper interfaces.
+
+Format your response:
+1. A brief diagnosis of the most impactful issues (bullet list).
+2. The refactored code in a code block.
+3. A short "What changed" summary listing the specific transformations applied.
+
+If the refactor affects multiple files, describe the cross-file plan first, then show each file's change.`;
+
+export const REVIEW_SYSTEM_PROMPT = `You are a senior engineer conducting a thorough code review. Produce a structured, actionable review.
+
+${DEVELOPER_TONE_ADAPTIVE}
+
+Review the provided code across these dimensions and output findings in this exact structure:
+
+## Critical
+Issues that will cause bugs, security vulnerabilities, data loss, or broken behaviour. Must be fixed before shipping.
+
+## Warnings
+Code smells, performance issues, accessibility gaps, unhandled edge cases. Should be addressed but won't break things today.
+
+## Suggestions
+Style, maintainability, and best-practice improvements. Nice to have.
+
+## Summary
+One paragraph verdict: overall quality, biggest win, recommended next action.
+
+Be specific: cite the exact function name, variable, or line pattern. Avoid generic advice. If the code is clean in a dimension, say "None" for that section rather than inventing issues.`;
+
+export const EXPLAIN_SYSTEM_PROMPT = `You are a senior engineer explaining code to a colleague. Provide deep technical explanation with architectural context.
+
+${DEVELOPER_TONE_ADAPTIVE}
+
+Structure your explanation:
+1. **What it does** — one sentence purpose statement.
+2. **How it works** — walk through the logic step by step, referencing actual variable names and control flow from the code.
+3. **Why it's designed this way** — architectural rationale: trade-offs made, patterns used (e.g. singleton, observer, factory), constraints respected.
+4. **Key details to know** — edge cases handled, hidden assumptions, gotchas, or subtle behaviours the reader should not miss.
+5. **Related files / dependencies** — what else this code talks to and why.
+
+Use code blocks to illustrate specific points. Keep explanations precise; avoid over-simplifying for non-technical readers unless the user's question is clearly non-technical.`;
+
 export const CONVERSE_SYSTEM_PROMPT = `You are the MustaFlow AI assistant for an AI app builder. You help users understand their app, answer questions, give advice, explain code, and guide them through MustaFlow's features. In this mode you are explaining, not editing — but you ARE a full-capability builder in other modes.
+
+${DEVELOPER_TONE_ADAPTIVE}
 
 ${MUSTAFLOW_PLATFORM_PRIMER}
 
@@ -7812,6 +7900,7 @@ export async function runConversePipeline(args: {
   isAmbiguous?: boolean;
   imageAttachments?: ConverseImageAttachment[];
   conversationSummary?: string;
+  systemPromptOverride?: string;
 }): Promise<ConverseResult> {
   const {
     projectName,
@@ -7822,6 +7911,7 @@ export async function runConversePipeline(args: {
     isAmbiguous,
     imageAttachments,
     conversationSummary,
+    systemPromptOverride,
   } = args;
 
   if (isAmbiguous) {
@@ -7872,6 +7962,7 @@ export async function runConversePipeline(args: {
           .join("\n\n")
       : "No files yet — the app hasn't been built.";
 
+  const effectiveSystemPrompt = systemPromptOverride ?? CONVERSE_SYSTEM_PROMPT;
   const model = modelFor(agentMode);
 
   type TextPart = { type: "text"; text: string };
@@ -7881,7 +7972,7 @@ export async function runConversePipeline(args: {
     | { role: "user"; content: string | Array<TextPart | ImagePart> };
 
   const messages: ChatMsg[] = [
-    { role: "system", content: CONVERSE_SYSTEM_PROMPT },
+    { role: "system", content: effectiveSystemPrompt },
     {
       role: "system",
       content: `Project: "${projectName}"\n\nCurrent files:\n${fileContext}`,
@@ -8046,6 +8137,7 @@ export async function runConverseStreamPipeline(
       : "No project files yet — starting fresh.";
 
   const model = modelFor(agentMode);
+  const effectiveSystemPromptStream = systemPromptOverride ?? CONVERSE_SYSTEM_PROMPT;
 
   type TextPart = { type: "text"; text: string };
   type ImagePart = { type: "image_url"; image_url: { url: string } };

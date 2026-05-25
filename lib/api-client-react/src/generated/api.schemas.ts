@@ -932,7 +932,7 @@ export const ChatMessageInputAgentIdentity = {
 } as const;
 
 /**
- * Optional explicit intent override. If provided, skips server-side intent detection.
+ * Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt.
  */
 export type ChatMessageInputAgentIntent = typeof ChatMessageInputAgentIntent[keyof typeof ChatMessageInputAgentIntent];
 
@@ -941,6 +941,10 @@ export const ChatMessageInputAgentIntent = {
   converse: 'converse',
   plan: 'plan',
   build: 'build',
+  debug: 'debug',
+  refactor: 'refactor',
+  review: 'review',
+  explain: 'explain',
 } as const;
 
 export interface ChatMessageInput {
@@ -951,7 +955,7 @@ export interface ChatMessageInput {
   background?: boolean;
   /** Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically. */
   agentIdentity?: ChatMessageInputAgentIdentity;
-  /** Optional explicit intent override. If provided, skips server-side intent detection. */
+  /** Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. */
   agentIntent?: ChatMessageInputAgentIntent;
   /** Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model. */
   attachments?: ChatAttachment[];

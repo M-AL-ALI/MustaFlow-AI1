@@ -26,6 +26,7 @@ import {
   Layers,
   Puzzle,
   Users,
+  Code2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -54,6 +55,7 @@ const SECONDARY_NAV_ITEMS = [
   { name: "My Domains", href: "/account/domains", icon: ShoppingCart },
   { name: "Integrations", href: "/integrations", icon: Blocks },
   { name: "Organizations", href: "/orgs/new", icon: Building2 },
+  { name: "Developer Portal", href: "/developers", icon: Code2 },
 ];
 
 const ECOSYSTEM_NAV_ITEMS = [
