@@ -189,6 +189,26 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
   // ── Cloudflare for SaaS hostname summary (Task #553) ─────────────────────
   const cfHostnames = await getCfHostnameSummary();
 
+  // ── Token usage analytics (Task #806) ────────────────────────────────────
+  // Aggregates token_count from agent_tasks for the last 30 days to provide
+  // per-task cost breakdowns and platform-wide AI usage reporting.
+  const tokenStatsRow = await db.execute<{
+    total_tokens: string | null;
+    avg_tokens_per_task: string | null;
+    tasks_with_tokens: string;
+    total_tasks: string;
+  }>(sql`
+    SELECT
+      SUM(token_count)::bigint                                          AS total_tokens,
+      AVG(token_count) FILTER (WHERE token_count IS NOT NULL)           AS avg_tokens_per_task,
+      COUNT(*) FILTER (WHERE token_count IS NOT NULL)::int              AS tasks_with_tokens,
+      COUNT(*)::int                                                     AS total_tasks
+    FROM agent_tasks
+    WHERE completed_at > now() - interval '30 days'
+      AND status IN ('completed', 'failed', 'needs_review')
+  `);
+  const tokenRow = tokenStatsRow.rows[0];
+
   res.json({
     projects: {
       total: projectStats?.total ?? 0,
@@ -225,6 +245,15 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
       windowDays: SKILLS_WINDOW_DAYS,
       totalBuildsWithSkills,
       skills: topSkills,
+    },
+    tokenUsage: {
+      windowDays: 30,
+      totalTokens: Number(tokenRow?.total_tokens ?? 0),
+      avgTokensPerTask: tokenRow?.avg_tokens_per_task
+        ? Number(Number(tokenRow.avg_tokens_per_task).toFixed(0))
+        : 0,
+      tasksWithTokens: Number(tokenRow?.tasks_with_tokens ?? 0),
+      totalTasks: Number(tokenRow?.total_tasks ?? 0),
     },
   });
 });

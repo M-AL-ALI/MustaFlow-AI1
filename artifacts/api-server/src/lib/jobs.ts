@@ -254,10 +254,28 @@ async function emitEvent(
   }
 }
 
+// ── Per-task LLM token counter ────────────────────────────────────────────────
+// Accumulates an approximate token count (chars / 4) from streaming deltas.
+// Written to agent_tasks.token_count on task completion and then cleared.
+// Module-level so it survives across async pipeline steps within the same
+// process. The entry is always removed when a task reaches a terminal state.
+const taskTokenCounters = new Map<number, number>();
+
+/**
+ * Return the accumulated token count for a task and remove it from the map.
+ * Returns 0 if no tokens were recorded (e.g. early pre-flight failures).
+ */
+function flushTokenCount(taskId: number): number {
+  const count = taskTokenCounters.get(taskId) ?? 0;
+  taskTokenCounters.delete(taskId);
+  return count;
+}
+
 /**
  * Emit a token delta directly to the event bus without persisting to the DB.
  * Used for streaming code-generation output so the frontend can show a live
  * typing effect while the builder accumulates the full response.
+ * Also accumulates an approximate token count (chars / 4) for billing analytics.
  */
 function emitTokenEvent(taskId: number, delta: string): void {
   publishTaskEvent({
@@ -268,6 +286,9 @@ function emitTokenEvent(taskId: number, delta: string): void {
     filePath: null,
     createdAt: new Date(),
   });
+  // Approximate: 1 token ≈ 4 characters of English text.
+  const approxTokens = Math.ceil(delta.length / 4);
+  taskTokenCounters.set(taskId, (taskTokenCounters.get(taskId) ?? 0) + approxTokens);
 }
 
 async function loadFiles(projectId: number): Promise<BuilderFile[]> {
@@ -1380,6 +1401,7 @@ export async function runJob(input: JobInput): Promise<void> {
           status: "failed",
           result: "Project not found",
           completedAt: sql`now()`,
+          tokenCount: flushTokenCount(taskId),
         })
         .where(eq(agentTasksTable.id, taskId));
       return;
@@ -1496,7 +1518,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           await emitEvent(taskId, "failed", msg);
           await db
             .update(agentTasksTable)
-            .set({ status: "failed", result: msg, completedAt: sql`now()` })
+            .set({
+              status: "failed",
+              result: msg,
+              completedAt: sql`now()`,
+              tokenCount: flushTokenCount(taskId),
+            })
             .where(eq(agentTasksTable.id, taskId));
           return;
         }
@@ -1529,7 +1556,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         await emitEvent(taskId, "failed", msg);
         await db
           .update(agentTasksTable)
-          .set({ status: "failed", result: msg, completedAt: sql`now()` })
+          .set({
+            status: "failed",
+            result: msg,
+            completedAt: sql`now()`,
+            tokenCount: flushTokenCount(taskId),
+          })
           .where(eq(agentTasksTable.id, taskId));
         // Task #638 — pause any remaining queued siblings so they don't drain
         // and fail one-by-one with the same insufficient-credits error.
@@ -2638,6 +2670,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             report,
             stagingSnapshot: stagingData,
             completedAt: sql`now()`,
+            tokenCount: flushTokenCount(taskId),
           })
           .where(eq(agentTasksTable.id, taskId));
 
@@ -2871,6 +2904,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 warnings: [...(report.warnings ?? []), migResult.error],
               },
               completedAt: sql`now()`,
+              tokenCount: flushTokenCount(taskId),
             })
             .where(eq(agentTasksTable.id, taskId));
           return;
@@ -3153,6 +3187,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           result: assistantSummary,
           report,
           completedAt: sql`now()`,
+          tokenCount: flushTokenCount(taskId),
         })
         .where(
           and(
@@ -3849,6 +3884,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         (err.message === "Build cancelled" || abortController.signal.aborted)
       ) {
         await emitEvent(taskId, "cancelled", "Build cancelled by user.");
+        // Flush the token counter before entering the transaction so we can
+        // persist the partial count even for mid-run cancellations.
+        const canceledTokenCount = flushTokenCount(taskId);
         // Atomically transition to canceled and clear reserved credits, capturing
         // the prior reserved amount so we can refund exactly once (Task #509).
         const cancelTx = await db.transaction(async (tx) => {
@@ -3859,7 +3897,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             .limit(1);
           await tx
             .update(agentTasksTable)
-            .set({ status: "canceled", completedAt: sql`now()`, creditsReserved: null })
+            .set({
+              status: "canceled",
+              completedAt: sql`now()`,
+              creditsReserved: null,
+              tokenCount: canceledTokenCount,
+            })
             .where(eq(agentTasksTable.id, taskId));
           return { reserved: pre?.creditsReserved ?? 0 };
         });
@@ -3885,11 +3928,17 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       await emitEvent(taskId, "failed", message);
 
       // Generate specific fix suggestions via AI (parallel with DB writes)
+      const finalTokenCount = flushTokenCount(taskId);
       const [suggestions] = await Promise.all([
         generateFixSuggestions(userPrompt, message),
         db
           .update(agentTasksTable)
-          .set({ status: "failed", result: message, completedAt: sql`now()` })
+          .set({
+            status: "failed",
+            result: message,
+            completedAt: sql`now()`,
+            tokenCount: finalTokenCount,
+          })
           .where(eq(agentTasksTable.id, taskId)),
         db
           .update(projectsTable)

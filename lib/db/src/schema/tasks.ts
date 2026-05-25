@@ -327,6 +327,10 @@ export const agentTasksTable = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    // Total LLM tokens consumed by this task (prompt + completion across all AI calls).
+    // Accumulated from streaming deltas in emitTokenEvent; written on task completion.
+    // Null for tasks completed before Task #806 migration.
+    tokenCount: integer("token_count"),
   },
   (table) => [
     index("agent_tasks_project_id_created_at_idx").on(table.projectId, table.createdAt),

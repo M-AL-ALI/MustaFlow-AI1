@@ -71,6 +71,7 @@ const MIGRATIONS = [
   "migrate-preview-db",
   "migrate-testing-workflow",
   "migrate-deployment-logs-mobile",
+  "migrate-token-count",
 ] as const;
 
 async function main(): Promise<void> {
