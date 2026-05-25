@@ -5424,3 +5424,200 @@ export const RefreshPurchasedDomainInfoResponse = zod.object({
 })
 
 
+/**
+ * @summary List all projects owned by the caller
+ */
+export const V1ListProjectsResponse = zod.object({
+  "projects": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "name": zod.string().optional(),
+  "description": zod.string().nullish(),
+  "kind": zod.string().optional(),
+  "platform": zod.string().optional(),
+  "stack": zod.string().optional(),
+  "status": zod.string().optional(),
+  "agentMode": zod.string().optional(),
+  "publicSlug": zod.string().nullish(),
+  "siteTitle": zod.string().nullish(),
+  "metaDescription": zod.string().nullish(),
+  "customDomain": zod.string().nullish(),
+  "domainStatus": zod.string().optional(),
+  "provisioningStatus": zod.string().optional(),
+  "builderMode": zod.string().optional(),
+  "containerStatus": zod.string().nullish(),
+  "createdAt": zod.coerce.date().optional(),
+  "updatedAt": zod.coerce.date().optional()
+})).optional(),
+  "total": zod.number().optional()
+})
+
+
+/**
+ * @summary Create a new project
+ */
+export const v1CreateProjectBodyNameMax = 120;
+
+export const v1CreateProjectBodyDescriptionMax = 500;
+
+export const v1CreateProjectBodyKindDefault = `web`;
+export const v1CreateProjectBodyStackDefault = `react-vite`;
+
+export const V1CreateProjectBody = zod.object({
+  "name": zod.string().max(v1CreateProjectBodyNameMax).describe('Project name (max 120 characters)'),
+  "description": zod.string().max(v1CreateProjectBodyDescriptionMax).optional().describe('Short project description (max 500 characters)'),
+  "kind": zod.string().default(v1CreateProjectBodyKindDefault).describe('Project kind: web | mobile-ios | mobile-android | mobile-cross'),
+  "stack": zod.string().default(v1CreateProjectBodyStackDefault).describe('Technology stack: react-vite | nextjs | node-api | python-flask | python-fastapi')
+})
+
+
+/**
+ * @summary Get a single project by id
+ */
+export const V1GetProjectParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const V1GetProjectResponse = zod.object({
+  "project": zod.object({
+  "id": zod.number().optional(),
+  "name": zod.string().optional(),
+  "description": zod.string().nullish(),
+  "kind": zod.string().optional(),
+  "platform": zod.string().optional(),
+  "stack": zod.string().optional(),
+  "status": zod.string().optional(),
+  "agentMode": zod.string().optional(),
+  "publicSlug": zod.string().nullish(),
+  "siteTitle": zod.string().nullish(),
+  "metaDescription": zod.string().nullish(),
+  "customDomain": zod.string().nullish(),
+  "domainStatus": zod.string().optional(),
+  "provisioningStatus": zod.string().optional(),
+  "builderMode": zod.string().optional(),
+  "containerStatus": zod.string().nullish(),
+  "createdAt": zod.coerce.date().optional(),
+  "updatedAt": zod.coerce.date().optional()
+}).optional()
+})
+
+
+/**
+ * @summary List builds (AI tasks) for a project
+ */
+export const V1ListBuildsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const v1ListBuildsQueryLimitDefault = 20;
+export const v1ListBuildsQueryLimitMax = 100;
+
+
+
+export const V1ListBuildsQueryParams = zod.object({
+  "limit": zod.coerce.number().min(1).max(v1ListBuildsQueryLimitMax).default(v1ListBuildsQueryLimitDefault)
+})
+
+export const V1ListBuildsResponse = zod.object({
+  "builds": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "projectId": zod.number().optional(),
+  "title": zod.string().optional(),
+  "prompt": zod.string().nullish(),
+  "status": zod.string().optional().describe('queued | planning | building | completed | failed | cancelled'),
+  "kind": zod.string().optional(),
+  "agentMode": zod.string().nullish(),
+  "elapsedSeconds": zod.number().nullish(),
+  "result": zod.string().nullish(),
+  "createdAt": zod.coerce.date().optional(),
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish()
+})).optional(),
+  "total": zod.number().optional()
+})
+
+
+/**
+ * @summary Trigger a new AI build for a project
+ */
+export const V1TriggerBuildParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const v1TriggerBuildBodyPromptMax = 2000;
+
+
+
+export const V1TriggerBuildBody = zod.object({
+  "prompt": zod.string().max(v1TriggerBuildBodyPromptMax).describe('Natural language description of what to build or change')
+})
+
+
+/**
+ * @summary Poll the status of a specific build
+ */
+export const V1GetBuildParams = zod.object({
+  "id": zod.coerce.number(),
+  "buildId": zod.coerce.number()
+})
+
+export const V1GetBuildResponse = zod.object({
+  "build": zod.object({
+  "id": zod.number().optional(),
+  "projectId": zod.number().optional(),
+  "title": zod.string().optional(),
+  "prompt": zod.string().nullish(),
+  "status": zod.string().optional().describe('queued | planning | building | completed | failed | cancelled'),
+  "kind": zod.string().optional(),
+  "agentMode": zod.string().nullish(),
+  "elapsedSeconds": zod.number().nullish(),
+  "result": zod.string().nullish(),
+  "createdAt": zod.coerce.date().optional(),
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish()
+}).optional()
+})
+
+
+/**
+ * @summary Cancel an in-progress or queued build
+ */
+export const V1CancelBuildParams = zod.object({
+  "id": zod.coerce.number(),
+  "buildId": zod.coerce.number()
+})
+
+export const V1CancelBuildResponse = zod.object({
+  "cancelled": zod.boolean().optional(),
+  "buildId": zod.number().optional()
+})
+
+
+/**
+ * @summary List all generated files for a project (metadata only)
+ */
+export const V1ListFilesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const V1ListFilesResponse = zod.object({
+  "files": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "path": zod.string().optional(),
+  "mimeType": zod.string().optional(),
+  "size": zod.number().optional().describe('File size in bytes (content length)'),
+  "artifactId": zod.number().nullish(),
+  "updatedAt": zod.coerce.date().optional()
+})).optional(),
+  "total": zod.number().optional()
+})
+
+
+/**
+ * @summary Download a generated file by its path
+ */
+export const V1DownloadFileParams = zod.object({
+  "id": zod.coerce.number(),
+  "path": zod.coerce.string().describe('File path within the project (e.g. index.html or src\/App.tsx)')
+})
+
+

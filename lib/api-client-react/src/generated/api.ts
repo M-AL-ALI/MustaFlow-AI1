@@ -264,6 +264,17 @@ import type {
   UploadUrlResponse,
   UserCredit,
   UserPreferences,
+  V1CancelBuild200,
+  V1CreateProject201,
+  V1CreateProjectInput,
+  V1GetBuild200,
+  V1GetProject200,
+  V1ListBuilds200,
+  V1ListBuildsParams,
+  V1ListFiles200,
+  V1ListProjects200,
+  V1TriggerBuild202,
+  V1TriggerBuildBody,
   VisualEditInput,
   VisualEditResult,
   WhoisContactUpdate,
@@ -15911,6 +15922,705 @@ export function useRefreshPurchasedDomainInfo<TData = Awaited<ReturnType<typeof 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getRefreshPurchasedDomainInfoQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getV1ListProjectsUrl = () => {
+
+
+
+
+  return `/api/v1/projects`
+}
+
+/**
+ * @summary List all projects owned by the caller
+ */
+export const v1ListProjects = async ( options?: RequestInit): Promise<V1ListProjects200> => {
+
+  return customFetch<V1ListProjects200>(getV1ListProjectsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getV1ListProjectsQueryKey = () => {
+    return [
+    `/api/v1/projects`
+    ] as const;
+    }
+
+
+export const getV1ListProjectsQueryOptions = <TData = Awaited<ReturnType<typeof v1ListProjects>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1ListProjects>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getV1ListProjectsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof v1ListProjects>>> = ({ signal }) => v1ListProjects({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof v1ListProjects>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type V1ListProjectsQueryResult = NonNullable<Awaited<ReturnType<typeof v1ListProjects>>>
+export type V1ListProjectsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List all projects owned by the caller
+ */
+
+export function useV1ListProjects<TData = Awaited<ReturnType<typeof v1ListProjects>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1ListProjects>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getV1ListProjectsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getV1CreateProjectUrl = () => {
+
+
+
+
+  return `/api/v1/projects`
+}
+
+/**
+ * @summary Create a new project
+ */
+export const v1CreateProject = async (v1CreateProjectInput: V1CreateProjectInput, options?: RequestInit): Promise<V1CreateProject201> => {
+
+  return customFetch<V1CreateProject201>(getV1CreateProjectUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      v1CreateProjectInput,)
+  }
+);}
+
+
+
+
+export const getV1CreateProjectMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof v1CreateProject>>, TError,{data: BodyType<V1CreateProjectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof v1CreateProject>>, TError,{data: BodyType<V1CreateProjectInput>}, TContext> => {
+
+const mutationKey = ['v1CreateProject'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof v1CreateProject>>, {data: BodyType<V1CreateProjectInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  v1CreateProject(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type V1CreateProjectMutationResult = NonNullable<Awaited<ReturnType<typeof v1CreateProject>>>
+    export type V1CreateProjectMutationBody = BodyType<V1CreateProjectInput>
+    export type V1CreateProjectMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Create a new project
+ */
+export const useV1CreateProject = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof v1CreateProject>>, TError,{data: BodyType<V1CreateProjectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof v1CreateProject>>,
+        TError,
+        {data: BodyType<V1CreateProjectInput>},
+        TContext
+      > => {
+      return useMutation(getV1CreateProjectMutationOptions(options));
+    }
+
+export const getV1GetProjectUrl = (id: number,) => {
+
+
+
+
+  return `/api/v1/projects/${id}`
+}
+
+/**
+ * @summary Get a single project by id
+ */
+export const v1GetProject = async (id: number, options?: RequestInit): Promise<V1GetProject200> => {
+
+  return customFetch<V1GetProject200>(getV1GetProjectUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getV1GetProjectQueryKey = (id: number,) => {
+    return [
+    `/api/v1/projects/${id}`
+    ] as const;
+    }
+
+
+export const getV1GetProjectQueryOptions = <TData = Awaited<ReturnType<typeof v1GetProject>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1GetProject>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getV1GetProjectQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof v1GetProject>>> = ({ signal }) => v1GetProject(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof v1GetProject>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type V1GetProjectQueryResult = NonNullable<Awaited<ReturnType<typeof v1GetProject>>>
+export type V1GetProjectQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get a single project by id
+ */
+
+export function useV1GetProject<TData = Awaited<ReturnType<typeof v1GetProject>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1GetProject>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getV1GetProjectQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getV1ListBuildsUrl = (id: number,
+    params?: V1ListBuildsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/projects/${id}/builds?${stringifiedParams}` : `/api/v1/projects/${id}/builds`
+}
+
+/**
+ * @summary List builds (AI tasks) for a project
+ */
+export const v1ListBuilds = async (id: number,
+    params?: V1ListBuildsParams, options?: RequestInit): Promise<V1ListBuilds200> => {
+
+  return customFetch<V1ListBuilds200>(getV1ListBuildsUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getV1ListBuildsQueryKey = (id: number,
+    params?: V1ListBuildsParams,) => {
+    return [
+    `/api/v1/projects/${id}/builds`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getV1ListBuildsQueryOptions = <TData = Awaited<ReturnType<typeof v1ListBuilds>>, TError = ErrorType<ApiError>>(id: number,
+    params?: V1ListBuildsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1ListBuilds>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getV1ListBuildsQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof v1ListBuilds>>> = ({ signal }) => v1ListBuilds(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof v1ListBuilds>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type V1ListBuildsQueryResult = NonNullable<Awaited<ReturnType<typeof v1ListBuilds>>>
+export type V1ListBuildsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List builds (AI tasks) for a project
+ */
+
+export function useV1ListBuilds<TData = Awaited<ReturnType<typeof v1ListBuilds>>, TError = ErrorType<ApiError>>(
+ id: number,
+    params?: V1ListBuildsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1ListBuilds>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getV1ListBuildsQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getV1TriggerBuildUrl = (id: number,) => {
+
+
+
+
+  return `/api/v1/projects/${id}/builds`
+}
+
+/**
+ * @summary Trigger a new AI build for a project
+ */
+export const v1TriggerBuild = async (id: number,
+    v1TriggerBuildBody: V1TriggerBuildBody, options?: RequestInit): Promise<V1TriggerBuild202> => {
+
+  return customFetch<V1TriggerBuild202>(getV1TriggerBuildUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      v1TriggerBuildBody,)
+  }
+);}
+
+
+
+
+export const getV1TriggerBuildMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof v1TriggerBuild>>, TError,{id: number;data: BodyType<V1TriggerBuildBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof v1TriggerBuild>>, TError,{id: number;data: BodyType<V1TriggerBuildBody>}, TContext> => {
+
+const mutationKey = ['v1TriggerBuild'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof v1TriggerBuild>>, {id: number;data: BodyType<V1TriggerBuildBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  v1TriggerBuild(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type V1TriggerBuildMutationResult = NonNullable<Awaited<ReturnType<typeof v1TriggerBuild>>>
+    export type V1TriggerBuildMutationBody = BodyType<V1TriggerBuildBody>
+    export type V1TriggerBuildMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Trigger a new AI build for a project
+ */
+export const useV1TriggerBuild = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof v1TriggerBuild>>, TError,{id: number;data: BodyType<V1TriggerBuildBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof v1TriggerBuild>>,
+        TError,
+        {id: number;data: BodyType<V1TriggerBuildBody>},
+        TContext
+      > => {
+      return useMutation(getV1TriggerBuildMutationOptions(options));
+    }
+
+export const getV1GetBuildUrl = (id: number,
+    buildId: number,) => {
+
+
+
+
+  return `/api/v1/projects/${id}/builds/${buildId}`
+}
+
+/**
+ * @summary Poll the status of a specific build
+ */
+export const v1GetBuild = async (id: number,
+    buildId: number, options?: RequestInit): Promise<V1GetBuild200> => {
+
+  return customFetch<V1GetBuild200>(getV1GetBuildUrl(id,buildId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getV1GetBuildQueryKey = (id: number,
+    buildId: number,) => {
+    return [
+    `/api/v1/projects/${id}/builds/${buildId}`
+    ] as const;
+    }
+
+
+export const getV1GetBuildQueryOptions = <TData = Awaited<ReturnType<typeof v1GetBuild>>, TError = ErrorType<ApiError>>(id: number,
+    buildId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1GetBuild>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getV1GetBuildQueryKey(id,buildId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof v1GetBuild>>> = ({ signal }) => v1GetBuild(id,buildId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && buildId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof v1GetBuild>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type V1GetBuildQueryResult = NonNullable<Awaited<ReturnType<typeof v1GetBuild>>>
+export type V1GetBuildQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Poll the status of a specific build
+ */
+
+export function useV1GetBuild<TData = Awaited<ReturnType<typeof v1GetBuild>>, TError = ErrorType<ApiError>>(
+ id: number,
+    buildId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1GetBuild>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getV1GetBuildQueryOptions(id,buildId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getV1CancelBuildUrl = (id: number,
+    buildId: number,) => {
+
+
+
+
+  return `/api/v1/projects/${id}/builds/${buildId}/cancel`
+}
+
+/**
+ * @summary Cancel an in-progress or queued build
+ */
+export const v1CancelBuild = async (id: number,
+    buildId: number, options?: RequestInit): Promise<V1CancelBuild200> => {
+
+  return customFetch<V1CancelBuild200>(getV1CancelBuildUrl(id,buildId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getV1CancelBuildMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof v1CancelBuild>>, TError,{id: number;buildId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof v1CancelBuild>>, TError,{id: number;buildId: number}, TContext> => {
+
+const mutationKey = ['v1CancelBuild'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof v1CancelBuild>>, {id: number;buildId: number}> = (props) => {
+          const {id,buildId} = props ?? {};
+
+          return  v1CancelBuild(id,buildId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type V1CancelBuildMutationResult = NonNullable<Awaited<ReturnType<typeof v1CancelBuild>>>
+
+    export type V1CancelBuildMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Cancel an in-progress or queued build
+ */
+export const useV1CancelBuild = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof v1CancelBuild>>, TError,{id: number;buildId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof v1CancelBuild>>,
+        TError,
+        {id: number;buildId: number},
+        TContext
+      > => {
+      return useMutation(getV1CancelBuildMutationOptions(options));
+    }
+
+export const getV1ListFilesUrl = (id: number,) => {
+
+
+
+
+  return `/api/v1/projects/${id}/files`
+}
+
+/**
+ * @summary List all generated files for a project (metadata only)
+ */
+export const v1ListFiles = async (id: number, options?: RequestInit): Promise<V1ListFiles200> => {
+
+  return customFetch<V1ListFiles200>(getV1ListFilesUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getV1ListFilesQueryKey = (id: number,) => {
+    return [
+    `/api/v1/projects/${id}/files`
+    ] as const;
+    }
+
+
+export const getV1ListFilesQueryOptions = <TData = Awaited<ReturnType<typeof v1ListFiles>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1ListFiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getV1ListFilesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof v1ListFiles>>> = ({ signal }) => v1ListFiles(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof v1ListFiles>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type V1ListFilesQueryResult = NonNullable<Awaited<ReturnType<typeof v1ListFiles>>>
+export type V1ListFilesQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List all generated files for a project (metadata only)
+ */
+
+export function useV1ListFiles<TData = Awaited<ReturnType<typeof v1ListFiles>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1ListFiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getV1ListFilesQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getV1DownloadFileUrl = (id: number,
+    path: string,) => {
+
+
+
+
+  return `/api/v1/projects/${id}/files/${path}`
+}
+
+/**
+ * @summary Download a generated file by its path
+ */
+export const v1DownloadFile = async (id: number,
+    path: string, options?: RequestInit): Promise<Blob> => {
+
+  return customFetch<Blob>(getV1DownloadFileUrl(id,path),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getV1DownloadFileQueryKey = (id: number,
+    path: string,) => {
+    return [
+    `/api/v1/projects/${id}/files/${path}`
+    ] as const;
+    }
+
+
+export const getV1DownloadFileQueryOptions = <TData = Awaited<ReturnType<typeof v1DownloadFile>>, TError = ErrorType<ApiError>>(id: number,
+    path: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1DownloadFile>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getV1DownloadFileQueryKey(id,path);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof v1DownloadFile>>> = ({ signal }) => v1DownloadFile(id,path, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && path), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof v1DownloadFile>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type V1DownloadFileQueryResult = NonNullable<Awaited<ReturnType<typeof v1DownloadFile>>>
+export type V1DownloadFileQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Download a generated file by its path
+ */
+
+export function useV1DownloadFile<TData = Awaited<ReturnType<typeof v1DownloadFile>>, TError = ErrorType<ApiError>>(
+ id: number,
+    path: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof v1DownloadFile>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getV1DownloadFileQueryOptions(id,path,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

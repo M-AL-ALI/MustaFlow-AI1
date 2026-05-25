@@ -3366,6 +3366,70 @@ export interface RenewDomainResponse {
   priceUsd?: number;
 }
 
+export interface V1Project {
+  id?: number;
+  name?: string;
+  description?: string | null;
+  kind?: string;
+  platform?: string;
+  stack?: string;
+  status?: string;
+  agentMode?: string;
+  publicSlug?: string | null;
+  siteTitle?: string | null;
+  metaDescription?: string | null;
+  customDomain?: string | null;
+  domainStatus?: string;
+  provisioningStatus?: string;
+  builderMode?: string;
+  containerStatus?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface V1CreateProjectInput {
+  /**
+     * Project name (max 120 characters)
+     * @maxLength 120
+     */
+  name: string;
+  /**
+     * Short project description (max 500 characters)
+     * @maxLength 500
+     */
+  description?: string;
+  /** Project kind: web | mobile-ios | mobile-android | mobile-cross */
+  kind?: string;
+  /** Technology stack: react-vite | nextjs | node-api | python-flask | python-fastapi */
+  stack?: string;
+}
+
+export interface V1Build {
+  id?: number;
+  projectId?: number;
+  title?: string;
+  prompt?: string | null;
+  /** queued | planning | building | completed | failed | cancelled */
+  status?: string;
+  kind?: string;
+  agentMode?: string | null;
+  elapsedSeconds?: number | null;
+  result?: string | null;
+  createdAt?: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+export interface V1FileMeta {
+  id?: number;
+  path?: string;
+  mimeType?: string;
+  /** File size in bytes (content length) */
+  size?: number;
+  artifactId?: number | null;
+  updatedAt?: string;
+}
+
 export type RequestProjectUploadUrlBody = {
   name: string;
   contentType?: string;
@@ -4095,5 +4159,59 @@ export type RefreshPurchasedDomainInfo200NamecheapInfo = { [key: string]: unknow
 export type RefreshPurchasedDomainInfo200 = {
   domain: PurchasedDomain;
   namecheapInfo?: RefreshPurchasedDomainInfo200NamecheapInfo;
+};
+
+export type V1ListProjects200 = {
+  projects?: V1Project[];
+  total?: number;
+};
+
+export type V1CreateProject201 = {
+  project?: V1Project;
+};
+
+export type V1GetProject200 = {
+  project?: V1Project;
+};
+
+export type V1ListBuildsParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+};
+
+export type V1ListBuilds200 = {
+  builds?: V1Build[];
+  total?: number;
+};
+
+export type V1TriggerBuildBody = {
+  /**
+     * Natural language description of what to build or change
+     * @maxLength 2000
+     */
+  prompt: string;
+};
+
+export type V1TriggerBuild202 = {
+  build?: V1Build;
+  queued?: boolean;
+  message?: string;
+};
+
+export type V1GetBuild200 = {
+  build?: V1Build;
+};
+
+export type V1CancelBuild200 = {
+  cancelled?: boolean;
+  buildId?: number;
+};
+
+export type V1ListFiles200 = {
+  files?: V1FileMeta[];
+  total?: number;
 };
 

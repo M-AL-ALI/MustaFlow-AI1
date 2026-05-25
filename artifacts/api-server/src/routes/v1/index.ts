@@ -1,27 +1,45 @@
 /**
- * Public REST API v1 — stable, versioned domain + DNS operations.
+ * Public REST API v1 — stable, versioned operations.
  * Mounted at /api/v1 (no /api prefix rewrite needed — Express handles it).
  *
- * Auth: Bearer personal access token (PAT).
+ * Auth: Bearer personal access token (PAT) OR Clerk session cookie.
+ * The v1AuthMiddleware below tries PAT first, then falls back to the Clerk
+ * session already resolved by clerkMiddleware() in app.ts.
  *
  * Routes:
- *   GET    /api/v1/projects/:id/domains         — list domains
- *   POST   /api/v1/projects/:id/domains         — add domain
- *   DELETE /api/v1/projects/:id/domains/:domainId — remove domain
+ *   GET    /api/v1/projects                              — list caller's projects
+ *   GET    /api/v1/projects/:id                          — get a project
+ *   POST   /api/v1/projects                              — create a project
+ *   GET    /api/v1/projects/:id/builds                   — list builds
+ *   GET    /api/v1/projects/:id/builds/:buildId          — poll a build
+ *   POST   /api/v1/projects/:id/builds                   — trigger a build
+ *   POST   /api/v1/projects/:id/builds/:buildId/cancel   — cancel a build
+ *   GET    /api/v1/projects/:id/files                    — list generated files
+ *   GET    /api/v1/projects/:id/files/*path              — download a file
+ *   GET    /api/v1/projects/:id/domains                  — list domains
+ *   POST   /api/v1/projects/:id/domains                  — add domain
+ *   DELETE /api/v1/projects/:id/domains/:domainId        — remove domain
  *   POST   /api/v1/projects/:id/domains/:domainId/verify — trigger verify
- *   GET    /api/v1/tokens                       — list caller's PATs (masked)
- *   POST   /api/v1/tokens                       — create a PAT
- *   DELETE /api/v1/tokens/:tokenId              — revoke a PAT
+ *   GET    /api/v1/tokens                                — list caller's PATs (masked)
+ *   POST   /api/v1/tokens                                — create a PAT
+ *   DELETE /api/v1/tokens/:tokenId                       — revoke a PAT
  */
 
 import { Router, type IRouter } from "express";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import type { Request, Response, NextFunction } from "express";
+import { and, asc, eq } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
 import { promises as dns } from "dns";
-import { db, projectsTable, projectDomainsTable, personalAccessTokensTable } from "@workspace/db";
+import { db, projectDomainsTable, personalAccessTokensTable } from "@workspace/db";
 import { patAuthMiddleware, type PATRequest } from "../../lib/pat-auth";
 import { publishDomainEvent } from "../../lib/event-bus";
 import { dispatchWebhookEvent } from "../../lib/webhook-dispatcher";
+import { getAuth } from "@clerk/express";
+import { logger } from "../../lib/logger";
+import { checkV1ProjectAccess, isPatAuth } from "./access";
+import projectsRouter from "./projects";
+import buildsRouter from "./builds";
+import filesRouter from "./files";
 
 const router: IRouter = Router();
 
@@ -55,37 +73,53 @@ function normaliseHostname(raw: string): string | null {
   }
 }
 
-/** Check that a PAT can access the given project. */
-async function checkProjectAccess(
-  req: Parameters<typeof patAuthMiddleware>[0],
-  projectId: number,
-): Promise<boolean> {
-  // If the token is scoped to a specific project, enforce it
-  if (req.patProjectId !== null && req.patProjectId !== undefined) {
-    return req.patProjectId === projectId;
+// ── Combined PAT + Clerk session auth middleware ───────────────────────────────
+// Tries Bearer PAT first. If no Authorization header is present, falls back to
+// the Clerk session already resolved by clerkMiddleware() in app.ts.
+async function v1AuthMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const auth = req.headers["authorization"];
+  if (auth && auth.startsWith("Bearer ")) {
+    // Delegate to the existing PAT middleware.
+    return patAuthMiddleware(req, res, next);
   }
-  // User-scoped token — verify ownership via DB
-  const [proj] = await db
-    .select({ id: projectsTable.id })
-    .from(projectsTable)
-    .where(
-      and(
-        eq(projectsTable.id, projectId),
-        eq(projectsTable.ownerId, req.userId!),
-        isNull(projectsTable.deletedAt),
-      ),
-    );
-  return Boolean(proj);
+
+  // No Bearer token — check if Clerk has already resolved a session.
+  try {
+    const clerkAuth = getAuth(req);
+    const userId =
+      (clerkAuth?.sessionClaims?.["userId"] as string | undefined) ?? clerkAuth?.userId;
+
+    if (!userId) {
+      res.status(401).json({
+        error: "Authentication required. Provide a Bearer PAT token or a valid session cookie.",
+      });
+      return;
+    }
+
+    req.userId = userId;
+    // Session auth has no PAT scopes.
+    req.patProjectId = undefined;
+    req.patScopes = [];
+    next();
+  } catch (err) {
+    logger.warn({ err }, "v1 auth error");
+    res.status(401).json({ error: "Authentication error." });
+  }
 }
 
-// ── All v1 routes require PAT auth ────────────────────────────────────────────
-router.use(patAuthMiddleware);
+// ── All v1 routes require auth ────────────────────────────────────────────────
+router.use(v1AuthMiddleware);
+
+// ── Mount sub-routers for projects, builds, and files ─────────────────────────
+router.use(projectsRouter);
+router.use(buildsRouter);
+router.use(filesRouter);
 
 // ── GET /api/v1/projects/:id/domains ─────────────────────────────────────────
 router.get("/projects/:id/domains", async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
-  if (!(await checkProjectAccess(req, projectId))) {
-    res.status(403).json({ error: "Access denied to this project." });
+  if (!(await checkV1ProjectAccess(req, projectId))) {
+    res.status(404).json({ error: "Project not found." });
     return;
   }
 
@@ -101,13 +135,13 @@ router.get("/projects/:id/domains", async (req, res): Promise<void> => {
 // ── POST /api/v1/projects/:id/domains ────────────────────────────────────────
 router.post("/projects/:id/domains", async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
-  if (!(await checkProjectAccess(req, projectId))) {
-    res.status(403).json({ error: "Access denied to this project." });
+  if (!(await checkV1ProjectAccess(req, projectId))) {
+    res.status(404).json({ error: "Project not found." });
     return;
   }
 
-  const patReq = req as unknown as PATRequest;
-  if (!patReq.patScopes?.includes("domains:write")) {
+  // Scope check: PAT tokens must carry domains:write. Session auth is exempt.
+  if (isPatAuth(req) && !(req as unknown as PATRequest).patScopes?.includes("domains:write")) {
     res.status(403).json({ error: "Token does not have domains:write scope." });
     return;
   }
@@ -165,13 +199,13 @@ router.delete("/projects/:id/domains/:domainId", async (req, res): Promise<void>
   const projectId = Number(req.params.id);
   const domainId = Number(req.params.domainId);
 
-  if (!(await checkProjectAccess(req, projectId))) {
-    res.status(403).json({ error: "Access denied to this project." });
+  if (!(await checkV1ProjectAccess(req, projectId))) {
+    res.status(404).json({ error: "Project not found." });
     return;
   }
 
-  const patReq2 = req as unknown as PATRequest;
-  if (!patReq2.patScopes?.includes("domains:write")) {
+  // Scope check: PAT tokens must carry domains:write. Session auth is exempt.
+  if (isPatAuth(req) && !(req as unknown as PATRequest).patScopes?.includes("domains:write")) {
     res.status(403).json({ error: "Token does not have domains:write scope." });
     return;
   }
@@ -201,8 +235,8 @@ router.post("/projects/:id/domains/:domainId/verify", async (req, res): Promise<
   const projectId = Number(req.params.id);
   const domainId = Number(req.params.domainId);
 
-  if (!(await checkProjectAccess(req, projectId))) {
-    res.status(403).json({ error: "Access denied to this project." });
+  if (!(await checkV1ProjectAccess(req, projectId))) {
+    res.status(404).json({ error: "Project not found." });
     return;
   }
 
@@ -300,10 +334,20 @@ router.post("/tokens", async (req, res): Promise<void> => {
     return;
   }
 
-  const validScopes = ["domains:read", "domains:write", "webhooks:read", "webhooks:write"];
+  const validScopes = [
+    "domains:read",
+    "domains:write",
+    "webhooks:read",
+    "webhooks:write",
+    "projects:read",
+    "projects:write",
+    "builds:read",
+    "builds:write",
+    "files:read",
+  ];
   const resolvedScopes = Array.isArray(scopes)
     ? scopes.filter((s) => validScopes.includes(s))
-    : ["domains:read", "domains:write"];
+    : ["projects:read", "builds:read", "files:read"];
 
   const raw = generateRawToken();
   const tokenHash = hashToken(raw);

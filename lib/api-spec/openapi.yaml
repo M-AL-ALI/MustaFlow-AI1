@@ -50,6 +50,8 @@ tags:
     description: CVE dependency scanning and findings management
   - name: security-findings
     description: Persistent security findings across builds (dismiss/fix workflow)
+  - name: v1
+    description: Public stable REST API (v1) — accepts Bearer PAT token or session cookie
 paths:
   /healthz:
     get:
@@ -4783,6 +4785,257 @@ paths:
                     nullable: true
                     additionalProperties: true
 
+  # ── Public REST API v1 ────────────────────────────────────────────────────────
+  # All v1 routes accept Bearer PAT or a Clerk session cookie.
+
+  /v1/projects:
+    get:
+      operationId: v1ListProjects
+      tags: [v1]
+      summary: List all projects owned by the caller
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items: { $ref: "#/components/schemas/V1Project" }
+                  total: { type: integer }
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    post:
+      operationId: v1CreateProject
+      tags: [v1]
+      summary: Create a new project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/V1CreateProjectInput" }
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project: { $ref: "#/components/schemas/V1Project" }
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /v1/projects/{id}:
+    get:
+      operationId: v1GetProject
+      tags: [v1]
+      summary: Get a single project by id
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project: { $ref: "#/components/schemas/V1Project" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /v1/projects/{id}/builds:
+    get:
+      operationId: v1ListBuilds
+      tags: [v1]
+      summary: List builds (AI tasks) for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - {
+            name: limit,
+            in: query,
+            required: false,
+            schema: { type: integer, minimum: 1, maximum: 100, default: 20 },
+          }
+      responses:
+        "200":
+          description: Build list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  builds:
+                    type: array
+                    items: { $ref: "#/components/schemas/V1Build" }
+                  total: { type: integer }
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    post:
+      operationId: v1TriggerBuild
+      tags: [v1]
+      summary: Trigger a new AI build for a project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt:
+                  type: string
+                  description: Natural language description of what to build or change
+                  maxLength: 2000
+      responses:
+        "202":
+          description: Build accepted (started or queued)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  build: { $ref: "#/components/schemas/V1Build" }
+                  queued: { type: boolean }
+                  message: { type: string }
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /v1/projects/{id}/builds/{buildId}:
+    get:
+      operationId: v1GetBuild
+      tags: [v1]
+      summary: Poll the status of a specific build
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: buildId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Build status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  build: { $ref: "#/components/schemas/V1Build" }
+        "404":
+          description: Build or project not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /v1/projects/{id}/builds/{buildId}/cancel:
+    post:
+      operationId: v1CancelBuild
+      tags: [v1]
+      summary: Cancel an in-progress or queued build
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: buildId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancelled: { type: boolean }
+                  buildId: { type: integer }
+        "404":
+          description: Build or project not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "409":
+          description: Build is not cancellable in its current state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /v1/projects/{id}/files:
+    get:
+      operationId: v1ListFiles
+      tags: [v1]
+      summary: List all generated files for a project (metadata only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: File list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items: { $ref: "#/components/schemas/V1FileMeta" }
+                  total: { type: integer }
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /v1/projects/{id}/files/{path}:
+    get:
+      operationId: v1DownloadFile
+      tags: [v1]
+      summary: Download a generated file by its path
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - {
+            name: path,
+            in: path,
+            required: true,
+            schema: { type: string },
+            description: "File path within the project (e.g. index.html or src/App.tsx)",
+          }
+      responses:
+        "200":
+          description: Raw file content with correct Content-Type header
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: File or project not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
 components:
   schemas:
     HealthStatus:
@@ -7686,3 +7939,76 @@ components:
         clientSecret: { type: string }
         paymentIntentId: { type: string }
         priceUsd: { type: number }
+
+    # ── v1 public REST API schemas ─────────────────────────────────────────────
+
+    V1Project:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        kind: { type: string }
+        platform: { type: string }
+        stack: { type: string }
+        status: { type: string }
+        agentMode: { type: string }
+        publicSlug: { type: string, nullable: true }
+        siteTitle: { type: string, nullable: true }
+        metaDescription: { type: string, nullable: true }
+        customDomain: { type: string, nullable: true }
+        domainStatus: { type: string }
+        provisioningStatus: { type: string }
+        builderMode: { type: string }
+        containerStatus: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    V1CreateProjectInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Project name (max 120 characters)
+          maxLength: 120
+        description:
+          type: string
+          description: Short project description (max 500 characters)
+          maxLength: 500
+        kind:
+          type: string
+          description: "Project kind: web | mobile-ios | mobile-android | mobile-cross"
+          default: web
+        stack:
+          type: string
+          description: "Technology stack: react-vite | nextjs | node-api | python-flask | python-fastapi"
+          default: react-vite
+
+    V1Build:
+      type: object
+      properties:
+        id: { type: integer }
+        projectId: { type: integer }
+        title: { type: string }
+        prompt: { type: string, nullable: true }
+        status:
+          type: string
+          description: "queued | planning | building | completed | failed | cancelled"
+        kind: { type: string }
+        agentMode: { type: string, nullable: true }
+        elapsedSeconds: { type: integer, nullable: true }
+        result: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+
+    V1FileMeta:
+      type: object
+      properties:
+        id: { type: integer }
+        path: { type: string }
+        mimeType: { type: string }
+        size: { type: integer, description: File size in bytes (content length) }
+        artifactId: { type: integer, nullable: true }
+        updatedAt: { type: string, format: date-time }

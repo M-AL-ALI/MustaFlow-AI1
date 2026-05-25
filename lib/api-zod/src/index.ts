@@ -45,3 +45,5 @@ export { RateKnowledgeBody } from "./generated/api";
 export { ApplyFileSuggestionBody } from "./generated/api";
 export { ApplyFileSuggestionParams } from "./generated/api";
 export { ApplyFileSuggestionResponse } from "./generated/api";
+export { V1ListBuildsParams } from "./generated/api";
+export { V1TriggerBuildBody } from "./generated/api";
