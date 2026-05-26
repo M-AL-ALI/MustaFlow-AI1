@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useLocation } from "wouter";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
 import {
   Sun,
@@ -28,6 +29,8 @@ import {
   FlaskConical,
   CheckCircle2,
   XCircle,
+  Sparkles,
+  LayoutGrid,
 } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
@@ -36,6 +39,8 @@ import {
   useGetUserCredits,
   useListCreditTransactions,
   getBillingCheckoutSession,
+  useGetMyPreferences,
+  useUpdateMyPreferences,
 } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -385,6 +390,9 @@ function AccountTab() {
           />
         </div>
       </div>
+
+      {/* Mode */}
+      <ModeSection />
     </div>
   );
 }
@@ -414,6 +422,111 @@ function AppearanceOption({
       <Icon className="h-5 w-5" />
       {label}
     </button>
+  );
+}
+
+function ModeSection() {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const prefsQuery = useGetMyPreferences({
+    query: { queryKey: ["/api/me/preferences"] },
+  });
+  const updatePreferences = useUpdateMyPreferences();
+  const [switching, setSwitching] = useState<"builder" | "developer" | null>(null);
+
+  const currentMode = prefsQuery.data?.preferredMode ?? null;
+
+  async function handleSwitch(mode: "builder" | "developer") {
+    if (switching || mode === currentMode) return;
+    setSwitching(mode);
+    try {
+      await updatePreferences.mutateAsync({ data: { preferredMode: mode } });
+      toast({
+        title: "Mode updated",
+        description: `Switched to ${mode === "builder" ? "AI Build Mode" : "Developer Mode"}.`,
+      });
+      setLocation(mode === "builder" ? "/projects" : "/dev");
+    } catch {
+      toast({
+        title: "Something went wrong",
+        description: "Could not update your mode. Please try again.",
+        variant: "destructive",
+      });
+      setSwitching(null);
+    }
+  }
+
+  return (
+    <div className="border border-border rounded-xl bg-card p-6 space-y-4">
+      <div className="flex items-center gap-2 mb-2">
+        <LayoutGrid className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-base font-semibold">Mode</h2>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Switch between AI Build Mode and Developer Mode at any time.
+      </p>
+      {prefsQuery.isPending ? (
+        <div className="flex gap-3">
+          <div className="h-20 flex-1 bg-muted rounded-lg animate-pulse" />
+          <div className="h-20 flex-1 bg-muted rounded-lg animate-pulse" />
+        </div>
+      ) : (
+        <div className="flex gap-3">
+          <button
+            onClick={() => void handleSwitch("builder")}
+            disabled={switching !== null}
+            className={`flex-1 flex flex-col items-start gap-2 px-4 py-4 rounded-lg border text-sm font-medium transition-all text-left ${
+              currentMode === "builder"
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
+            } disabled:opacity-60 disabled:cursor-not-allowed`}
+          >
+            <div className="flex items-center gap-2">
+              {switching === "builder" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              <span>AI Build Mode</span>
+              {currentMode === "builder" && (
+                <span className="ml-auto text-xs font-normal bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">
+                  Active
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-normal text-muted-foreground">
+              No code needed — describe it, Zero builds it.
+            </span>
+          </button>
+          <button
+            onClick={() => void handleSwitch("developer")}
+            disabled={switching !== null}
+            className={`flex-1 flex flex-col items-start gap-2 px-4 py-4 rounded-lg border text-sm font-medium transition-all text-left ${
+              currentMode === "developer"
+                ? "border-violet-500/70 bg-violet-500/10 text-violet-400"
+                : "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
+            } disabled:opacity-60 disabled:cursor-not-allowed`}
+          >
+            <div className="flex items-center gap-2">
+              {switching === "developer" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Code2 className="h-4 w-4" />
+              )}
+              <span>Developer Mode</span>
+              {currentMode === "developer" && (
+                <span className="ml-auto text-xs font-normal bg-violet-500/20 text-violet-400 px-1.5 py-0.5 rounded-full">
+                  Active
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-normal text-muted-foreground">
+              Full cloud IDE — file tree, terminal, AI agent, live preview.
+            </span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

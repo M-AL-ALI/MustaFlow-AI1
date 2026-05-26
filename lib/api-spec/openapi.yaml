@@ -6280,12 +6280,20 @@ components:
       properties:
         userId: { type: string }
         dismissedOnboarding: { type: boolean }
+        preferredMode:
+          type: string
+          enum: [builder, developer]
+          nullable: true
         updatedAt: { type: string, format: date-time }
 
     UpdatePreferencesBody:
       type: object
       properties:
         dismissedOnboarding: { type: boolean }
+        preferredMode:
+          type: string
+          enum: [builder, developer]
+          nullable: true
 
     UserCredit:
       type: object

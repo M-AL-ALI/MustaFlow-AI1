@@ -5,9 +5,11 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { UserPreferencesPreferredMode } from './userPreferencesPreferredMode';
 
 export interface UserPreferences {
   userId: string;
   dismissedOnboarding: boolean;
+  preferredMode?: UserPreferencesPreferredMode;
   updatedAt: Date;
 }

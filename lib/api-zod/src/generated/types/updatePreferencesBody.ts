@@ -5,7 +5,9 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { UpdatePreferencesBodyPreferredMode } from './updatePreferencesBodyPreferredMode';
 
 export interface UpdatePreferencesBody {
   dismissedOnboarding?: boolean;
+  preferredMode?: UpdatePreferencesBodyPreferredMode;
 }

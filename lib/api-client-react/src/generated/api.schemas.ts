@@ -1705,14 +1705,32 @@ export interface MobileBuildLogsResult {
   logs?: string;
 }
 
+export type UserPreferencesPreferredMode = typeof UserPreferencesPreferredMode[keyof typeof UserPreferencesPreferredMode] | null;
+
+
+export const UserPreferencesPreferredMode = {
+  builder: 'builder',
+  developer: 'developer',
+} as const;
+
 export interface UserPreferences {
   userId: string;
   dismissedOnboarding: boolean;
+  preferredMode?: UserPreferencesPreferredMode;
   updatedAt: string;
 }
 
+export type UpdatePreferencesBodyPreferredMode = typeof UpdatePreferencesBodyPreferredMode[keyof typeof UpdatePreferencesBodyPreferredMode] | null;
+
+
+export const UpdatePreferencesBodyPreferredMode = {
+  builder: 'builder',
+  developer: 'developer',
+} as const;
+
 export interface UpdatePreferencesBody {
   dismissedOnboarding?: boolean;
+  preferredMode?: UpdatePreferencesBodyPreferredMode;
 }
 
 export interface UserCredit {

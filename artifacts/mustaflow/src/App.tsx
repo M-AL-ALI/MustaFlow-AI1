@@ -9,7 +9,11 @@ import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth } from "@clerk/r
 import { ClerkUserProvider, ClerkActionsProvider } from "@/lib/clerk-safe";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
-import { useGetAdminMe, setAuthTokenGetter } from "@workspace/api-client-react";
+import {
+  useGetAdminMe,
+  useGetMyPreferences,
+  setAuthTokenGetter,
+} from "@workspace/api-client-react";
 import NotFound from "@/pages/not-found";
 
 // Pages
@@ -53,6 +57,8 @@ import { OfflineIndicator } from "./components/offline-indicator";
 import TrustPage from "./pages/trust";
 import DevelopersPage from "./pages/developers";
 import DevelopersChangelogPage from "./pages/developers-changelog";
+import ModeSelectPage from "./pages/mode-select";
+import DevPage from "./pages/dev";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -320,12 +326,33 @@ function SignUpPage() {
   );
 }
 
-// Home: public landing for visitors; authenticated users land on /projects.
+// Fetches preferredMode and redirects signed-in users to the right dashboard.
+// Shows a minimal spinner while the preferences load to avoid a flash.
+function SmartSignedInRedirect() {
+  const prefsQuery = useGetMyPreferences({
+    query: { queryKey: ["/api/me/preferences"] },
+  });
+
+  if (prefsQuery.isPending) {
+    return (
+      <div className="flex items-center justify-center min-h-[100dvh]">
+        <div className="h-5 w-5 rounded-full border-2 border-border border-t-primary animate-spin" />
+      </div>
+    );
+  }
+
+  const mode = prefsQuery.data?.preferredMode ?? null;
+  if (mode === "builder") return <Redirect to="/projects" />;
+  if (mode === "developer") return <Redirect to="/dev" />;
+  return <Redirect to="/mode-select" />;
+}
+
+// Home: public landing for visitors; authenticated users redirect to their mode dashboard.
 function HomeRoute() {
   return (
     <>
       <Show when="signed-in">
-        <Redirect to="/projects" />
+        <SmartSignedInRedirect />
       </Show>
       <Show when="signed-out">
         <HomePage />
@@ -368,6 +395,16 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
               </Route>
 
               {/* ── Protected routes ── */}
+              <Route path="/mode-select">
+                <Protected>
+                  <ModeSelectPage />
+                </Protected>
+              </Route>
+              <Route path="/dev">
+                <Protected>
+                  <DevPage />
+                </Protected>
+              </Route>
               <Route path="/projects">
                 <Protected>
                   <AppLayout>

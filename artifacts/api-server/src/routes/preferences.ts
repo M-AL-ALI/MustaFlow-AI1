@@ -36,12 +36,14 @@ router.get("/me/preferences", async (req, res): Promise<void> => {
   res.json({
     userId: prefs.userId,
     dismissedOnboarding: prefs.dismissedOnboarding,
+    preferredMode: prefs.preferredMode ?? null,
     updatedAt: prefs.updatedAt,
   });
 });
 
 const updatePreferencesSchema = z.object({
   dismissedOnboarding: z.boolean().optional(),
+  preferredMode: z.enum(["builder", "developer"]).nullable().optional(),
 });
 
 router.patch("/me/preferences", async (req, res): Promise<void> => {
@@ -61,6 +63,9 @@ router.patch("/me/preferences", async (req, res): Promise<void> => {
   if (parsed.data.dismissedOnboarding !== undefined) {
     updates.dismissedOnboarding = parsed.data.dismissedOnboarding;
   }
+  if (parsed.data.preferredMode !== undefined) {
+    updates.preferredMode = parsed.data.preferredMode;
+  }
 
   const [updated] = await db
     .insert(userPreferencesTable)
@@ -74,6 +79,7 @@ router.patch("/me/preferences", async (req, res): Promise<void> => {
   res.json({
     userId: updated!.userId,
     dismissedOnboarding: updated!.dismissedOnboarding,
+    preferredMode: updated!.preferredMode ?? null,
     updatedAt: updated!.updatedAt,
   });
 });

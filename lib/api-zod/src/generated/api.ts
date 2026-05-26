@@ -3545,6 +3545,7 @@ export const SetProjectSubdomainResponse = zod.object({
 export const GetMyPreferencesResponse = zod.object({
   "userId": zod.string(),
   "dismissedOnboarding": zod.boolean(),
+  "preferredMode": zod.enum(['builder', 'developer']).nullish(),
   "updatedAt": zod.coerce.date()
 })
 
@@ -3553,12 +3554,14 @@ export const GetMyPreferencesResponse = zod.object({
  * @summary Update current user preferences
  */
 export const UpdateMyPreferencesBody = zod.object({
-  "dismissedOnboarding": zod.boolean().optional()
+  "dismissedOnboarding": zod.boolean().optional(),
+  "preferredMode": zod.enum(['builder', 'developer']).nullish()
 })
 
 export const UpdateMyPreferencesResponse = zod.object({
   "userId": zod.string(),
   "dismissedOnboarding": zod.boolean(),
+  "preferredMode": zod.enum(['builder', 'developer']).nullish(),
   "updatedAt": zod.coerce.date()
 })
 
