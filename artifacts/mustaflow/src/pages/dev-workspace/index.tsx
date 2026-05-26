@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useParams } from "wouter";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
@@ -11,7 +11,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { X, Bot, Send, Loader2 } from "lucide-react";
 
 import { IconRail, type PanelId } from "./components/icon-rail";
 import { TopBar, type PaneLayout } from "./components/top-bar";
@@ -30,6 +29,7 @@ import { TerminalPanel } from "./components/terminal-panel";
 import { PreviewPane } from "./components/preview-pane";
 import { DevCanvasTab } from "./components/canvas-tab";
 import { DeploymentPanel } from "./components/deployment-panel";
+import { DevChatPanel } from "./components/dev-chat-panel";
 
 type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
 
@@ -44,142 +44,6 @@ interface FileEntry {
   id: number;
   path: string;
   content?: string;
-}
-
-interface AgentMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
-// ── Zero Agent right-docked chat panel ────────────────────────────────────────
-function ZeroAgentPanel({ projectId, onClose }: { projectId: number; onClose: () => void }) {
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const send = useCallback(async () => {
-    const text = input.trim();
-    if (!text || loading) return;
-    setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { response?: string; message?: string };
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: data.response ?? data.message ?? "(no response)" },
-        ]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "Sorry, I ran into an error. Please try again." },
-        ]);
-      }
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Network error. Please check your connection." },
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  }, [input, loading, projectId]);
-
-  return (
-    <div className="flex flex-col h-full border-l border-border bg-zinc-950 min-w-0">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-        <div className="flex items-center gap-2">
-          <Bot className="h-4 w-4 text-primary" />
-          <span className="text-xs font-semibold text-foreground">Zero Agent</span>
-        </div>
-        <button
-          onClick={onClose}
-          className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center gap-3 pt-8 text-center">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-              <Bot className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <div className="text-sm font-medium text-foreground mb-1">Zero Agent</div>
-              <div className="text-[11px] text-muted-foreground max-w-[180px] leading-relaxed">
-                Ask me to write code, fix bugs, explain errors, or refactor files.
-              </div>
-            </div>
-          </div>
-        )}
-        {messages.map((msg, i) => (
-          <div key={i} className={msg.role === "user" ? "flex justify-end" : "flex justify-start"}>
-            <div
-              className={
-                msg.role === "user"
-                  ? "bg-primary/15 border border-primary/20 text-foreground text-[11px] rounded-xl rounded-br-sm px-3 py-2 max-w-[85%] leading-relaxed"
-                  : "bg-muted/60 border border-border text-foreground text-[11px] rounded-xl rounded-bl-sm px-3 py-2 max-w-[85%] leading-relaxed whitespace-pre-wrap"
-              }
-            >
-              {msg.content}
-            </div>
-          </div>
-        ))}
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bg-muted/60 border border-border text-muted-foreground text-[11px] rounded-xl rounded-bl-sm px-3 py-2">
-              <Loader2 className="h-3 w-3 animate-spin" />
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input */}
-      <div className="shrink-0 border-t border-border p-2">
-        <div className="flex items-end gap-1.5 bg-muted/40 border border-border rounded-xl px-3 py-2 focus-within:border-primary/40 transition-colors">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            placeholder="Ask Zero Agent…"
-            rows={2}
-            className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/60 outline-none resize-none leading-relaxed"
-          />
-          <button
-            onClick={() => void send()}
-            disabled={!input.trim() || loading}
-            className="flex items-center justify-center h-6 w-6 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-opacity shrink-0"
-          >
-            <Send className="h-3 w-3" />
-          </button>
-        </div>
-        <p className="text-[9px] text-muted-foreground/50 text-center mt-1">
-          Enter to send · Shift+Enter for new line
-        </p>
-      </div>
-    </div>
-  );
 }
 
 export default function DevWorkspacePage() {
@@ -243,7 +107,6 @@ export default function DevWorkspacePage() {
   // ── Panel state ───────────────────────────────────────────────────────────
   const [activePanel, setActivePanel] = useState<PanelId>("files");
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
-  const [zeroAgentOpen, setZeroAgentOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [paneLayout, setPaneLayout] = useState<PaneLayout>("default");
   const [toolsSearchOpen, setToolsSearchOpen] = useState(false);
@@ -252,14 +115,13 @@ export default function DevWorkspacePage() {
   const handlePanelToggle = useCallback(
     (panel: PanelId) => {
       if (panel === "zero-agent") {
-        setZeroAgentOpen((v) => !v);
+        // Zero agent is always visible as the left main panel — nothing to toggle
         return;
       }
       if (panel === "canvas") {
         setCanvasOpen((v) => !v);
         return;
       }
-      // Clicking any left-panel icon while canvas is open: close canvas, show editor+panel
       setCanvasOpen(false);
       if (activePanel === panel) {
         setLeftPanelVisible((v) => !v);
@@ -292,9 +154,8 @@ export default function DevWorkspacePage() {
     }
   }, []);
 
-  // Derived visibility from pane layout
   const showPreview = paneLayout !== "editor-max";
-  const showLeftPanel =
+  const showToolsPanel =
     leftPanelVisible && paneLayout !== "editor-max" && paneLayout !== "preview-max";
 
   // ── Editor state ──────────────────────────────────────────────────────────
@@ -404,7 +265,6 @@ export default function DevWorkspacePage() {
     [projectId, updateProject, queryClient],
   );
 
-  // ── Open new tab ──────────────────────────────────────────────────────────
   const handleOpenNewTab = useCallback(() => {
     window.open(window.location.href, "_blank");
   }, []);
@@ -423,13 +283,12 @@ export default function DevWorkspacePage() {
           onSelect={(panelId) => {
             if (panelId === "canvas") {
               setCanvasOpen(true);
-              setZeroAgentOpen(false);
             } else {
               setCanvasOpen(false);
               setActivePanel(panelId);
               setLeftPanelVisible(true);
-              setZeroAgentOpen(false);
             }
+            setToolsSearchOpen(false);
           }}
         />
 
@@ -461,20 +320,21 @@ export default function DevWorkspacePage() {
         <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Icon rail */}
           <IconRail
-            activePanel={zeroAgentOpen ? "zero-agent" : canvasOpen ? "canvas" : activePanel}
+            activePanel={canvasOpen ? "canvas" : activePanel}
             onPanelToggle={handlePanelToggle}
             onOpenSearch={() => setToolsSearchOpen(true)}
           />
 
-          {/* Main panel group */}
+          {/* ── Main 3-column panel group ─────────────────────────────────── */}
           <PanelGroup direction="horizontal" className="flex-1 min-w-0">
-            {/* Left panel */}
-            {showLeftPanel && (
+
+            {/* ── Column 1: Tools panel (file tree, search, etc.) ─────────── */}
+            {showToolsPanel && (
               <>
                 <Panel
-                  defaultSize={18}
-                  minSize={12}
-                  maxSize={35}
+                  defaultSize={15}
+                  minSize={10}
+                  maxSize={30}
                   className="border-r border-border bg-zinc-950 overflow-hidden"
                 >
                   {activePanel === "files" && (
@@ -520,110 +380,130 @@ export default function DevWorkspacePage() {
               </>
             )}
 
-            {/* Center: tab bar + canvas board OR editor + terminal */}
+            {/* ── Column 2: Chat thread + Composer (stacked) ──────────────── */}
             <Panel
-              defaultSize={showLeftPanel ? (showPreview ? 50 : 82) : showPreview ? 65 : 100}
-              minSize={25}
+              defaultSize={showToolsPanel ? (showPreview ? 28 : 40) : showPreview ? 35 : 50}
+              minSize={22}
+              maxSize={55}
+              className="overflow-hidden border-r border-border"
             >
-              <div className="flex flex-col h-full min-h-0">
-                {/* Center-panel tab bar */}
-                <div className="shrink-0 flex items-center gap-0 border-b border-border bg-zinc-950 px-2">
-                  <button
-                    onClick={() => setCanvasOpen(false)}
-                    className={[
-                      "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                      !canvasOpen
-                        ? "border-primary text-foreground"
-                        : "border-transparent text-muted-foreground hover:text-foreground",
-                    ].join(" ")}
-                  >
-                    Editor
-                  </button>
-                  <button
-                    onClick={() => setCanvasOpen(true)}
-                    className={[
-                      "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                      canvasOpen
-                        ? "border-primary text-foreground"
-                        : "border-transparent text-muted-foreground hover:text-foreground",
-                    ].join(" ")}
-                  >
-                    Canvas
-                  </button>
-                </div>
-
-                {/* Tab content */}
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  {canvasOpen ? (
-                    <DevCanvasTab
-                      projectId={projectId}
-                      onProjectFilesChanged={() => {
-                        setRefreshTrigger((n) => n + 1);
-                        void queryClient.invalidateQueries({
-                          queryKey: getListProjectFilesQueryKey(projectId),
-                        });
-                      }}
-                    />
-                  ) : (
-                    <PanelGroup direction="vertical">
-                      {/* Monaco editor */}
-                      <Panel defaultSize={70} minSize={30} className="overflow-hidden">
-                        <MonacoEditorPane
-                          projectId={projectId}
-                          tabs={tabs}
-                          activeTabIndex={activeTabIndex}
-                          diffView={diffView}
-                          onTabClose={handleTabClose}
-                          onTabActivate={setActiveTabIndex}
-                          onContentChange={handleContentChange}
-                          onFileSaved={handleFileSaved}
-                          onDiffClose={() => setDiffView(null)}
-                        />
-                      </Panel>
-
-                      <PanelResizeHandle className="h-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
-
-                      {/* Terminal panel */}
-                      <Panel defaultSize={30} minSize={15} maxSize={60} className="overflow-hidden">
-                        <TerminalPanel
-                          projectId={projectId}
-                          containerStatus={containerStatus}
-                          containerUrl={containerUrl}
-                          onStartContainer={() => void handleStartContainer()}
-                          isStarting={isStarting}
-                        />
-                      </Panel>
-                    </PanelGroup>
-                  )}
-                </div>
-              </div>
+              <DevChatPanel
+                projectId={projectId}
+                onBuildComplete={() => {
+                  void queryClient.invalidateQueries({
+                    queryKey: getListProjectFilesQueryKey(projectId),
+                  });
+                  setRefreshTrigger((n) => n + 1);
+                }}
+              />
             </Panel>
 
-            {/* Right: preview pane */}
-            {showPreview && (
-              <>
-                <PanelResizeHandle className="w-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
-                <Panel defaultSize={32} minSize={20} maxSize={60} className="overflow-hidden">
-                  <PreviewPane
-                    projectId={projectId}
-                    containerUrl={containerUrl}
-                    containerStatus={containerStatus}
-                    previewUrl={previewUrl}
-                    refreshTrigger={refreshTrigger}
-                  />
-                </Panel>
-              </>
-            )}
+            <PanelResizeHandle className="w-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
 
-            {/* Zero Agent: right-docked chat panel */}
-            {zeroAgentOpen && (
-              <>
-                <PanelResizeHandle className="w-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
-                <Panel defaultSize={26} minSize={20} maxSize={45} className="overflow-hidden">
-                  <ZeroAgentPanel projectId={projectId} onClose={() => setZeroAgentOpen(false)} />
-                </Panel>
-              </>
-            )}
+            {/* ── Column 3: Editor + Terminal / Canvas / Preview ───────────── */}
+            <Panel
+              defaultSize={showToolsPanel ? (showPreview ? 57 : 60) : showPreview ? 65 : 50}
+              minSize={30}
+              className="overflow-hidden"
+            >
+              <PanelGroup direction="horizontal" className="h-full">
+                {/* Editor + terminal OR canvas */}
+                {paneLayout !== "preview-max" && (
+                  <>
+                    <Panel defaultSize={showPreview ? 50 : 100} minSize={25} className="overflow-hidden">
+                      <div className="flex flex-col h-full min-h-0">
+                        {/* Center-panel tab bar */}
+                        <div className="shrink-0 flex items-center gap-0 border-b border-border bg-zinc-950 px-2">
+                          <button
+                            onClick={() => setCanvasOpen(false)}
+                            className={[
+                              "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                              !canvasOpen
+                                ? "border-primary text-foreground"
+                                : "border-transparent text-muted-foreground hover:text-foreground",
+                            ].join(" ")}
+                          >
+                            Editor
+                          </button>
+                          <button
+                            onClick={() => setCanvasOpen(true)}
+                            className={[
+                              "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                              canvasOpen
+                                ? "border-primary text-foreground"
+                                : "border-transparent text-muted-foreground hover:text-foreground",
+                            ].join(" ")}
+                          >
+                            Canvas
+                          </button>
+                        </div>
+
+                        <div className="flex-1 min-h-0 overflow-hidden">
+                          {canvasOpen ? (
+                            <DevCanvasTab
+                              projectId={projectId}
+                              onProjectFilesChanged={() => {
+                                setRefreshTrigger((n) => n + 1);
+                                void queryClient.invalidateQueries({
+                                  queryKey: getListProjectFilesQueryKey(projectId),
+                                });
+                              }}
+                            />
+                          ) : (
+                            <PanelGroup direction="vertical">
+                              <Panel defaultSize={65} minSize={30} className="overflow-hidden">
+                                <MonacoEditorPane
+                                  projectId={projectId}
+                                  tabs={tabs}
+                                  activeTabIndex={activeTabIndex}
+                                  diffView={diffView}
+                                  onTabClose={handleTabClose}
+                                  onTabActivate={setActiveTabIndex}
+                                  onContentChange={handleContentChange}
+                                  onFileSaved={handleFileSaved}
+                                  onDiffClose={() => setDiffView(null)}
+                                />
+                              </Panel>
+                              <PanelResizeHandle className="h-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
+                              <Panel defaultSize={35} minSize={15} maxSize={60} className="overflow-hidden">
+                                <TerminalPanel
+                                  projectId={projectId}
+                                  containerStatus={containerStatus}
+                                  containerUrl={containerUrl}
+                                  onStartContainer={() => void handleStartContainer()}
+                                  isStarting={isStarting}
+                                />
+                              </Panel>
+                            </PanelGroup>
+                          )}
+                        </div>
+                      </div>
+                    </Panel>
+
+                    {showPreview && (
+                      <PanelResizeHandle className="w-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
+                    )}
+                  </>
+                )}
+
+                {/* Preview pane */}
+                {showPreview && (
+                  <Panel
+                    defaultSize={paneLayout === "preview-max" ? 100 : 50}
+                    minSize={20}
+                    className="overflow-hidden"
+                  >
+                    <PreviewPane
+                      projectId={projectId}
+                      containerUrl={containerUrl}
+                      containerStatus={containerStatus}
+                      previewUrl={previewUrl}
+                      refreshTrigger={refreshTrigger}
+                    />
+                  </Panel>
+                )}
+              </PanelGroup>
+            </Panel>
           </PanelGroup>
         </div>
       </div>
