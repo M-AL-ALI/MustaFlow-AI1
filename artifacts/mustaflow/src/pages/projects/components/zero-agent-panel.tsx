@@ -674,13 +674,22 @@ export function ZeroAgentPanel({
     });
   }, [activeTaskId, projectId, queryClient]);
 
-  const sortedMessages = useMemo(
-    () =>
-      [...messagesArr]
-        .filter((m) => m.origin === "zero")
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
+  // Legacy fallback: if no messages have origin='zero' yet (pre-backfill projects),
+  // show all messages so the thread isn't empty. New messages will carry origin='zero'
+  // going forward, at which point the filter takes effect naturally.
+  const hasZeroOriginMessages = useMemo(
+    () => messagesArr.some((m) => m.origin === "zero"),
     [messagesArr],
   );
+
+  const sortedMessages = useMemo(() => {
+    const filtered = hasZeroOriginMessages
+      ? messagesArr.filter((m) => m.origin === "zero")
+      : messagesArr;
+    return [...filtered].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+  }, [messagesArr, hasZeroOriginMessages]);
 
   const sortedVersions = useMemo(
     () =>
@@ -847,6 +856,14 @@ export function ZeroAgentPanel({
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Legacy fallback notice — shown when no zero-tagged messages exist yet */}
+          {!hasZeroOriginMessages && sortedMessages.length > 0 && (
+            <div className="mx-3 mb-2 px-3 py-2 rounded-lg bg-muted/40 border border-border/50 text-[10px] text-muted-foreground leading-relaxed">
+              Showing all messages. Older messages predate Zero's thread filter and won't be
+              separated from the main chat. New conversations will be filtered automatically.
             </div>
           )}
 

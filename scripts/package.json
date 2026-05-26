@@ -77,6 +77,7 @@
     "migrate-project-mode": "tsx ./src/migrate-project-mode.ts",
     "migrate-canvas-state": "tsx ./src/migrate-canvas-state.ts",
     "migrate-message-origin": "tsx ./src/migrate-message-origin.ts",
+    "backfill-message-origin": "tsx ./src/backfill-message-origin.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
