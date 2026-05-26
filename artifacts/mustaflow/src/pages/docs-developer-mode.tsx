@@ -44,13 +44,7 @@ function Section({ number, icon: Icon, title, summary, children }: SectionProps)
   );
 }
 
-function CalloutBox({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function CalloutBox({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 mt-3">
       <p className="text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
@@ -176,8 +170,8 @@ export default function DocsDevModePage() {
             </p>
             <CalloutBox title="Core tools">
               <p>
-                <span className="font-mono text-foreground">read_file</span> — read an existing
-                file from the container filesystem
+                <span className="font-mono text-foreground">read_file</span> — read an existing file
+                from the container filesystem
               </p>
               <p>
                 <span className="font-mono text-foreground">write_file</span> — create or overwrite
@@ -196,8 +190,8 @@ export default function DocsDevModePage() {
                 (npm/pip/cargo) without raw shell access
               </p>
               <p>
-                <span className="font-mono text-foreground">list_files / search</span> — explore
-                the project before editing
+                <span className="font-mono text-foreground">list_files / search</span> — explore the
+                project before editing
               </p>
             </CalloutBox>
             <p className="mt-2">

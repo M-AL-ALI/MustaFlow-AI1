@@ -31,11 +31,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
 import logoUrl from "/logo.png";
 import type { PanelId } from "./icon-rail";
@@ -441,10 +437,7 @@ export function TopBar({
             </TooltipTrigger>
             <TooltipContent>How Developer Mode works</TooltipContent>
           </Tooltip>
-          <PopoverContent
-            align="end"
-            className="w-80 p-0 bg-zinc-900 border-border text-sm"
-          >
+          <PopoverContent align="end" className="w-80 p-0 bg-zinc-900 border-border text-sm">
             <div className="px-4 py-3 border-b border-border">
               <p className="font-semibold text-foreground">How Developer Mode works</p>
               <p className="text-xs text-muted-foreground mt-0.5">From prompt to live preview</p>
