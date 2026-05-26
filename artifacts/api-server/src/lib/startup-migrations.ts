@@ -2220,6 +2220,14 @@ const MIGRATION_STEPS: MigrationStep[] = [
       );
     },
   },
+
+  // ── migrate-message-origin (Task #919) ──────────────────────────────────────
+  {
+    name: "migrate-message-origin",
+    async run(client) {
+      await client.query(`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS origin TEXT`);
+    },
+  },
 ];
 
 /**

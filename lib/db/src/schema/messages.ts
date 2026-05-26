@@ -31,6 +31,9 @@ export const chatMessagesTable = pgTable(
     checkpointId: integer("checkpoint_id").references(() => projectVersionsTable.id, {
       onDelete: "set null",
     }),
+    // origin: identifies which panel/surface sent this message.
+    // 'zero' = Zero agent panel; null = main builder chat or other sources.
+    origin: text("origin"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

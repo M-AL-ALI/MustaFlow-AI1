@@ -61,6 +61,7 @@ type ZeroMessage = {
   agentMode: string;
   planMode: boolean;
   plan?: Record<string, unknown> | null;
+  origin?: string | null;
   createdAt: string;
 };
 
@@ -584,6 +585,7 @@ export function ZeroAgentPanel({
             planMode: usePlan,
             background: useBg,
             agentIntent: usePlan ? ("plan" as const) : ("build" as const),
+            origin: "zero",
             ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
           },
         },
@@ -674,9 +676,9 @@ export function ZeroAgentPanel({
 
   const sortedMessages = useMemo(
     () =>
-      [...messagesArr].sort(
-        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-      ),
+      [...messagesArr]
+        .filter((m) => m.origin === "zero")
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
     [messagesArr],
   );
 

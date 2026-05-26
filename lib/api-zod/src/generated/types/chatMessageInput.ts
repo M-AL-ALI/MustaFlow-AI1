@@ -22,4 +22,6 @@ export interface ChatMessageInput {
   agentIntent?: ChatMessageInputAgentIntent;
   /** Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model. */
   attachments?: ChatAttachment[];
+  /** Surface sending this message. Pass 'zero' when sending from the Zero agent panel so the message is tagged for its filtered thread view. */
+  origin?: string;
 }

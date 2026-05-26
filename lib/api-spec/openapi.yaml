@@ -5564,6 +5564,9 @@ components:
         checkpointId:
           type: ["integer", "null"]
           description: "If set, this message is anchored to a project_versions row. The chat UI can offer a 'Rewind to here' action that restores files + database and truncates chat after this point."
+        origin:
+          type: ["string", "null"]
+          description: "Surface that produced this message. 'zero' = Zero agent panel; null = main builder chat or other sources."
         createdAt: { type: string, format: date-time }
 
     Checkpoint:
@@ -5674,6 +5677,9 @@ components:
           type: array
           items: { $ref: "#/components/schemas/ChatAttachment" }
           description: "Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model."
+        origin:
+          type: string
+          description: "Surface sending this message. Pass 'zero' when sending from the Zero agent panel so the message is tagged for its filtered thread view."
 
     ChatExchange:
       type: object

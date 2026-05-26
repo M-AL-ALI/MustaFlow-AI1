@@ -95,6 +95,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     agentIdentity: explicitAgentIdentity,
     agentIntent: explicitAgentIntent,
     attachments: rawAttachments,
+    origin,
   } = parsed.data;
   let { content } = parsed.data;
   const mode = agentMode as AgentMode;
@@ -209,6 +210,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   const effectivePlanMode = planMode || resolvedIntent === "plan";
 
   // Save user message
+  const messageOrigin = typeof origin === "string" && origin.length > 0 ? origin : null;
   const [userMessage] = await db
     .insert(chatMessagesTable)
     .values({
@@ -218,6 +220,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       agentMode: mode,
       planMode: effectivePlanMode,
       attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
+      origin: messageOrigin,
     })
     .returning();
   if (!userMessage) {
@@ -611,6 +614,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       agentMode: mode,
       planMode: effectivePlanMode,
       plan: plan ?? undefined,
+      origin: messageOrigin,
     })
     .returning();
   if (!assistantMessage) {
@@ -679,6 +683,7 @@ router.post(
       planMode,
       agentIntent: explicitAgentIntent,
       attachments: rawAttachments,
+      origin: streamOrigin,
     } = parsed.data;
     const mode = agentMode as AgentMode;
     const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
@@ -817,6 +822,8 @@ router.post(
       resolvedIntent !== "converse" ? streamDeveloperIntentPrompts[resolvedIntent] : undefined;
 
     // Save user message
+    const streamMessageOrigin =
+      typeof streamOrigin === "string" && streamOrigin.length > 0 ? streamOrigin : null;
     let userMessageId: number;
     try {
       const [userMessage] = await db
@@ -828,6 +835,7 @@ router.post(
           agentMode: mode,
           planMode: effectivePlanMode,
           attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
+          origin: streamMessageOrigin,
         })
         .returning();
       if (!userMessage) throw new Error("Failed to save user message");
@@ -941,6 +949,7 @@ router.post(
           agentMode: mode,
           planMode: effectivePlanMode,
           plan,
+          origin: streamMessageOrigin,
         })
         .returning();
 
@@ -988,6 +997,7 @@ router.post(
             agentMode: mode,
             planMode: effectivePlanMode,
             plan: { kind: "error", message: msg },
+            origin: streamMessageOrigin,
           })
           .returning();
         sendEvent({

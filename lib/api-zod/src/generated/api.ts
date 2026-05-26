@@ -1277,6 +1277,7 @@ export const ListMessagesResponseItem = zod.object({
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
 })).nullish(),
   "checkpointId": zod.number().nullish().describe('If set, this message is anchored to a project_versions row. The chat UI can offer a \'Rewind to here\' action that restores files + database and truncates chat after this point.'),
+  "origin": zod.string().nullish().describe('Surface that produced this message. \'zero\' = Zero agent panel; null = main builder chat or other sources.'),
   "createdAt": zod.coerce.date()
 })
 export const ListMessagesResponse = zod.array(ListMessagesResponseItem)
@@ -1307,7 +1308,8 @@ export const SendMessageBody = zod.object({
   "height": zod.number().optional(),
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
-})).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.')
+})).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.'),
+  "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.')
 })
 
 export const SendMessageResponse = zod.object({
@@ -1329,6 +1331,7 @@ export const SendMessageResponse = zod.object({
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
 })).nullish(),
   "checkpointId": zod.number().nullish().describe('If set, this message is anchored to a project_versions row. The chat UI can offer a \'Rewind to here\' action that restores files + database and truncates chat after this point.'),
+  "origin": zod.string().nullish().describe('Surface that produced this message. \'zero\' = Zero agent panel; null = main builder chat or other sources.'),
   "createdAt": zod.coerce.date()
 }),
   "assistantMessage": zod.object({
@@ -1349,6 +1352,7 @@ export const SendMessageResponse = zod.object({
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
 })).nullish(),
   "checkpointId": zod.number().nullish().describe('If set, this message is anchored to a project_versions row. The chat UI can offer a \'Rewind to here\' action that restores files + database and truncates chat after this point.'),
+  "origin": zod.string().nullish().describe('Surface that produced this message. \'zero\' = Zero agent panel; null = main builder chat or other sources.'),
   "createdAt": zod.coerce.date()
 }),
   "detectedIntent": zod.enum(['converse', 'plan', 'build']).optional().describe('The intent auto-detected or explicitly provided for this exchange.')

@@ -26,5 +26,10 @@ export interface ChatMessage {
      * @nullable
      */
   checkpointId?: number | null;
+  /**
+     * Surface that produced this message. 'zero' = Zero agent panel; null = main builder chat or other sources.
+     * @nullable
+     */
+  origin?: string | null;
   createdAt: Date;
 }
