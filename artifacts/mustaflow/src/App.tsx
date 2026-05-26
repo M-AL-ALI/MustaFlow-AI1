@@ -55,6 +55,7 @@ import { WorkspaceProvider } from "./contexts/workspace-context";
 import { OnboardingTour } from "./components/onboarding-tour";
 import { OfflineIndicator } from "./components/offline-indicator";
 import TrustPage from "./pages/trust";
+import DocsDevModePage from "./pages/docs-developer-mode";
 import DevelopersPage from "./pages/developers";
 import DevelopersChangelogPage from "./pages/developers-changelog";
 import ModeSelectPage from "./pages/mode-select";
@@ -618,6 +619,9 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                 <AppLayout>
                   <TrustPage />
                 </AppLayout>
+              </Route>
+              <Route path="/docs/developer-mode">
+                <DocsDevModePage />
               </Route>
               <Route path="/developers/changelog">
                 <DevelopersChangelogPage />

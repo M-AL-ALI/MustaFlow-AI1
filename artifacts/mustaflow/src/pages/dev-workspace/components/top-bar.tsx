@@ -31,6 +31,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
 import logoUrl from "/logo.png";
 import type { PanelId } from "./icon-rail";
@@ -423,6 +428,85 @@ export function TopBar({
           </TooltipTrigger>
           <TooltipContent>Open deployment panel</TooltipContent>
         </Tooltip>
+
+        {/* How it works */}
+        <Popover>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <button className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                  <Info className="h-4 w-4" />
+                </button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>How Developer Mode works</TooltipContent>
+          </Tooltip>
+          <PopoverContent
+            align="end"
+            className="w-80 p-0 bg-zinc-900 border-border text-sm"
+          >
+            <div className="px-4 py-3 border-b border-border">
+              <p className="font-semibold text-foreground">How Developer Mode works</p>
+              <p className="text-xs text-muted-foreground mt-0.5">From prompt to live preview</p>
+            </div>
+            <ol className="px-4 py-3 space-y-3">
+              {[
+                {
+                  label: "You send a prompt",
+                  detail: "Your message goes to the backend as a regular API request.",
+                },
+                {
+                  label: "An LLM reads your project",
+                  detail:
+                    "The AI receives your prompt plus the current file tree, chat history, and a tool catalog.",
+                },
+                {
+                  label: "The agent calls tools, not text",
+                  detail:
+                    "It picks actions — read_file, write_file, run_command — and executes them in order.",
+                },
+                {
+                  label: "A loop runs until done",
+                  detail:
+                    "Think → call tool → observe result → think again. Each file write is a real disk write in your container.",
+                },
+                {
+                  label: "Real side effects",
+                  detail:
+                    "npm install actually installs packages. write_file changes the file on disk. Nothing is simulated.",
+                },
+                {
+                  label: "Preview refreshes automatically",
+                  detail:
+                    "The dev server watches the filesystem. Every file the agent writes triggers HMR — no restart needed.",
+                },
+              ].map((step, i) => (
+                <li key={i} className="flex gap-3">
+                  <span className="flex-shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-[10px] font-bold mt-0.5">
+                    {i + 1}
+                  </span>
+                  <div>
+                    <p className="font-medium text-foreground leading-snug">{step.label}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed mt-0.5">
+                      {step.detail}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="px-4 py-2.5 border-t border-border">
+              <a
+                href="/docs/developer-mode"
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-primary hover:underline flex items-center gap-1"
+              >
+                Full documentation
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          </PopoverContent>
+        </Popover>
 
         {/* Open in new tab */}
         <Tooltip>
