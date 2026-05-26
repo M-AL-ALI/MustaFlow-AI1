@@ -3187,6 +3187,7 @@ export default function ProjectWorkspacePage() {
                             taskId={pendingFeedTaskId}
                             startedAt={pendingBuildStartedAt}
                             onDismiss={() => {}}
+                            isAtBottom={!chatScrolledUp}
                             onViewHistory={(versionId) => {
                               setHistoryFocusVersionId(versionId);
                               switchLeftPanel("history");
@@ -3224,6 +3225,7 @@ export default function ProjectWorkspacePage() {
                             taskId={activeTaskId}
                             startedAt={pendingBuildStartedAt}
                             onDismiss={() => setActiveTaskId(null)}
+                            isAtBottom={!chatScrolledUp}
                             onViewHistory={(versionId) => {
                               setHistoryFocusVersionId(versionId);
                               switchLeftPanel("history");

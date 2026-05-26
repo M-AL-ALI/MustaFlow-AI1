@@ -1378,6 +1378,9 @@ interface Props {
   onDismiss: () => void;
   onViewHistory?: (versionId: number) => void;
   onConnectionChange?: (connected: boolean) => void;
+  /** When false, suppress the auto-scroll triggered by new events so the user
+   *  can read earlier messages without the view jumping back down. */
+  isAtBottom?: boolean;
 }
 
 export function AgentThinkingBubble({
@@ -1387,6 +1390,7 @@ export function AgentThinkingBubble({
   onDismiss,
   onViewHistory,
   onConnectionChange,
+  isAtBottom = true,
 }: Props) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   const mountTimeRef = useRef(Date.now());
@@ -1520,10 +1524,11 @@ export function AgentThinkingBubble({
   }, [isTerminal, isCancelled, onDismiss]);
 
   useEffect(() => {
+    if (!isAtBottom) return;
     if (bubbleRef.current) {
       bubbleRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-  }, [events.length]);
+  }, [events.length, isAtBottom]);
 
   if (events.length === 0) {
     if (stalled) {
