@@ -39,8 +39,11 @@ import {
   Zap,
   Lock,
   BadgeCheck,
+  Blocks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useListSecrets } from "@workspace/api-client-react";
+import { IntegrationsRegistry } from "./integrations-registry";
 
 type Category = "auth" | "payments" | "database" | "storage" | "ai" | "mcp" | "other";
 
@@ -158,7 +161,7 @@ const PLATFORM_NOTICES: Record<string, { label: string; detail: string }> = {
   },
 };
 
-type TabId = "blueprints" | "webhooks" | "mcp";
+type TabId = "blueprints" | "connectors" | "webhooks" | "mcp";
 
 export default function IntegrationsTab({ projectId }: { projectId: number }) {
   const [activeTab, setActiveTab] = useState<TabId>("blueprints");
@@ -169,6 +172,7 @@ export default function IntegrationsTab({ projectId }: { projectId: number }) {
         {(
           [
             { id: "blueprints", label: "Marketplace", icon: Package },
+            { id: "connectors", label: "Connectors", icon: Blocks },
             { id: "webhooks", label: "Webhooks", icon: Webhook },
             { id: "mcp", label: "MCP Servers", icon: Server },
           ] as const
@@ -192,9 +196,39 @@ export default function IntegrationsTab({ projectId }: { projectId: number }) {
 
       <div className="flex-1 overflow-auto">
         {activeTab === "blueprints" && <BlueprintsPanel projectId={projectId} />}
+        {activeTab === "connectors" && <ConnectorsPanel projectId={projectId} />}
         {activeTab === "webhooks" && <WebhooksPanel projectId={projectId} />}
         {activeTab === "mcp" && <McpPanel />}
       </div>
+    </div>
+  );
+}
+
+// ─── Connectors panel ─────────────────────────────────────────────────────────
+
+function ConnectorsPanel({ projectId }: { projectId: number }) {
+  const { data: secrets = [], isLoading } = useListSecrets(projectId);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground p-6">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading connectors…
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4 p-6 h-full">
+      <div>
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <Blocks className="h-4 w-4 text-cyan-400" /> Connectors
+        </h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          Connect third-party services by adding their API keys as project secrets. Connected
+          integrations are automatically available to the AI builder.
+        </p>
+      </div>
+      <IntegrationsRegistry projectId={projectId} secrets={secrets} />
     </div>
   );
 }
