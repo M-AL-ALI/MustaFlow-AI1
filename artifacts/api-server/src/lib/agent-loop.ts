@@ -1251,16 +1251,25 @@ function buildSystemPrompt(
       : isDeveloperMode
         ? `This is a DEVELOPER MODE project running as a live server process inside a Linux container (stack: ${isStatic ? "node-api" : stack}).
 
-## Preview pane — how it works
-The preview pane is an <iframe> that sends HTTP requests through the MustaFlow reverse proxy, which forwards them directly to your running server's port inside the container. The proxy is byte-transparent: it does not inspect, transform, or cache responses. Whatever your server returns — HTML, JSON, JS bundle, redirect, WebSocket upgrade — is exactly what the iframe shows.
+## How the live preview works
+write_file and apply_patch write directly to the container's filesystem — the same filesystem your dev server is watching. The full chain is automatic:
+
+  1. You call write_file / apply_patch
+  2. The dev server's filesystem watcher detects the change instantly
+  3. The dev server pushes a hot-reload signal (HMR / WebSocket / SSE) to the preview iframe
+  4. The preview refreshes — usually without a full page reload
+
+The preview pane is an <iframe> connected to the dev server through the MustaFlow reverse proxy. The proxy is byte-transparent: it forwards HTTP requests, WebSocket upgrades, and SSE streams unchanged. Whatever the server returns is exactly what the iframe shows.
+
+DO NOT manually restart the server after writing files. The filesystem watcher handles it. Restarting kills the HMR connection and causes a blank preview until the process comes back up.
 
 ## Critical: always bind to process.env.PORT
-The container runtime injects a PORT environment variable (default 3000). Your server MUST listen on this port:
+The container runtime injects PORT (default 3000). Your server MUST read it:
 - Node.js/Express: const port = parseInt(process.env.PORT ?? "3000", 10); app.listen(port, ...)
 - Python Flask:    port = int(os.environ.get("PORT", 3000)); app.run(host="0.0.0.0", port=port)
 - Python FastAPI:  uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 3000)))
 - Go/Gin:          port := os.Getenv("PORT"); if port == "" { port = "3000" }; router.Run(":" + port)
-Never hardcode a port number other than as a fallback when PORT is unset.
+Never hardcode a port other than as a fallback when PORT is unset.
 
 The app must always be a real server that handles HTTP requests — never generate a static-HTML-only build. You may run any shell commands (npm/npx/tsc/python/go/etc.) via run_command. To add dependencies, use pkg_install.`
         : `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
