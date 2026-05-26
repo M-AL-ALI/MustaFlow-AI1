@@ -3454,6 +3454,13 @@ export default function ProjectWorkspacePage() {
                       onStopBuild={handleStopStream}
                       onSingleSend={(content, intent, attachments) => {
                         setPrompt("");
+                        if (chatScrolledUp) {
+                          setChatScrolledUp(false);
+                          chatAtBottomRef.current = true;
+                          if (scrollRef.current) {
+                            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                          }
+                        }
                         const imageOnly = attachments?.filter(
                           (
                             a,
