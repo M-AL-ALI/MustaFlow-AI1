@@ -305,6 +305,7 @@ export default function DevWorkspacePage() {
           paneLayout={paneLayout}
           onPaneLayout={handlePaneLayout}
           onDeploy={() => setDeployPanelOpen(true)}
+          onPanelOpen={handlePanelToggle}
         />
 
         {/* Deployment panel slide-over */}
@@ -409,98 +410,101 @@ export default function DevWorkspacePage() {
               className="overflow-hidden"
             >
               <PanelGroup direction="horizontal" className="h-full">
-                {/* Editor + terminal OR canvas */}
-                {paneLayout !== "preview-max" && (
-                  <>
-                    <Panel
-                      defaultSize={showPreview ? 50 : 100}
-                      minSize={25}
-                      className="overflow-hidden"
-                    >
-                      <div className="flex flex-col h-full min-h-0">
-                        {/* Center-panel tab bar */}
-                        <div className="shrink-0 flex items-center gap-0 border-b border-border bg-zinc-950 px-2">
-                          <button
-                            onClick={() => setCanvasOpen(false)}
-                            className={[
-                              "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                              !canvasOpen
-                                ? "border-primary text-foreground"
-                                : "border-transparent text-muted-foreground hover:text-foreground",
-                            ].join(" ")}
-                          >
-                            Editor
-                          </button>
-                          <button
-                            onClick={() => setCanvasOpen(true)}
-                            className={[
-                              "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                              canvasOpen
-                                ? "border-primary text-foreground"
-                                : "border-transparent text-muted-foreground hover:text-foreground",
-                            ].join(" ")}
-                          >
-                            Canvas
-                          </button>
+                {/* Editor + terminal OR canvas — only shown when a file is open or canvas/editor-max */}
+                {paneLayout !== "preview-max" &&
+                  (canvasOpen || tabs.length > 0 || paneLayout === "editor-max") && (
+                    <>
+                      <Panel
+                        defaultSize={showPreview ? 50 : 100}
+                        minSize={25}
+                        className="overflow-hidden"
+                      >
+                        <div className="flex flex-col h-full min-h-0">
+                          {/* Tab bar */}
+                          <div className="shrink-0 flex items-center gap-0 border-b border-border bg-zinc-950 px-2">
+                            <button
+                              onClick={() => setCanvasOpen(false)}
+                              className={[
+                                "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                                !canvasOpen
+                                  ? "border-primary text-foreground"
+                                  : "border-transparent text-muted-foreground hover:text-foreground",
+                              ].join(" ")}
+                            >
+                              Editor
+                            </button>
+                            <button
+                              onClick={() => setCanvasOpen(true)}
+                              className={[
+                                "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                                canvasOpen
+                                  ? "border-primary text-foreground"
+                                  : "border-transparent text-muted-foreground hover:text-foreground",
+                              ].join(" ")}
+                            >
+                              Canvas
+                            </button>
+                          </div>
+
+                          <div className="flex-1 min-h-0 overflow-hidden">
+                            {canvasOpen ? (
+                              <DevCanvasTab
+                                projectId={projectId}
+                                onProjectFilesChanged={() => {
+                                  setRefreshTrigger((n) => n + 1);
+                                  void queryClient.invalidateQueries({
+                                    queryKey: getListProjectFilesQueryKey(projectId),
+                                  });
+                                }}
+                              />
+                            ) : (
+                              <PanelGroup direction="vertical">
+                                <Panel defaultSize={65} minSize={30} className="overflow-hidden">
+                                  <MonacoEditorPane
+                                    projectId={projectId}
+                                    tabs={tabs}
+                                    activeTabIndex={activeTabIndex}
+                                    diffView={diffView}
+                                    onTabClose={handleTabClose}
+                                    onTabActivate={setActiveTabIndex}
+                                    onContentChange={handleContentChange}
+                                    onFileSaved={handleFileSaved}
+                                    onDiffClose={() => setDiffView(null)}
+                                  />
+                                </Panel>
+                                <PanelResizeHandle className="h-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
+                                <Panel
+                                  defaultSize={35}
+                                  minSize={15}
+                                  maxSize={60}
+                                  className="overflow-hidden"
+                                >
+                                  <TerminalPanel
+                                    projectId={projectId}
+                                    containerStatus={containerStatus}
+                                    containerUrl={containerUrl}
+                                    onStartContainer={() => void handleStartContainer()}
+                                    isStarting={isStarting}
+                                  />
+                                </Panel>
+                              </PanelGroup>
+                            )}
+                          </div>
                         </div>
+                      </Panel>
 
-                        <div className="flex-1 min-h-0 overflow-hidden">
-                          {canvasOpen ? (
-                            <DevCanvasTab
-                              projectId={projectId}
-                              onProjectFilesChanged={() => {
-                                setRefreshTrigger((n) => n + 1);
-                                void queryClient.invalidateQueries({
-                                  queryKey: getListProjectFilesQueryKey(projectId),
-                                });
-                              }}
-                            />
-                          ) : (
-                            <PanelGroup direction="vertical">
-                              <Panel defaultSize={65} minSize={30} className="overflow-hidden">
-                                <MonacoEditorPane
-                                  projectId={projectId}
-                                  tabs={tabs}
-                                  activeTabIndex={activeTabIndex}
-                                  diffView={diffView}
-                                  onTabClose={handleTabClose}
-                                  onTabActivate={setActiveTabIndex}
-                                  onContentChange={handleContentChange}
-                                  onFileSaved={handleFileSaved}
-                                  onDiffClose={() => setDiffView(null)}
-                                />
-                              </Panel>
-                              <PanelResizeHandle className="h-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
-                              <Panel
-                                defaultSize={35}
-                                minSize={15}
-                                maxSize={60}
-                                className="overflow-hidden"
-                              >
-                                <TerminalPanel
-                                  projectId={projectId}
-                                  containerStatus={containerStatus}
-                                  containerUrl={containerUrl}
-                                  onStartContainer={() => void handleStartContainer()}
-                                  isStarting={isStarting}
-                                />
-                              </Panel>
-                            </PanelGroup>
-                          )}
-                        </div>
-                      </div>
-                    </Panel>
+                      {showPreview && (
+                        <PanelResizeHandle className="w-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
+                      )}
+                    </>
+                  )}
 
-                    {showPreview && (
-                      <PanelResizeHandle className="w-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
-                    )}
-                  </>
-                )}
-
-                {/* Preview pane */}
+                {/* Preview pane — full width when editor is hidden, half when editor is open */}
                 {showPreview && (
                   <Panel
-                    defaultSize={paneLayout === "preview-max" ? 100 : 50}
+                    defaultSize={
+                      paneLayout === "preview-max" || (!canvasOpen && tabs.length === 0) ? 100 : 50
+                    }
                     minSize={20}
                     className="overflow-hidden"
                   >

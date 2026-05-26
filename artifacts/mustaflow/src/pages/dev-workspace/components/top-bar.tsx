@@ -18,10 +18,22 @@ import {
   Keyboard,
   Info,
   ChevronRight,
+  FolderOpen,
+  Search,
+  Layers,
+  Wrench,
+  Lock,
+  Package,
+  GitBranch,
+  Database,
+  Boxes,
+  Gauge,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { DynamicAtom } from "@/components/icons/dynamic-atom";
 import logoUrl from "/logo.png";
+import type { PanelId } from "./icon-rail";
 
 type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
 
@@ -39,9 +51,58 @@ interface TopBarProps {
   paneLayout: PaneLayout;
   onPaneLayout: (layout: PaneLayout) => void;
   onDeploy?: () => void;
+  onPanelOpen?: (panel: PanelId) => void;
 }
 
-function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+// All panels available in the icon rail
+const PANEL_NAV: Array<{
+  id: PanelId;
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: "files", label: "Files", description: "Browse and open project files", icon: FolderOpen },
+  { id: "search", label: "Search", description: "Full-text search across files", icon: Search },
+  {
+    id: "zero-agent",
+    label: "Zero Agent",
+    description: "AI assistant chat panel",
+    icon: DynamicAtom,
+  },
+  { id: "canvas", label: "Canvas", description: "Visual design canvas", icon: Layers },
+  { id: "tools", label: "Tools", description: "All workspace tools", icon: Wrench },
+  { id: "secrets", label: "Secrets", description: "Environment variables & secrets", icon: Lock },
+  { id: "packages", label: "Packages", description: "Manage dependencies", icon: Package },
+  { id: "git", label: "Version Control", description: "Git history & branches", icon: GitBranch },
+  {
+    id: "database",
+    label: "Database",
+    description: "Query and manage the database",
+    icon: Database,
+  },
+  {
+    id: "storage",
+    label: "Object Storage",
+    description: "Files and assets in the cloud",
+    icon: Boxes,
+  },
+  {
+    id: "resources",
+    label: "Resources",
+    description: "CPU, memory, container status",
+    icon: Gauge,
+  },
+];
+
+function SettingsDrawer({
+  open,
+  onClose,
+  onPanelOpen,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onPanelOpen?: (panel: PanelId) => void;
+}) {
   const drawerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,24 +116,21 @@ function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () => void 
     return () => document.removeEventListener("mousedown", handler);
   }, [open, onClose]);
 
-  const items = [
+  const settingsItems = [
     {
       icon: Keyboard,
       label: "Keyboard shortcuts",
       description: "View all shortcuts",
-      action: () => onClose(),
     },
     {
       icon: Moon,
       label: "Appearance",
       description: "Dark mode (default)",
-      action: () => onClose(),
     },
     {
       icon: Info,
       label: "About MustaFlow",
       description: "Version & documentation",
-      action: () => onClose(),
     },
   ];
 
@@ -86,6 +144,7 @@ function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () => void 
           open ? "translate-x-0" : "-translate-x-full",
         )}
       >
+        {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
             <img src={logoUrl} alt="MustaFlow AI" className="h-6 w-auto object-contain" />
@@ -100,7 +159,8 @@ function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
 
         <div className="flex-1 overflow-y-auto py-2">
-          <div className="px-3 pb-2">
+          {/* Back to projects */}
+          <div className="px-3 pb-1">
             <p className="text-[9px] font-semibold text-muted-foreground/50 uppercase tracking-wider px-1 mb-1">
               Developer Mode
             </p>
@@ -115,15 +175,41 @@ function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () => void 
             </Link>
           </div>
 
-          <div className="px-3 pt-1">
+          {/* Panels — all icon-rail items */}
+          <div className="px-3 pt-2">
+            <p className="text-[9px] font-semibold text-muted-foreground/50 uppercase tracking-wider px-1 mb-1">
+              Panels
+            </p>
+            {PANEL_NAV.map(({ id, label, description, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => {
+                  onPanelOpen?.(id);
+                  onClose();
+                }}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors group"
+              >
+                <div className="h-7 w-7 rounded-md bg-muted border border-border flex items-center justify-center shrink-0 group-hover:border-primary/30 transition-colors">
+                  <Icon className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground" />
+                </div>
+                <div className="text-left min-w-0">
+                  <p className="text-xs font-medium text-foreground truncate">{label}</p>
+                  <p className="text-[10px] text-muted-foreground/60 truncate">{description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {/* Workspace settings */}
+          <div className="px-3 pt-3">
             <p className="text-[9px] font-semibold text-muted-foreground/50 uppercase tracking-wider px-1 mb-1">
               Workspace
             </p>
-            {items.map(({ icon: Icon, label, description, action }) => (
+            {settingsItems.map(({ icon: Icon, label, description }) => (
               <button
                 key={label}
-                onClick={action}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/60 transition-colors group"
+                onClick={onClose}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors group"
               >
                 <div className="h-7 w-7 rounded-md bg-muted border border-border flex items-center justify-center shrink-0 group-hover:border-primary/30 transition-colors">
                   <Icon className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground" />
@@ -159,6 +245,7 @@ export function TopBar({
   paneLayout,
   onPaneLayout,
   onDeploy,
+  onPanelOpen,
 }: TopBarProps) {
   const { user } = useUser();
   const [editingName, setEditingName] = useState(false);
@@ -202,7 +289,11 @@ export function TopBar({
 
   return (
     <>
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsDrawer
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onPanelOpen={onPanelOpen}
+      />
 
       <header className="flex items-center h-11 px-3 gap-2 bg-zinc-950 border-b border-border shrink-0 z-20">
         {/* MustaFlow logo — click to open settings drawer */}
@@ -221,7 +312,7 @@ export function TopBar({
               <img src={logoUrl} alt="MustaFlow AI" className="h-5 w-auto object-contain" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Settings & navigation</TooltipContent>
+          <TooltipContent>Settings & panels</TooltipContent>
         </Tooltip>
 
         <div className="w-px h-5 bg-border mx-1 shrink-0" />
@@ -361,7 +452,7 @@ export function TopBar({
               <Settings className="h-4 w-4" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Settings</TooltipContent>
+          <TooltipContent>Settings & panels</TooltipContent>
         </Tooltip>
 
         {/* User avatar */}

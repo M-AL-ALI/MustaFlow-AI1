@@ -82,7 +82,16 @@ type Session = {
 };
 
 const SESSION_GAP_MS = 30 * 60 * 1000;
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "canceled"]);
+// All statuses that mean the task is no longer running
+const TERMINAL_STATUSES = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "canceled",
+  "discarded",
+  "needs_approval",
+  "needs_review",
+]);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function groupIntoSessions(msgs: ZeroMessage[]): Session[] {
@@ -318,7 +327,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
 
   const isBusy = sendMessage.isPending || uploadingCount > 0 || (!!activeTaskId && !isTaskTerminal);
 
-  // Sync activeTaskId from tasks list
+  // Sync activeTaskId from tasks list — clear once terminal
   useEffect(() => {
     if (activeTaskId === null) return;
     if (!isTaskTerminal) return;
@@ -334,6 +343,20 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
     }, 1500);
     return () => clearTimeout(timeout);
   }, [isTaskTerminal, activeTaskId, projectId, queryClient, onBuildComplete]);
+
+  // Hard-cap: if we've been showing a spinner for > 2 min, force-clear.
+  // Protects against tasks that never reach a terminal status client-side.
+  useEffect(() => {
+    if (!activeTaskId || !pendingStartedAt) return;
+    const elapsed = Date.now() - pendingStartedAt.getTime();
+    const remaining = Math.max(0, 120_000 - elapsed);
+    const t = setTimeout(() => {
+      setActiveTaskId(null);
+      setPendingStartedAt(null);
+      setSseConnected(false);
+    }, remaining);
+    return () => clearTimeout(t);
+  }, [activeTaskId, pendingStartedAt]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
