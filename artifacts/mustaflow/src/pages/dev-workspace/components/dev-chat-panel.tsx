@@ -156,22 +156,37 @@ async function resizeImageForVision(file: File): Promise<Blob> {
     img.onload = () => {
       URL.revokeObjectURL(url);
       let { width, height } = img;
-      if (width <= MAX && height <= MAX) { resolve(file); return; }
+      if (width <= MAX && height <= MAX) {
+        resolve(file);
+        return;
+      }
       const scale = Math.min(MAX / width, MAX / height);
       width = Math.round(width * scale);
       height = Math.round(height * scale);
       const canvas = document.createElement("canvas");
-      canvas.width = width; canvas.height = height;
+      canvas.width = width;
+      canvas.height = height;
       const ctx = canvas.getContext("2d")!;
       ctx.drawImage(img, 0, 0, width, height);
       canvas.toBlob((b) => resolve(b ?? file), file.type, 0.92);
     };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
     img.src = url;
   });
 }
 
-function PersistedToolEvents({ projectId, taskId, taskStatus }: { projectId: number; taskId: number; taskStatus: string }) {
+function PersistedToolEvents({
+  projectId,
+  taskId,
+  taskStatus,
+}: {
+  projectId: number;
+  taskId: number;
+  taskStatus: string;
+}) {
   const { data } = useListTaskEvents(projectId, taskId, {
     query: {
       queryKey: getListTaskEventsQueryKey(projectId, taskId),
@@ -179,16 +194,27 @@ function PersistedToolEvents({ projectId, taskId, taskStatus }: { projectId: num
       refetchInterval: TERMINAL_STATUSES.has(taskStatus) ? false : 5000,
     },
   });
-  const events = (data as Array<{ id: number; eventType: string; message: string }> | undefined) ?? [];
+  const events =
+    (data as Array<{ id: number; eventType: string; message: string }> | undefined) ?? [];
   if (events.length === 0) return null;
   return <ToolCallGroup events={events} taskStatus={taskStatus} />;
 }
 
-const AGENT_MODES: { value: AgentMode; label: string; credits: string; icon: React.ComponentType<{ className?: string }> }[] = [
+const AGENT_MODES: {
+  value: AgentMode;
+  label: string;
+  credits: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
   { value: "lite", label: "Lite", credits: "1 cr", icon: Zap },
   { value: "eco", label: "Eco", credits: "2 cr", icon: Layers2 },
   { value: "power", label: "Power", credits: "5 cr", icon: Brain },
-  { value: "pro", label: "Pro", credits: "10 cr", icon: DynamicAtom as React.ComponentType<{ className?: string }> },
+  {
+    value: "pro",
+    label: "Pro",
+    credits: "10 cr",
+    icon: DynamicAtom as React.ComponentType<{ className?: string }>,
+  },
 ];
 
 interface DevChatPanelProps {
@@ -255,9 +281,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   const { data: messages } = useListMessages(projectId, {
     query: {
       queryKey: getListMessagesQueryKey(projectId),
-      refetchInterval: activeTaskId
-        ? sseConnected ? 30000 : 3000
-        : 20000,
+      refetchInterval: activeTaskId ? (sseConnected ? 30000 : 3000) : 20000,
       staleTime: 2000,
     },
   });
@@ -265,9 +289,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   const { data: tasks } = useListTasks(projectId, {
     query: {
       queryKey: getListTasksQueryKey(projectId),
-      refetchInterval: activeTaskId
-        ? sseConnected ? 30000 : 2000
-        : 15000,
+      refetchInterval: activeTaskId ? (sseConnected ? 30000 : 2000) : 15000,
       staleTime: 1000,
     },
   });
@@ -352,65 +374,90 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   const activeTaskIsInThread = inlineBubbleMsgId !== null;
 
   // ── Image upload ───────────────────────────────────────────────────────────
-  const uploadImage = useCallback(async (file: File): Promise<string | null> => {
-    if (file.size > MAX_IMAGE_BYTES) {
-      return null;
-    }
-    try {
-      const resized = await resizeImageForVision(file);
-      const resizedFile = new File([resized], file.name, { type: resized.type || file.type });
-      const metaRes = await fetch(`/api/projects/${projectId}/attachments/upload-url`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ filename: resizedFile.name, mimeType: resizedFile.type, size: resizedFile.size }),
-      });
-      if (!metaRes.ok) return null;
-      const { uploadUrl, objectPath } = (await metaRes.json()) as { uploadUrl: string; objectPath: string };
-      const up = await fetch(uploadUrl, { method: "PUT", body: resizedFile, headers: { "Content-Type": resizedFile.type } });
-      if (!up.ok) return null;
-      return objectPath;
-    } catch {
-      return null;
-    }
-  }, [projectId]);
+  const uploadImage = useCallback(
+    async (file: File): Promise<string | null> => {
+      if (file.size > MAX_IMAGE_BYTES) {
+        return null;
+      }
+      try {
+        const resized = await resizeImageForVision(file);
+        const resizedFile = new File([resized], file.name, { type: resized.type || file.type });
+        const metaRes = await fetch(`/api/projects/${projectId}/attachments/upload-url`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            filename: resizedFile.name,
+            mimeType: resizedFile.type,
+            size: resizedFile.size,
+          }),
+        });
+        if (!metaRes.ok) return null;
+        const { uploadUrl, objectPath } = (await metaRes.json()) as {
+          uploadUrl: string;
+          objectPath: string;
+        };
+        const up = await fetch(uploadUrl, {
+          method: "PUT",
+          body: resizedFile,
+          headers: { "Content-Type": resizedFile.type },
+        });
+        if (!up.ok) return null;
+        return objectPath;
+      } catch {
+        return null;
+      }
+    },
+    [projectId],
+  );
 
-  const handleImageFiles = useCallback(async (files: File[]) => {
-    const imageFiles = files.filter((f) => f.type.startsWith("image/")).slice(0, 4);
-    if (imageFiles.length === 0) return;
+  const handleImageFiles = useCallback(
+    async (files: File[]) => {
+      const imageFiles = files.filter((f) => f.type.startsWith("image/")).slice(0, 4);
+      if (imageFiles.length === 0) return;
 
-    const pendingItems: PendingImage[] = imageFiles.map((f) => ({
-      objectUrl: URL.createObjectURL(f),
-      file: f,
-      uploading: true,
-    }));
-    setImages((prev) => [...prev, ...pendingItems]);
-    setUploadingCount((n) => n + pendingItems.length);
+      const pendingItems: PendingImage[] = imageFiles.map((f) => ({
+        objectUrl: URL.createObjectURL(f),
+        file: f,
+        uploading: true,
+      }));
+      setImages((prev) => [...prev, ...pendingItems]);
+      setUploadingCount((n) => n + pendingItems.length);
 
-    for (let i = 0; i < imageFiles.length; i++) {
-      const file = imageFiles[i]!;
-      const objUrl = pendingItems[i]!.objectUrl;
-      const uploadedUrl = await uploadImage(file);
-      setImages((prev) =>
-        prev.map((img) =>
-          img.objectUrl === objUrl
-            ? { ...img, uploading: false, uploadedUrl: uploadedUrl ?? undefined, error: uploadedUrl ? undefined : "Upload failed" }
-            : img,
-        ),
-      );
-      setUploadingCount((n) => Math.max(0, n - 1));
-    }
-  }, [uploadImage]);
+      for (let i = 0; i < imageFiles.length; i++) {
+        const file = imageFiles[i]!;
+        const objUrl = pendingItems[i]!.objectUrl;
+        const uploadedUrl = await uploadImage(file);
+        setImages((prev) =>
+          prev.map((img) =>
+            img.objectUrl === objUrl
+              ? {
+                  ...img,
+                  uploading: false,
+                  uploadedUrl: uploadedUrl ?? undefined,
+                  error: uploadedUrl ? undefined : "Upload failed",
+                }
+              : img,
+          ),
+        );
+        setUploadingCount((n) => Math.max(0, n - 1));
+      }
+    },
+    [uploadImage],
+  );
 
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    const items = Array.from(e.clipboardData.items);
-    const imageItems = items.filter((it) => it.type.startsWith("image/"));
-    if (imageItems.length > 0) {
-      e.preventDefault();
-      const files = imageItems.map((it) => it.getAsFile()).filter(Boolean) as File[];
-      void handleImageFiles(files);
-    }
-  }, [handleImageFiles]);
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = Array.from(e.clipboardData.items);
+      const imageItems = items.filter((it) => it.type.startsWith("image/"));
+      if (imageItems.length > 0) {
+        e.preventDefault();
+        const files = imageItems.map((it) => it.getAsFile()).filter(Boolean) as File[];
+        void handleImageFiles(files);
+      }
+    },
+    [handleImageFiles],
+  );
 
   const removeImage = useCallback((objectUrl: string) => {
     setImages((prev) => {
@@ -423,7 +470,13 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   // ── Voice dictation ────────────────────────────────────────────────────────
   const stopVoice = useCallback(() => {
     const mr = mediaRecorderRef.current;
-    if (mr && mr.state !== "inactive") { try { mr.stop(); } catch { /* ignore */ } }
+    if (mr && mr.state !== "inactive") {
+      try {
+        mr.stop();
+      } catch {
+        /* ignore */
+      }
+    }
     const stream = mediaStreamRef.current;
     if (stream) stream.getTracks().forEach((t) => t.stop());
     mediaRecorderRef.current = null;
@@ -432,7 +485,10 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   }, []);
 
   const startVoice = useCallback(async () => {
-    if (isListening) { stopVoice(); return; }
+    if (isListening) {
+      stopVoice();
+      return;
+    }
     setVoiceError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
       setVoiceError("Microphone not supported in this browser.");
@@ -448,7 +504,9 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
     mediaStreamRef.current = stream;
     const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
     mediaChunksRef.current = [];
-    mr.ondataavailable = (e) => { if (e.data && e.data.size > 0) mediaChunksRef.current.push(e.data); };
+    mr.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) mediaChunksRef.current.push(e.data);
+    };
     mr.onstop = async () => {
       const blob = new Blob(mediaChunksRef.current, { type: "audio/webm" });
       mediaChunksRef.current = [];
@@ -522,21 +580,22 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
     );
   }, [prompt, images, isBusy, projectId, agentMode, planMode, sendMessage, queryClient]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      doSend();
-    }
-  }, [doSend]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        doSend();
+      }
+    },
+    [doSend],
+  );
 
   const currentMode = AGENT_MODES.find((m) => m.value === agentMode) ?? AGENT_MODES[2]!;
 
   return (
     <div className="flex flex-col h-full bg-zinc-950 min-w-0 overflow-hidden">
-
       {/* ── Thread ─────────────────────────────────────────────────────────── */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
-
         {/* Empty state */}
         {sortedMessages.length === 0 && !activeTaskId && !sendMessage.isPending && (
           <div className="flex flex-col items-center gap-4 pt-16 px-6 text-center">
@@ -611,9 +670,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                 <div>
                   {session.items.map(({ msg, globalIdx }) => {
                     const versionAfter = typedVersions[globalIdx] as ZeroVersion | undefined;
-                    const plan = msg.plan
-                      ? (msg.plan as unknown as StructuredPlan)
-                      : null;
+                    const plan = msg.plan ? (msg.plan as unknown as StructuredPlan) : null;
 
                     return (
                       <div key={msg.id} data-msg-id={msg.id}>
@@ -656,31 +713,40 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                         )}
 
                         {/* Inline tool events */}
-                        {msg.role === "assistant" && msg.plan && activeTaskId && inlineBubbleMsgId === msg.id && (
-                          <div className="px-3 pb-1">
-                            <AgentThinkingBubble
-                              projectId={projectId}
-                              taskId={activeTaskId}
-                              isAtBottom={true}
-                              onDismiss={() => setActiveTaskId(null)}
-                              onConnectionChange={handleSseConnectionChange}
-                            />
-                          </div>
-                        )}
+                        {msg.role === "assistant" &&
+                          msg.plan &&
+                          activeTaskId &&
+                          inlineBubbleMsgId === msg.id && (
+                            <div className="px-3 pb-1">
+                              <AgentThinkingBubble
+                                projectId={projectId}
+                                taskId={activeTaskId}
+                                isAtBottom={true}
+                                onDismiss={() => setActiveTaskId(null)}
+                                onConnectionChange={handleSseConnectionChange}
+                              />
+                            </div>
+                          )}
 
                         {/* Persisted tool events for completed tasks */}
-                        {msg.role === "assistant" && msg.plan && (() => {
-                          const plan2 = msg.plan as { taskId?: number };
-                          const tid = plan2.taskId;
-                          if (!tid || tid === activeTaskId) return null;
-                          const t = typedTasks.find((x) => x.id === tid);
-                          if (!t) return null;
-                          return (
-                            <div className="px-3 pb-1">
-                              <PersistedToolEvents projectId={projectId} taskId={tid} taskStatus={t.status} />
-                            </div>
-                          );
-                        })()}
+                        {msg.role === "assistant" &&
+                          msg.plan &&
+                          (() => {
+                            const plan2 = msg.plan as { taskId?: number };
+                            const tid = plan2.taskId;
+                            if (!tid || tid === activeTaskId) return null;
+                            const t = typedTasks.find((x) => x.id === tid);
+                            if (!t) return null;
+                            return (
+                              <div className="px-3 pb-1">
+                                <PersistedToolEvents
+                                  projectId={projectId}
+                                  taskId={tid}
+                                  taskStatus={t.status}
+                                />
+                              </div>
+                            );
+                          })()}
 
                         {/* Checkpoint marker */}
                         {versionAfter && (
@@ -693,8 +759,12 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                                   { id: projectId, versionId: versionAfter.id },
                                   {
                                     onSuccess: () => {
-                                      void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
-                                      void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+                                      void queryClient.invalidateQueries({
+                                        queryKey: getListProjectFilesQueryKey(projectId),
+                                      });
+                                      void queryClient.invalidateQueries({
+                                        queryKey: getGetProjectQueryKey(projectId),
+                                      });
                                     },
                                   },
                                 );
@@ -742,7 +812,6 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
 
       {/* ── Composer ───────────────────────────────────────────────────────── */}
       <div className="shrink-0 border-t border-border bg-zinc-950">
-
         {/* Pasted images preview */}
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2 px-3 pt-2.5">
@@ -782,17 +851,25 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
 
         {/* Textarea */}
         <div className="px-3 pt-2.5 pb-1">
-          <div className={cn(
-            "flex flex-col rounded-xl border bg-muted/30 transition-colors",
-            isListening ? "border-red-500/40" : "border-border focus-within:border-primary/40",
-          )}>
+          <div
+            className={cn(
+              "flex flex-col rounded-xl border bg-muted/30 transition-colors",
+              isListening ? "border-red-500/40" : "border-border focus-within:border-primary/40",
+            )}
+          >
             <textarea
               ref={textareaRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={isListening ? "Listening…" : images.length > 0 ? "Describe what you want done with these screenshots…" : "Ask Zero to build, fix, or explain…"}
+              placeholder={
+                isListening
+                  ? "Listening…"
+                  : images.length > 0
+                    ? "Describe what you want done with these screenshots…"
+                    : "Ask Zero to build, fix, or explain…"
+              }
               rows={3}
               disabled={isBusy && !isListening}
               className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/50 outline-none resize-none leading-relaxed px-3 pt-2.5 pb-1 min-h-[52px] max-h-[180px]"
@@ -801,7 +878,6 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
             {/* Toolbar row */}
             <div className="flex items-center justify-between px-2 pb-2 pt-1 gap-1">
               <div className="flex items-center gap-1">
-
                 {/* Mode selector */}
                 <div className="relative" ref={modeMenuRef}>
                   <Tooltip>
@@ -872,11 +948,9 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                   </TooltipTrigger>
                   <TooltipContent>Select element from preview</TooltipContent>
                 </Tooltip>
-
               </div>
 
               <div className="flex items-center gap-1">
-
                 {/* Add image */}
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -927,7 +1001,9 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                     <TooltipTrigger asChild>
                       <button
                         onClick={() => {
-                          void fetch(`/api/projects/${projectId}/tasks/${activeTaskId}/cancel`, { method: "POST" });
+                          void fetch(`/api/projects/${projectId}/tasks/${activeTaskId}/cancel`, {
+                            method: "POST",
+                          });
                         }}
                         className="flex items-center justify-center h-6 w-6 rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors"
                       >

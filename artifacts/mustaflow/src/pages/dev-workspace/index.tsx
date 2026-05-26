@@ -327,7 +327,6 @@ export default function DevWorkspacePage() {
 
           {/* ── Main 3-column panel group ─────────────────────────────────── */}
           <PanelGroup direction="horizontal" className="flex-1 min-w-0">
-
             {/* ── Column 1: Tools panel (file tree, search, etc.) ─────────── */}
             {showToolsPanel && (
               <>
@@ -410,7 +409,11 @@ export default function DevWorkspacePage() {
                 {/* Editor + terminal OR canvas */}
                 {paneLayout !== "preview-max" && (
                   <>
-                    <Panel defaultSize={showPreview ? 50 : 100} minSize={25} className="overflow-hidden">
+                    <Panel
+                      defaultSize={showPreview ? 50 : 100}
+                      minSize={25}
+                      className="overflow-hidden"
+                    >
                       <div className="flex flex-col h-full min-h-0">
                         {/* Center-panel tab bar */}
                         <div className="shrink-0 flex items-center gap-0 border-b border-border bg-zinc-950 px-2">
@@ -465,7 +468,12 @@ export default function DevWorkspacePage() {
                                 />
                               </Panel>
                               <PanelResizeHandle className="h-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
-                              <Panel defaultSize={35} minSize={15} maxSize={60} className="overflow-hidden">
+                              <Panel
+                                defaultSize={35}
+                                minSize={15}
+                                maxSize={60}
+                                className="overflow-hidden"
+                              >
                                 <TerminalPanel
                                   projectId={projectId}
                                   containerStatus={containerStatus}

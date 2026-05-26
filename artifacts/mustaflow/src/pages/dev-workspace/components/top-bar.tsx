@@ -78,9 +78,7 @@ function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () => void 
 
   return (
     <>
-      {open && (
-        <div className="fixed inset-0 z-40 pointer-events-none" />
-      )}
+      {open && <div className="fixed inset-0 z-40 pointer-events-none" />}
       <div
         ref={drawerRef}
         className={cn(
