@@ -58,7 +58,9 @@ import TrustPage from "./pages/trust";
 import DevelopersPage from "./pages/developers";
 import DevelopersChangelogPage from "./pages/developers-changelog";
 import ModeSelectPage from "./pages/mode-select";
-import DevPage from "./pages/dev";
+import DevHomePage from "./pages/dev-home";
+import DevDeploymentsPage from "./pages/dev-deployments";
+import DevWorkspacePage from "./pages/dev-workspace";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -402,7 +404,22 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
               </Route>
               <Route path="/dev">
                 <Protected>
-                  <DevPage />
+                  <DevHomePage />
+                </Protected>
+              </Route>
+              <Route path="/dev/projects">
+                <Protected>
+                  <DevHomePage />
+                </Protected>
+              </Route>
+              <Route path="/dev/deployments">
+                <Protected>
+                  <DevDeploymentsPage />
+                </Protected>
+              </Route>
+              <Route path="/dev/workspace/:id">
+                <Protected>
+                  <DevWorkspacePage />
                 </Protected>
               </Route>
               <Route path="/projects">

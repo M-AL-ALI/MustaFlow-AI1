@@ -669,7 +669,8 @@ export const DeleteWorkspaceResponse = zod.object({
  * @summary List all projects
  */
 export const ListProjectsQueryParams = zod.object({
-  "workspaceId": zod.coerce.number().optional()
+  "workspaceId": zod.coerce.number().optional(),
+  "mode": zod.enum(['builder', 'developer']).optional().describe('Filter by project mode. \'builder\' = AI Build Mode projects; \'developer\' = Developer Mode cloud IDE projects.')
 })
 
 export const listProjectsResponseHealthScoreMin = 0;
@@ -733,6 +734,7 @@ export const ListProjectsResponseItem = zod.object({
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
+  "projectMode": zod.enum(['builder', 'developer']).optional().describe('Surface that created this project. \'builder\' = AI Build Mode (default). \'developer\' = Developer Mode cloud IDE (Task #898). Immutable after creation.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -752,7 +754,8 @@ export const CreateProjectBody = zod.object({
   "kind": zod.enum(['web', 'mobile-ios', 'mobile-android', 'mobile-cross', 'fullstack', 'dashboard', 'api', 'design', 'automation', 'marketplace', 'chatbot', 'spreadsheet']),
   "stack": zod.enum(['react-vite', 'nextjs', 'node-api', 'python-flask', 'python-fastapi', 'go-gin']).optional().describe('Technology stack to use. Defaults to react-vite for web projects.'),
   "initialPrompt": zod.string().optional(),
-  "chipLabel": zod.string().optional().describe('Name of the capability chip that pre-filled the prompt (e.g. \'React SaaS app\', \'REST API + Postgres\'). Omit if no chip was used.')
+  "chipLabel": zod.string().optional().describe('Name of the capability chip that pre-filled the prompt (e.g. \'React SaaS app\', \'REST API + Postgres\'). Omit if no chip was used.'),
+  "mode": zod.enum(['builder', 'developer']).optional().describe('Surface creating the project. \'builder\' = AI Build Mode (default). \'developer\' = Developer Mode cloud IDE.')
 })
 
 
@@ -821,6 +824,7 @@ export const GetProjectResponse = zod.object({
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
+  "projectMode": zod.enum(['builder', 'developer']).optional().describe('Surface that created this project. \'builder\' = AI Build Mode (default). \'developer\' = Developer Mode cloud IDE (Task #898). Immutable after creation.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -913,6 +917,7 @@ export const UpdateProjectResponse = zod.object({
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
+  "projectMode": zod.enum(['builder', 'developer']).optional().describe('Surface that created this project. \'builder\' = AI Build Mode (default). \'developer\' = Developer Mode cloud IDE (Task #898). Immutable after creation.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -987,6 +992,7 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
+  "projectMode": zod.enum(['builder', 'developer']).optional().describe('Surface that created this project. \'builder\' = AI Build Mode (default). \'developer\' = Developer Mode cloud IDE (Task #898). Immutable after creation.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -1061,6 +1067,7 @@ export const RestoreProjectResponse = zod.object({
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
+  "projectMode": zod.enum(['builder', 'developer']).optional().describe('Surface that created this project. \'builder\' = AI Build Mode (default). \'developer\' = Developer Mode cloud IDE (Task #898). Immutable after creation.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -1134,6 +1141,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "activePreviewSessionId": zod.string().nullish().describe('Task #768. ULID of the currently active preview session cookie (used by the subdomain gateway).'),
   "previewDbUrl": zod.string().nullish().describe('Task #767\/768. Encrypted Neon Postgres connection string for the test-environment database. Never returned plaintext.'),
   "chipLabel": zod.string().nullish().describe('Name of the capability chip used when the project was created (e.g. \'React SaaS app\'). Null when no chip was used.'),
+  "projectMode": zod.enum(['builder', 'developer']).optional().describe('Surface that created this project. \'builder\' = AI Build Mode (default). \'developer\' = Developer Mode cloud IDE (Task #898). Immutable after creation.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))

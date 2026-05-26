@@ -655,6 +655,13 @@ paths:
           in: query
           required: false
           schema: { type: integer }
+        - name: mode
+          in: query
+          required: false
+          description: "Filter by project mode. 'builder' = AI Build Mode projects; 'developer' = Developer Mode cloud IDE projects."
+          schema:
+            type: string
+            enum: [builder, developer]
       responses:
         "200":
           description: List of projects
@@ -5274,6 +5281,10 @@ components:
         chipLabel:
           type: ["string", "null"]
           description: "Name of the capability chip used when the project was created (e.g. 'React SaaS app'). Null when no chip was used."
+        projectMode:
+          type: string
+          enum: [builder, developer]
+          description: "Surface that created this project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE (Task #898). Immutable after creation."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -5321,6 +5332,10 @@ components:
         chipLabel:
           type: string
           description: "Name of the capability chip that pre-filled the prompt (e.g. 'React SaaS app', 'REST API + Postgres'). Omit if no chip was used."
+        mode:
+          type: string
+          enum: [builder, developer]
+          description: "Surface creating the project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE."
 
     ProjectUpdate:
       type: object

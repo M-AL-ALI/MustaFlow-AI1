@@ -122,8 +122,12 @@ const activeProjects = isNull(projectsTable.deletedAt);
 router.get("/projects", async (req, res): Promise<void> => {
   const userId = req.userId ?? "demo-user";
   const wsId = req.query.workspaceId ? parseInt(req.query.workspaceId as string, 10) : null;
+  const mode = req.query.mode as string | undefined;
   const conditions: SQL[] = [eq(projectsTable.ownerId, userId), activeProjects];
   if (wsId && !isNaN(wsId)) conditions.push(eq(projectsTable.workspaceId, wsId));
+  if (mode === "developer" || mode === "builder") {
+    conditions.push(eq(projectsTable.projectMode, mode));
+  }
   const rows = await db
     .select()
     .from(projectsTable)
@@ -179,7 +183,7 @@ router.post("/projects", async (req, res): Promise<void> => {
     return;
   }
 
-  const { initialPrompt, chipLabel, ...projectInput } = parsed.data;
+  const { initialPrompt, chipLabel, mode, ...projectInput } = parsed.data;
 
   // Derive platform from kind
   const platformMap: Record<string, string> = {
@@ -218,6 +222,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       provisioningStatus: "provisioning",
       lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
       chipLabel: chipLabel ?? null,
+      projectMode: mode ?? "builder",
     })
     .returning();
 

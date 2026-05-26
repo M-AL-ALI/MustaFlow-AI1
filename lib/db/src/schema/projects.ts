@@ -223,6 +223,11 @@ export const projectsTable = pgTable("projects", {
   // E.g. "React SaaS app", "REST API + Postgres", "Mobile app". Null for projects created
   // without a chip (direct prompt, template, or API). Immutable after creation.
   chipLabel: text("chip_label"),
+  // projectMode: surface that created this project.
+  // 'builder'   — AI Build Mode (default, existing behaviour).
+  // 'developer' — Developer Mode cloud IDE (Task #898).
+  // Immutable after creation. Used to scope project list queries by mode.
+  projectMode: text("project_mode").notNull().default("builder"),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

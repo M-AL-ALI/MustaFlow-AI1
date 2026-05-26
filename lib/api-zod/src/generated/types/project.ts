@@ -17,6 +17,7 @@ import type { ProjectPolicyStrictness } from './projectPolicyStrictness';
 import type { ProjectPreviewDbStatus } from './projectPreviewDbStatus';
 import type { ProjectProdContainerStatus } from './projectProdContainerStatus';
 import type { ProjectProjectFormat } from './projectProjectFormat';
+import type { ProjectProjectMode } from './projectProjectMode';
 import type { ProjectProvisioningStatus } from './projectProvisioningStatus';
 import type { ProjectStack } from './projectStack';
 import type { ProjectStatus } from './projectStatus';
@@ -181,6 +182,8 @@ export interface Project {
      * @nullable
      */
   chipLabel?: string | null;
+  /** Surface that created this project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE (Task #898). Immutable after creation. */
+  projectMode?: ProjectProjectMode;
   createdAt: Date;
   updatedAt: Date;
 }

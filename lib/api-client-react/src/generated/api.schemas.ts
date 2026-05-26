@@ -288,6 +288,17 @@ export const ProjectTestContainerStatus = {
   error: 'error',
 } as const;
 
+/**
+ * Surface that created this project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE (Task #898). Immutable after creation.
+ */
+export type ProjectProjectMode = typeof ProjectProjectMode[keyof typeof ProjectProjectMode];
+
+
+export const ProjectProjectMode = {
+  builder: 'builder',
+  developer: 'developer',
+} as const;
+
 export interface Project {
   id: number;
   /** @nullable */
@@ -446,6 +457,8 @@ export interface Project {
      * @nullable
      */
   chipLabel?: string | null;
+  /** Surface that created this project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE (Task #898). Immutable after creation. */
+  projectMode?: ProjectProjectMode;
   createdAt: string;
   updatedAt: string;
 }
@@ -493,6 +506,17 @@ export const ProjectInputStack = {
   'go-gin': 'go-gin',
 } as const;
 
+/**
+ * Surface creating the project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE.
+ */
+export type ProjectInputMode = typeof ProjectInputMode[keyof typeof ProjectInputMode];
+
+
+export const ProjectInputMode = {
+  builder: 'builder',
+  developer: 'developer',
+} as const;
+
 export interface ProjectInput {
   /** @minLength 1 */
   name: string;
@@ -504,6 +528,8 @@ export interface ProjectInput {
   initialPrompt?: string;
   /** Name of the capability chip that pre-filled the prompt (e.g. 'React SaaS app', 'REST API + Postgres'). Omit if no chip was used. */
   chipLabel?: string;
+  /** Surface creating the project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE. */
+  mode?: ProjectInputMode;
 }
 
 export type ProjectUpdateStatus = typeof ProjectUpdateStatus[keyof typeof ProjectUpdateStatus];
@@ -3569,7 +3595,19 @@ export type DeleteWorkspace200 = {
 
 export type ListProjectsParams = {
 workspaceId?: number;
+/**
+ * Filter by project mode. 'builder' = AI Build Mode projects; 'developer' = Developer Mode cloud IDE projects.
+ */
+mode?: ListProjectsMode;
 };
+
+export type ListProjectsMode = typeof ListProjectsMode[keyof typeof ListProjectsMode];
+
+
+export const ListProjectsMode = {
+  builder: 'builder',
+  developer: 'developer',
+} as const;
 
 export type SearchMessagesParams = {
 q: string;

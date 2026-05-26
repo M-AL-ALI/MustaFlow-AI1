@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProjectInputKind } from './projectInputKind';
+import type { ProjectInputMode } from './projectInputMode';
 import type { ProjectInputStack } from './projectInputStack';
 
 export interface ProjectInput {
@@ -19,4 +20,6 @@ export interface ProjectInput {
   initialPrompt?: string;
   /** Name of the capability chip that pre-filled the prompt (e.g. 'React SaaS app', 'REST API + Postgres'). Omit if no chip was used. */
   chipLabel?: string;
+  /** Surface creating the project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE. */
+  mode?: ProjectInputMode;
 }

@@ -5,7 +5,12 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListProjectsMode } from './listProjectsMode';
 
 export type ListProjectsParams = {
 workspaceId?: number;
+/**
+ * Filter by project mode. 'builder' = AI Build Mode projects; 'developer' = Developer Mode cloud IDE projects.
+ */
+mode?: ListProjectsMode;
 };
