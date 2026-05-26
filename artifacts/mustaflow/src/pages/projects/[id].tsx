@@ -115,6 +115,8 @@ import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
 import { QueueComposer } from "./components/queue-composer";
 import { QueueProgressStrip } from "./components/queue-progress-strip";
 import { BackgroundTasksDrawer, type BgTask } from "./components/background-tasks-drawer";
+import { ZeroAgentPanel } from "./components/zero-agent-panel";
+import { DynamicAtom } from "@/components/icons/dynamic-atom";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
@@ -930,6 +932,9 @@ export default function ProjectWorkspacePage() {
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
   const [backgroundPanelOpen, setBackgroundPanelOpen] = useState(false);
+  const [zeroPanelOpen, setZeroPanelOpen] = useState(false);
+  const [zeroPanelWidth, setZeroPanelWidth] = useState(380);
+  const [zeroBgTaskId, setZeroBgTaskId] = useState<number | null>(null);
   const [variantMode, setVariantMode] = useState(false);
   const [variantBatchPending, setVariantBatchPending] = useState(false);
   const [variantComparison, setVariantComparison] = useState<{
@@ -942,6 +947,18 @@ export default function ProjectWorkspacePage() {
   // Holds the latest pendingFeedTaskId so handleStopStream can cancel it even
   // though that value is computed further down the component body.
   const pendingFeedTaskIdRef = useRef<number | null>(null);
+
+  // Auto-clear the Zero background pill when its task reaches a terminal status.
+  // This runs independent of the panel being open so the pill is never stale.
+  useEffect(() => {
+    if (zeroBgTaskId === null) return;
+    const task = (tasksForFeed as Array<{ id: number; status: string }>).find(
+      (t) => t.id === zeroBgTaskId,
+    );
+    if (task && ["completed", "failed", "cancelled", "canceled"].includes(task.status)) {
+      setZeroBgTaskId(null);
+    }
+  }, [tasksForFeed, zeroBgTaskId]);
 
   // On initial load, if there is already an in-flight task (e.g. after a browser
   // refresh while a build is running), surface it in the AgentThinkingBubble.
@@ -2451,6 +2468,37 @@ export default function ProjectWorkspacePage() {
           >
             <Map style={{ width: 11, height: 11 }} />
           </button>
+          {/* Zero agent toggle */}
+          <button
+            onClick={() => setZeroPanelOpen((v) => !v)}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors",
+              zeroPanelOpen
+                ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
+                : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+            title={zeroPanelOpen ? "Close Zero agent panel" : "Open Zero agent panel"}
+          >
+            <DynamicAtom size={13} animate={zeroPanelOpen || !!zeroBgTaskId} className="shrink-0" />
+            Zero
+          </button>
+          {/* Zero background-run progress pill */}
+          {zeroBgTaskId !== null && !zeroPanelOpen && (
+            <button
+              onClick={() => {
+                // Keep zeroBgTaskId so ZeroAgentPanel can reattach to the running task
+                setZeroPanelOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-primary/30 bg-primary/8 text-primary text-[10px] font-medium animate-pulse hover:animate-none hover:bg-primary/15 transition-colors"
+              title="Zero is working in the background — click to view"
+            >
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
+              </span>
+              Zero is working… View
+            </button>
+          )}
           <button
             onClick={() => setActiveTab("publishing")}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold hover:bg-green-500/15 transition-colors"
@@ -2490,7 +2538,7 @@ export default function ProjectWorkspacePage() {
                 : { width: `${splitPct}%`, minWidth: 260, maxWidth: "72%" }
           }
         >
-          {/* Left panel tab bar: Chat | Files | History | Saved */}
+          {/* Left panel tab bar: Chat | Files | History | Saved | Zero */}
           <div className="shrink-0 flex border-b border-border bg-card/60">
             {(["chat", "files", "history", "saved"] as const).map((t) => {
               const Icon =
@@ -2549,6 +2597,20 @@ export default function ProjectWorkspacePage() {
                 </button>
               );
             })}
+            {/* Zero agent entry in left rail */}
+            <button
+              onClick={() => setZeroPanelOpen((v) => !v)}
+              className={cn(
+                "flex items-center justify-center gap-1.5 py-2 px-2.5 text-[11px] font-medium transition-colors border-b-2 shrink-0",
+                zeroPanelOpen || zeroBgTaskId !== null
+                  ? "border-primary text-primary bg-primary/5"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+              title={zeroPanelOpen ? "Close Zero agent panel" : "Open Zero agent panel"}
+            >
+              <DynamicAtom size={12} animate={zeroPanelOpen || !!zeroBgTaskId} />
+              Zero
+            </button>
             {/* Close button for mobile drawer */}
             {isMobileLayout && (
               <button
@@ -3955,6 +4017,27 @@ export default function ProjectWorkspacePage() {
           />
         )}
       </BackgroundTasksDrawer>
+      {/* ── Zero Agent Panel ── */}
+      <ZeroAgentPanel
+        projectId={projectId}
+        isOpen={zeroPanelOpen}
+        onClose={() => setZeroPanelOpen(false)}
+        width={zeroPanelWidth}
+        onWidthChange={setZeroPanelWidth}
+        initialActiveTaskId={zeroBgTaskId}
+        onBuildComplete={() => {
+          setZeroBgTaskId(null);
+          void queryClient.invalidateQueries({
+            queryKey: getListProjectFilesQueryKey(projectId),
+          });
+          void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
+          setBuildRefreshCount((n) => n + 1);
+        }}
+        onBackgroundRun={(taskId) => {
+          setZeroBgTaskId(taskId);
+        }}
+      />
+
       <BuyCreditsSheet
         open={buyCreditsOpen}
         onClose={() => setBuyCreditsOpen(false)}

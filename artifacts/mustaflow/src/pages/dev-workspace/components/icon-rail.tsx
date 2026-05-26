@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { useUser } from "@clerk/react";
+import { DynamicAtom } from "@/components/icons/dynamic-atom";
 
 export type PanelId =
   | "files"
@@ -30,41 +31,9 @@ export type PanelId =
   | "canvas"
   | null;
 
-function DynamicAtomIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <ellipse
-        cx="10"
-        cy="10"
-        rx="8"
-        ry="3.2"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        fill="none"
-      />
-      <ellipse
-        cx="10"
-        cy="10"
-        rx="8"
-        ry="3.2"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        fill="none"
-        transform="rotate(60 10 10)"
-      />
-      <ellipse
-        cx="10"
-        cy="10"
-        rx="8"
-        ry="3.2"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        fill="none"
-        transform="rotate(120 10 10)"
-      />
-      <circle cx="10" cy="10" r="1.6" fill="currentColor" />
-    </svg>
-  );
+/** Wrapper so DynamicAtom matches the icon rail's ComponentType<{className?}> contract */
+function DynamicAtomRailIcon({ className }: { className?: string }) {
+  return <DynamicAtom size={16} animate={false} className={className} />;
 }
 
 const RAIL_ITEMS: Array<{
@@ -75,7 +44,7 @@ const RAIL_ITEMS: Array<{
 }> = [
   { id: "files", label: "Files", icon: FolderOpen },
   { id: "search", label: "Search", icon: Search },
-  { id: "zero-agent", label: "Zero Agent", icon: DynamicAtomIcon, isCustom: true },
+  { id: "zero-agent", label: "Zero Agent", icon: DynamicAtomRailIcon, isCustom: true },
   { id: "canvas", label: "Canvas", icon: Layers },
   { id: "tools", label: "Tools", icon: Wrench },
   { id: "secrets", label: "Secrets", icon: Lock },
