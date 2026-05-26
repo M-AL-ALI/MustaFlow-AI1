@@ -935,6 +935,7 @@ export default function ProjectWorkspacePage() {
   const [zeroPanelOpen, setZeroPanelOpen] = useState(false);
   const [zeroPanelWidth, setZeroPanelWidth] = useState(380);
   const [zeroBgTaskId, setZeroBgTaskId] = useState<number | null>(null);
+  const [zeroScrollToTaskId, setZeroScrollToTaskId] = useState<number | null>(null);
   const [variantMode, setVariantMode] = useState(false);
   const [variantBatchPending, setVariantBatchPending] = useState(false);
   const [variantComparison, setVariantComparison] = useState<{
@@ -3514,6 +3515,10 @@ export default function ProjectWorkspacePage() {
                 setPrompt(text);
                 switchLeftPanel("chat");
               }}
+              onViewInChat={(taskId) => {
+                setZeroScrollToTaskId(taskId);
+                setZeroPanelOpen(true);
+              }}
             />
           )}
 
@@ -4040,6 +4045,8 @@ export default function ProjectWorkspacePage() {
         width={zeroPanelWidth}
         onWidthChange={setZeroPanelWidth}
         initialActiveTaskId={zeroBgTaskId}
+        scrollToTaskId={zeroScrollToTaskId}
+        onScrollToComplete={() => setZeroScrollToTaskId(null)}
         onBuildComplete={() => {
           setZeroBgTaskId(null);
           void queryClient.invalidateQueries({

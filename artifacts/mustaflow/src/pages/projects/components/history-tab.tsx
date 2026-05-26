@@ -30,6 +30,7 @@ import {
   X,
   Clock,
   Plus,
+  ArrowUpRight,
 } from "lucide-react";
 
 const PAGE_SIZE = 20;
@@ -135,9 +136,10 @@ interface EntryCardProps {
   entry: KnowledgeEntry;
   projectId: number;
   onRetry?: (prompt: string) => void;
+  onViewInChat?: (taskId: number) => void;
 }
 
-function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
+function EntryCard({ entry, projectId, onRetry, onViewInChat }: EntryCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showAnnotationInput, setShowAnnotationInput] = useState(false);
   const [annotationDraft, setAnnotationDraft] = useState(entry.annotation ?? "");
@@ -272,6 +274,16 @@ function EntryCard({ entry, projectId, onRetry }: EntryCardProps) {
                 minute: "2-digit",
               })}
             </span>
+            {entry.relatedTaskId != null && onViewInChat && (
+              <button
+                onClick={() => onViewInChat(entry.relatedTaskId!)}
+                className="shrink-0 flex items-center gap-0.5 text-[9px] text-muted-foreground/60 hover:text-primary transition-colors"
+                title="Jump to the chat message that started this build"
+              >
+                <ArrowUpRight className="h-2.5 w-2.5" />
+                View in chat
+              </button>
+            )}
           </div>
         </div>
 
@@ -516,9 +528,10 @@ interface HistoryTabProps {
   projectId: number;
   onRetry?: (prompt: string) => void;
   focusVersionId?: number | null;
+  onViewInChat?: (taskId: number) => void;
 }
 
-export function HistoryTab({ projectId, onRetry, focusVersionId }: HistoryTabProps) {
+export function HistoryTab({ projectId, onRetry, focusVersionId, onViewInChat }: HistoryTabProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -732,7 +745,13 @@ export function HistoryTab({ projectId, onRetry, focusVersionId }: HistoryTabPro
             </div>
             <div className="space-y-2">
               {group.entries.map((entry) => (
-                <EntryCard key={entry.id} entry={entry} projectId={projectId} onRetry={onRetry} />
+                <EntryCard
+                  key={entry.id}
+                  entry={entry}
+                  projectId={projectId}
+                  onRetry={onRetry}
+                  onViewInChat={onViewInChat}
+                />
               ))}
             </div>
           </div>

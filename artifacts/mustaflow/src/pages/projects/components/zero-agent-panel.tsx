@@ -298,6 +298,10 @@ export interface ZeroAgentPanelProps {
   initialActiveTaskId?: number | null;
   width?: number;
   onWidthChange?: (w: number) => void;
+  /** When set, scroll to the chat message whose plan.taskId matches and briefly highlight it */
+  scrollToTaskId?: number | null;
+  /** Called once the scroll + highlight cycle completes */
+  onScrollToComplete?: () => void;
 }
 
 export function ZeroAgentPanel({
@@ -309,6 +313,8 @@ export function ZeroAgentPanel({
   initialActiveTaskId,
   width = 380,
   onWidthChange,
+  scrollToTaskId,
+  onScrollToComplete,
 }: ZeroAgentPanelProps) {
   const queryClient = useQueryClient();
 
@@ -321,6 +327,9 @@ export function ZeroAgentPanel({
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [isDetached, setIsDetached] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [highlightedMsgId, setHighlightedMsgId] = useState<number | null>(null);
+  /** Tracks which scrollToTaskId we have already acted on to avoid re-running */
+  const appliedScrollTaskIdRef = useRef<number | null>(null);
   const [uploadingCount, setUploadingCount] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -728,6 +737,48 @@ export function ZeroAgentPanel({
   /** True when the inline bubble is anchored to a message in the thread. */
   const activeTaskIsInThread = inlineBubbleMsgId !== null;
 
+  /**
+   * When `scrollToTaskId` changes (or messages finish loading), find the
+   * assistant message whose plan.taskId matches, scroll to it, and briefly
+   * highlight it so the user can spot it easily.
+   */
+  useEffect(() => {
+    if (scrollToTaskId == null) {
+      appliedScrollTaskIdRef.current = null;
+      return;
+    }
+    if (appliedScrollTaskIdRef.current === scrollToTaskId) return;
+
+    const target = sortedMessages.find((m) => {
+      if (m.role === "user") return false;
+      const payload = m.plan as Record<string, unknown> | null | undefined;
+      return (
+        payload != null &&
+        typeof payload === "object" &&
+        (payload.taskId as number | undefined) === scrollToTaskId
+      );
+    });
+
+    if (!target) return; // Messages not yet loaded — re-runs when sortedMessages changes
+
+    appliedScrollTaskIdRef.current = scrollToTaskId;
+    setHighlightedMsgId(target.id);
+
+    requestAnimationFrame(() => {
+      const el = scrollRef.current?.querySelector(
+        `[data-msg-id="${target.id}"]`,
+      ) as HTMLElement | null;
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+
+    const t = setTimeout(() => {
+      setHighlightedMsgId(null);
+      onScrollToComplete?.();
+    }, 2000);
+
+    return () => clearTimeout(t);
+  }, [scrollToTaskId, sortedMessages, onScrollToComplete]);
+
   if (!isOpen) return null;
 
   return (
@@ -903,7 +954,14 @@ export function ZeroAgentPanel({
             const task = taskId ? taskById.get(taskId) : undefined;
 
             return (
-              <div key={msg.id}>
+              <div
+                key={msg.id}
+                data-msg-id={msg.id}
+                className={cn(
+                  "rounded-lg transition-colors duration-300",
+                  highlightedMsgId === msg.id && "bg-primary/10 ring-1 ring-primary/30",
+                )}
+              >
                 {isUser ? (
                   <UserBubble text={msg.content} />
                 ) : isPlanCard ? (
