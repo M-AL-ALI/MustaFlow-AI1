@@ -11,6 +11,11 @@ export interface TaskStreamEvent {
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
+export interface TaskEventStreamResult {
+  events: TaskStreamEvent[];
+  lastEventAt: number | null;
+}
+
 /**
  * Connects to the SSE stream for a task and accumulates events in real time.
  *
@@ -23,14 +28,19 @@ const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
  *
  * The connection closes automatically once a terminal event arrives
  * (completed / failed / cancelled). Cleanup also fires on unmount.
+ *
+ * `lastEventAt` is a `Date.now()` timestamp updated on every incoming event,
+ * used by consumers to detect idle gaps between tool calls.
  */
-export function useTaskEventStream(projectId: number, taskId: number): TaskStreamEvent[] {
+export function useTaskEventStream(projectId: number, taskId: number): TaskEventStreamResult {
   const [events, setEvents] = useState<TaskStreamEvent[]>([]);
+  const [lastEventAt, setLastEventAt] = useState<number | null>(null);
   const seenIdsRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     seenIdsRef.current = new Set();
     setEvents([]);
+    setLastEventAt(null);
 
     const es = new EventSource(`/api/projects/${projectId}/tasks/${taskId}/events/stream`);
 
@@ -40,6 +50,7 @@ export function useTaskEventStream(projectId: number, taskId: number): TaskStrea
         if (seenIdsRef.current.has(event.id)) return;
         seenIdsRef.current.add(event.id);
         setEvents((prev) => [...prev, event]);
+        setLastEventAt(Date.now());
         if (TERMINAL_STATUSES.has(event.eventType)) {
           es.close();
         }
@@ -51,5 +62,5 @@ export function useTaskEventStream(projectId: number, taskId: number): TaskStrea
     return () => es.close();
   }, [projectId, taskId]);
 
-  return events;
+  return { events, lastEventAt };
 }

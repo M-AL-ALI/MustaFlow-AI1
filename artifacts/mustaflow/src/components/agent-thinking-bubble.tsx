@@ -64,6 +64,44 @@ type StepGroup = {
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
+/**
+ * Returns true when the last SSE event arrived >1 s ago and the task is still
+ * running. Resets immediately when a new event arrives or the task finishes.
+ */
+function useIdleGap(lastEventAt: number | null, isTerminal: boolean): boolean {
+  const [isIdle, setIsIdle] = useState(false);
+
+  useEffect(() => {
+    if (isTerminal || lastEventAt === null) {
+      setIsIdle(false);
+      return;
+    }
+    const gap = Date.now() - lastEventAt;
+    if (gap >= 1000) {
+      setIsIdle(true);
+      return;
+    }
+    setIsIdle(false);
+    const t = setTimeout(() => setIsIdle(true), 1000 - gap);
+    return () => clearTimeout(t);
+  }, [lastEventAt, isTerminal]);
+
+  return isIdle;
+}
+
+function ThinkingIdleIndicator() {
+  return (
+    <div className="flex items-center gap-1.5 py-1 animate-in fade-in duration-300">
+      <span className="text-[11px] italic text-muted-foreground/60">Zero is thinking</span>
+      <span className="flex items-center gap-0.5">
+        <span className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:0ms]" />
+        <span className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:150ms]" />
+        <span className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:300ms]" />
+      </span>
+    </div>
+  );
+}
+
 const STEP_ICON: Record<string, React.ElementType> = {
   queued: Clock,
   analyzing_request: Search,
@@ -1358,13 +1396,14 @@ export function AgentThinkingBubble({
   const cancelTask = useCancelTask();
   const forceStartTask = useForceStartTask();
 
-  const events = useTaskEventStream(projectId, taskId);
+  const { events, lastEventAt } = useTaskEventStream(projectId, taskId);
 
   const lastEvent = events[events.length - 1];
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
   const isCancelled = lastEvent?.eventType === "cancelled";
+  const isIdle = useIdleGap(lastEventAt, isTerminal);
   // True when the task is sitting in the queue (only event so far is "queued").
   // Once the job starts running it emits additional events and this flips false.
   const isQueued = events.length > 0 && events.every((e) => e.eventType === "queued");
@@ -1639,6 +1678,8 @@ export function AgentThinkingBubble({
                 taskId={taskId}
               />
             )}
+
+            {isIdle && !isTerminal && !isQueued && <ThinkingIdleIndicator />}
 
             {groups.length === 0 && !isTerminal && (
               <div className="flex items-center gap-2 text-muted-foreground">

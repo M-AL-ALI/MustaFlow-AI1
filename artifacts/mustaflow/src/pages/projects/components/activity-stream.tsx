@@ -219,7 +219,7 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
   const [expanded, setExpanded] = useState(false);
   const [autoDismissed, setAutoDismissed] = useState(false);
 
-  const events = useTaskEventStream(projectId, taskId);
+  const { events } = useTaskEventStream(projectId, taskId);
 
   const lastEvent = events[events.length - 1];
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType) : false;
@@ -480,7 +480,7 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
 export function InlineLiveActivity({ projectId, taskId, onDismiss }: Props) {
   const pillRowRef = useRef<HTMLDivElement>(null);
 
-  const events = useTaskEventStream(projectId, taskId);
+  const { events } = useTaskEventStream(projectId, taskId);
 
   const lastEvent = events[events.length - 1];
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType) : false;
