@@ -165,7 +165,8 @@ export default function DevWorkspacePage() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Editor panel shows only when a file tab is open or editor-max layout is active
-  const showEditorPanel = paneLayout !== "preview-max" && (tabs.length > 0 || paneLayout === "editor-max");
+  const showEditorPanel =
+    paneLayout !== "preview-max" && (tabs.length > 0 || paneLayout === "editor-max");
 
   // ── Project derived state ─────────────────────────────────────────────────
   const projectName = (project as { name?: string } | undefined)?.name ?? "Untitled Project";
@@ -173,8 +174,7 @@ export default function DevWorkspacePage() {
   const previewUrl = (project as { previewUrl?: string | null } | undefined)?.previewUrl ?? null;
   // hasContainer: true only when the project has a provisioned Fly.io machine.
   // Static HTML/SPA projects never have a container so their preview always works.
-  const hasContainer =
-    !!((project as { containerId?: string | null } | undefined)?.containerId);
+  const hasContainer = !!(project as { containerId?: string | null } | undefined)?.containerId;
 
   const { data: projectFiles } = useListProjectFiles(projectId, {
     query: {
@@ -184,28 +184,25 @@ export default function DevWorkspacePage() {
   });
 
   // ── File operations ───────────────────────────────────────────────────────
-  const handleFileOpen = useCallback(
-    (file: FileEntry) => {
-      setTabs((prev) => {
-        const existing = prev.findIndex((t) => t.path === file.path);
-        if (existing >= 0) {
-          setActiveTabIndex(existing);
-          return prev;
-        }
-        const newTab: EditorTab = {
-          fileId: file.id,
-          path: file.path,
-          content: file.content ?? "",
-          isDirty: false,
-        };
-        setActiveTabIndex(prev.length);
-        return [...prev, newTab];
-      });
-      // Opening a file keeps preview visible alongside the editor
-      setRightView((prev) => (prev === "canvas" ? "preview" : prev));
-    },
-    [],
-  );
+  const handleFileOpen = useCallback((file: FileEntry) => {
+    setTabs((prev) => {
+      const existing = prev.findIndex((t) => t.path === file.path);
+      if (existing >= 0) {
+        setActiveTabIndex(existing);
+        return prev;
+      }
+      const newTab: EditorTab = {
+        fileId: file.id,
+        path: file.path,
+        content: file.content ?? "",
+        isDirty: false,
+      };
+      setActiveTabIndex(prev.length);
+      return [...prev, newTab];
+    });
+    // Opening a file keeps preview visible alongside the editor
+    setRightView((prev) => (prev === "canvas" ? "preview" : prev));
+  }, []);
 
   const handleNavigateToFile = useCallback(
     (fileId: number, _lineNumber?: number) => {
@@ -216,18 +213,19 @@ export default function DevWorkspacePage() {
     [projectFiles, handleFileOpen],
   );
 
-  const handleTabClose = useCallback((index: number) => {
-    setTabs((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      return next;
-    });
-    setActiveTabIndex((prev) => Math.max(0, Math.min(prev, tabs.length - 2)));
-  }, [tabs.length]);
+  const handleTabClose = useCallback(
+    (index: number) => {
+      setTabs((prev) => {
+        const next = prev.filter((_, i) => i !== index);
+        return next;
+      });
+      setActiveTabIndex((prev) => Math.max(0, Math.min(prev, tabs.length - 2)));
+    },
+    [tabs.length],
+  );
 
   const handleContentChange = useCallback((index: number, content: string) => {
-    setTabs((prev) =>
-      prev.map((t, i) => (i === index ? { ...t, content, isDirty: true } : t)),
-    );
+    setTabs((prev) => prev.map((t, i) => (i === index ? { ...t, content, isDirty: true } : t)));
   }, []);
 
   const handleFileSaved = useCallback((index: number) => {
@@ -253,11 +251,7 @@ export default function DevWorkspacePage() {
   // ── Computed rail active panel ─────────────────────────────────────────────
   // Canvas icon highlights when canvas view is active
   const railActivePanel: PanelId =
-    rightView === "canvas"
-      ? "canvas"
-      : leftPanelVisible && activePanel
-        ? activePanel
-        : null;
+    rightView === "canvas" ? "canvas" : leftPanelVisible && activePanel ? activePanel : null;
 
   return (
     <TooltipProvider>
@@ -312,7 +306,6 @@ export default function DevWorkspacePage() {
 
           {/* ── Main panel group ──────────────────────────────────────────── */}
           <PanelGroup direction="horizontal" className="flex-1 min-w-0">
-
             {/* ── Column 1: Collapsible tools sidebar ──────────────────────── */}
             {showToolsPanel && (
               <>
@@ -367,7 +360,9 @@ export default function DevWorkspacePage() {
 
             {/* ── Column 2: Chat thread + composer ─────────────────────────── */}
             <Panel
-              defaultSize={showToolsPanel ? (showPreviewOrCanvas ? 28 : 40) : showPreviewOrCanvas ? 35 : 50}
+              defaultSize={
+                showToolsPanel ? (showPreviewOrCanvas ? 28 : 40) : showPreviewOrCanvas ? 35 : 50
+              }
               minSize={22}
               maxSize={55}
               className="overflow-hidden border-r border-border"
@@ -393,7 +388,6 @@ export default function DevWorkspacePage() {
                 className="overflow-hidden"
               >
                 <PanelGroup direction="horizontal" className="h-full">
-
                   {/* Editor + terminal — only shown when a tab is open */}
                   {showEditorPanel && (
                     <>

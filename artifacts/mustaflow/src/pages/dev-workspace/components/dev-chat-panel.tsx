@@ -561,56 +561,59 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   // ── Send ───────────────────────────────────────────────────────────────────
   // overrideText: when provided (e.g. from PlanCard onBuild), use this instead of
   // the prompt state to avoid the stale-closure problem with setPrompt + doSend().
-  const doSend = useCallback((overrideText?: string) => {
-    const text = (overrideText !== undefined ? overrideText : prompt).trim();
-    const readyImages = images.filter((i) => i.uploadedUrl && !i.uploading && !i.error);
-    if (!text && readyImages.length === 0) return;
-    if (isBusy) return;
+  const doSend = useCallback(
+    (overrideText?: string) => {
+      const text = (overrideText !== undefined ? overrideText : prompt).trim();
+      const readyImages = images.filter((i) => i.uploadedUrl && !i.uploading && !i.error);
+      if (!text && readyImages.length === 0) return;
+      if (isBusy) return;
 
-    const attachments = readyImages.map((i) => ({
-      kind: "image" as const,
-      url: i.uploadedUrl!,
-      alt: i.file.name,
-    }));
+      const attachments = readyImages.map((i) => ({
+        kind: "image" as const,
+        url: i.uploadedUrl!,
+        alt: i.file.name,
+      }));
 
-    setPrompt("");
-    setImages([]);
-    setPendingStartedAt(new Date());
+      setPrompt("");
+      setImages([]);
+      setPendingStartedAt(new Date());
 
-    sendMessage.mutate(
-      {
-        id: projectId,
-        data: {
-          content: text,
-          agentMode,
-          planMode,
-          background: false,
-          agentIntent: planMode ? ("plan" as const) : ("build" as const),
-          origin: "zero",
-          ...(attachments.length > 0 ? { attachments } : {}),
+      sendMessage.mutate(
+        {
+          id: projectId,
+          data: {
+            content: text,
+            agentMode,
+            planMode,
+            background: false,
+            agentIntent: planMode ? ("plan" as const) : ("build" as const),
+            origin: "zero",
+            ...(attachments.length > 0 ? { attachments } : {}),
+          },
         },
-      },
-      {
-        onSuccess: (data) => {
-          const plan = (data as { assistantMessage?: { plan?: Record<string, unknown> | null } })
-            ?.assistantMessage?.plan;
-          const tid =
-            plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
-          if (tid) {
-            setActiveTaskId(tid);
-          } else {
+        {
+          onSuccess: (data) => {
+            const plan = (data as { assistantMessage?: { plan?: Record<string, unknown> | null } })
+              ?.assistantMessage?.plan;
+            const tid =
+              plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
+            if (tid) {
+              setActiveTaskId(tid);
+            } else {
+              setPendingStartedAt(null);
+            }
+            void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+            void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+          },
+          onError: () => {
+            void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
             setPendingStartedAt(null);
-          }
-          void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
-          void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+          },
         },
-        onError: () => {
-          void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
-          setPendingStartedAt(null);
-        },
-      },
-    );
-  }, [prompt, images, isBusy, projectId, agentMode, planMode, sendMessage, queryClient]);
+      );
+    },
+    [prompt, images, isBusy, projectId, agentMode, planMode, sendMessage, queryClient],
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -456,10 +456,7 @@ const REACT_SIGNALS = [
  *                   Developer Mode project runs as a real server process inside a
  *                   Linux container.
  */
-export async function detectRequiredStack(
-  prompt: string,
-  devMode = false,
-): Promise<StackId> {
+export async function detectRequiredStack(prompt: string, devMode = false): Promise<StackId> {
   const lower = prompt.toLowerCase();
 
   // Mobile intent always wins — a user asking for "an app like Uber" or
