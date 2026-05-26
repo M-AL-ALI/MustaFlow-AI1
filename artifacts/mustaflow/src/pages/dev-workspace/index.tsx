@@ -23,6 +23,7 @@ import { PlaceholderPanel } from "./components/placeholder-panel";
 import { MonacoEditorPane, type EditorTab } from "./components/monaco-editor-pane";
 import { TerminalPanel } from "./components/terminal-panel";
 import { PreviewPane } from "./components/preview-pane";
+import { DevCanvasTab } from "./components/canvas-tab";
 
 type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
 
@@ -237,13 +238,17 @@ export default function DevWorkspacePage() {
   const [activePanel, setActivePanel] = useState<PanelId>("files");
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
   const [zeroAgentOpen, setZeroAgentOpen] = useState(false);
+  const [canvasOpen, setCanvasOpen] = useState(false);
   const [paneLayout, setPaneLayout] = useState<PaneLayout>("default");
 
   const handlePanelToggle = useCallback(
     (panel: PanelId) => {
       if (panel === "zero-agent") {
-        // Zero Agent is right-docked — toggle independently
         setZeroAgentOpen((v) => !v);
+        return;
+      }
+      if (panel === "canvas") {
+        setCanvasOpen((v) => !v);
         return;
       }
       if (activePanel === panel) {
@@ -408,7 +413,7 @@ export default function DevWorkspacePage() {
         <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Icon rail */}
           <IconRail
-            activePanel={zeroAgentOpen ? "zero-agent" : activePanel}
+            activePanel={zeroAgentOpen ? "zero-agent" : canvasOpen ? "canvas" : activePanel}
             onPanelToggle={handlePanelToggle}
           />
 
@@ -445,40 +450,83 @@ export default function DevWorkspacePage() {
               </>
             )}
 
-            {/* Center: editor + terminal */}
+            {/* Center: tab bar + canvas board OR editor + terminal */}
             <Panel
               defaultSize={showLeftPanel ? (showPreview ? 50 : 82) : showPreview ? 65 : 100}
               minSize={25}
             >
-              <PanelGroup direction="vertical">
-                {/* Monaco editor */}
-                <Panel defaultSize={70} minSize={30} className="overflow-hidden">
-                  <MonacoEditorPane
-                    projectId={projectId}
-                    tabs={tabs}
-                    activeTabIndex={activeTabIndex}
-                    diffView={diffView}
-                    onTabClose={handleTabClose}
-                    onTabActivate={setActiveTabIndex}
-                    onContentChange={handleContentChange}
-                    onFileSaved={handleFileSaved}
-                    onDiffClose={() => setDiffView(null)}
-                  />
-                </Panel>
+              <div className="flex flex-col h-full min-h-0">
+                {/* Center-panel tab bar */}
+                <div className="shrink-0 flex items-center gap-0 border-b border-border bg-zinc-950 px-2">
+                  <button
+                    onClick={() => setCanvasOpen(false)}
+                    className={[
+                      "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                      !canvasOpen
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground",
+                    ].join(" ")}
+                  >
+                    Editor
+                  </button>
+                  <button
+                    onClick={() => setCanvasOpen(true)}
+                    className={[
+                      "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                      canvasOpen
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground",
+                    ].join(" ")}
+                  >
+                    Canvas
+                  </button>
+                </div>
 
-                <PanelResizeHandle className="h-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
+                {/* Tab content */}
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  {canvasOpen ? (
+                    <DevCanvasTab
+                      projectId={projectId}
+                      onProjectFilesChanged={() => {
+                        setRefreshTrigger((n) => n + 1);
+                        void queryClient.invalidateQueries({
+                          queryKey: getListProjectFilesQueryKey(projectId),
+                        });
+                      }}
+                    />
+                  ) : (
+                    <PanelGroup direction="vertical">
+                      {/* Monaco editor */}
+                      <Panel defaultSize={70} minSize={30} className="overflow-hidden">
+                        <MonacoEditorPane
+                          projectId={projectId}
+                          tabs={tabs}
+                          activeTabIndex={activeTabIndex}
+                          diffView={diffView}
+                          onTabClose={handleTabClose}
+                          onTabActivate={setActiveTabIndex}
+                          onContentChange={handleContentChange}
+                          onFileSaved={handleFileSaved}
+                          onDiffClose={() => setDiffView(null)}
+                        />
+                      </Panel>
 
-                {/* Terminal panel */}
-                <Panel defaultSize={30} minSize={15} maxSize={60} className="overflow-hidden">
-                  <TerminalPanel
-                    projectId={projectId}
-                    containerStatus={containerStatus}
-                    containerUrl={containerUrl}
-                    onStartContainer={() => void handleStartContainer()}
-                    isStarting={isStarting}
-                  />
-                </Panel>
-              </PanelGroup>
+                      <PanelResizeHandle className="h-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
+
+                      {/* Terminal panel */}
+                      <Panel defaultSize={30} minSize={15} maxSize={60} className="overflow-hidden">
+                        <TerminalPanel
+                          projectId={projectId}
+                          containerStatus={containerStatus}
+                          containerUrl={containerUrl}
+                          onStartContainer={() => void handleStartContainer()}
+                          isStarting={isStarting}
+                        />
+                      </Panel>
+                    </PanelGroup>
+                  )}
+                </div>
+              </div>
             </Panel>
 
             {/* Right: preview pane */}

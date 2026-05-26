@@ -75,6 +75,7 @@
     "migrate-pat-rotation": "tsx ./src/migrate-pat-rotation.ts",
     "migrate-preferred-mode": "tsx ./src/migrate-preferred-mode.ts",
     "migrate-project-mode": "tsx ./src/migrate-project-mode.ts",
+    "migrate-canvas-state": "tsx ./src/migrate-canvas-state.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"

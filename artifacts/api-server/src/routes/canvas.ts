@@ -356,6 +356,80 @@ router.get(
   },
 );
 
+// ── GET /api/projects/:id/canvas/variants/:vid/files ─────────────────────────
+router.get(
+  "/projects/:id/canvas/variants/:vid/files",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const vid = Number(req.params.vid);
+    const [row] = await db
+      .select()
+      .from(canvasVariantsTable)
+      .where(and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, vid)));
+    if (!row) {
+      res.status(404).json({ error: "Variant not found" });
+      return;
+    }
+    if (row.status !== "ready" || !row.files) {
+      res.status(409).json({ error: "Variant is not ready", status: row.status });
+      return;
+    }
+    res.json({
+      files: (row.files as FileSnapshotEntry[]).map((f) => ({
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType || guessMime(f.path),
+      })),
+    });
+  },
+);
+
+// ── PATCH /api/projects/:id/canvas/variants/:vid/files ───────────────────────
+router.patch(
+  "/projects/:id/canvas/variants/:vid/files",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const vid = Number(req.params.vid);
+    const body = req.body as { files?: unknown } | undefined;
+    if (!Array.isArray(body?.files) || body.files.length === 0) {
+      res.status(400).json({ error: "files must be a non-empty array" });
+      return;
+    }
+    const files: FileSnapshotEntry[] = (body.files as Array<Record<string, unknown>>)
+      .filter(
+        (f): f is { path: string; content: string; mimeType?: string } =>
+          typeof f.path === "string" && typeof f.content === "string",
+      )
+      .map((f) => ({
+        path: f.path,
+        content: f.content,
+        mimeType: f.mimeType ?? guessMime(f.path),
+      }));
+    if (files.length === 0) {
+      res.status(400).json({ error: "No valid files provided" });
+      return;
+    }
+
+    const [row] = await db
+      .select()
+      .from(canvasVariantsTable)
+      .where(and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, vid)));
+    if (!row) {
+      res.status(404).json({ error: "Variant not found" });
+      return;
+    }
+
+    await db
+      .update(canvasVariantsTable)
+      .set({ files, updatedAt: new Date(), lastViewedAt: new Date() })
+      .where(eq(canvasVariantsTable.id, vid));
+
+    res.json({ updated: true, fileCount: files.length });
+  },
+);
+
 // ── POST /api/projects/:id/canvas/variants/:vid/touch ────────────────────────
 router.post(
   "/projects/:id/canvas/variants/:vid/touch",
@@ -1509,5 +1583,50 @@ publicCanvasRouter.delete("/canvas/library/:lid", async (req, res): Promise<void
     );
   res.json({ deleted: true });
 });
+
+// ── GET /api/projects/:id/canvas/state ───────────────────────────────────────
+router.get(
+  "/projects/:id/canvas/state",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const [row] = await db
+      .select({ canvasState: projectsTable.canvasState })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+    if (!row) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    res.json({ canvasState: row.canvasState ?? {} });
+  },
+);
+
+// ── PATCH /api/projects/:id/canvas/state ─────────────────────────────────────
+router.patch(
+  "/projects/:id/canvas/state",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const body = req.body as { canvasState?: unknown } | undefined;
+    if (!body?.canvasState || typeof body.canvasState !== "object") {
+      res.status(400).json({ error: "canvasState must be an object" });
+      return;
+    }
+    const [updated] = await db
+      .update(projectsTable)
+      .set({
+        canvasState: body.canvasState as Record<string, unknown>,
+        updatedAt: new Date(),
+      })
+      .where(eq(projectsTable.id, projectId))
+      .returning({ id: projectsTable.id });
+    if (!updated) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    res.json({ saved: true });
+  },
+);
 
 export default router;

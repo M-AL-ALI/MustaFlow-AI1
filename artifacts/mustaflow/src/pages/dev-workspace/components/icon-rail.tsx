@@ -9,6 +9,7 @@ import {
   Lock,
   Gauge,
   Settings,
+  Layers,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useUser } from "@clerk/react";
@@ -22,6 +23,7 @@ export type PanelId =
   | "git"
   | "secrets"
   | "resources"
+  | "canvas"
   | null;
 
 function DynamicAtomIcon({ className }: { className?: string }) {
@@ -70,6 +72,7 @@ const RAIL_ITEMS: Array<{
   { id: "files", label: "Files", icon: FolderOpen },
   { id: "search", label: "Search", icon: Search },
   { id: "zero-agent", label: "Zero Agent", icon: DynamicAtomIcon, isCustom: true },
+  { id: "canvas", label: "Canvas", icon: Layers },
   { id: "tools", label: "Tools", icon: Wrench },
   { id: "packages", label: "Packages", icon: Package },
   { id: "git", label: "Version Control", icon: GitBranch },

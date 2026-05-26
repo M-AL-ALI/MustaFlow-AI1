@@ -223,6 +223,10 @@ export const projectsTable = pgTable("projects", {
   // E.g. "React SaaS app", "REST API + Postgres", "Mobile app". Null for projects created
   // without a chip (direct prompt, template, or API). Immutable after creation.
   chipLabel: text("chip_label"),
+  // canvasState: persisted canvas board state for the Developer Mode Canvas tab.
+  // Structure: { explorationId, tiles: { [variantId]: { device } } }
+  // Saved by PATCH /api/projects/:id/canvas/state; loaded on workspace open.
+  canvasState: jsonb("canvas_state").$type<Record<string, unknown>>().default({}),
   // projectMode: surface that created this project.
   // 'builder'   — AI Build Mode (default, existing behaviour).
   // 'developer' — Developer Mode cloud IDE (Task #898).
