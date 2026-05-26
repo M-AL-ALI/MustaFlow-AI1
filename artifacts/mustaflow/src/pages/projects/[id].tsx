@@ -1022,6 +1022,7 @@ export default function ProjectWorkspacePage() {
   });
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [showAllRecent, setShowAllRecent] = useState(false);
+  const [visibleMessageWindow, setVisibleMessageWindow] = useState(20);
   const [chatScrolledUp, setChatScrolledUp] = useState(false);
   const [historyFocusVersionId, setHistoryFocusVersionId] = useState<number | null>(null);
   const [selectedCodeFileId, setSelectedCodeFileId] = useState<number | null>(null);
@@ -2801,12 +2802,43 @@ export default function ProjectWorkspacePage() {
                       )}
                       {(() => {
                         const RECENT_DEFAULT = 6;
-                        const allRecent = messages?.slice(-20) ?? [];
+                        const allRecent = messages?.slice(-visibleMessageWindow) ?? [];
+                        const totalMessages = messages?.length ?? 0;
+                        const hasMoreOlder = totalMessages > visibleMessageWindow;
                         const hiddenCount = showAllRecent
                           ? 0
                           : Math.max(0, allRecent.length - RECENT_DEFAULT);
                         return (
                           <>
+                            {hasMoreOlder && showAllRecent && (
+                              <div className="flex items-center justify-center gap-2 pb-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const el = scrollRef.current;
+                                    const prevHeight = el?.scrollHeight ?? 0;
+                                    setVisibleMessageWindow((w) => w + 20);
+                                    requestAnimationFrame(() => {
+                                      if (el) {
+                                        el.scrollTop += el.scrollHeight - prevHeight;
+                                      }
+                                    });
+                                  }}
+                                  className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                                >
+                                  <ChevronDown className="h-3 w-3 rotate-180" />
+                                  Load previous messages
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowChatHistory(true)}
+                                  className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                                >
+                                  <History className="h-3 w-3" />
+                                  Full history
+                                </button>
+                              </div>
+                            )}
                             {hiddenCount > 0 && (
                               <div className="flex items-center justify-center gap-2 pb-1">
                                 <button
@@ -2845,7 +2877,7 @@ export default function ProjectWorkspacePage() {
                       })()}
                       {(() => {
                         const RECENT_DEFAULT = 6;
-                        const allRecent = messages?.slice(-20) ?? [];
+                        const allRecent = messages?.slice(-visibleMessageWindow) ?? [];
                         const visibleMsgs = showAllRecent
                           ? allRecent
                           : allRecent.slice(-RECENT_DEFAULT);
@@ -3259,8 +3291,14 @@ export default function ProjectWorkspacePage() {
                         className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-medium shadow-lg hover:opacity-90 transition-opacity"
                         title="Jump to latest message"
                       >
-                        <ChevronDown className="h-3 w-3" />
-                        Jump to latest
+                        {isBusy && (
+                          <span className="relative flex h-2 w-2 shrink-0">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-foreground" />
+                          </span>
+                        )}
+                        {!isBusy && <ChevronDown className="h-3 w-3" />}
+                        {isBusy ? "New events" : "Jump to latest"}
                       </button>
                     )}
                   </div>

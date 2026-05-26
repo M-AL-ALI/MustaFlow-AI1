@@ -120,9 +120,7 @@ function formatSessionLabel(date: Date): string {
   const isYesterday = date.toDateString() === yesterday.toDateString();
   if (isToday) return `Today at ${timeStr}`;
   if (isYesterday) return `Yesterday at ${timeStr}`;
-  return (
-    date.toLocaleDateString([], { month: "short", day: "numeric" }) + ` at ${timeStr}`
-  );
+  return date.toLocaleDateString([], { month: "short", day: "numeric" }) + ` at ${timeStr}`;
 }
 
 function SessionCard({
@@ -160,9 +158,7 @@ function SessionCard({
               {formatSessionLabel(session.startTime)}
             </span>
             {!isExpanded && firstUserMsg && (
-              <p className="text-[10px] text-muted-foreground/35 truncate mt-0.5">
-                {firstUserMsg}
-              </p>
+              <p className="text-[10px] text-muted-foreground/35 truncate mt-0.5">{firstUserMsg}</p>
             )}
           </div>
           <span className="text-[9px] text-muted-foreground/30 shrink-0 tabular-nums">
