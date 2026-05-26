@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { Gauge, Cpu, HardDrive, MemoryStick, Loader2, RefreshCw } from "lucide-react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { Gauge, Cpu, HardDrive, MemoryStick, Loader2, RefreshCw, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ResourceUsage {
@@ -11,6 +11,37 @@ interface ResourceUsage {
   status: "running" | "stopped" | "unknown";
 }
 
+const SPARKLINE_MAX = 30;
+
+function Sparkline({ data, color, max }: { data: number[]; color: string; max: number }) {
+  if (data.length < 2) return null;
+  const width = 80;
+  const height = 24;
+  const pts = data.slice(-SPARKLINE_MAX);
+  const step = width / (SPARKLINE_MAX - 1);
+  const points = pts
+    .map((v, i) => {
+      const x = i * step;
+      const y = height - (max > 0 ? Math.min(1, v / max) : 0) * height;
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  return (
+    <svg width={width} height={height} className="shrink-0">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.7}
+      />
+    </svg>
+  );
+}
+
 function UsageBar({
   label,
   value,
@@ -18,6 +49,8 @@ function UsageBar({
   unit,
   icon: Icon,
   color,
+  sparklineData,
+  sparklineColor,
 }: {
   label: string;
   value: number;
@@ -25,6 +58,8 @@ function UsageBar({
   unit: string;
   icon: React.ComponentType<{ className?: string }>;
   color: string;
+  sparklineData: number[];
+  sparklineColor: string;
 }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   const isHigh = pct > 80;
@@ -32,21 +67,22 @@ function UsageBar({
 
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-[11px]">
-        <div className="flex items-center gap-1.5 text-foreground/80">
-          <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-          {label}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-[11px] text-foreground/80 min-w-0">
+          <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="truncate">{label}</span>
         </div>
-        <span
-          className={cn(
-            "font-mono font-medium",
-            isHigh ? "text-red-400" : isMed ? "text-yellow-400" : "text-muted-foreground",
-          )}
-        >
-          {unit === "%"
-            ? `${Math.round(pct)}%`
-            : `${Math.round(value)} / ${Math.round(max)} ${unit}`}
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <Sparkline data={sparklineData} color={sparklineColor} max={unit === "%" ? 100 : max} />
+          <span
+            className={cn(
+              "font-mono text-[11px] font-medium w-20 text-right",
+              isHigh ? "text-red-400" : isMed ? "text-yellow-400" : "text-muted-foreground",
+            )}
+          >
+            {unit === "%" ? `${Math.round(pct)}%` : `${Math.round(value)} / ${Math.round(max)} MB`}
+          </span>
+        </div>
       </div>
       <div className="h-1.5 bg-muted rounded-full overflow-hidden">
         <div
@@ -68,6 +104,12 @@ export function ResourcesPanel({ projectId, containerStatus }: ResourcesPanelPro
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Sparkline history — last SPARKLINE_MAX data points
+  const cpuHistory = useRef<number[]>([]);
+  const ramHistory = useRef<number[]>([]);
+  const diskHistory = useRef<number[]>([]);
+  const [, forceRender] = useState(0);
+
   const fetchResources = useCallback(async () => {
     if (containerStatus !== "running") {
       setUsage(null);
@@ -76,10 +118,15 @@ export function ResourcesPanel({ projectId, containerStatus }: ResourcesPanelPro
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/resources`);
+      const res = await fetch(`/api/projects/${projectId}/resources`, { credentials: "include" });
       if (res.ok) {
         const data = (await res.json()) as ResourceUsage;
         setUsage(data);
+        // Append to sparkline history
+        cpuHistory.current = [...cpuHistory.current, data.cpuPercent].slice(-SPARKLINE_MAX);
+        ramHistory.current = [...ramHistory.current, data.ramMb].slice(-SPARKLINE_MAX);
+        diskHistory.current = [...diskHistory.current, data.diskMb].slice(-SPARKLINE_MAX);
+        forceRender((n) => n + 1);
       } else {
         setError("Failed to load resource data");
       }
@@ -96,6 +143,15 @@ export function ResourcesPanel({ projectId, containerStatus }: ResourcesPanelPro
     const interval = setInterval(() => void fetchResources(), 5000);
     return () => clearInterval(interval);
   }, [fetchResources, containerStatus]);
+
+  // Reset history when container stops
+  useEffect(() => {
+    if (containerStatus !== "running") {
+      cpuHistory.current = [];
+      ramHistory.current = [];
+      diskHistory.current = [];
+    }
+  }, [containerStatus]);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -128,7 +184,7 @@ export function ResourcesPanel({ projectId, containerStatus }: ResourcesPanelPro
         ) : error ? (
           <div className="text-[11px] text-red-400 text-center py-4">{error}</div>
         ) : usage ? (
-          <div className="space-y-5">
+          <div className="space-y-6">
             <UsageBar
               label="CPU"
               value={usage.cpuPercent}
@@ -141,6 +197,10 @@ export function ResourcesPanel({ projectId, containerStatus }: ResourcesPanelPro
                   : usage.cpuPercent > 50
                     ? "bg-yellow-500"
                     : "bg-primary"
+              }
+              sparklineData={cpuHistory.current}
+              sparklineColor={
+                usage.cpuPercent > 80 ? "#ef4444" : usage.cpuPercent > 50 ? "#eab308" : "#6366f1"
               }
             />
             <UsageBar
@@ -156,6 +216,14 @@ export function ResourcesPanel({ projectId, containerStatus }: ResourcesPanelPro
                     ? "bg-yellow-500"
                     : "bg-blue-500"
               }
+              sparklineData={ramHistory.current}
+              sparklineColor={
+                usage.ramMb / usage.ramLimitMb > 0.8
+                  ? "#ef4444"
+                  : usage.ramMb / usage.ramLimitMb > 0.5
+                    ? "#eab308"
+                    : "#3b82f6"
+              }
             />
             <UsageBar
               label="Disk"
@@ -170,9 +238,21 @@ export function ResourcesPanel({ projectId, containerStatus }: ResourcesPanelPro
                     ? "bg-yellow-500"
                     : "bg-green-500"
               }
+              sparklineData={diskHistory.current}
+              sparklineColor={
+                usage.diskMb / usage.diskLimitMb > 0.8
+                  ? "#ef4444"
+                  : usage.diskMb / usage.diskLimitMb > 0.5
+                    ? "#eab308"
+                    : "#22c55e"
+              }
             />
 
-            <div className="pt-2 border-t border-border">
+            <div className="pt-2 border-t border-border space-y-1">
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <TrendingUp className="h-3 w-3" />
+                Sparklines show the last {SPARKLINE_MAX} samples (5 s each)
+              </div>
               <div className="text-[10px] text-muted-foreground">
                 Live — updates every 5 seconds
               </div>

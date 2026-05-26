@@ -5,44 +5,60 @@ import {
   Package,
   GitBranch,
   Database,
-  Globe,
   Boxes,
   Gauge,
   Terminal,
   ChevronRight,
+  FolderOpen,
+  FileSearch,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Link } from "wouter";
 
 interface Tool {
   id: string;
   label: string;
   description: string;
   icon: React.ComponentType<{ className?: string }>;
-  href?: string;
-  onClick?: () => void;
   badge?: string;
+  panelId?: string;
 }
 
 const TOOLS: Tool[] = [
+  {
+    id: "files",
+    label: "Files",
+    description: "Browse and edit project files",
+    icon: FolderOpen,
+    panelId: "files",
+  },
+  {
+    id: "search",
+    label: "Search",
+    description: "Search across all project files",
+    icon: FileSearch,
+    panelId: "search",
+  },
   {
     id: "secrets",
     label: "Secrets",
     description: "Manage environment variables and API keys",
     icon: Lock,
     badge: "ENV",
+    panelId: "secrets",
   },
   {
     id: "packages",
     label: "Packages",
     description: "Install and manage npm / pip dependencies",
     icon: Package,
+    panelId: "packages",
   },
   {
     id: "git",
     label: "Version Control",
     description: "Stage, commit, branch, and push changes",
     icon: GitBranch,
+    panelId: "git",
   },
   {
     id: "database",
@@ -50,30 +66,28 @@ const TOOLS: Tool[] = [
     description: "Browse tables, run queries, manage schema",
     icon: Database,
     badge: "SQL",
-  },
-  {
-    id: "domains",
-    label: "Custom Domains",
-    description: "Connect a domain or configure DNS",
-    icon: Globe,
+    panelId: "database",
   },
   {
     id: "storage",
     label: "Object Storage",
     description: "Upload and manage files and assets",
     icon: Boxes,
+    panelId: "storage",
   },
   {
     id: "resources",
     label: "Resources",
     description: "CPU, RAM, and disk usage metrics",
     icon: Gauge,
+    panelId: "resources",
   },
   {
     id: "terminal",
     label: "Shell",
     description: "Run commands in the project container",
     icon: Terminal,
+    badge: "CLI",
   },
 ];
 
@@ -117,6 +131,14 @@ export function ToolsPanel({ projectId: _projectId, onSelectTool }: ToolsPanelPr
             placeholder="Search tools…"
             className="flex-1 bg-transparent text-xs outline-none text-foreground placeholder:text-muted-foreground/60"
           />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              className="h-4 w-4 flex items-center justify-center rounded text-muted-foreground hover:text-foreground text-xs"
+            >
+              ×
+            </button>
+          )}
         </div>
       </div>
 
@@ -129,10 +151,10 @@ export function ToolsPanel({ projectId: _projectId, onSelectTool }: ToolsPanelPr
         ) : (
           filtered.map((tool) => {
             const Icon = tool.icon;
-            const inner = (
+            return (
               <button
                 key={tool.id}
-                onClick={() => onSelectTool?.(tool.id)}
+                onClick={() => onSelectTool?.(tool.panelId ?? tool.id)}
                 className={cn(
                   "w-full flex items-center gap-2.5 px-3 py-2 text-left",
                   "hover:bg-muted/60 transition-colors group",
@@ -159,21 +181,8 @@ export function ToolsPanel({ projectId: _projectId, onSelectTool }: ToolsPanelPr
                 <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0 group-hover:text-muted-foreground transition-colors" />
               </button>
             );
-
-            return tool.href ? (
-              <Link href={tool.href} key={tool.id}>
-                {inner}
-              </Link>
-            ) : (
-              <div key={tool.id}>{inner}</div>
-            );
           })
         )}
-      </div>
-
-      {/* Footer hint */}
-      <div className="px-3 py-2 border-t border-border shrink-0">
-        <p className="text-[10px] text-muted-foreground/60">More tools coming in Phase 5</p>
       </div>
     </div>
   );

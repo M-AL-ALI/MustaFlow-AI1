@@ -232,6 +232,29 @@ router.post(
   },
 );
 
+// ── GET /api/projects/:id/packages ────────────────────────────────────────
+// Returns installed dependencies and devDependencies from package.json.
+router.get("/projects/:id/packages", requireProjectOwnership, async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  const project = await loadProject(projectId);
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const loaded = await loadPackageJson(projectId);
+  if (!loaded) {
+    // No package.json — could be a Python or static project
+    res.json({ dependencies: {}, devDependencies: {} });
+    return;
+  }
+
+  res.json({
+    dependencies: loaded.pkg.dependencies ?? {},
+    devDependencies: loaded.pkg.devDependencies ?? {},
+  });
+});
+
 // ── GET /api/projects/:id/packages/search ─────────────────────────────────
 // Proxy search to npm or PyPI registries so the browser doesn't need CORS
 // workarounds. Results are cached in-memory for 5 minutes.
@@ -247,7 +270,7 @@ interface NpmSearchResult {
   score: { final: number; detail: { quality: number; popularity: number; maintenance: number } };
 }
 
-interface PypiSearchResult {
+interface _PypiSearchResult {
   name: string;
   version: string;
   description: string;

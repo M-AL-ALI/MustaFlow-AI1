@@ -10,6 +10,8 @@ import {
   Gauge,
   Settings,
   Layers,
+  Database,
+  Boxes,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useUser } from "@clerk/react";
@@ -22,6 +24,8 @@ export type PanelId =
   | "packages"
   | "git"
   | "secrets"
+  | "database"
+  | "storage"
   | "resources"
   | "canvas"
   | null;
@@ -74,29 +78,35 @@ const RAIL_ITEMS: Array<{
   { id: "zero-agent", label: "Zero Agent", icon: DynamicAtomIcon, isCustom: true },
   { id: "canvas", label: "Canvas", icon: Layers },
   { id: "tools", label: "Tools", icon: Wrench },
+  { id: "secrets", label: "Secrets", icon: Lock },
   { id: "packages", label: "Packages", icon: Package },
   { id: "git", label: "Version Control", icon: GitBranch },
-  { id: "secrets", label: "Secrets", icon: Lock },
+  { id: "database", label: "Database", icon: Database },
+  { id: "storage", label: "Object Storage", icon: Boxes },
   { id: "resources", label: "Resources", icon: Gauge },
 ];
 
 interface IconRailProps {
   activePanel: PanelId;
   onPanelToggle: (panel: PanelId) => void;
+  onOpenSearch?: () => void;
 }
 
-export function IconRail({ activePanel, onPanelToggle }: IconRailProps) {
+export function IconRail({ activePanel, onPanelToggle, onOpenSearch }: IconRailProps) {
   const { user } = useUser();
 
   return (
     <nav className="flex flex-col items-center w-12 bg-zinc-950 border-r border-border py-2 shrink-0 z-10">
       {RAIL_ITEMS.map(({ id, label, icon: Icon, isCustom }) => {
         const isActive = activePanel === id;
+        // Wrench ("tools") opens the search popup if onOpenSearch is wired
+        const handleClick =
+          id === "tools" && onOpenSearch ? onOpenSearch : () => onPanelToggle(id);
         return (
           <Tooltip key={id}>
             <TooltipTrigger asChild>
               <button
-                onClick={() => onPanelToggle(id)}
+                onClick={handleClick}
                 className={cn(
                   "flex items-center justify-center h-10 w-10 rounded-lg transition-colors my-0.5",
                   isActive

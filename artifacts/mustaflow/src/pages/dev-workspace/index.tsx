@@ -19,7 +19,12 @@ import { FileTree } from "./components/file-tree";
 import { SearchPanel } from "./components/search-panel";
 import { ResourcesPanel } from "./components/resources-panel";
 import { ToolsPanel } from "./components/tools-panel";
-import { PlaceholderPanel } from "./components/placeholder-panel";
+import { SecretsPanel } from "./components/secrets-panel";
+import { PackagesPanel } from "./components/packages-panel";
+import { GitPanel } from "./components/git-panel";
+import { DatabasePanel } from "./components/database-panel";
+import { ObjectStoragePanel } from "./components/object-storage-panel";
+import { ToolsSearchPopup } from "./components/tools-search-popup";
 import { MonacoEditorPane, type EditorTab } from "./components/monaco-editor-pane";
 import { TerminalPanel } from "./components/terminal-panel";
 import { PreviewPane } from "./components/preview-pane";
@@ -240,6 +245,7 @@ export default function DevWorkspacePage() {
   const [zeroAgentOpen, setZeroAgentOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [paneLayout, setPaneLayout] = useState<PaneLayout>("default");
+  const [toolsSearchOpen, setToolsSearchOpen] = useState(false);
 
   const handlePanelToggle = useCallback(
     (panel: PanelId) => {
@@ -260,6 +266,18 @@ export default function DevWorkspacePage() {
     },
     [activePanel],
   );
+
+  // Cmd+K / Ctrl+K → tools search popup
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setToolsSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const handlePaneLayout = useCallback((layout: PaneLayout) => {
     if (layout === "editor-split") {
@@ -395,6 +413,17 @@ export default function DevWorkspacePage() {
   return (
     <TooltipProvider>
       <div className="h-screen w-screen flex flex-col overflow-hidden bg-background text-foreground">
+        {/* Tools search popup — Cmd+K */}
+        <ToolsSearchPopup
+          open={toolsSearchOpen}
+          onClose={() => setToolsSearchOpen(false)}
+          onSelect={(panelId) => {
+            setActivePanel(panelId);
+            setLeftPanelVisible(true);
+            setZeroAgentOpen(false);
+          }}
+        />
+
         {/* Top bar */}
         <TopBar
           projectId={projectId}
@@ -415,6 +444,7 @@ export default function DevWorkspacePage() {
           <IconRail
             activePanel={zeroAgentOpen ? "zero-agent" : canvasOpen ? "canvas" : activePanel}
             onPanelToggle={handlePanelToggle}
+            onOpenSearch={() => setToolsSearchOpen(true)}
           />
 
           {/* Main panel group */}
@@ -438,10 +468,31 @@ export default function DevWorkspacePage() {
                   {activePanel === "search" && (
                     <SearchPanel projectId={projectId} onNavigateToFile={handleNavigateToFile} />
                   )}
-                  {activePanel === "tools" && <ToolsPanel projectId={projectId} />}
-                  {activePanel === "packages" && <PlaceholderPanel type="packages" />}
-                  {activePanel === "git" && <PlaceholderPanel type="git" />}
-                  {activePanel === "secrets" && <PlaceholderPanel type="secrets" />}
+                  {activePanel === "tools" && (
+                    <ToolsPanel
+                      projectId={projectId}
+                      onSelectTool={(toolId) => {
+                        const validPanels: PanelId[] = [
+                          "files",
+                          "search",
+                          "secrets",
+                          "packages",
+                          "git",
+                          "database",
+                          "storage",
+                          "resources",
+                        ];
+                        if (validPanels.includes(toolId as PanelId)) {
+                          setActivePanel(toolId as PanelId);
+                        }
+                      }}
+                    />
+                  )}
+                  {activePanel === "secrets" && <SecretsPanel projectId={projectId} />}
+                  {activePanel === "packages" && <PackagesPanel projectId={projectId} />}
+                  {activePanel === "git" && <GitPanel projectId={projectId} />}
+                  {activePanel === "database" && <DatabasePanel projectId={projectId} />}
+                  {activePanel === "storage" && <ObjectStoragePanel projectId={projectId} />}
                   {activePanel === "resources" && (
                     <ResourcesPanel projectId={projectId} containerStatus={containerStatus} />
                   )}
