@@ -1,0 +1,1 @@
+- [Mode-select migration](mode-select-migration.md) — preferred_mode column must be migrated before mode-select buttons work; easy to miss on fresh DBs.
