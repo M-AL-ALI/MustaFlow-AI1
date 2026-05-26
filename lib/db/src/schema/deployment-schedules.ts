@@ -1,7 +1,7 @@
 import { pgTable, serial, integer, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
-export const DEPLOYMENT_TYPES = ["static", "autoscale", "reserved_vm"] as const;
+export const DEPLOYMENT_TYPES = ["static", "autoscale", "reserved_vm", "scheduled"] as const;
 export type DeploymentType = (typeof DEPLOYMENT_TYPES)[number];
 
 export const SCHEDULE_KINDS = ["redeploy", "task_run", "health_probe"] as const;

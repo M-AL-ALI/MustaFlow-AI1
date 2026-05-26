@@ -155,18 +155,31 @@ router.post("/projects/:id/deploy", requireProjectOwnership, async (req, res): P
 
   if (containerEligible) {
     try {
-      // Load secrets for env injection
+      // Load secrets for env injection.
+      // If the caller sent secretIds, only inject those specific secrets.
+      // When omitted (or empty), all project secrets are injected (legacy behaviour).
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const requestedIds: number[] | null =
+        Array.isArray(body.secretIds) && body.secretIds.length > 0
+          ? (body.secretIds as number[]).filter((x) => typeof x === "number")
+          : null;
+
       const secretRows = await db
-        .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
+        .select({ id: secretsTable.id, name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
         .from(secretsTable)
         .where(eq(secretsTable.projectId, projectId));
+
+      // Filter to only the secrets the caller wants synced
+      const filteredSecrets = requestedIds
+        ? secretRows.filter((s) => requestedIds.includes(s.id))
+        : secretRows;
 
       const envVars: Record<string, string> = {
         PROJECT_ID: String(projectId),
         NODE_ENV: "production",
         PORT: "3000",
       };
-      for (const s of secretRows) {
+      for (const s of filteredSecrets) {
         try {
           envVars[s.name] = encryptionService.decrypt(s.valueEncrypted);
         } catch {

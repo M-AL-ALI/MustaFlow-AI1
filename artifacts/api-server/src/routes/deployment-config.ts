@@ -109,6 +109,11 @@ router.get(
           price: "$5/mo est.",
           description: "Always-on container. Best for background jobs / low latency.",
         },
+        scheduled: {
+          label: "Scheduled",
+          price: "Per execution",
+          description: "Runs on a cron schedule. Best for periodic tasks and jobs.",
+        },
       },
     });
   },

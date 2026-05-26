@@ -29,6 +29,7 @@ import { MonacoEditorPane, type EditorTab } from "./components/monaco-editor-pan
 import { TerminalPanel } from "./components/terminal-panel";
 import { PreviewPane } from "./components/preview-pane";
 import { DevCanvasTab } from "./components/canvas-tab";
+import { DeploymentPanel } from "./components/deployment-panel";
 
 type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
 
@@ -246,6 +247,7 @@ export default function DevWorkspacePage() {
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [paneLayout, setPaneLayout] = useState<PaneLayout>("default");
   const [toolsSearchOpen, setToolsSearchOpen] = useState(false);
+  const [deployPanelOpen, setDeployPanelOpen] = useState(false);
 
   const handlePanelToggle = useCallback(
     (panel: PanelId) => {
@@ -406,9 +408,8 @@ export default function DevWorkspacePage() {
   }, []);
 
   const projectName = project?.name ?? "Untitled";
-  const previewUrl = (project as { publicSlug?: string | null } | undefined)?.publicSlug
-    ? `/api/p/${(project as { publicSlug: string }).publicSlug}/`
-    : null;
+  const projectSlug = (project as { publicSlug?: string | null } | undefined)?.publicSlug ?? null;
+  const previewUrl = projectSlug ? `/api/p/${projectSlug}/` : null;
 
   return (
     <TooltipProvider>
@@ -436,7 +437,17 @@ export default function DevWorkspacePage() {
           onOpenNewTab={handleOpenNewTab}
           paneLayout={paneLayout}
           onPaneLayout={handlePaneLayout}
+          onDeploy={() => setDeployPanelOpen(true)}
         />
+
+        {/* Deployment panel slide-over */}
+        {deployPanelOpen && (
+          <DeploymentPanel
+            projectId={projectId}
+            projectSlug={projectSlug}
+            onClose={() => setDeployPanelOpen(false)}
+          />
+        )}
 
         {/* Body */}
         <div className="flex flex-1 min-h-0 overflow-hidden">

@@ -32,6 +32,7 @@ interface TopBarProps {
   onOpenNewTab: () => void;
   paneLayout: PaneLayout;
   onPaneLayout: (layout: PaneLayout) => void;
+  onDeploy?: () => void;
 }
 
 export function TopBar({
@@ -45,6 +46,7 @@ export function TopBar({
   onOpenNewTab,
   paneLayout,
   onPaneLayout,
+  onDeploy,
 }: TopBarProps) {
   const { user } = useUser();
   const [editingName, setEditingName] = useState(false);
@@ -181,12 +183,24 @@ export function TopBar({
       {/* Deploy */}
       <Tooltip>
         <TooltipTrigger asChild>
-          <Link href={`/projects/${projectId}`}>
-            <Button size="sm" variant="outline" className="h-7 px-3 gap-1.5 text-xs">
+          {onDeploy ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-3 gap-1.5 text-xs"
+              onClick={onDeploy}
+            >
               <Rocket className="h-3.5 w-3.5" />
               Deploy
             </Button>
-          </Link>
+          ) : (
+            <Link href={`/projects/${projectId}`}>
+              <Button size="sm" variant="outline" className="h-7 px-3 gap-1.5 text-xs">
+                <Rocket className="h-3.5 w-3.5" />
+                Deploy
+              </Button>
+            </Link>
+          )}
         </TooltipTrigger>
         <TooltipContent>Open deployment panel</TooltipContent>
       </Tooltip>
