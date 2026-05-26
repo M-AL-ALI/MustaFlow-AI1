@@ -1249,7 +1249,20 @@ function buildSystemPrompt(
     : isMobile
       ? "This is a MOBILE cross-platform app (Expo SDK 52 / Expo Router v3 / NativeWind v4). Generate an Expo project AND an index.html web preview. `run_command` is restricted to in-process structural validators."
       : isDeveloperMode
-        ? `This is a DEVELOPER MODE project running as a live server process inside a Linux container (stack: ${isStatic ? "node-api" : stack}). The app must always be a real server that handles HTTP requests — never generate a static-HTML-only build. You may run any shell commands (npm/npx/tsc/python/go/etc.) via run_command. To add dependencies, use pkg_install.`
+        ? `This is a DEVELOPER MODE project running as a live server process inside a Linux container (stack: ${isStatic ? "node-api" : stack}).
+
+## Preview pane — how it works
+The preview pane is an <iframe> that sends HTTP requests through the MustaFlow reverse proxy, which forwards them directly to your running server's port inside the container. The proxy is byte-transparent: it does not inspect, transform, or cache responses. Whatever your server returns — HTML, JSON, JS bundle, redirect, WebSocket upgrade — is exactly what the iframe shows.
+
+## Critical: always bind to process.env.PORT
+The container runtime injects a PORT environment variable (default 3000). Your server MUST listen on this port:
+- Node.js/Express: const port = parseInt(process.env.PORT ?? "3000", 10); app.listen(port, ...)
+- Python Flask:    port = int(os.environ.get("PORT", 3000)); app.run(host="0.0.0.0", port=port)
+- Python FastAPI:  uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 3000)))
+- Go/Gin:          port := os.Getenv("PORT"); if port == "" { port = "3000" }; router.Run(":" + port)
+Never hardcode a port number other than as a fallback when PORT is unset.
+
+The app must always be a real server that handles HTTP requests — never generate a static-HTML-only build. You may run any shell commands (npm/npx/tsc/python/go/etc.) via run_command. To add dependencies, use pkg_install.`
         : `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
   return [
     isDeveloperMode
