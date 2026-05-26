@@ -693,6 +693,32 @@ export function ZeroAgentPanel({
   /** Build a map of taskId → task for associating plan payloads to events */
   const taskById = useMemo(() => new Map(tasksArr.map((t) => [t.id, t])), [tasksArr]);
 
+  /**
+   * The message ID of the *first* assistant message whose plan.taskId matches
+   * activeTaskId. Only this one message renders the inline AgentThinkingBubble
+   * (guard against duplicate bubbles if the same taskId somehow appears in
+   * multiple messages). null when no such message exists yet (triggering the
+   * fallback bottom bubble).
+   */
+  const inlineBubbleMsgId = useMemo<number | null>(() => {
+    if (activeTaskId === null) return null;
+    for (const msg of sortedMessages) {
+      if (msg.role === "user") continue;
+      const payload = msg.plan as Record<string, unknown> | null | undefined;
+      if (
+        payload &&
+        typeof payload === "object" &&
+        (payload.taskId as number | undefined) === activeTaskId
+      ) {
+        return msg.id;
+      }
+    }
+    return null;
+  }, [activeTaskId, sortedMessages]);
+
+  /** True when the inline bubble is anchored to a message in the thread. */
+  const activeTaskIsInThread = inlineBubbleMsgId !== null;
+
   if (!isOpen) return null;
 
   return (
@@ -889,14 +915,38 @@ export function ZeroAgentPanel({
                   <ZeroBubble content={msg.content} />
                 ) : null}
 
-                {/* Persisted tool-call events for this message's task */}
-                {taskId && task && TERMINAL_STATUSES.has(task.status) && (
-                  <PersistedToolEvents
-                    projectId={projectId}
-                    taskId={taskId}
-                    taskStatus={task.status}
-                  />
+                {/*
+                 * Inline live stream — render AgentThinkingBubble directly
+                 * below the triggering message when this task is the active one.
+                 * Keyed to msg.id (the first matching message) so only one
+                 * bubble ever mounts even if multiple messages share a taskId.
+                 * The bubble uses SSE (useTaskEventStream) so tool call events
+                 * appear with zero latency as they arrive, matching the Replit
+                 * Agent experience. Once the task is terminal the bubble
+                 * auto-dismisses and PersistedToolEvents takes over below.
+                 */}
+                {msg.id === inlineBubbleMsgId && taskId !== undefined && (
+                  <div className="px-3 py-1">
+                    <AgentThinkingBubble
+                      projectId={projectId}
+                      taskId={taskId}
+                      startedAt={pendingStartedAt}
+                      onDismiss={dismissBubble}
+                    />
+                  </div>
                 )}
+
+                {/* Persisted tool-call events for completed tasks only */}
+                {taskId &&
+                  task &&
+                  TERMINAL_STATUSES.has(task.status) &&
+                  taskId !== activeTaskId && (
+                    <PersistedToolEvents
+                      projectId={projectId}
+                      taskId={taskId}
+                      taskStatus={task.status}
+                    />
+                  )}
 
                 {checkpointsAfter.map((v) => (
                   <CheckpointMarker
@@ -910,8 +960,14 @@ export function ZeroAgentPanel({
             );
           })}
 
-          {/* Live tool-call stream (active task) */}
-          {activeTaskId !== null && (
+          {/*
+           * Fallback live stream — only shown when the active task's assistant
+           * message has NOT yet appeared in the sorted message list (e.g. the
+           * first 1-2 seconds right after sendMessage succeeds, before the
+           * messages query re-fetches). Once the message appears in the thread
+           * the inline AgentThinkingBubble above takes over and this disappears.
+           */}
+          {activeTaskId !== null && !activeTaskIsInThread && (
             <div className="px-3 py-1">
               <AgentThinkingBubble
                 projectId={projectId}
