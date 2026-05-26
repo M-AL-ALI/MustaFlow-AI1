@@ -51,12 +51,36 @@ const TEMPLATE_CHIPS: Array<{
   description: string;
 }> = [
   { label: "React", stack: "react-vite", kind: "web", icon: Layers, description: "React + Vite" },
-  { label: "Node.js", stack: "node-api", kind: "web", icon: Server, description: "Express + TypeScript" },
-  { label: "Python", stack: "python-flask", kind: "web", icon: FileCode2, description: "Flask REST API" },
+  {
+    label: "Node.js",
+    stack: "node-api",
+    kind: "web",
+    icon: Server,
+    description: "Express + TypeScript",
+  },
+  {
+    label: "Python",
+    stack: "python-flask",
+    kind: "web",
+    icon: FileCode2,
+    description: "Flask REST API",
+  },
   { label: "Next.js", stack: "nextjs", kind: "web", icon: Globe2, description: "Full-stack React" },
   { label: "Go", stack: "go-gin", kind: "web", icon: Terminal, description: "Gin REST API" },
-  { label: "Mobile", stack: "react-vite", kind: "mobile-cross", icon: Smartphone, description: "Expo / React Native" },
-  { label: "FastAPI", stack: "python-fastapi", kind: "web", icon: Zap, description: "Async Python API" },
+  {
+    label: "Mobile",
+    stack: "react-vite",
+    kind: "mobile-cross",
+    icon: Smartphone,
+    description: "Expo / React Native",
+  },
+  {
+    label: "FastAPI",
+    stack: "python-fastapi",
+    kind: "web",
+    icon: Zap,
+    description: "Async Python API",
+  },
   { label: "Blank", stack: "react-vite", kind: "web", icon: Code2, description: "Empty project" },
 ];
 
@@ -118,7 +142,10 @@ function DevCreateModal({
           name: resolvedName,
           description: prompt.trim() || undefined,
           kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
-          stack: kind === "mobile-cross" ? undefined : (stack as Parameters<typeof createProject.mutate>[0]["data"]["stack"]),
+          stack:
+            kind === "mobile-cross"
+              ? undefined
+              : (stack as Parameters<typeof createProject.mutate>[0]["data"]["stack"]),
           initialPrompt: prompt.trim() || undefined,
           mode: "developer",
         },
@@ -159,7 +186,10 @@ function DevCreateModal({
                       <button
                         key={opt.value}
                         type="button"
-                        onClick={() => { setStack(opt.value); setKind("web"); }}
+                        onClick={() => {
+                          setStack(opt.value);
+                          setKind("web");
+                        }}
                         className={cn(
                           "flex flex-col items-center gap-1 rounded-xl border px-2 py-3 text-[11px] font-medium transition-colors text-center",
                           stack === opt.value
@@ -169,7 +199,12 @@ function DevCreateModal({
                       >
                         <Icon className="h-4 w-4 shrink-0" />
                         <span className="leading-tight">{opt.label}</span>
-                        <span className={cn("text-[9px] font-normal leading-tight", stack === opt.value ? "text-primary/70" : "text-muted-foreground/60")}>
+                        <span
+                          className={cn(
+                            "text-[9px] font-normal leading-tight",
+                            stack === opt.value ? "text-primary/70" : "text-muted-foreground/60",
+                          )}
+                        >
                           {opt.description}
                         </span>
                       </button>
@@ -185,7 +220,8 @@ function DevCreateModal({
                 <div>
                   <span className="font-medium">Expo / React Native</span>
                   {" — "}
-                  Generates iOS + Android source code. Scan the QR code with Expo Go to run on device.
+                  Generates iOS + Android source code. Scan the QR code with Expo Go to run on
+                  device.
                 </div>
               </div>
             )}
@@ -217,7 +253,12 @@ function DevCreateModal({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={createProject.isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={createProject.isPending}
+            >
               Cancel
             </Button>
             <Button type="submit" disabled={createProject.isPending}>
@@ -269,7 +310,9 @@ function CreationZone({
             ref={inputRef}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSubmit();
+            }}
             placeholder="A REST API for a task manager with user auth..."
             className="h-12 text-base pr-4"
           />
@@ -337,9 +380,11 @@ function ProjectCard({
     kind: string;
   };
 }) {
-  const StackIcon = TEMPLATE_CHIPS.find(
-    (c) => c.stack === project.stack || (project.kind === "mobile-cross" && c.kind === "mobile-cross"),
-  )?.icon ?? Code2;
+  const StackIcon =
+    TEMPLATE_CHIPS.find(
+      (c) =>
+        c.stack === project.stack || (project.kind === "mobile-cross" && c.kind === "mobile-cross"),
+    )?.icon ?? Code2;
 
   return (
     <Link href={`/dev/workspace/${project.id}`}>
@@ -348,14 +393,16 @@ function ProjectCard({
           <div className="flex items-center justify-center h-9 w-9 rounded-lg border border-border bg-muted shrink-0 text-muted-foreground group-hover:text-foreground transition-colors">
             <StackIcon className="h-4.5 w-4.5 h-[18px] w-[18px]" />
           </div>
-          <span className={cn(
-            "text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0",
-            project.status === "published"
-              ? "text-green-400 bg-green-500/10 border-green-500/20"
-              : project.status === "building"
-                ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
-                : "text-muted-foreground bg-muted border-border",
-          )}>
+          <span
+            className={cn(
+              "text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0",
+              project.status === "published"
+                ? "text-green-400 bg-green-500/10 border-green-500/20"
+                : project.status === "building"
+                  ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
+                  : "text-muted-foreground bg-muted border-border",
+            )}
+          >
             {project.status}
           </span>
         </div>
@@ -384,7 +431,7 @@ export default function DevHomePage() {
   const [modalStack, setModalStack] = useState("react-vite");
   const [modalKind, setModalKind] = useState("web");
 
-  function openModalWithPrompt(prompt: string) {
+  function _openModalWithPrompt(prompt: string) {
     setModalPrompt(prompt);
     setModalStack("react-vite");
     setModalKind("web");
@@ -432,10 +479,7 @@ export default function DevHomePage() {
         <div className="min-h-full flex flex-col">
           {/* Creation zone — centered in the top portion */}
           <div className="flex items-center justify-center px-6 pt-16 pb-12">
-            <CreationZone
-              onSubmit={handleQuickCreate}
-              onChipClick={openModalWithChip}
-            />
+            <CreationZone onSubmit={handleQuickCreate} onChipClick={openModalWithChip} />
           </div>
 
           {/* Project grid */}
@@ -458,7 +502,10 @@ export default function DevHomePage() {
             {isLoading ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-28 rounded-xl border border-border bg-muted/20 animate-pulse" />
+                  <div
+                    key={i}
+                    className="h-28 rounded-xl border border-border bg-muted/20 animate-pulse"
+                  />
                 ))}
               </div>
             ) : projects && projects.length > 0 ? (
@@ -484,7 +531,11 @@ export default function DevHomePage() {
                 <p className="text-xs text-muted-foreground mb-5">
                   Describe what you want to build above, or pick a stack to get started.
                 </p>
-                <Button size="sm" onClick={() => openModalWithChip(TEMPLATE_CHIPS[0]!)} className="gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => openModalWithChip(TEMPLATE_CHIPS[0]!)}
+                  className="gap-2"
+                >
                   <Plus className="h-3.5 w-3.5" />
                   Create your first project
                 </Button>

@@ -28,8 +28,7 @@ export function DevSidebar() {
       {/* Top nav icons */}
       <div className="flex flex-col items-center gap-1 flex-1">
         {NAV_ITEMS.map(({ icon: Icon, label, href }) => {
-          const isActive =
-            location === href || (href !== "/dev" && location.startsWith(href));
+          const isActive = location === href || (href !== "/dev" && location.startsWith(href));
           return (
             <Tooltip key={href}>
               <TooltipTrigger asChild>

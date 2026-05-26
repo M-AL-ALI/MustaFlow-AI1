@@ -1,14 +1,6 @@
 import { useListProjects } from "@workspace/api-client-react";
 import { Link } from "wouter";
-import {
-  Globe2,
-  ExternalLink,
-  Clock,
-  CheckCircle2,
-  XCircle,
-  Loader2,
-  Server,
-} from "lucide-react";
+import { ExternalLink, Clock, CheckCircle2, XCircle, Loader2, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DevSidebar } from "@/components/dev-sidebar";
 
@@ -53,7 +45,10 @@ export default function DevDeploymentsPage() {
           {isLoading ? (
             <div className="space-y-3">
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-16 rounded-xl border border-border bg-muted/20 animate-pulse" />
+                <div
+                  key={i}
+                  className="h-16 rounded-xl border border-border bg-muted/20 animate-pulse"
+                />
               ))}
             </div>
           ) : all.length === 0 ? (
@@ -107,7 +102,11 @@ export default function DevDeploymentsPage() {
                         </a>
                       ) : (
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {isLive ? "Live" : project.status === "building" ? "Building…" : "Not deployed"}
+                          {isLive
+                            ? "Live"
+                            : project.status === "building"
+                              ? "Building…"
+                              : "Not deployed"}
                         </p>
                       )}
                     </div>
