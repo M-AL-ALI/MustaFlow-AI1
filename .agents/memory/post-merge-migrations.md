@@ -8,11 +8,13 @@ After each task agent merge, the post-merge script runs `pnpm --filter @workspac
 **Symptoms:** HTTP 500 on any route that INSERTs or SELECTs the new column. Error: `column "X" of relation "Y" does not exist`.
 
 **Fix:** Run the specific migration script for the missing column:
+
 - `pnpm --filter @workspace/scripts run migrate-<name>`
 - All migrations live in `scripts/src/migrate-*.ts` and are listed in `scripts/package.json`
 - `pnpm --filter @workspace/scripts run migrate-all-outstanding` runs all 60+ in order but can stall on long-running ones (e.g. background-jobs); prefer targeted scripts when you know what's missing.
 
 **Columns that have needed manual migration after merges:**
+
 - `user_preferences.preferred_mode` → `migrate-preferred-mode`
 - `projects.canvas_state` → `migrate-canvas-state`
 - `projects.project_mode` → `migrate-project-mode`
