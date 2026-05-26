@@ -689,7 +689,21 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                       return vt > msgTime && vt < nextTime;
                     });
                     const versionAfter = checkpointsAfter[0] as ZeroVersion | undefined;
-                    const plan = msg.plan ? (msg.plan as unknown as StructuredPlan) : null;
+
+                    // Only show PlanCard for genuine plan-mode messages
+                    // (exclude report/error/task-queued/task-done payloads)
+                    const rawPlan = msg.plan as Record<string, unknown> | null | undefined;
+                    const planPayloadKind =
+                      rawPlan && typeof rawPlan === "object" ? rawPlan.kind : undefined;
+                    const isPlanCard =
+                      msg.planMode &&
+                      msg.role !== "user" &&
+                      planPayloadKind !== "report" &&
+                      planPayloadKind !== "error" &&
+                      planPayloadKind !== "task-queued" &&
+                      planPayloadKind !== "task-done" &&
+                      rawPlan != null;
+                    const plan = isPlanCard ? (rawPlan as unknown as StructuredPlan) : null;
 
                     return (
                       <div key={msg.id} data-msg-id={msg.id}>

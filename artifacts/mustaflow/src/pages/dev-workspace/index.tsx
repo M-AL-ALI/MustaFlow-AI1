@@ -319,8 +319,11 @@ export default function DevWorkspacePage() {
         {/* Body */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Icon rail */}
+          {/* zero-agent is always the active chat column, so always highlight it */}
           <IconRail
-            activePanel={canvasOpen ? "canvas" : activePanel}
+            activePanel={
+              canvasOpen ? "canvas" : activePanel === "zero-agent" ? "zero-agent" : activePanel
+            }
             onPanelToggle={handlePanelToggle}
             onOpenSearch={() => setToolsSearchOpen(true)}
           />
