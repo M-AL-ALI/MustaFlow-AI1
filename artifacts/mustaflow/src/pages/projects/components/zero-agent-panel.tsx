@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   RotateCcw,
   ChevronDown,
+  ChevronRight,
   Square,
   Zap,
   Layers2,
@@ -75,6 +76,104 @@ type PendingAttachment = {
   uploading?: boolean;
   error?: string;
 };
+
+type Session = {
+  id: string;
+  startTime: Date;
+  items: Array<{ msg: ZeroMessage; globalIdx: number }>;
+};
+
+const SESSION_GAP_MS = 30 * 60 * 1000;
+
+function groupIntoSessions(sortedMsgs: ZeroMessage[]): Session[] {
+  if (sortedMsgs.length === 0) return [];
+  const sessions: Session[] = [];
+  let current: Session = {
+    id: sortedMsgs[0]!.createdAt,
+    startTime: new Date(sortedMsgs[0]!.createdAt),
+    items: [{ msg: sortedMsgs[0]!, globalIdx: 0 }],
+  };
+  for (let i = 1; i < sortedMsgs.length; i++) {
+    const prev = new Date(sortedMsgs[i - 1]!.createdAt).getTime();
+    const curr = new Date(sortedMsgs[i]!.createdAt).getTime();
+    if (curr - prev > SESSION_GAP_MS) {
+      sessions.push(current);
+      current = {
+        id: sortedMsgs[i]!.createdAt,
+        startTime: new Date(sortedMsgs[i]!.createdAt),
+        items: [{ msg: sortedMsgs[i]!, globalIdx: i }],
+      };
+    } else {
+      current.items.push({ msg: sortedMsgs[i]!, globalIdx: i });
+    }
+  }
+  sessions.push(current);
+  return sessions;
+}
+
+function formatSessionLabel(date: Date): string {
+  const now = new Date();
+  const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const isToday = date.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+  if (isToday) return `Today at ${timeStr}`;
+  if (isYesterday) return `Yesterday at ${timeStr}`;
+  return (
+    date.toLocaleDateString([], { month: "short", day: "numeric" }) + ` at ${timeStr}`
+  );
+}
+
+function SessionCard({
+  session,
+  isCurrentSession,
+  isExpanded,
+  onToggle,
+  children,
+}: {
+  session: Session;
+  isCurrentSession: boolean;
+  isExpanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const firstUserMsg = session.items.find((it) => it.msg.role === "user")?.msg.content ?? null;
+  const msgCount = session.items.length;
+
+  return (
+    <div>
+      {!isCurrentSession && (
+        <button
+          onClick={onToggle}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/30 transition-colors group"
+          aria-expanded={isExpanded}
+        >
+          <ChevronRight
+            className={cn(
+              "h-3 w-3 text-muted-foreground/40 transition-transform shrink-0",
+              isExpanded && "rotate-90",
+            )}
+          />
+          <div className="flex-1 min-w-0">
+            <span className="text-[10px] text-muted-foreground/60 font-medium">
+              {formatSessionLabel(session.startTime)}
+            </span>
+            {!isExpanded && firstUserMsg && (
+              <p className="text-[10px] text-muted-foreground/35 truncate mt-0.5">
+                {firstUserMsg}
+              </p>
+            )}
+          </div>
+          <span className="text-[9px] text-muted-foreground/30 shrink-0 tabular-nums">
+            {msgCount} msg{msgCount !== 1 ? "s" : ""}
+          </span>
+        </button>
+      )}
+      {isExpanded && <div>{children}</div>}
+    </div>
+  );
+}
 
 const AGENT_MODES: { value: AgentMode; label: string; credits: string }[] = [
   { value: "lite", label: "Lite", credits: "1 cr" },
@@ -706,6 +805,21 @@ export function ZeroAgentPanel({
     );
   }, [messagesArr, hasZeroOriginMessages]);
 
+  const sessions = useMemo(() => groupIntoSessions(sortedMessages), [sortedMessages]);
+
+  // Tracks sessions toggled away from their default state.
+  // Default: last session expanded, all previous sessions collapsed.
+  const [toggledSessions, setToggledSessions] = useState<Set<string>>(new Set());
+
+  const toggleSession = useCallback((sessionId: string) => {
+    setToggledSessions((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  }, []);
+
   const sortedVersions = useMemo(
     () =>
       [...versionsArr].sort(
@@ -924,121 +1038,133 @@ export function ZeroAgentPanel({
             </div>
           )}
 
-          {/* Messages interleaved with tool events + checkpoint markers */}
-          {sortedMessages.map((msg, idx) => {
-            const msgTime = new Date(msg.createdAt).getTime();
-            const nextTime =
-              idx < sortedMessages.length - 1
-                ? new Date(sortedMessages[idx + 1]!.createdAt).getTime()
-                : Infinity;
-
-            const checkpointsAfter = sortedVersions.filter((v) => {
-              const vt = v.createdAt ? new Date(v.createdAt).getTime() : 0;
-              return vt > msgTime && vt < nextTime;
-            });
-
-            const isUser = msg.role === "user";
-            const planPayload = msg.plan as Record<string, unknown> | null | undefined;
-            const payloadKind =
-              planPayload && typeof planPayload === "object" ? planPayload.kind : undefined;
-            const isReport = payloadKind === "report";
-            const isError = payloadKind === "error";
-            const isTaskQueued = payloadKind === "task-queued" || payloadKind === "task-done";
-            const isPlanCard =
-              msg.planMode &&
-              !isUser &&
-              !isReport &&
-              !isError &&
-              planPayload &&
-              typeof planPayload === "object";
-
-            // For assistant messages with a taskId, show persisted tool events
-            const taskId =
-              !isUser && planPayload && typeof planPayload === "object"
-                ? (planPayload.taskId as number | undefined)
-                : undefined;
-            const task = taskId ? taskById.get(taskId) : undefined;
+          {/* Messages grouped into collapsible session cards */}
+          {sessions.map((session, sessionIdx) => {
+            const isCurrentSession = sessionIdx === sessions.length - 1;
+            const isExpanded = isCurrentSession
+              ? !toggledSessions.has(session.id)
+              : toggledSessions.has(session.id);
 
             return (
-              <div
-                key={msg.id}
-                data-msg-id={msg.id}
-                className={cn(
-                  "rounded-lg transition-colors duration-300",
-                  highlightedMsgId === msg.id && "bg-primary/10 ring-1 ring-primary/30",
-                )}
+              <SessionCard
+                key={session.id}
+                session={session}
+                isCurrentSession={isCurrentSession}
+                isExpanded={isExpanded}
+                onToggle={() => toggleSession(session.id)}
               >
-                {isUser ? (
-                  <UserBubble text={msg.content} />
-                ) : isPlanCard ? (
-                  <ZeroPlanBubble
-                    plan={planPayload as StructuredPlan}
-                    projectId={projectId}
-                    agentMode={agentMode}
-                    messageId={msg.id}
-                    isBusy={isBusy}
-                    onBuild={(builtPrompt, mode, bg) =>
-                      doSend(builtPrompt, { planMode: false, background: bg, mode })
-                    }
-                  />
-                ) : isReport ? (
-                  // Build-complete message — show a summary so users see the
-                  // final result rather than a blank gap in the thread
-                  <ZeroBubble
-                    content={
-                      msg.content ||
-                      ((planPayload as { report?: { summary?: string } }).report?.summary
-                        ? `Build complete. ${(planPayload as { report: { summary: string } }).report.summary}`
-                        : "Build complete.")
-                    }
-                  />
-                ) : isTaskQueued ? null : msg.content ? (
-                  <ZeroBubble content={msg.content} />
-                ) : null}
+                {session.items.map(({ msg, globalIdx }) => {
+                  const msgTime = new Date(msg.createdAt).getTime();
+                  const nextGlobalIdx = globalIdx + 1;
+                  const nextTime =
+                    nextGlobalIdx < sortedMessages.length
+                      ? new Date(sortedMessages[nextGlobalIdx]!.createdAt).getTime()
+                      : Infinity;
 
-                {/*
-                 * Inline live stream — render AgentThinkingBubble directly
-                 * below the triggering message when this task is the active one.
-                 * Keyed to msg.id (the first matching message) so only one
-                 * bubble ever mounts even if multiple messages share a taskId.
-                 * The bubble uses SSE (useTaskEventStream) so tool call events
-                 * appear with zero latency as they arrive, matching the Replit
-                 * Agent experience. Once the task is terminal the bubble
-                 * auto-dismisses and PersistedToolEvents takes over below.
-                 */}
-                {msg.id === inlineBubbleMsgId && taskId !== undefined && (
-                  <div className="px-3 py-1">
-                    <AgentThinkingBubble
-                      projectId={projectId}
-                      taskId={taskId}
-                      startedAt={pendingStartedAt}
-                      onDismiss={dismissBubble}
-                      onConnectionChange={handleSseConnectionChange}
-                    />
-                  </div>
-                )}
+                  const checkpointsAfter = sortedVersions.filter((v) => {
+                    const vt = v.createdAt ? new Date(v.createdAt).getTime() : 0;
+                    return vt > msgTime && vt < nextTime;
+                  });
 
-                {/* Persisted tool-call events for completed tasks only */}
-                {taskId &&
-                  task &&
-                  TERMINAL_STATUSES.has(task.status) &&
-                  taskId !== activeTaskId && (
-                    <PersistedToolEvents
-                      projectId={projectId}
-                      taskId={taskId}
-                      taskStatus={task.status}
-                    />
-                  )}
+                  const isUser = msg.role === "user";
+                  const planPayload = msg.plan as Record<string, unknown> | null | undefined;
+                  const payloadKind =
+                    planPayload && typeof planPayload === "object" ? planPayload.kind : undefined;
+                  const isReport = payloadKind === "report";
+                  const isError = payloadKind === "error";
+                  const isTaskQueued = payloadKind === "task-queued" || payloadKind === "task-done";
+                  const isPlanCard =
+                    msg.planMode &&
+                    !isUser &&
+                    !isReport &&
+                    !isError &&
+                    planPayload &&
+                    typeof planPayload === "object";
 
-                {checkpointsAfter.map((v) => (
-                  <CheckpointMarker
-                    key={v.id}
-                    version={v}
-                    onRollback={handleRollback}
-                    isRollingBack={rollbackVersion.isPending}
-                  />
-                ))}
-              </div>
+                  const taskId =
+                    !isUser && planPayload && typeof planPayload === "object"
+                      ? (planPayload.taskId as number | undefined)
+                      : undefined;
+                  const task = taskId ? taskById.get(taskId) : undefined;
+
+                  return (
+                    <div
+                      key={msg.id}
+                      data-msg-id={msg.id}
+                      className={cn(
+                        "rounded-lg transition-colors duration-300",
+                        highlightedMsgId === msg.id && "bg-primary/10 ring-1 ring-primary/30",
+                      )}
+                    >
+                      {isUser ? (
+                        <UserBubble text={msg.content} />
+                      ) : isPlanCard ? (
+                        <ZeroPlanBubble
+                          plan={planPayload as StructuredPlan}
+                          projectId={projectId}
+                          agentMode={agentMode}
+                          messageId={msg.id}
+                          isBusy={isBusy}
+                          onBuild={(builtPrompt, mode, bg) =>
+                            doSend(builtPrompt, { planMode: false, background: bg, mode })
+                          }
+                        />
+                      ) : isReport ? (
+                        <ZeroBubble
+                          content={
+                            msg.content ||
+                            ((planPayload as { report?: { summary?: string } }).report?.summary
+                              ? `Build complete. ${(planPayload as { report: { summary: string } }).report.summary}`
+                              : "Build complete.")
+                          }
+                        />
+                      ) : isTaskQueued ? null : msg.content ? (
+                        <ZeroBubble content={msg.content} />
+                      ) : null}
+
+                      {/*
+                       * Inline live stream — render AgentThinkingBubble directly
+                       * below the triggering message when this task is the active one.
+                       * Keyed to msg.id so only one bubble ever mounts even if
+                       * multiple messages share a taskId. Once the task is terminal
+                       * the bubble auto-dismisses and PersistedToolEvents takes over.
+                       */}
+                      {msg.id === inlineBubbleMsgId && taskId !== undefined && (
+                        <div className="px-3 py-1">
+                          <AgentThinkingBubble
+                            projectId={projectId}
+                            taskId={taskId}
+                            startedAt={pendingStartedAt}
+                            onDismiss={dismissBubble}
+                            onConnectionChange={handleSseConnectionChange}
+                          />
+                        </div>
+                      )}
+
+                      {/* Persisted tool-call events for completed tasks only */}
+                      {taskId &&
+                        task &&
+                        TERMINAL_STATUSES.has(task.status) &&
+                        taskId !== activeTaskId && (
+                          <PersistedToolEvents
+                            projectId={projectId}
+                            taskId={taskId}
+                            taskStatus={task.status}
+                          />
+                        )}
+
+                      {checkpointsAfter.map((v) => (
+                        <CheckpointMarker
+                          key={v.id}
+                          version={v}
+                          onRollback={handleRollback}
+                          isRollingBack={rollbackVersion.isPending}
+                        />
+                      ))}
+                    </div>
+                  );
+                })}
+              </SessionCard>
             );
           })}
 
