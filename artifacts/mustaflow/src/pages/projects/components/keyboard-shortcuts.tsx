@@ -30,7 +30,6 @@ const SECTIONS: ShortcutSection[] = [
       { keys: [`${mod}/`], description: "Show keyboard shortcuts" },
       { keys: [`${mod}S`], description: "Save current file" },
       { keys: [`${mod}Z`], description: "Undo" },
-      { keys: [`${mod}Shift+Z`], description: "Redo" },
       { keys: ["Escape"], description: "Close palette / dismiss dialog" },
     ],
   },
@@ -83,6 +82,7 @@ const SECTIONS: ShortcutSection[] = [
     title: "Workspace",
     shortcuts: [
       { keys: ["`"], description: "Toggle terminal" },
+      { keys: [`${mod}Shift+Z`], description: "Toggle Zero agent panel" },
       { keys: [`${mod}Shift+D`], description: "Open debugger" },
       { keys: [`${mod}Shift+G`], description: "Open Git panel" },
       { keys: [`${mod}Shift+P`], description: "Open package manager" },

@@ -340,6 +340,15 @@ export function ZeroAgentPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, initialActiveTaskId]);
 
+  // Auto-focus the textarea when the panel opens (e.g. via keyboard shortcut)
+  useEffect(() => {
+    if (!isOpen) return;
+    const id = setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(id);
+  }, [isOpen]);
+
   const { data: messages } = useListMessages(projectId, {
     query: {
       queryKey: getListMessagesQueryKey(projectId),

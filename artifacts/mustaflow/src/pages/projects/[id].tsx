@@ -2138,6 +2138,21 @@ export default function ProjectWorkspacePage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [focusMode]);
 
+  // Cmd+Shift+Z / Ctrl+Shift+Z toggles the Zero agent panel
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      const isMod = e.metaKey || e.ctrlKey;
+      if (isMod && e.shiftKey && e.key === "Z") {
+        e.preventDefault();
+        setZeroPanelOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const handleHtmlFileSaved = useCallback(() => {
     setPageMapSyncing(true);
     if (pageMapSyncTimerRef.current) clearTimeout(pageMapSyncTimerRef.current);
