@@ -1638,6 +1638,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       let resolvedProjectStack = project.stack ?? "static-html";
       let resolvedProjectFormat = project.projectFormat ?? null;
 
+      // Developer Mode projects always run as real server processes inside a Linux
+      // container — raw static-html is never the right stack. Upgrade the fallback
+      // so the agent generates a real server app (minimum: node-api / Express).
+      if (project.projectMode === "developer" && resolvedProjectStack === "static-html") {
+        resolvedProjectStack = "node-api";
+        resolvedProjectFormat = "static-html";
+      }
+
       // ── Auto-detect required stack on the very first build ──────────────────
       // The project is created before the user writes their first real request,
       // so the stack is not locked at creation time. Right before the first
@@ -1651,7 +1659,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             "narration",
             "Reading your request to choose the right architecture…",
           );
-          const detectedStack = await detectRequiredStack(userPrompt);
+          const isDevMode = project.projectMode === "developer";
+          const detectedStack = await detectRequiredStack(userPrompt, isDevMode);
           const stackChanged = detectedStack !== resolvedProjectStack;
           const becomesMobile = detectedStack === "mobile-cross";
 
@@ -1911,6 +1920,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   projectKind: project.kind,
                   projectFormat: project.projectFormat ?? null,
                   stack: project.stack ?? null,
+                  projectMode: project.projectMode ?? null,
                   userPrompt,
                   agentMode,
                   conversationHistory,
@@ -2340,6 +2350,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   projectKind: project.kind,
                   projectFormat: project.projectFormat ?? null,
                   stack: project.stack ?? null,
+                  projectMode: project.projectMode ?? null,
                   userPrompt,
                   agentMode,
                   conversationHistory,

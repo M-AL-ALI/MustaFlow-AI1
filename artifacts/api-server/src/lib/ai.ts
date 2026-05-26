@@ -447,7 +447,19 @@ const REACT_SIGNALS = [
  *
  * Falls back to a fast gpt-5-mini call when heuristics return no clear signal.
  */
-export async function detectRequiredStack(prompt: string): Promise<StackId> {
+/**
+ * Classify a user prompt into the best-fit stack.
+ *
+ * @param prompt     The user's first message describing what they want to build.
+ * @param devMode    When true (Developer Mode / agentic projects) "static-html" is
+ *                   never returned — the minimum is "node-api" because every
+ *                   Developer Mode project runs as a real server process inside a
+ *                   Linux container.
+ */
+export async function detectRequiredStack(
+  prompt: string,
+  devMode = false,
+): Promise<StackId> {
   const lower = prompt.toLowerCase();
 
   // Mobile intent always wins — a user asking for "an app like Uber" or
@@ -492,6 +504,13 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
   }
 
   // Unclear from keywords — ask the model. Keep it cheap: 20 output tokens max.
+  //
+  // In Developer Mode the "static" category is excluded: every project runs in a
+  // real container so "react" (React SPA served by Vite dev-server) is the
+  // lightest valid choice for content-only requests.
+  const devModeNote = devMode
+    ? 'NOTE: "static" is NOT a valid answer here — this project always runs in a container. Use "react" as the lightest server-backed option if nothing else fits.\n'
+    : "";
   try {
     const { createChatCompletion } = await import("./ai-providers");
     const res = await createChatCompletion({
@@ -502,6 +521,7 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
           role: "system",
           content:
             "Classify this request into exactly one category. Reply with a single word only.\n" +
+            devModeNote +
             "Categories:\n" +
             "  mobile    — native phone/tablet app: something you'd install from the App Store or Play Store\n" +
             "  slides    — slide deck, presentation, or pitch deck (Reveal.js)\n" +
@@ -512,8 +532,12 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
             "  flask     — Python Flask backend: web app or REST API using Flask\n" +
             "  fullstack — Node.js/TypeScript web app that needs a real backend: user auth, database, file uploads, payments, APIs\n" +
             "  react     — rich web single-page app, dashboard, or data viz with no server-side database\n" +
-            "  static    — simple web page: landing page, portfolio, brochure, no persistent data\n" +
-            "Reply with ONLY one of: mobile | slides | animation | automation | go | fastapi | flask | fullstack | react | static",
+            (devMode
+              ? ""
+              : "  static    — simple web page: landing page, portfolio, brochure, no persistent data\n") +
+            (devMode
+              ? "Reply with ONLY one of: mobile | slides | animation | automation | go | fastapi | flask | fullstack | react"
+              : "Reply with ONLY one of: mobile | slides | animation | automation | go | fastapi | flask | fullstack | react | static"),
         },
         { role: "user", content: prompt.slice(0, 800) },
       ],
@@ -529,9 +553,16 @@ export async function detectRequiredStack(prompt: string): Promise<StackId> {
     if (word.includes("flask")) return "python-flask";
     if (word.includes("fullstack") || word.includes("full")) return "node-api";
     if (word.includes("react")) return "react-vite";
-    return "static-html";
+    // "static" response in devMode → upgrade to node-api (minimum container stack).
+    if (!devMode && word.includes("static")) return "static-html";
+    return devMode ? "node-api" : "static-html";
   } catch (err) {
-    logger.warn({ err }, "Stack auto-detection AI call failed — defaulting to static-html");
-    return "static-html";
+    logger.warn(
+      { err },
+      devMode
+        ? "Stack auto-detection AI call failed — defaulting to node-api (Developer Mode)"
+        : "Stack auto-detection AI call failed — defaulting to static-html",
+    );
+    return devMode ? "node-api" : "static-html";
   }
 }

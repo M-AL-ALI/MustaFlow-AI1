@@ -100,6 +100,13 @@ export interface AgentLoopInput {
   previewUrl?: string | null;
   /** Per-project Playwright E2E enablement. Defaults true. */
   e2eEnabled?: boolean;
+  /**
+   * Surface that owns this project: 'builder' = AI Build Mode (default),
+   * 'developer' = Developer Mode cloud IDE.  When 'developer', the agent
+   * knows every project runs as a live server process in a Linux container
+   * and must never generate raw static-HTML-only output.
+   */
+  projectMode?: string | null;
   onEvent: AgentLoopEvent;
   signal: AbortSignal;
   /**
@@ -1228,14 +1235,26 @@ function buildSystemPrompt(
   const checkList = profile.checks.map((c) => `  • ${c.id} (${c.label})`).join("\n");
   const isStatic = stack === "static-html";
   const isMobile = stack === "mobile-cross";
+  const isDeveloperMode = input.projectMode === "developer";
   const strictness = input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS;
-  const platformNote = isStatic
+
+  // In Developer Mode every project is a real server process inside a Linux
+  // container — static-html is never a valid target.  If the stack still reads
+  // "static-html" at this point (legacy row), treat it as node-api and warn the
+  // agent explicitly.
+  const effectivelyStatic = isStatic && !isDeveloperMode;
+
+  const platformNote = effectivelyStatic
     ? "This is a STATIC web app (HTML/CSS/JS + Tailwind/lucide via CDN). No npm or build tools — `run_command` is restricted to in-process validators."
     : isMobile
       ? "This is a MOBILE cross-platform app (Expo SDK 52 / Expo Router v3 / NativeWind v4). Generate an Expo project AND an index.html web preview. `run_command` is restricted to in-process structural validators."
-      : `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
+      : isDeveloperMode
+        ? `This is a DEVELOPER MODE project running as a live server process inside a Linux container (stack: ${isStatic ? "node-api" : stack}). The app must always be a real server that handles HTTP requests — never generate a static-HTML-only build. You may run any shell commands (npm/npx/tsc/python/go/etc.) via run_command. To add dependencies, use pkg_install.`
+        : `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
   return [
-    `You are MustaFlow's agentic app builder. Your job is to ${input.mode === "build" ? "create" : "refine"} a working ${stack} application that satisfies the user's request.`,
+    isDeveloperMode
+      ? `You are MustaFlow's Developer Mode AI. Your job is to ${input.mode === "build" ? "build" : "update"} a production-quality ${isStatic ? "Node.js/Express" : stack} server application that runs as a live process in a Linux container. The project is always containerized — never produce a raw static HTML bundle without a server.`
+      : `You are MustaFlow's agentic app builder. Your job is to ${input.mode === "build" ? "create" : "refine"} a working ${stack} application that satisfies the user's request.`,
     "",
     platformNote,
     "",
