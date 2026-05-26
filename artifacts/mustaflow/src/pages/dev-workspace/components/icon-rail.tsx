@@ -100,8 +100,7 @@ export function IconRail({ activePanel, onPanelToggle, onOpenSearch }: IconRailP
       {RAIL_ITEMS.map(({ id, label, icon: Icon, isCustom }) => {
         const isActive = activePanel === id;
         // Wrench ("tools") opens the search popup if onOpenSearch is wired
-        const handleClick =
-          id === "tools" && onOpenSearch ? onOpenSearch : () => onPanelToggle(id);
+        const handleClick = id === "tools" && onOpenSearch ? onOpenSearch : () => onPanelToggle(id);
         return (
           <Tooltip key={id}>
             <TooltipTrigger asChild>

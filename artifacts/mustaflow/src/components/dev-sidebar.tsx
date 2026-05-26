@@ -2,14 +2,12 @@ import { useLocation, Link } from "wouter";
 import { useUser } from "@clerk/react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Home, FolderOpen, Users, Globe2, Bell, Settings, Code2 } from "lucide-react";
+import { Home, FolderOpen, Globe2, Settings, Code2 } from "lucide-react";
 
 const NAV_ITEMS = [
   { icon: Home, label: "Home", href: "/dev" },
   { icon: FolderOpen, label: "Projects", href: "/dev/projects" },
-  { icon: Users, label: "Teams", href: "/dev/teams" },
   { icon: Globe2, label: "Deployments", href: "/dev/deployments" },
-  { icon: Bell, label: "Notifications", href: "/dev/notifications" },
 ] as const;
 
 export function DevSidebar() {

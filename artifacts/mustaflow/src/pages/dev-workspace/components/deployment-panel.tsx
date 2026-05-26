@@ -393,9 +393,7 @@ export function DeploymentPanel({
 
       // 4. Trigger the deploy — include selected secret IDs so the server
       //    filters which secrets are injected into the container env.
-      const syncedSecretIds = secrets
-        .filter((s) => s.syncToDeployment)
-        .map((s) => s.id);
+      const syncedSecretIds = secrets.filter((s) => s.syncToDeployment).map((s) => s.id);
 
       setBuildLog((l) => [
         ...l,
@@ -422,9 +420,7 @@ export function DeploymentPanel({
       setBuildLog((l) => [
         ...l,
         `Snapshot created — ${data.filesDeployed ?? 0} file${(data.filesDeployed ?? 0) !== 1 ? "s" : ""} snapshotted.`,
-        data.containerDeployed
-          ? "Container blue/green swap complete."
-          : "Pushed to edge CDN.",
+        data.containerDeployed ? "Container blue/green swap complete." : "Pushed to edge CDN.",
         `Deployment recorded: ${new Date(data.deployedAt).toLocaleTimeString()}`,
         `Live at: ${data.publicUrl}`,
         "Done.",

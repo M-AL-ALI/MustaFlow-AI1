@@ -165,7 +165,11 @@ router.post("/projects/:id/deploy", requireProjectOwnership, async (req, res): P
           : null;
 
       const secretRows = await db
-        .select({ id: secretsTable.id, name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
+        .select({
+          id: secretsTable.id,
+          name: secretsTable.name,
+          valueEncrypted: secretsTable.valueEncrypted,
+        })
         .from(secretsTable)
         .where(eq(secretsTable.projectId, projectId));
 

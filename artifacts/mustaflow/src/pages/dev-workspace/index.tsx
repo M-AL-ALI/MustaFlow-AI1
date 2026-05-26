@@ -259,6 +259,8 @@ export default function DevWorkspacePage() {
         setCanvasOpen((v) => !v);
         return;
       }
+      // Clicking any left-panel icon while canvas is open: close canvas, show editor+panel
+      setCanvasOpen(false);
       if (activePanel === panel) {
         setLeftPanelVisible((v) => !v);
       } else {
@@ -419,9 +421,15 @@ export default function DevWorkspacePage() {
           open={toolsSearchOpen}
           onClose={() => setToolsSearchOpen(false)}
           onSelect={(panelId) => {
-            setActivePanel(panelId);
-            setLeftPanelVisible(true);
-            setZeroAgentOpen(false);
+            if (panelId === "canvas") {
+              setCanvasOpen(true);
+              setZeroAgentOpen(false);
+            } else {
+              setCanvasOpen(false);
+              setActivePanel(panelId);
+              setLeftPanelVisible(true);
+              setZeroAgentOpen(false);
+            }
           }}
         />
 

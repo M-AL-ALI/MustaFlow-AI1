@@ -57,7 +57,7 @@ const TOOL_ITEMS: ToolItem[] = [
     label: "Preview",
     description: "View your app in the live preview pane",
     icon: Eye,
-    panelId: null,
+    panelId: "files",
     keywords: ["browser", "view", "app"],
   },
   {
@@ -121,7 +121,7 @@ const TOOL_ITEMS: ToolItem[] = [
     label: "Shell",
     description: "Run commands in the project container",
     icon: Terminal,
-    panelId: null,
+    panelId: "files",
     keywords: ["cli", "bash", "shell", "command"],
   },
   {
@@ -129,7 +129,7 @@ const TOOL_ITEMS: ToolItem[] = [
     label: "Canvas",
     description: "Visual layout and component editor",
     icon: LayoutTemplate,
-    panelId: null,
+    panelId: "canvas",
     keywords: ["design", "mockup", "layout"],
   },
 ];
