@@ -560,17 +560,24 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
           agentMode,
           planMode,
           background: false,
+          agentIntent: planMode ? ("plan" as const) : ("build" as const),
           origin: "zero",
           ...(attachments.length > 0 ? { attachments } : {}),
         },
       },
       {
         onSuccess: (data) => {
-          const taskData = data as { taskId?: number };
-          if (taskData?.taskId) {
-            setActiveTaskId(taskData.taskId);
+          const plan = (data as { assistantMessage?: { plan?: Record<string, unknown> | null } })
+            ?.assistantMessage?.plan;
+          const tid =
+            plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
+          if (tid) {
+            setActiveTaskId(tid);
+          } else {
+            setPendingStartedAt(null);
           }
           void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+          void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
         },
         onError: () => {
           void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
@@ -669,7 +676,19 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
               {isExpanded && (
                 <div>
                   {session.items.map(({ msg, globalIdx }) => {
-                    const versionAfter = typedVersions[globalIdx] as ZeroVersion | undefined;
+                    // Time-based version correlation: find versions created between
+                    // this message and the next one (mirrors zero-agent-panel logic)
+                    const msgTime = new Date(msg.createdAt).getTime();
+                    const nextGlobalIdx = globalIdx + 1;
+                    const nextTime =
+                      nextGlobalIdx < sortedMessages.length
+                        ? new Date(sortedMessages[nextGlobalIdx]!.createdAt).getTime()
+                        : Infinity;
+                    const checkpointsAfter = typedVersions.filter((v) => {
+                      const vt = v.createdAt ? new Date(v.createdAt).getTime() : 0;
+                      return vt > msgTime && vt < nextTime;
+                    });
+                    const versionAfter = checkpointsAfter[0] as ZeroVersion | undefined;
                     const plan = msg.plan ? (msg.plan as unknown as StructuredPlan) : null;
 
                     return (
