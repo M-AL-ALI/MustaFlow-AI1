@@ -445,33 +445,34 @@ export function TopBar({
             <ol className="px-4 py-3 space-y-3">
               {[
                 {
-                  label: "You send a prompt",
-                  detail: "Your message goes to the backend as a regular API request.",
+                  label: "Context assembly",
+                  detail:
+                    "Your text, the full file tree, conversation history, tool definitions, and the system prompt are bundled into one payload.",
                 },
                 {
-                  label: "An LLM reads your project",
+                  label: "Chain-of-thought reasoning",
                   detail:
-                    "The AI receives your prompt plus the current file tree, chat history, and a tool catalog.",
+                    "The LLM writes out reasoning steps before deciding on an action. The thinking text you see is real — it improves decision quality.",
                 },
                 {
-                  label: "The agent calls tools, not text",
+                  label: "Tool call output",
                   detail:
-                    "It picks actions — read_file, write_file, run_command — and executes them in order.",
+                    'The model outputs structured JSON — { tool: "write_file", arguments: { path, content } }. It decides; the backend executes.',
                 },
                 {
-                  label: "A loop runs until done",
+                  label: "Real execution",
                   detail:
-                    "Think → call tool → observe result → think again. Each file write is a real disk write in your container.",
+                    "The backend intercepts the tool call, runs it against the real container, and returns the result. Nothing is simulated.",
                 },
                 {
-                  label: "Real side effects",
+                  label: "Loop until done",
                   detail:
-                    "npm install actually installs packages. write_file changes the file on disk. Nothing is simulated.",
+                    "The result is appended to context and sent back to the LLM. It reasons again, calls another tool, and repeats — 10 to 50 times for complex tasks.",
                 },
                 {
-                  label: "Preview refreshes automatically",
+                  label: "HMR auto-refresh",
                   detail:
-                    "The dev server watches the filesystem. Every file the agent writes triggers HMR — no restart needed.",
+                    "Every file write triggers the filesystem watcher → HMR signal → preview refresh. The agent never restarts the server.",
                 },
               ].map((step, i) => (
                 <li key={i} className="flex gap-3">

@@ -1,13 +1,12 @@
 import {
-  MessageSquare,
+  Package,
   Brain,
   Wrench,
   RefreshCw,
-  Zap,
-  MonitorPlay,
+  AlertTriangle,
   ExternalLink,
-  ArrowRight,
   ChevronRight,
+  ArrowDown,
 } from "lucide-react";
 import { Link } from "wouter";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
@@ -19,50 +18,64 @@ interface SectionProps {
   title: string;
   summary: string;
   children: React.ReactNode;
+  last?: boolean;
 }
 
-function Section({ number, icon: Icon, title, summary, children }: SectionProps) {
+function Section({ number, icon: Icon, title, summary, children, last }: SectionProps) {
   return (
     <div className="flex gap-6">
       <div className="flex-shrink-0 flex flex-col items-center gap-2">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 border border-primary/20">
           <Icon className="h-5 w-5 text-primary" />
         </div>
-        <div className="w-px flex-1 bg-border min-h-[2rem]" />
+        {!last && <div className="w-px flex-1 bg-border min-h-[2rem]" />}
       </div>
       <div className="pb-10 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
+        <div className="mb-1">
           <span className="text-xs font-mono text-muted-foreground/60 tracking-widest uppercase">
-            Step {number}
+            Section {number}
           </span>
         </div>
         <h2 className="text-lg font-semibold text-foreground mb-1">{title}</h2>
         <p className="text-sm text-primary/80 font-medium mb-3">{summary}</p>
-        <div className="text-sm text-muted-foreground leading-relaxed space-y-2">{children}</div>
+        <div className="text-sm text-muted-foreground leading-relaxed space-y-3">{children}</div>
       </div>
     </div>
   );
 }
 
-function CalloutBox({ title, children }: { title: string; children: React.ReactNode }) {
+function Callout({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 mt-3">
-      <p className="text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
-        {title}
-      </p>
+    <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+      <p className="text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">{title}</p>
       <div className="text-xs text-muted-foreground leading-relaxed space-y-1">{children}</div>
     </div>
   );
 }
 
-function LoopStep({ n, label }: { n: number; label: string }) {
+function CodeBlock({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-[10px] font-bold flex-shrink-0">
-        {n}
-      </span>
-      <span>{label}</span>
-      {n < 5 && <ArrowRight className="h-3 w-3 text-muted-foreground/40 ml-auto flex-shrink-0" />}
+    <pre className="rounded-lg border border-border bg-zinc-950 px-4 py-3 text-xs text-emerald-400 font-mono leading-relaxed overflow-x-auto">
+      {children}
+    </pre>
+  );
+}
+
+function FlowStep({ label, sub }: { label: string; sub?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1 text-center">
+      <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground w-full">
+        {label}
+      </div>
+      {sub && <p className="text-[10px] text-muted-foreground/70 leading-tight">{sub}</p>}
+    </div>
+  );
+}
+
+function FlowArrow() {
+  return (
+    <div className="flex justify-center">
+      <ArrowDown className="h-4 w-4 text-muted-foreground/40" />
     </div>
   );
 }
@@ -111,207 +124,296 @@ export default function DocsDevModePage() {
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">
             Developer Mode is a live cloud IDE backed by an AI agent that writes real files into a
-            real container. This page explains the full pipeline — every step from prompt submission
-            to hot-reload in the preview iframe.
+            real container. This page covers the full pipeline in technical depth — context
+            assembly, LLM reasoning, tool calling mechanics, the agentic loop, and the failure modes
+            you should know about.
           </p>
         </div>
 
-        {/* Steps */}
+        {/* Sections */}
         <div>
           <Section
             number={1}
-            icon={MessageSquare}
-            title="You send a prompt"
-            summary="Your text becomes an API request."
+            icon={Package}
+            title="The prompt — more than just your words"
+            summary="The backend assembles a full context package before anything reaches the AI."
           >
             <p>
-              When you type a message and press Send, the frontend posts your prompt to the
-              MustaFlow API. There is no streaming or special protocol — it is a regular HTTP
-              request.
+              When you press Send, your text is not forwarded directly to the LLM. The backend
+              constructs a large payload that gives the model everything it needs to act
+              intelligently.
             </p>
+            <Callout title="What the LLM receives">
+              <p>
+                <span className="text-foreground font-medium">System prompt</span> — a detailed
+                instruction set: the AI's role, the rules it must follow, every tool it has access
+                to, how to format responses, and platform-specific constraints (port binding, HMR
+                chain, safety limits).
+              </p>
+              <p>
+                <span className="text-foreground font-medium">File tree</span> — a snapshot of every
+                file in the project so the AI knows what already exists before deciding whether to
+                create, extend, or replace.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">Conversation history</span> — all
+                previous messages in the session, giving the AI memory of what was discussed and
+                built.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">Tool definitions</span> — a structured
+                description of every callable tool: the name, a description of what it does, and the
+                exact schema of arguments it accepts.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">Knowledge context</span> — lessons
+                from prior builds on this project, injected as additional context.
+              </p>
+            </Callout>
             <p>
-              The request includes your project ID, the current conversation history, and any
-              context about the active file or selection you have open in the editor.
+              The model needs all of this to make intelligent decisions rather than guessing
+              blindly. Context assembly is not overhead — it is what makes the difference between an
+              agent that can navigate a real codebase and one that hallucinates file paths.
             </p>
           </Section>
 
           <Section
             number={2}
             icon={Brain}
-            title="The backend feeds it to an LLM"
-            summary="Your prompt meets the project context."
+            title="How the LLM actually thinks"
+            summary="Token prediction at scale produces something that looks like reasoning."
           >
             <p>
-              MustaFlow constructs a system prompt that gives the AI everything it needs to act
-              effectively:
+              The LLM does not think the way humans do. It predicts the most statistically likely
+              next token (word fragment) given everything it has seen. But at scale, and with the
+              right training, this produces something that looks like reasoning.
             </p>
-            <CalloutBox title="What the LLM sees">
-              <p>• Your prompt and the full conversation history</p>
-              <p>• A description of your project's stack and current file tree</p>
-              <p>• A catalog of tools it is allowed to call</p>
-              <p>• Platform rules: port binding, HMR chain, safety limits</p>
-              <p>• Knowledge from prior builds (lessons learned, past decisions)</p>
-            </CalloutBox>
-            <p className="mt-2">
-              The model is not just generating text — it is deciding what to do with the tools it
-              has been given.
+            <p>
+              Modern LLMs are trained to produce{" "}
+              <span className="text-foreground font-medium">chain-of-thought</span> — they write out
+              reasoning steps before acting. You sometimes see this as the "thinking" text in the
+              agent panel. This is not decorative. The model genuinely builds on its own
+              intermediate conclusions, which improves the quality of the final decision.
+            </p>
+            <Callout title="Example chain-of-thought before a tool call">
+              <p className="italic">
+                "The user wants a login form. I should check whether there is already an auth file
+                before creating a new one. If there is, I should extend it rather than create a
+                duplicate. Let me read the file tree first, then read the relevant file."
+              </p>
+            </Callout>
+            <p>
+              That reasoning then drives the next tool call — reading the auth file rather than
+              blindly writing a new one. Suppressing chain-of-thought produces faster but lower
+              quality decisions, which is why MustaFlow preserves it for complex tasks.
             </p>
           </Section>
 
           <Section
             number={3}
             icon={Wrench}
-            title="The agent has tools, not just words"
-            summary="Every action calls a real tool with real consequences."
+            title="Tool calling — the mechanics"
+            summary="Instead of outputting text, the model outputs a structured JSON action."
           >
             <p>
-              This is the critical difference from a chatbot. The agent is given a set of callable
-              tools. When it decides to act, it calls the tool — not describe what it would do.
+              Tool calling is a specific capability built into modern LLMs. Instead of just
+              producing text, the model can output a structured JSON object that tells the backend:
+              "call this function with these arguments."
             </p>
-            <CalloutBox title="Core tools">
-              <p>
-                <span className="font-mono text-foreground">read_file</span> — read an existing file
-                from the container filesystem
-              </p>
-              <p>
-                <span className="font-mono text-foreground">write_file</span> — create or overwrite
-                a file on disk
-              </p>
-              <p>
-                <span className="font-mono text-foreground">apply_patch</span> — surgical edit: a
-                before/after diff applied in-place
-              </p>
-              <p>
-                <span className="font-mono text-foreground">run_command</span> — execute a shell
-                command inside the container (npm, tsc, python, etc.)
-              </p>
-              <p>
-                <span className="font-mono text-foreground">pkg_install</span> — add a dependency
-                (npm/pip/cargo) without raw shell access
-              </p>
-              <p>
-                <span className="font-mono text-foreground">list_files / search</span> — explore the
-                project before editing
-              </p>
-            </CalloutBox>
-            <p className="mt-2">
-              The LLM picks which tool to call, with what arguments, and in what order — based
-              entirely on your request and what it has observed so far.
+            <p>Internally, a tool call looks like this:</p>
+            <CodeBlock>{`{
+  "tool": "write_file",
+  "arguments": {
+    "path": "src/components/LoginForm.tsx",
+    "content": "import React from 'react'\\n..."
+  }
+}`}</CodeBlock>
+            <p>
+              The backend intercepts this output, executes the real action (writes the actual file
+              to disk in your container), and returns the result back to the model:
+            </p>
+            <CodeBlock>{`{
+  "result": "success",
+  "path": "src/components/LoginForm.tsx",
+  "bytes_written": 1842
+}`}</CodeBlock>
+            <p>
+              The model sees this result and continues from there. This back-and-forth — model
+              decides, backend executes, result returned — is what makes the agent feel interactive
+              rather than a one-shot generator.
+            </p>
+            <p>
+              Critically: the model does not execute anything itself. It only outputs structured
+              intent. The backend is the execution boundary. This is what allows the platform to
+              enforce safety limits, sandbox file paths, and block destructive operations before
+              they reach the container.
             </p>
           </Section>
 
           <Section
             number={4}
             icon={RefreshCw}
-            title="A loop runs until the task is done"
-            summary="Think → act → observe → repeat."
+            title="The agentic loop — step by step"
+            summary="A single message can trigger 10, 20, or 50 loop iterations."
           >
             <p>
-              The agent does not do everything in one shot. It runs in an agentic loop — each turn
-              it takes one action, sees the result, and decides the next step.
+              Here is what actually happens during a single agent run, in full detail. A single user
+              message triggers this entire sequence, and the loop repeats as many times as needed
+              until the task is done.
             </p>
-            <CalloutBox title="The loop">
-              <div className="space-y-1.5">
-                <LoopStep n={1} label="Receive your prompt" />
-                <LoopStep n={2} label="Think — decide the best next action" />
-                <LoopStep n={3} label="Call a tool (file write, shell command, etc.)" />
-                <LoopStep n={4} label="Observe the result" />
-                <LoopStep n={5} label="Repeat — or call finalize when done" />
-              </div>
-            </CalloutBox>
-            <p className="mt-2">
-              This loop is what makes complex tasks — "build a full-stack SaaS with auth, a
-              database, and a dashboard" — possible. The agent plans, executes, checks its work, and
-              adapts, just like a developer would.
-            </p>
-            <p>
-              The loop also grounds the agent in reality. Before editing a file it reads the actual
-              content — it cannot hallucinate what your code looks like.
+            <div className="space-y-1.5 mt-2">
+              <FlowStep
+                label="User sends prompt"
+                sub="Text, conversation history, active file context"
+              />
+              <FlowArrow />
+              <FlowStep
+                label="Backend assembles full context"
+                sub="System prompt + file tree + history + tool definitions + knowledge"
+              />
+              <FlowArrow />
+              <FlowStep
+                label="LLM produces chain-of-thought"
+                sub="Writes out reasoning before deciding on an action"
+              />
+              <FlowArrow />
+              <FlowStep label="LLM outputs a tool call" sub='e.g. read_file "src/App.tsx"' />
+              <FlowArrow />
+              <FlowStep
+                label="Backend executes the tool"
+                sub="Reads the file from disk, returns content"
+              />
+              <FlowArrow />
+              <FlowStep
+                label="Result appended to conversation"
+                sub="The file content is now part of the LLM's context"
+              />
+              <FlowArrow />
+              <FlowStep
+                label="LLM reasons again with new information"
+                sub="Decides next action based on what it read"
+              />
+              <FlowArrow />
+              <FlowStep
+                label="LLM outputs another tool call"
+                sub="e.g. write_file with modified content"
+              />
+              <FlowArrow />
+              <FlowStep
+                label="Backend writes the file to disk"
+                sub="Real file change in the container"
+              />
+              <FlowArrow />
+              <FlowStep
+                label="Dev server detects the change"
+                sub="Filesystem watcher fires → HMR signal → preview refreshes"
+              />
+              <FlowArrow />
+              <FlowStep label="Result returned to LLM" sub='e.g. { "result": "success" }' />
+              <FlowArrow />
+              <FlowStep
+                label="LLM decides: is the task done?"
+                sub="If not → loop again. If yes → output plain-text summary and call finalize."
+              />
+            </div>
+            <p className="mt-3">
+              Every step in this flow is real. The loop is not a simulation. Files written by the
+              agent persist in the container. Commands the agent runs have actual output. The
+              preview that refreshes is the real dev server responding to real file changes.
             </p>
           </Section>
 
           <Section
             number={5}
-            icon={Zap}
-            title="Every tool call has real side effects"
-            summary="Nothing is simulated."
+            icon={AlertTriangle}
+            title="Why the loop can go wrong"
+            summary="Autonomous decisions compound — early mistakes propagate forward."
+            last
           >
             <p>
-              When the agent calls <span className="font-mono text-foreground">write_file</span>,
-              the file changes on disk inside your container — immediately. When it runs{" "}
-              <span className="font-mono text-foreground">npm install</span>, packages actually get
-              installed. When it calls{" "}
-              <span className="font-mono text-foreground">run_command</span>, the output you see in
-              the terminal is the real stdout/stderr from inside the container.
+              Because the agent makes decisions autonomously, errors in early steps can silently
+              corrupt every subsequent decision. There are three main failure patterns:
             </p>
+            <Callout title="1. Stale or misread context">
+              <p>
+                If the agent misreads a file early in the loop — or assumes a file exists without
+                checking — every subsequent decision builds on a wrong assumption. By the time it
+                writes the final file, it may have produced code that references functions,
+                variables, or paths that do not exist.
+              </p>
+              <p className="mt-1">
+                The fix: the agent is instructed to always read files before editing them, and to
+                re-read after complex changes to confirm the result matches expectations.
+              </p>
+            </Callout>
+            <Callout title="2. Silent command failures">
+              <p>
+                If a shell command fails — a build error, a package that does not install, a test
+                that exits non-zero — but the agent does not check the output carefully, it may
+                continue as if the command succeeded. The next step then builds on a broken
+                foundation.
+              </p>
+              <p className="mt-1">
+                The fix: the agent is required to check stdout/stderr and exit codes after every{" "}
+                <span className="font-mono text-foreground">run_command</span> call. Failures must
+                be explicitly handled, not ignored.
+              </p>
+            </Callout>
+            <Callout title="3. Context window limits">
+              <p>
+                There is a hard limit on how many tokens (word fragments) an LLM can hold in its
+                context window at once. In a long agent run, if the context fills up, early messages
+                — including the original instructions and the first files read — get compressed or
+                dropped. The agent can lose track of earlier decisions.
+              </p>
+              <p className="mt-1">
+                The fix: MustaFlow enforces a step cap on loop iterations and a wall-clock time
+                limit. The agent is also designed to make small, focused changes rather than
+                attempting to do everything in one giant loop, which keeps context usage bounded.
+              </p>
+            </Callout>
             <p>
-              This is intentional. Grounding the agent in a real filesystem means it is always
-              working from the true current state of your project, not a model of it.
-            </p>
-          </Section>
-
-          <Section
-            number={6}
-            icon={MonitorPlay}
-            title="The preview updates as a side effect"
-            summary="HMR handles it — the agent never restarts your server."
-          >
-            <p>
-              The preview pane is an iframe pointed at your container through a byte-transparent
-              reverse proxy. The moment the agent writes a file, the dev server's filesystem watcher
-              detects the change:
-            </p>
-            <CalloutBox title="The HMR chain">
-              <p>1. Agent writes a file via write_file / apply_patch</p>
-              <p>2. Dev server filesystem watcher fires (chokidar / nodemon / webpack / vite)</p>
-              <p>3. Server pushes a hot-reload signal over WebSocket / SSE to the iframe</p>
-              <p>4. Preview refreshes — usually without a full page reload</p>
-            </CalloutBox>
-            <p className="mt-2">
-              The agent does not control this chain. It just writes files. The rest is automatic.
-              This is why the agent is instructed never to restart the dev server manually —
-              restarting kills the WebSocket connection and causes the preview to go blank until the
-              process comes back up.
+              Good agent design adds checkpoints — moments where the agent re-reads files or runs
+              verification commands to confirm its assumptions are still correct before proceeding
+              to the next phase of a task. This is why the system prompt explicitly instructs the
+              agent to run checks after meaningful edits rather than racing to finalize.
             </p>
           </Section>
         </div>
 
         {/* Why this design */}
-        <div className="mt-4 rounded-xl border border-border bg-muted/20 p-6 space-y-4">
+        <div className="rounded-xl border border-border bg-muted/20 p-6 space-y-4 mt-4">
           <h2 className="text-base font-semibold">Why is it designed this way?</h2>
           <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
-            <div className="flex gap-3">
-              <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-primary mt-2" />
-              <p>
-                <span className="text-foreground font-medium">Tool use makes it an agent.</span> A
-                chatbot only produces text. An agent produces text and takes actions with real
-                consequences. The difference is the tool catalog.
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-primary mt-2" />
-              <p>
-                <span className="text-foreground font-medium">
-                  The loop enables multi-step reasoning.
-                </span>{" "}
-                Complex tasks require dozens of steps. The loop lets the AI plan, execute, observe,
-                and adapt — rather than guessing the entire solution upfront.
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-primary mt-2" />
-              <p>
-                <span className="text-foreground font-medium">
-                  Real files keep the agent honest.
-                </span>{" "}
-                By reading actual files before writing, the agent always works from the true current
-                state of your project — it cannot hallucinate what your code looks like.
-              </p>
-            </div>
+            {[
+              {
+                title: "Tool use makes it an agent.",
+                body: "A chatbot only produces text. An agent produces structured intent that the backend executes with real consequences. The model cannot bypass the execution boundary — every action is intercepted, validated, and sandboxed before it runs.",
+              },
+              {
+                title: "The loop enables multi-step reasoning.",
+                body: "Complex tasks require dozens of steps. The loop lets the AI plan, execute, observe, and adapt — turn by turn — rather than guessing the entire solution upfront. Chain-of-thought within each turn further improves decision quality.",
+              },
+              {
+                title: "Real files keep the agent honest.",
+                body: "By reading actual files before writing, the agent always works from the true current state of the project. It cannot hallucinate what your code looks like — the filesystem is the ground truth.",
+              },
+              {
+                title: "The HMR chain is intentional.",
+                body: "The agent never restarts the dev server because restarting kills the WebSocket connection and breaks the preview. Instead, every file write automatically triggers the filesystem watcher, which triggers HMR, which updates the iframe. The agent just writes — the rest is infrastructure.",
+              },
+            ].map(({ title, body }) => (
+              <div key={title} className="flex gap-3">
+                <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-primary mt-2" />
+                <p>
+                  <span className="text-foreground font-medium">{title}</span> {body}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Footer CTA */}
+        {/* Footer */}
         <div className="mt-10 flex items-center justify-between text-xs text-muted-foreground border-t border-border pt-6">
           <span>MustaFlow AI — Developer Mode documentation</span>
           <Link
