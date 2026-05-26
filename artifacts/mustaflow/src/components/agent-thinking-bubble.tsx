@@ -1377,6 +1377,7 @@ interface Props {
   startedAt?: Date | null;
   onDismiss: () => void;
   onViewHistory?: (versionId: number) => void;
+  onConnectionChange?: (connected: boolean) => void;
 }
 
 export function AgentThinkingBubble({
@@ -1385,6 +1386,7 @@ export function AgentThinkingBubble({
   startedAt,
   onDismiss,
   onViewHistory,
+  onConnectionChange,
 }: Props) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   const mountTimeRef = useRef(Date.now());
@@ -1396,7 +1398,13 @@ export function AgentThinkingBubble({
   const cancelTask = useCancelTask();
   const forceStartTask = useForceStartTask();
 
-  const { events, lastEventAt } = useTaskEventStream(projectId, taskId);
+  const { events, lastEventAt, isConnected } = useTaskEventStream(projectId, taskId);
+
+  const onConnectionChangeRef = useRef(onConnectionChange);
+  onConnectionChangeRef.current = onConnectionChange;
+  useEffect(() => {
+    onConnectionChangeRef.current?.(isConnected);
+  }, [isConnected]);
 
   const lastEvent = events[events.length - 1];
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType as string) : false;

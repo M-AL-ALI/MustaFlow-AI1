@@ -14,6 +14,7 @@ const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 export interface TaskEventStreamResult {
   events: TaskStreamEvent[];
   lastEventAt: number | null;
+  isConnected: boolean;
 }
 
 /**
@@ -31,18 +32,28 @@ export interface TaskEventStreamResult {
  *
  * `lastEventAt` is a `Date.now()` timestamp updated on every incoming event,
  * used by consumers to detect idle gaps between tool calls.
+ *
+ * `isConnected` becomes true once the SSE connection is open and false once
+ * it closes, allowing callers to suppress redundant polling while the channel
+ * is live.
  */
 export function useTaskEventStream(projectId: number, taskId: number): TaskEventStreamResult {
   const [events, setEvents] = useState<TaskStreamEvent[]>([]);
   const [lastEventAt, setLastEventAt] = useState<number | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
   const seenIdsRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     seenIdsRef.current = new Set();
     setEvents([]);
     setLastEventAt(null);
+    setIsConnected(false);
 
     const es = new EventSource(`/api/projects/${projectId}/tasks/${taskId}/events/stream`);
+
+    es.onopen = () => {
+      setIsConnected(true);
+    };
 
     es.onmessage = (raw: MessageEvent<string>) => {
       try {
@@ -52,6 +63,7 @@ export function useTaskEventStream(projectId: number, taskId: number): TaskEvent
         setEvents((prev) => [...prev, event]);
         setLastEventAt(Date.now());
         if (TERMINAL_STATUSES.has(event.eventType)) {
+          setIsConnected(false);
           es.close();
         }
       } catch {
@@ -59,8 +71,15 @@ export function useTaskEventStream(projectId: number, taskId: number): TaskEvent
       }
     };
 
-    return () => es.close();
+    es.onerror = () => {
+      setIsConnected(false);
+    };
+
+    return () => {
+      setIsConnected(false);
+      es.close();
+    };
   }, [projectId, taskId]);
 
-  return { events, lastEventAt };
+  return { events, lastEventAt, isConnected };
 }

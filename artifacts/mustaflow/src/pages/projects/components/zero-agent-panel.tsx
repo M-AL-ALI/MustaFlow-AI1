@@ -324,6 +324,7 @@ export function ZeroAgentPanel({
   const [runInBackground, setRunInBackground] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<number | null>(initialActiveTaskId ?? null);
   const [pendingStartedAt, setPendingStartedAt] = useState<Date | null>(null);
+  const [sseConnected, setSseConnected] = useState(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [isDetached, setIsDetached] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -359,10 +360,14 @@ export function ZeroAgentPanel({
     return () => clearTimeout(id);
   }, [isOpen]);
 
+  const handleSseConnectionChange = useCallback((connected: boolean) => {
+    setSseConnected(connected);
+  }, []);
+
   const { data: messages } = useListMessages(projectId, {
     query: {
       queryKey: getListMessagesQueryKey(projectId),
-      refetchInterval: activeTaskId ? 3000 : 20000,
+      refetchInterval: activeTaskId ? (sseConnected ? 30000 : 3000) : 20000,
       staleTime: 2000,
     },
   });
@@ -370,7 +375,7 @@ export function ZeroAgentPanel({
   const { data: tasks } = useListTasks(projectId, {
     query: {
       queryKey: getListTasksQueryKey(projectId),
-      refetchInterval: activeTaskId ? 2000 : 15000,
+      refetchInterval: activeTaskId ? (sseConnected ? 30000 : 2000) : 15000,
       staleTime: 1000,
     },
   });
@@ -394,6 +399,7 @@ export function ZeroAgentPanel({
   const dismissBubble = useCallback(() => {
     setActiveTaskId(null);
     setPendingStartedAt(null);
+    setSseConnected(false);
     onBackgroundRun?.(null);
     void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
     void queryClient.invalidateQueries({ queryKey: getListVersionsQueryKey(projectId) });
@@ -1007,6 +1013,7 @@ export function ZeroAgentPanel({
                       taskId={taskId}
                       startedAt={pendingStartedAt}
                       onDismiss={dismissBubble}
+                      onConnectionChange={handleSseConnectionChange}
                     />
                   </div>
                 )}
@@ -1049,6 +1056,7 @@ export function ZeroAgentPanel({
                 taskId={activeTaskId}
                 startedAt={pendingStartedAt}
                 onDismiss={dismissBubble}
+                onConnectionChange={handleSseConnectionChange}
               />
             </div>
           )}
