@@ -46,6 +46,9 @@ interface FileEntry {
   content?: string;
 }
 
+// Which "view" is showing in the right-column third panel
+type RightView = "preview" | "canvas" | "editor";
+
 export default function DevWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const projectId = Number(id);
@@ -105,32 +108,29 @@ export default function DevWorkspacePage() {
   }, [projectId, toast]);
 
   // ── Panel state ───────────────────────────────────────────────────────────
-  const [activePanel, setActivePanel] = useState<PanelId>("files");
-  const [leftPanelVisible, setLeftPanelVisible] = useState(true);
-  const [canvasOpen, setCanvasOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState<PanelId>(null);
+  const [leftPanelVisible, setLeftPanelVisible] = useState(false); // hidden by default like Replit
+  const [rightView, setRightView] = useState<RightView>("preview");
   const [paneLayout, setPaneLayout] = useState<PaneLayout>("default");
   const [toolsSearchOpen, setToolsSearchOpen] = useState(false);
   const [deployPanelOpen, setDeployPanelOpen] = useState(false);
 
   const handlePanelToggle = useCallback(
     (panel: PanelId) => {
-      if (panel === "zero-agent") {
-        // Zero agent is always visible as the left main panel — nothing to toggle
-        return;
-      }
+      if (panel === "zero-agent") return; // always visible
       if (panel === "canvas") {
-        setCanvasOpen((v) => !v);
+        setRightView((v) => (v === "canvas" ? "preview" : "canvas"));
         return;
       }
-      setCanvasOpen(false);
-      if (activePanel === panel) {
-        setLeftPanelVisible((v) => !v);
+      if (activePanel === panel && leftPanelVisible) {
+        // Clicking the already-active panel icon collapses the sidebar
+        setLeftPanelVisible(false);
       } else {
         setActivePanel(panel);
         setLeftPanelVisible(true);
       }
     },
-    [activePanel],
+    [activePanel, leftPanelVisible],
   );
 
   // Cmd+K / Ctrl+K → tools search popup
@@ -154,7 +154,7 @@ export default function DevWorkspacePage() {
     }
   }, []);
 
-  const showPreview = paneLayout !== "editor-max";
+  const showPreviewOrCanvas = paneLayout !== "editor-max";
   const showToolsPanel =
     leftPanelVisible && paneLayout !== "editor-max" && paneLayout !== "preview-max";
 
@@ -164,127 +164,107 @@ export default function DevWorkspacePage() {
   const [diffView, setDiffView] = useState<DiffView | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  const { data: allFiles } = useListProjectFiles(projectId, {
-    query: { queryKey: getListProjectFilesQueryKey(projectId) },
+  // Editor panel shows only when a file tab is open or editor-max layout is active
+  const showEditorPanel = paneLayout !== "preview-max" && (tabs.length > 0 || paneLayout === "editor-max");
+
+  // ── Project derived state ─────────────────────────────────────────────────
+  const projectName = (project as { name?: string } | undefined)?.name ?? "Untitled Project";
+  const projectSlug = (project as { slug?: string } | undefined)?.slug ?? "";
+  const previewUrl = (project as { previewUrl?: string | null } | undefined)?.previewUrl ?? null;
+
+  const { data: projectFiles } = useListProjectFiles(projectId, {
+    query: {
+      queryKey: getListProjectFilesQueryKey(projectId),
+      refetchInterval: 30000,
+    },
   });
 
-  const openFile = useCallback(
-    async (file: FileEntry, lineNumber?: number) => {
-      const existingIdx = tabs.findIndex((t) => t.fileId === file.id);
-      if (existingIdx !== -1) {
-        setActiveTabIndex(existingIdx);
-        if (lineNumber) {
-          setTabs((prev) => prev.map((t, i) => (i === existingIdx ? { ...t, lineNumber } : t)));
-        }
-        return;
-      }
-
-      let content = file.content ?? "";
-      if (!content) {
-        try {
-          const res = await fetch(`/api/projects/${projectId}/files/${file.id}`);
-          if (res.ok) {
-            const data = (await res.json()) as { content?: string };
-            content = data.content ?? "";
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-
-      const newTab: EditorTab = {
-        fileId: file.id,
-        path: file.path,
-        content,
-        isDirty: false,
-        lineNumber,
-      };
-
-      setTabs((prev) => {
-        const next = [...prev, newTab];
-        setActiveTabIndex(next.length - 1);
-        return next;
-      });
-    },
-    [tabs, projectId],
-  );
-
+  // ── File operations ───────────────────────────────────────────────────────
   const handleFileOpen = useCallback(
     (file: FileEntry) => {
-      void openFile(file);
+      setTabs((prev) => {
+        const existing = prev.findIndex((t) => t.path === file.path);
+        if (existing >= 0) {
+          setActiveTabIndex(existing);
+          return prev;
+        }
+        const newTab: EditorTab = {
+          fileId: file.id,
+          path: file.path,
+          content: file.content ?? "",
+          isDirty: false,
+        };
+        setActiveTabIndex(prev.length);
+        return [...prev, newTab];
+      });
+      // Opening a file switches to editor view
+      setRightView("editor");
     },
-    [openFile],
+    [],
   );
 
   const handleNavigateToFile = useCallback(
-    (fileId: number, lineNumber?: number) => {
-      const typedFiles = (allFiles as FileEntry[] | undefined) ?? [];
-      const file = typedFiles.find((f) => f.id === fileId);
-      if (file) void openFile(file, lineNumber);
+    (fileId: number, _lineNumber?: number) => {
+      const files = projectFiles as FileEntry[] | undefined;
+      const file = files?.find((f) => f.id === fileId);
+      if (file) handleFileOpen(file);
     },
-    [allFiles, openFile],
+    [projectFiles, handleFileOpen],
   );
 
   const handleTabClose = useCallback((index: number) => {
     setTabs((prev) => {
       const next = prev.filter((_, i) => i !== index);
-      setActiveTabIndex((active) => {
-        if (active >= next.length) return Math.max(0, next.length - 1);
-        if (active > index) return active - 1;
-        return active;
-      });
       return next;
     });
-  }, []);
+    setActiveTabIndex((prev) => Math.max(0, Math.min(prev, tabs.length - 2)));
+  }, [tabs.length]);
 
   const handleContentChange = useCallback((index: number, content: string) => {
-    setTabs((prev) => prev.map((t, i) => (i === index ? { ...t, content, isDirty: true } : t)));
+    setTabs((prev) =>
+      prev.map((t, i) => (i === index ? { ...t, content, isDirty: true } : t)),
+    );
   }, []);
 
-  const handleFileSaved = useCallback(
-    (fileId: number) => {
-      setTabs((prev) => prev.map((t) => (t.fileId === fileId ? { ...t, isDirty: false } : t)));
-      setRefreshTrigger((n) => n + 1);
-      toast({ title: "File saved" });
-    },
-    [toast],
-  );
+  const handleFileSaved = useCallback((index: number) => {
+    setTabs((prev) => prev.map((t, i) => (i === index ? { ...t, isDirty: false } : t)));
+  }, []);
 
-  // ── Project name ──────────────────────────────────────────────────────────
+  // ── Name / container helpers ───────────────────────────────────────────────
   const handleNameChange = useCallback(
     (name: string) => {
-      void updateProject.mutateAsync(
-        { id: projectId, data: { name } },
-        {
-          onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
-          },
-        },
-      );
+      void updateProject.mutateAsync({
+        id: projectId,
+        data: { name },
+      });
     },
-    [projectId, updateProject, queryClient],
+    [projectId, updateProject],
   );
 
   const handleOpenNewTab = useCallback(() => {
-    window.open(window.location.href, "_blank");
-  }, []);
+    const url = previewUrl ?? `/api/projects/${projectId}/preview/`;
+    window.open(url, "_blank");
+  }, [projectId, previewUrl]);
 
-  const projectName = project?.name ?? "Untitled";
-  const projectSlug = (project as { publicSlug?: string | null } | undefined)?.publicSlug ?? null;
-  const previewUrl = projectSlug ? `/api/p/${projectSlug}/` : null;
+  // ── Computed rail active panel ─────────────────────────────────────────────
+  // Canvas icon highlights when canvas view is active
+  const railActivePanel: PanelId =
+    rightView === "canvas"
+      ? "canvas"
+      : leftPanelVisible && activePanel
+        ? activePanel
+        : null;
 
   return (
     <TooltipProvider>
-      <div className="h-screen w-screen flex flex-col overflow-hidden bg-background text-foreground">
-        {/* Tools search popup — Cmd+K */}
+      <div className="flex flex-col h-screen bg-background overflow-hidden">
         <ToolsSearchPopup
           open={toolsSearchOpen}
           onClose={() => setToolsSearchOpen(false)}
           onSelect={(panelId) => {
             if (panelId === "canvas") {
-              setCanvasOpen(true);
+              setRightView("canvas");
             } else {
-              setCanvasOpen(false);
               setActivePanel(panelId);
               setLeftPanelVisible(true);
             }
@@ -320,18 +300,16 @@ export default function DevWorkspacePage() {
         {/* Body */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Icon rail */}
-          {/* zero-agent is always the active chat column, so always highlight it */}
           <IconRail
-            activePanel={
-              canvasOpen ? "canvas" : activePanel === "zero-agent" ? "zero-agent" : activePanel
-            }
+            activePanel={railActivePanel}
             onPanelToggle={handlePanelToggle}
             onOpenSearch={() => setToolsSearchOpen(true)}
           />
 
-          {/* ── Main 3-column panel group ─────────────────────────────────── */}
+          {/* ── Main panel group ──────────────────────────────────────────── */}
           <PanelGroup direction="horizontal" className="flex-1 min-w-0">
-            {/* ── Column 1: Tools panel (file tree, search, etc.) ─────────── */}
+
+            {/* ── Column 1: Collapsible tools sidebar ──────────────────────── */}
             {showToolsPanel && (
               <>
                 <Panel
@@ -383,9 +361,9 @@ export default function DevWorkspacePage() {
               </>
             )}
 
-            {/* ── Column 2: Chat thread + Composer (stacked) ──────────────── */}
+            {/* ── Column 2: Chat thread + composer ─────────────────────────── */}
             <Panel
-              defaultSize={showToolsPanel ? (showPreview ? 28 : 40) : showPreview ? 35 : 50}
+              defaultSize={showToolsPanel ? (showPreviewOrCanvas ? 28 : 40) : showPreviewOrCanvas ? 35 : 50}
               minSize={22}
               maxSize={55}
               className="overflow-hidden border-r border-border"
@@ -403,122 +381,114 @@ export default function DevWorkspacePage() {
 
             <PanelResizeHandle className="w-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
 
-            {/* ── Column 3: Editor + Terminal / Canvas / Preview ───────────── */}
-            <Panel
-              defaultSize={showToolsPanel ? (showPreview ? 57 : 60) : showPreview ? 65 : 50}
-              minSize={30}
-              className="overflow-hidden"
-            >
-              <PanelGroup direction="horizontal" className="h-full">
-                {/* Editor + terminal OR canvas — only shown when a file is open or canvas/editor-max */}
-                {paneLayout !== "preview-max" &&
-                  (canvasOpen || tabs.length > 0 || paneLayout === "editor-max") && (
+            {/* ── Column 3: Editor (optional) + Preview/Canvas ─────────────── */}
+            {showPreviewOrCanvas && (
+              <Panel
+                defaultSize={showToolsPanel ? 57 : 65}
+                minSize={30}
+                className="overflow-hidden"
+              >
+                <PanelGroup direction="horizontal" className="h-full">
+
+                  {/* Editor + terminal — only shown when a tab is open */}
+                  {showEditorPanel && (
                     <>
-                      <Panel
-                        defaultSize={showPreview ? 50 : 100}
-                        minSize={25}
-                        className="overflow-hidden"
-                      >
-                        <div className="flex flex-col h-full min-h-0">
-                          {/* Tab bar */}
-                          <div className="shrink-0 flex items-center gap-0 border-b border-border bg-zinc-950 px-2">
-                            <button
-                              onClick={() => setCanvasOpen(false)}
-                              className={[
-                                "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                                !canvasOpen
-                                  ? "border-primary text-foreground"
-                                  : "border-transparent text-muted-foreground hover:text-foreground",
-                              ].join(" ")}
-                            >
-                              Editor
-                            </button>
-                            <button
-                              onClick={() => setCanvasOpen(true)}
-                              className={[
-                                "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
-                                canvasOpen
-                                  ? "border-primary text-foreground"
-                                  : "border-transparent text-muted-foreground hover:text-foreground",
-                              ].join(" ")}
-                            >
-                              Canvas
-                            </button>
-                          </div>
-
-                          <div className="flex-1 min-h-0 overflow-hidden">
-                            {canvasOpen ? (
-                              <DevCanvasTab
-                                projectId={projectId}
-                                onProjectFilesChanged={() => {
-                                  setRefreshTrigger((n) => n + 1);
-                                  void queryClient.invalidateQueries({
-                                    queryKey: getListProjectFilesQueryKey(projectId),
-                                  });
-                                }}
-                              />
-                            ) : (
-                              <PanelGroup direction="vertical">
-                                <Panel defaultSize={65} minSize={30} className="overflow-hidden">
-                                  <MonacoEditorPane
-                                    projectId={projectId}
-                                    tabs={tabs}
-                                    activeTabIndex={activeTabIndex}
-                                    diffView={diffView}
-                                    onTabClose={handleTabClose}
-                                    onTabActivate={setActiveTabIndex}
-                                    onContentChange={handleContentChange}
-                                    onFileSaved={handleFileSaved}
-                                    onDiffClose={() => setDiffView(null)}
-                                  />
-                                </Panel>
-                                <PanelResizeHandle className="h-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
-                                <Panel
-                                  defaultSize={35}
-                                  minSize={15}
-                                  maxSize={60}
-                                  className="overflow-hidden"
-                                >
-                                  <TerminalPanel
-                                    projectId={projectId}
-                                    containerStatus={containerStatus}
-                                    containerUrl={containerUrl}
-                                    onStartContainer={() => void handleStartContainer()}
-                                    isStarting={isStarting}
-                                  />
-                                </Panel>
-                              </PanelGroup>
-                            )}
-                          </div>
-                        </div>
+                      <Panel defaultSize={50} minSize={25} className="overflow-hidden">
+                        <PanelGroup direction="vertical">
+                          <Panel defaultSize={65} minSize={30} className="overflow-hidden">
+                            <MonacoEditorPane
+                              projectId={projectId}
+                              tabs={tabs}
+                              activeTabIndex={activeTabIndex}
+                              diffView={diffView}
+                              onTabClose={handleTabClose}
+                              onTabActivate={setActiveTabIndex}
+                              onContentChange={handleContentChange}
+                              onFileSaved={handleFileSaved}
+                              onDiffClose={() => setDiffView(null)}
+                            />
+                          </Panel>
+                          <PanelResizeHandle className="h-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
+                          <Panel
+                            defaultSize={35}
+                            minSize={15}
+                            maxSize={60}
+                            className="overflow-hidden"
+                          >
+                            <TerminalPanel
+                              projectId={projectId}
+                              containerStatus={containerStatus}
+                              containerUrl={containerUrl}
+                              onStartContainer={() => void handleStartContainer()}
+                              isStarting={isStarting}
+                            />
+                          </Panel>
+                        </PanelGroup>
                       </Panel>
-
-                      {showPreview && (
-                        <PanelResizeHandle className="w-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
-                      )}
+                      <PanelResizeHandle className="w-px bg-border hover:bg-primary/40 transition-colors data-[resize-handle-state=drag]:bg-primary" />
                     </>
                   )}
 
-                {/* Preview pane — full width when editor is hidden, half when editor is open */}
-                {showPreview && (
+                  {/* Preview / Canvas — tabs in the header bar */}
                   <Panel
-                    defaultSize={
-                      paneLayout === "preview-max" || (!canvasOpen && tabs.length === 0) ? 100 : 50
-                    }
+                    defaultSize={showEditorPanel ? 50 : 100}
                     minSize={20}
                     className="overflow-hidden"
                   >
-                    <PreviewPane
-                      projectId={projectId}
-                      containerUrl={containerUrl}
-                      containerStatus={containerStatus}
-                      previewUrl={previewUrl}
-                      refreshTrigger={refreshTrigger}
-                    />
+                    <div className="flex flex-col h-full min-h-0">
+                      {/* Preview/Canvas tab bar */}
+                      <div className="shrink-0 flex items-center gap-0 border-b border-border bg-zinc-950 px-2">
+                        <button
+                          onClick={() => setRightView("preview")}
+                          className={[
+                            "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                            rightView === "preview"
+                              ? "border-primary text-foreground"
+                              : "border-transparent text-muted-foreground hover:text-foreground",
+                          ].join(" ")}
+                        >
+                          Preview
+                        </button>
+                        <button
+                          onClick={() => setRightView("canvas")}
+                          className={[
+                            "px-3 py-1.5 text-xs font-medium border-b-2 transition-colors",
+                            rightView === "canvas"
+                              ? "border-primary text-foreground"
+                              : "border-transparent text-muted-foreground hover:text-foreground",
+                          ].join(" ")}
+                        >
+                          Canvas
+                        </button>
+                      </div>
+
+                      {/* Content */}
+                      <div className="flex-1 min-h-0 overflow-hidden">
+                        {rightView === "canvas" ? (
+                          <DevCanvasTab
+                            projectId={projectId}
+                            onProjectFilesChanged={() => {
+                              setRefreshTrigger((n) => n + 1);
+                              void queryClient.invalidateQueries({
+                                queryKey: getListProjectFilesQueryKey(projectId),
+                              });
+                            }}
+                          />
+                        ) : (
+                          <PreviewPane
+                            projectId={projectId}
+                            containerUrl={containerUrl}
+                            containerStatus={containerStatus}
+                            previewUrl={previewUrl}
+                            refreshTrigger={refreshTrigger}
+                          />
+                        )}
+                      </div>
+                    </div>
                   </Panel>
-                )}
-              </PanelGroup>
-            </Panel>
+                </PanelGroup>
+              </Panel>
+            )}
           </PanelGroup>
         </div>
       </div>

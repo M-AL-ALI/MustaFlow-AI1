@@ -1522,6 +1522,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           })
           .join("\n\n")
       : "";
+  const refineReminder =
+    input.mode === "refine" && seedManifest.length > 0
+      ? "\n\nIMPORTANT: This is a REFINE run. You MUST call write_file or apply_patch to edit at least one file before calling finalize. Do NOT call finalize immediately — read the relevant files first, then make the changes."
+      : "";
   messages.push({
     role: "user",
     content:
@@ -1530,6 +1534,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         seedManifest.length > 0 ? seedManifest.slice(0, 40).join("\n") : "(empty)"
       }` +
       inboxBlock +
+      refineReminder +
       `\n\nConversation history follows.`,
   });
   // (Task #546) Surfaced unread items are marked read AFTER the first
