@@ -171,6 +171,10 @@ export default function DevWorkspacePage() {
   const projectName = (project as { name?: string } | undefined)?.name ?? "Untitled Project";
   const projectSlug = (project as { slug?: string } | undefined)?.slug ?? "";
   const previewUrl = (project as { previewUrl?: string | null } | undefined)?.previewUrl ?? null;
+  // hasContainer: true only when the project has a provisioned Fly.io machine.
+  // Static HTML/SPA projects never have a container so their preview always works.
+  const hasContainer =
+    !!((project as { containerId?: string | null } | undefined)?.containerId);
 
   const { data: projectFiles } = useListProjectFiles(projectId, {
     query: {
@@ -197,8 +201,8 @@ export default function DevWorkspacePage() {
         setActiveTabIndex(prev.length);
         return [...prev, newTab];
       });
-      // Opening a file switches to editor view
-      setRightView("editor");
+      // Opening a file keeps preview visible alongside the editor
+      setRightView((prev) => (prev === "canvas" ? "preview" : prev));
     },
     [],
   );
@@ -479,6 +483,7 @@ export default function DevWorkspacePage() {
                             projectId={projectId}
                             containerUrl={containerUrl}
                             containerStatus={containerStatus}
+                            hasContainer={hasContainer}
                             previewUrl={previewUrl}
                             refreshTrigger={refreshTrigger}
                           />

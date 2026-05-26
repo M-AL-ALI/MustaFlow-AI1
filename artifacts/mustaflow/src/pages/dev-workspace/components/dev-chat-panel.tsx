@@ -559,8 +559,10 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   }, [isListening, stopVoice]);
 
   // ── Send ───────────────────────────────────────────────────────────────────
-  const doSend = useCallback(() => {
-    const text = prompt.trim();
+  // overrideText: when provided (e.g. from PlanCard onBuild), use this instead of
+  // the prompt state to avoid the stale-closure problem with setPrompt + doSend().
+  const doSend = useCallback((overrideText?: string) => {
+    const text = (overrideText !== undefined ? overrideText : prompt).trim();
     const readyImages = images.filter((i) => i.uploadedUrl && !i.uploading && !i.error);
     if (!text && readyImages.length === 0) return;
     if (isBusy) return;
@@ -744,10 +746,9 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                                 projectId={projectId}
                                 initialAgentMode={agentMode}
                                 onBuild={(promptText, mode, _bg) => {
-                                  setPrompt(promptText);
                                   setAgentMode(mode);
                                   savePersistedMode(mode);
-                                  doSend();
+                                  doSend(promptText);
                                 }}
                                 disabled={isBusy}
                                 messageId={msg.id}
@@ -1072,7 +1073,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
-                        onClick={doSend}
+                        onClick={() => doSend()}
                         disabled={isBusy || (!prompt.trim() && images.length === 0)}
                         className="flex items-center justify-center h-6 w-6 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors"
                       >

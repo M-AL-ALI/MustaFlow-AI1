@@ -30,6 +30,8 @@ interface PreviewPaneProps {
   projectId: number;
   containerUrl: string | null;
   containerStatus: string;
+  /** True when the project has a provisioned container (Fly.io). False for static/SPA projects. */
+  hasContainer: boolean;
   previewUrl?: string | null;
   refreshTrigger?: number;
 }
@@ -38,6 +40,7 @@ export function PreviewPane({
   projectId,
   containerUrl,
   containerStatus,
+  hasContainer,
   previewUrl,
   refreshTrigger,
 }: PreviewPaneProps) {
@@ -188,13 +191,13 @@ export function PreviewPane({
 
       {/* Preview area */}
       <div className="flex-1 min-h-0 overflow-auto bg-zinc-800 flex items-start justify-center pt-0">
-        {containerStatus === "stopped" || containerStatus === "hibernated" ? (
+        {hasContainer && (containerStatus === "stopped" || containerStatus === "hibernated") ? (
           <div className="flex flex-col items-center justify-center h-full w-full gap-3 text-center p-6">
             <div className="w-12 h-12 rounded-xl bg-muted border border-border flex items-center justify-center">
               <Globe className="h-6 w-6 text-muted-foreground" />
             </div>
             <div>
-              <div className="text-sm font-medium text-foreground mb-1">Preview not available</div>
+              <div className="text-sm font-medium text-foreground mb-1">Container not running</div>
               <div className="text-xs text-muted-foreground">
                 Start the container to see a live preview
               </div>
