@@ -469,15 +469,7 @@ router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {
     "KNOWN_PREFIXES guard and fallback handler both return JSON { error: 'Not found' }.",
   );
 
-  // 14. SESSION_SECRET
-  check(
-    "session_secret",
-    "SESSION_SECRET configured",
-    process.env.SESSION_SECRET ? "pass" : "fail",
-    process.env.SESSION_SECRET ? "SESSION_SECRET present." : "SESSION_SECRET not set.",
-  );
-
-  // 15. AI integration
+  // 14. AI integration
   check(
     "ai_integration",
     "AI provider configured",

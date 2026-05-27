@@ -647,9 +647,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
                 // all roles (viewer|member|admin|owner) have at least viewer access
               ),
             );
-          const recipients = members
-            .map((m) => m.userId)
-            .filter((uid) => uid !== publisherId);
+          const recipients = members.map((m) => m.userId).filter((uid) => uid !== publisherId);
           if (recipients.length === 0) return;
           await db.insert(notificationsTable).values(
             recipients.map((uid) => ({

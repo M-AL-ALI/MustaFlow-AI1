@@ -116,8 +116,8 @@ app.use(
   },
 );
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
 // Resolve publishable key from the request host so the same server can serve
 // multiple Clerk custom domains. Falls back to CLERK_PUBLISHABLE_KEY.

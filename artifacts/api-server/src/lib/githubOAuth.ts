@@ -5,10 +5,11 @@ const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const DEFAULT_SCOPES = "repo read:user";
 const STATE_TTL_MS = 10 * 60 * 1000;
 
+// ENCRYPTION_KEY is used for all HMAC/signing operations — SESSION_SECRET is not needed.
 function getStateSecret(): string {
-  const secret = process.env.SESSION_SECRET ?? process.env.ENCRYPTION_KEY ?? "";
+  const secret = process.env.ENCRYPTION_KEY ?? "";
   if (!secret) {
-    throw new Error("SESSION_SECRET (or ENCRYPTION_KEY) is required to sign GitHub OAuth state");
+    throw new Error("ENCRYPTION_KEY is required to sign GitHub OAuth state");
   }
   return secret;
 }

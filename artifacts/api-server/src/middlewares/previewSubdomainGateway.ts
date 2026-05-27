@@ -33,13 +33,15 @@ const PREVIEW_SUFFIX = `.preview.${PLATFORM_DOMAIN}`;
 const COOKIE_NAME = "__prs";
 const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 hours
 
+// ENCRYPTION_KEY is used for all HMAC signing in this gateway.
+// SESSION_SECRET is not used; ENCRYPTION_KEY covers all signing/HMAC needs.
 function getSessionSecret(): string {
-  const s = process.env.SESSION_SECRET;
-  if (!s) throw new Error("SESSION_SECRET env var is not set");
+  const s = process.env.ENCRYPTION_KEY;
+  if (!s) throw new Error("ENCRYPTION_KEY env var is not set");
   return s;
 }
 
-/** Sign a value with the session secret using HMAC-SHA256. */
+/** Sign a value with HMAC-SHA256 using ENCRYPTION_KEY. */
 function hmacSign(value: string): string {
   return createHmac("sha256", getSessionSecret()).update(value).digest("hex");
 }
