@@ -91,9 +91,7 @@ export default function DocsDevModePage() {
           </Link>
           <span className="w-px h-5 bg-border" />
           <nav className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Link href="/docs" className="hover:text-foreground transition-colors">
-              Docs
-            </Link>
+            <span>Docs</span>
             <ChevronRight className="h-3 w-3" />
             <span className="text-foreground">Developer Mode</span>
           </nav>
