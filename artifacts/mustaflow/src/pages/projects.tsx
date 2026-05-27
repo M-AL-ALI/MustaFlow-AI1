@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import {
   useGetProjectsSummary,
@@ -128,22 +128,11 @@ function HomeHero() {
     }
   }
 
-  function useExamplePrompt() {
-    setPrompt(EXAMPLE_PROMPTS[exampleIndex]);
-    textareaRef.current?.focus();
-  }
-
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] pt-12 pb-6 px-4">
       {/* Greeting */}
       <h1 className="text-3xl md:text-4xl font-bold text-center mb-8 tracking-tight">
-        {firstName ? (
-          <>
-            Hi {firstName}, what do you want to make?
-          </>
-        ) : (
-          "What do you want to make?"
-        )}
+        {firstName ? <>Hi {firstName}, what do you want to make?</> : "What do you want to make?"}
       </h1>
 
       {/* Prompt input */}
@@ -192,7 +181,14 @@ function HomeHero() {
               >
                 {planMode && (
                   <svg viewBox="0 0 10 8" className="h-2 w-2 fill-primary-foreground">
-                    <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                    <path
+                      d="M1 4l3 3 5-6"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
                   </svg>
                 )}
               </span>
@@ -232,9 +228,7 @@ function HomeHero() {
             <button
               key={label}
               type="button"
-              onClick={() =>
-                setSelectedCategory((prev) => (prev === label ? null : label))
-              }
+              onClick={() => setSelectedCategory((prev) => (prev === label ? null : label))}
               className={cn(
                 "flex flex-col items-center gap-1.5 rounded-xl border px-4 py-2.5 text-xs font-medium transition-all",
                 selectedCategory === label
@@ -258,7 +252,11 @@ function HomeHero() {
             <RefreshCw className="h-3 w-3" />
             Try an example prompt
           </button>
-          {[exampleIndex, (exampleIndex + 1) % EXAMPLE_PROMPTS.length, (exampleIndex + 2) % EXAMPLE_PROMPTS.length].map((idx) => (
+          {[
+            exampleIndex,
+            (exampleIndex + 1) % EXAMPLE_PROMPTS.length,
+            (exampleIndex + 2) % EXAMPLE_PROMPTS.length,
+          ].map((idx) => (
             <button
               key={EXAMPLE_PROMPTS[idx]}
               type="button"

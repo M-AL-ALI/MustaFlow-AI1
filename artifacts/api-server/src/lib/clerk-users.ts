@@ -105,8 +105,6 @@ export async function findClerkUserByUsername(username: string): Promise<ClerkUs
   }
 }
 
-
-
 /**
  * Batch-resolve Clerk user IDs to display summaries. Returns a Map keyed by
  * userId. IDs that fail to resolve (deleted users, Clerk down, etc.) are

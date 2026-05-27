@@ -10,9 +10,6 @@ import {
   Settings,
   GraduationCap,
   BookOpen,
-  Library,
-  BrainCircuit,
-  HelpCircle,
   LayoutDashboard,
   LogOut,
   ChevronDown,
@@ -20,23 +17,10 @@ import {
   PanelLeftClose,
   Zap,
   AlertTriangle,
-  Trash2,
   ShoppingCart,
-  Building2,
-  Layers,
-  Puzzle,
-  Users,
-  Terminal,
-  GitBranch,
-  Key,
-  Code2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
-import {
-  useGetSecurityBadgeCount,
-  getGetSecurityBadgeCountQueryKey,
-} from "@workspace/api-client-react";
 import { useState, useEffect, useCallback } from "react";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
@@ -54,96 +38,10 @@ const NAV_ITEMS = [
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 
-const SECONDARY_NAV_ITEMS = [
-  { name: "My Domains", href: "/account/domains", icon: ShoppingCart },
-  { name: "Organizations", href: "/orgs/new", icon: Building2 },
-  { name: "Developer Portal", href: "/developers", icon: Code2 },
-];
-
-const ECOSYSTEM_NAV_ITEMS = [
-  { name: "Template Gallery", href: "/gallery", icon: Layers },
-  { name: "Extensions", href: "/extensions", icon: Puzzle },
-  { name: "Community", href: "/community", icon: Users },
-];
-
 const BOTTOM_NAV_ITEMS = [
   { name: "Learn", href: "/learn", icon: GraduationCap },
   { name: "Documentation", href: "/help", icon: BookOpen },
 ];
-
-function DevelopersNavGroup({ collapsed }: { collapsed?: boolean }) {
-  const [location] = useLocation();
-  const [lastProjectId, setLastProjectId] = useState<string | null>(() =>
-    typeof window !== "undefined" ? localStorage.getItem("mustaflow_last_project_id") : null,
-  );
-
-  useEffect(() => {
-    setLastProjectId(localStorage.getItem("mustaflow_last_project_id"));
-  }, [location]);
-
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "mustaflow_last_project_id") {
-        setLastProjectId(e.newValue);
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
-  const workspaceHref = (tab: string) =>
-    lastProjectId ? `/projects/${lastProjectId}?tab=${tab}` : "/projects";
-
-  const dynamicItems = [
-    { name: "Terminal", href: workspaceHref("terminal"), icon: Terminal, wsTab: "terminal" },
-    { name: "GitHub", href: workspaceHref("git"), icon: GitBranch, wsTab: "git" },
-    { name: "Security", href: workspaceHref("checks"), icon: ShieldCheck, wsTab: "checks" },
-    { name: "API Tokens", href: "/settings?tab=developer", icon: Key, wsTab: null },
-    { name: "Developers Portal", href: "/developers", icon: Code2, wsTab: null },
-  ];
-
-  const currentSearch =
-    typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("tab") : null;
-
-  return (
-    <div className="px-3 py-2">
-      {!collapsed && (
-        <h3 className="mb-2 px-4 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
-          Developers
-        </h3>
-      )}
-      <div className="space-y-1">
-        {dynamicItems.map((item) => {
-          let isActive: boolean;
-          if (item.wsTab && lastProjectId) {
-            const basePath = `/projects/${lastProjectId}`;
-            isActive = location.startsWith(basePath) && currentSearch === item.wsTab;
-          } else if (item.wsTab && !lastProjectId) {
-            isActive = false;
-          } else {
-            const [itemPath] = item.href.split("?");
-            isActive = location === itemPath || (itemPath !== "/" && location.startsWith(itemPath));
-          }
-          return (
-            <Link key={item.name} href={item.href}>
-              <div
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
-                  isActive
-                    ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
-                    : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
-                )}
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                {item.name}
-              </div>
-            </Link>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 function NavGroup({
   items,
@@ -246,43 +144,6 @@ function CreditsWidget() {
             )}
           </div>
           <CreditCard className="h-3 w-3 shrink-0 opacity-60" />
-        </div>
-      </Link>
-    </div>
-  );
-}
-
-function SecurityNavItem() {
-  const [location] = useLocation();
-  const { isSignedIn } = useClerkUser();
-  const { data } = useGetSecurityBadgeCount({
-    query: {
-      queryKey: getGetSecurityBadgeCountQueryKey(),
-      enabled: !!isSignedIn,
-      refetchInterval: 60000,
-    },
-  });
-  const count = data?.count ?? 0;
-  const isActive = location === "/security" || location.startsWith("/security");
-
-  return (
-    <div className="px-3 py-1">
-      <Link href="/security">
-        <div
-          className={cn(
-            "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
-            isActive
-              ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
-              : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
-          )}
-        >
-          <ShieldCheck className="h-4 w-4 shrink-0" />
-          <span className="flex-1">Security</span>
-          {count > 0 && (
-            <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/30 leading-none">
-              {count}
-            </span>
-          )}
         </div>
       </Link>
     </div>
@@ -442,10 +303,16 @@ function SidebarInner({
             <Plus className="h-4 w-4 shrink-0" />
             Create something new
           </button>
-          <button
-            className="w-full flex items-center gap-2 rounded-lg border border-border bg-muted/40 text-foreground hover:bg-muted hover:border-border/80 transition-colors px-3 py-2 text-sm font-medium"
-          >
-            <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <button className="w-full flex items-center gap-2 rounded-lg border border-border bg-muted/40 text-foreground hover:bg-muted hover:border-border/80 transition-colors px-3 py-2 text-sm font-medium">
+            <svg
+              className="h-4 w-4 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
@@ -469,7 +336,10 @@ function SidebarInner({
       <div className="mt-auto">
         <NavGroup items={BOTTOM_NAV_ITEMS} />
         <div className="px-6 py-2 flex items-center flex-wrap gap-x-2 gap-y-1 text-[10px] text-muted-foreground/60">
-          <a href="/changelog" className="hover:text-muted-foreground transition-colors font-medium">
+          <a
+            href="/changelog"
+            className="hover:text-muted-foreground transition-colors font-medium"
+          >
             MustaFlow
           </a>
           <span>·</span>
