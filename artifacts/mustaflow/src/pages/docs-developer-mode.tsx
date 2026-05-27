@@ -12,6 +12,9 @@ import {
   BookOpen,
   Plug,
   KeyRound,
+  Terminal,
+  Server,
+  ShieldCheck,
 } from "lucide-react";
 import { Link } from "wouter";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
@@ -656,6 +659,58 @@ export default function DocsDevModePage() {
                 <p>
                   <span className="text-foreground font-medium">{title}</span> {body}
                 </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Conclusion */}
+        <div className="rounded-xl border border-primary/30 bg-primary/5 p-6 space-y-5 mt-4">
+          <div>
+            <h2 className="text-base font-semibold">Conclusion</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Developer Mode is not a simulation. Every claim on this page is observable or
+              independently verifiable.
+            </p>
+          </div>
+          <div className="space-y-4">
+            {[
+              {
+                icon: Terminal,
+                title: "Tool calling with real filesystem access",
+                note: "you can see this happen",
+                body: "Every file write, command run, and search the agent performs is logged in the activity panel in real time. The files it writes appear immediately on disk inside the container — you can open a terminal and inspect them directly.",
+              },
+              {
+                icon: Server,
+                title: "Runs in a real Linux container",
+                note: "verifiable",
+                body: "Each Developer Mode project is backed by a dedicated Fly.io machine running a standard Linux environment. The agent's shell commands execute inside that container — not in a sandbox emulator, not in a browser process. Port binding, package installation, and process management all behave exactly as they would on a real server.",
+              },
+              {
+                icon: Plug,
+                title: "Integrations provisioned through the platform, injected as environment variables",
+                note: "documented publicly",
+                body: "Third-party service connections (Stripe, GitHub, and others) are set up through Replit's integration layer. Credentials are stored in the platform's secrets store and injected into the container as environment variables at runtime. The agent references them by name — it never handles the raw values.",
+              },
+              {
+                icon: ShieldCheck,
+                title: "Keys stored as environment secrets, never exposed in browser responses",
+                note: "observable",
+                body: "You can verify this yourself: open the browser's network panel, call the secrets API, and inspect the response. Every secret value is returned as a masked preview — the real value is absent. The server decrypts secrets in memory only at build time and injects them directly into the container environment. They never travel to the client.",
+              },
+            ].map(({ icon: Icon, title, note, body }) => (
+              <div key={title} className="flex gap-4">
+                <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center mt-0.5">
+                  <Icon className="h-4 w-4 text-primary" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-foreground">
+                    {title}{" "}
+                    <span className="text-xs font-normal text-muted-foreground">({note})</span>
+                  </p>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{body}</p>
+                </div>
               </div>
             ))}
           </div>
