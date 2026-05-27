@@ -541,6 +541,106 @@ export async function restartContainerWithSecrets(
 }
 
 /**
+ * Ensure a container is awake and ready to receive requests.
+ *
+ * Steps:
+ *   1. Calls startContainer (idempotent — safe when already running).
+ *   2. Polls Fly machine state until "started" (up to timeoutSeconds).
+ *   3. If a containerUrl is provided, also verifies the /healthz endpoint
+ *      responds 200 so we know the user's app process is live.
+ *
+ * Returns { ok: true } immediately when FLY_API_TOKEN is not configured
+ * (dev-mode degradation — let the build proceed without a real container).
+ */
+export async function ensureContainerAwake(
+  machineId: string,
+  projectId: number,
+  containerUrl: string | null,
+  timeoutSeconds = 30,
+): Promise<{ ok: boolean; message?: string }> {
+  if (!isConfigured()) return { ok: true };
+
+  // Wake the machine (idempotent — Fly ignores this when already running)
+  await startContainer(machineId, projectId);
+
+  // Poll Fly machine state until "started"
+  const machineReady = await waitForMachineReady(machineId, timeoutSeconds);
+  if (!machineReady) {
+    return {
+      ok: false,
+      message:
+        "Your server did not respond within 30 seconds. It may be hibernated or unreachable — please retry.",
+    };
+  }
+
+  // If the container has a proxy URL, verify /healthz responds so we know the
+  // app process (not just the Fly machine) is accepting traffic.
+  if (containerUrl) {
+    const healthUrl = `${containerUrl}/healthz`;
+    const deadline = Date.now() + timeoutSeconds * 1000;
+    let passed = false;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(healthUrl, { signal: AbortSignal.timeout(5_000) });
+        if (res.ok || res.status === 404) {
+          // 404 means the app is up but doesn't have /healthz — good enough.
+          passed = true;
+          break;
+        }
+      } catch {
+        // not ready yet — keep polling
+      }
+      await new Promise((r) => setTimeout(r, 3_000));
+    }
+    if (!passed) {
+      // Machine is "started" according to Fly but /healthz never responded.
+      // Fail hard so the caller can surface a plain-English message instead
+      // of letting the build start against an unresponsive app process.
+      logger.warn(
+        { projectId, machineId, healthUrl },
+        "/healthz did not respond within timeout — failing pre-flight",
+      );
+      return {
+        ok: false,
+        message:
+          "Your server started but is not responding to health checks. It may have crashed on startup — check the container logs and retry.",
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Map a known Fly.io sync / exec error to a plain-English user-facing message.
+ * Called by callers that catch errors from syncFilesToContainer / execInContainer.
+ */
+export function mapFlyErrorToMessage(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes("timeout") || lower.includes("timed out") || lower.includes("deadline")) {
+    return "Network timeout while syncing files to your container. Check your connection and retry.";
+  }
+  if (lower.includes("out of memory") || lower.includes("oom") || lower.includes("137")) {
+    return "Your container ran out of memory during the file sync. Try reducing the project size or upgrading your container plan.";
+  }
+  if (lower.includes("no space left") || lower.includes("disk full") || lower.includes("enospc")) {
+    return "Your container disk is full. Remove unused files or increase container storage.";
+  }
+  if (
+    lower.includes("connection refused") ||
+    lower.includes("econnrefused") ||
+    lower.includes("unreachable")
+  ) {
+    return "Could not connect to your container. It may have crashed — try waking it from the Terminal tab and retrying.";
+  }
+  if (lower.includes("401") || lower.includes("403") || lower.includes("unauthorized")) {
+    return "Access denied while communicating with your container. Check your FLY_API_TOKEN.";
+  }
+  // Default: sanitise and truncate the raw message
+  return `Container sync failed: ${raw.slice(0, 200).replace(/\n/g, " ").trim()}`;
+}
+
+/**
  * Provision or wake a container for a project.
  *
  * - If no containerId: creates a new machine + syncs files + runs npm install

@@ -1382,8 +1382,14 @@ export default function ProjectWorkspacePage() {
       // endpoint instead of the full project payload to keep the request
       // small and avoid re-fetching unrelated project state on a 4s timer.
       getProjectProvisioningStatus(projectId)
-        .then((data) => {
-          if (!data) return;
+        .then((raw) => {
+          if (!raw) return;
+          // The server returns additional fields (provisioningStep, estimatedSecondsRemaining)
+          // that are not yet in the generated OpenAPI type.
+          const data = raw as typeof raw & {
+            provisioningStep?: ProvisioningStep;
+            estimatedSecondsRemaining?: number | null;
+          };
           const newStatus = data.provisioningStatus as ProvisioningStatus | undefined;
           if (newStatus) {
             setProvisioningStatus(newStatus);
@@ -1421,6 +1427,33 @@ export default function ProjectWorkspacePage() {
       .finally(() => setRetryingProvisioning(false));
   }, [projectId]);
   // ── End provisioning state ─────────────────────────────────────────────────
+
+  // ── Container health indicator ────────────────────────────────────────────
+  // Polls /api/projects/:id/container-health every 30 s to display a live
+  // green/amber/red dot next to the provisioning badge for agentic projects.
+  // Only runs when the project is agentic and has a containerId.
+  type ContainerHealth = "awake" | "hibernated" | "unreachable" | "unknown";
+  const [containerHealthStatus, setContainerHealthStatus] = useState<ContainerHealth>("unknown");
+
+  useEffect(() => {
+    if (!project || project.builderMode !== "agentic") return;
+    const containerId = (project as { containerId?: string | null }).containerId;
+    if (!containerId) return;
+
+    const fetchHealth = () => {
+      fetch(`/api/projects/${projectId}/container-health`)
+        .then((r) => (r.ok ? (r.json() as Promise<{ health: ContainerHealth }>) : null))
+        .then((data) => {
+          if (data?.health) setContainerHealthStatus(data.health);
+        })
+        .catch(() => {});
+    };
+
+    fetchHealth();
+    const timer = setInterval(fetchHealth, 30_000);
+    return () => clearInterval(timer);
+  }, [project, projectId]);
+  // ── End container health indicator ────────────────────────────────────────
 
   // ── Static-to-agentic upgrade nudge ─────────────────────────────────────────
   // When a static project's prompt suggests a backend need (database, API, auth,
@@ -2501,6 +2534,44 @@ export default function ProjectWorkspacePage() {
             onRetry={handleRetryProvisioning}
             onLogsClick={() => setActiveTab("logs")}
           />
+          {project.builderMode === "agentic" &&
+            (project as { containerId?: string | null }).containerId &&
+            containerHealthStatus !== "unknown" && (
+              <span
+                title={
+                  isBusy && containerHealthStatus === "hibernated"
+                    ? "Waking container…"
+                    : containerHealthStatus === "awake"
+                      ? "Container is running"
+                      : containerHealthStatus === "hibernated"
+                        ? "Container is hibernated"
+                        : "Container unreachable"
+                }
+                className="flex items-center gap-1 text-[10px] text-muted-foreground shrink-0"
+              >
+                <span
+                  className={cn(
+                    "w-2 h-2 rounded-full shrink-0",
+                    isBusy && containerHealthStatus === "hibernated"
+                      ? "bg-amber-400 animate-pulse"
+                      : containerHealthStatus === "awake"
+                        ? "bg-green-500"
+                        : containerHealthStatus === "hibernated"
+                          ? "bg-amber-400"
+                          : "bg-destructive",
+                  )}
+                />
+                <span className="hidden sm:inline">
+                  {isBusy && containerHealthStatus === "hibernated"
+                    ? "Waking\u2026"
+                    : containerHealthStatus === "awake"
+                      ? "Running"
+                      : containerHealthStatus === "hibernated"
+                        ? "Hibernated"
+                        : "Unreachable"}
+                </span>
+              </span>
+            )}
         </div>
         <div className="w-px h-5 bg-border shrink-0" />
         <div className="flex-1 overflow-x-auto min-w-0">

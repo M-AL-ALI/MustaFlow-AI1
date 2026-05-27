@@ -1531,6 +1531,52 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
   res.status(200).json({ deleted: true, projectId: project.id });
 });
 
+// ── GET /api/projects/:id/container-health ────────────────────────────────────
+// Lightweight endpoint the workspace header polls every 30 s to display a live
+// container health indicator (green = awake, amber = hibernated, red = unreachable).
+// Reads from the DB rather than making a live Fly call so it stays fast.
+router.get(
+  "/projects/:id/container-health",
+  requireProjectAccess("viewer"),
+  async (req: import("express").Request, res: import("express").Response): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+    const [row] = await db
+      .select({
+        builderMode: projectsTable.builderMode,
+        containerId: projectsTable.containerId,
+        containerStatus: projectsTable.containerStatus,
+        provisioningStatus: projectsTable.provisioningStatus,
+      })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+    if (!row) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    // Map stored containerStatus to the three indicator states
+    const raw = row.containerStatus ?? "stopped";
+    const health: "awake" | "hibernated" | "unreachable" | "unknown" =
+      raw === "running"
+        ? "awake"
+        : raw === "hibernated" || raw === "stopped"
+          ? "hibernated"
+          : raw === "error"
+            ? "unreachable"
+            : "unknown";
+    res.json({
+      builderMode: row.builderMode,
+      containerId: row.containerId,
+      containerStatus: raw,
+      health,
+      provisioningStatus: row.provisioningStatus,
+    });
+  },
+);
+
 // ── Agent routing hint ─────────────────────────────────────────────────────────
 // Returns the recommended agentIdentity for a given prompt + project state.
 // Used by the frontend composer to show a live "Recommended: X Agent" badge.

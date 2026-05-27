@@ -94,6 +94,103 @@ import {
   ARCHITECT_CREDIT_COST,
   ARCHITECT_AUTOFIX_TITLE_PREFIX,
 } from "./architect";
+import { encryptionService } from "./encryption";
+
+/**
+ * Pre-build gate for agentic projects.
+ *
+ * 1. Container wake check — if the project has a containerId, wake it and
+ *    wait up to 30 seconds for it to respond. Emits a narration event so the
+ *    user sees "Waking your server…" in the chat.
+ *
+ * 2. Neon database health check — if the project has a DATABASE_URL secret,
+ *    run a `SELECT 1` with 3-retry exponential back-off (1 s, 2 s, 4 s) to
+ *    confirm the database is reachable before the agent loop starts.
+ *
+ * Returns { ok: false, message } when either check fails so the caller can
+ * emit a "failed" event and abort the task instead of crashing mid-loop.
+ * Returns { ok: true } when the project has no container (e.g. static-html)
+ * or when FLY_API_TOKEN / NEON_API_KEY are not configured (dev-mode).
+ */
+async function runAgenticPreflightGate(
+  projectId: number,
+  taskId: number,
+  containerId: string | null,
+  containerUrl: string | null,
+): Promise<{ ok: boolean; message?: string }> {
+  // ── 1. Container wake check ──────────────────────────────────────────────
+  if (containerId) {
+    await emitEvent(taskId, "narration", "Waking your server…");
+    const { ensureContainerAwake } = await import("./container");
+    const wakeResult = await ensureContainerAwake(containerId, projectId, containerUrl, 30);
+    if (!wakeResult.ok) {
+      return { ok: false, message: wakeResult.message ?? "Container did not wake in time." };
+    }
+    logger.info({ projectId, taskId, containerId }, "Container awake — proceeding with build");
+
+    // ── 2. Neon database health check ───────────────────────────────────────
+    // Only run if the project has a DATABASE_URL secret.
+    try {
+      const [secretRow] = await db
+        .select({ valueEncrypted: secretsTable.valueEncrypted })
+        .from(secretsTable)
+        .where(and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")));
+
+      if (secretRow?.valueEncrypted) {
+        const databaseUrl = encryptionService.decrypt(secretRow.valueEncrypted);
+
+        // 3-retry exponential back-off: 1 s, 2 s, 4 s
+        let dbOk = false;
+        let lastDbError = "";
+        const delays = [1_000, 2_000, 4_000];
+        for (let attempt = 0; attempt < delays.length; attempt++) {
+          try {
+            const pg = await import("pg");
+            const client = new pg.default.Client({
+              connectionString: databaseUrl,
+              connectionTimeoutMillis: 5_000,
+            });
+            await client.connect();
+            await client.query("SELECT 1");
+            await client.end();
+            dbOk = true;
+            break;
+          } catch (err) {
+            lastDbError = err instanceof Error ? err.message : String(err);
+            logger.warn(
+              { projectId, taskId, attempt, err: lastDbError },
+              "DB health check attempt failed",
+            );
+            if (attempt < delays.length - 1) {
+              await new Promise((r) => setTimeout(r, delays[attempt]));
+            }
+          }
+        }
+
+        if (!dbOk) {
+          return {
+            ok: false,
+            message: `Your database is unreachable after 3 attempts. Check your DATABASE_URL secret and retry. (${lastDbError.slice(0, 120)})`,
+          };
+        }
+
+        logger.info({ projectId, taskId }, "Database health check passed");
+      }
+    } catch (err) {
+      // Secret lookup or decrypt error — surface to user as a hard failure.
+      // A decrypt error indicates a misconfigured ENCRYPTION_KEY; a DB error
+      // here means even the platform DB is unreachable, both are blocking.
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, projectId, taskId }, "DB pre-flight check failed with unexpected error");
+      return {
+        ok: false,
+        message: `Database pre-flight check failed unexpectedly: ${errMsg.slice(0, 120)}`,
+      };
+    }
+  }
+
+  return { ok: true };
+}
 
 /**
  * Credit cost per AI call, keyed by agentMode. Kept as a flat table for
@@ -1910,6 +2007,36 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           signal,
         };
 
+        // ── Agentic pre-flight gate ────────────────────────────────────────────
+        // For projects with a provisioned container, ensure the container is
+        // awake and the database is reachable before starting the agent loop.
+        // This avoids mid-build failures due to cold-start or DB connectivity.
+        if (project.containerId) {
+          const preflightResult = await runAgenticPreflightGate(
+            projectId,
+            taskId,
+            project.containerId,
+            project.containerUrl ?? null,
+          );
+          if (!preflightResult.ok) {
+            await emitEvent(
+              taskId,
+              "failed",
+              preflightResult.message ?? "Pre-flight check failed.",
+            );
+            await db
+              .update(agentTasksTable)
+              .set({ status: "failed", completedAt: new Date() })
+              .where(eq(agentTasksTable.id, taskId));
+            await db
+              .update(projectsTable)
+              .set({ status: "failed", updatedAt: sql`now()` })
+              .where(eq(projectsTable.id, projectId));
+            return;
+          }
+        }
+        // ── End agentic pre-flight gate ────────────────────────────────────────
+
         const USE_AGENT_LOOP_BUILD = process.env.AGENTIC_BUILDER_ENABLED !== "false";
         logger.info(
           { taskId, projectId, pipeline: USE_AGENT_LOOP_BUILD ? "agentic" : "legacy" },
@@ -2360,6 +2487,33 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           onEvent: async (type: string, message: string) => emitEvent(taskId, type, message),
           signal,
         };
+
+        // ── Agentic pre-flight gate (refine path) ────────────────────────────
+        if (project.containerId) {
+          const preflightResult = await runAgenticPreflightGate(
+            projectId,
+            taskId,
+            project.containerId,
+            project.containerUrl ?? null,
+          );
+          if (!preflightResult.ok) {
+            await emitEvent(
+              taskId,
+              "failed",
+              preflightResult.message ?? "Pre-flight check failed.",
+            );
+            await db
+              .update(agentTasksTable)
+              .set({ status: "failed", completedAt: new Date() })
+              .where(eq(agentTasksTable.id, taskId));
+            await db
+              .update(projectsTable)
+              .set({ status: "failed", updatedAt: sql`now()` })
+              .where(eq(projectsTable.id, projectId));
+            return;
+          }
+        }
+        // ── End agentic pre-flight gate ────────────────────────────────────────
 
         const USE_AGENT_LOOP_REFINE = process.env.AGENTIC_BUILDER_ENABLED !== "false";
         logger.info(
@@ -3904,7 +4058,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               await emitEvent(taskId, "narration", "Container ready.");
             }
           } catch (err) {
-            logger.warn({ err, projectId, taskId }, "Container sync/install failed (non-fatal)");
+            const errMsg = err instanceof Error ? err.message : String(err);
+            const { mapFlyErrorToMessage } = await import("./container");
+            const humanMsg = mapFlyErrorToMessage(errMsg);
+            logger.warn({ err, projectId, taskId }, "Container sync/install failed");
+            await emitEvent(taskId, "narration", `Container sync failed: ${humanMsg}`);
           }
         })();
       });
@@ -4662,8 +4820,13 @@ async function runPostWriteMigrationSync(
   }
 
   const activeContainerId = containerRow.containerId;
-  const { syncFilesToContainer, execInContainer, startContainer, getContainerStatus } =
-    await import("./container");
+  const {
+    syncFilesToContainer,
+    execInContainer,
+    startContainer,
+    getContainerStatus,
+    mapFlyErrorToMessage,
+  } = await import("./container");
 
   if (containerRow.containerStatus !== "running") {
     await emitEvent(taskId, "narration", "Waking container for database migrations…");
@@ -4681,8 +4844,15 @@ async function runPostWriteMigrationSync(
     .from(projectFilesTable)
     .where(eq(projectFilesTable.projectId, projectId));
 
-  await emitEvent(taskId, "narration", "Syncing files to container for migration…");
-  await syncFilesToContainer(activeContainerId, projectId, allCurrentFiles);
+  try {
+    await emitEvent(taskId, "narration", "Syncing files to container for migration…");
+    await syncFilesToContainer(activeContainerId, projectId, allCurrentFiles);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const humanMsg = mapFlyErrorToMessage(errMsg);
+    logger.warn({ err, projectId, taskId }, "Container sync failed in migration pre-step");
+    return { ok: false, error: `Container sync failed: ${humanMsg}` };
+  }
 
   const hasPackageJson = allCurrentFiles.some((f) => f.path === "package.json");
   if (hasPackageJson) {

@@ -3,6 +3,7 @@ import {
   useListTasks,
   useSubmitTaskFeedback,
   getListTasksQueryKey,
+  createTask,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -1042,6 +1043,119 @@ function ContainerLogsPanel({ projectId }: { projectId: number }) {
   );
 }
 
+// ── Failed Jobs Section ────────────────────────────────────────────────────────
+// Collapsible section surfaced at the top of Build History when there are
+// recently failed tasks. Shows task title, termination reason, step count,
+// timestamp, and a Retry button that pre-fills the AI chat with the original
+// prompt.
+function FailedJobsSection({
+  tasks,
+  projectId,
+  onTryFix,
+}: {
+  tasks: Array<{
+    id: number;
+    title?: string | null;
+    status: string;
+    prompt?: string | null;
+    result?: string | null;
+    createdAt?: Date | string | null;
+    elapsedSeconds?: number | null;
+    agentMode?: string | null;
+  }>;
+  projectId: number;
+  onTryFix: (text: string) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const [retryingId, setRetryingId] = useState<number | null>(null);
+  const queryClient = useQueryClient();
+
+  const handleRetry = useCallback(
+    async (task: (typeof tasks)[number]) => {
+      if (!task.prompt || retryingId !== null) return;
+      setRetryingId(task.id);
+      try {
+        await createTask(projectId, {
+          title: task.title ?? "Retry",
+          kind: "main" as const,
+          prompt: task.prompt ?? undefined,
+        });
+        void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+      } catch {
+        onTryFix(task.prompt);
+      } finally {
+        setRetryingId(null);
+      }
+    },
+    [projectId, retryingId, queryClient, onTryFix],
+  );
+
+  return (
+    <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-destructive/10 transition-colors"
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 text-destructive shrink-0" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 text-destructive shrink-0" />
+        )}
+        <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
+        <span className="text-[11px] font-semibold text-destructive">
+          Failed Jobs ({tasks.length})
+        </span>
+        <span className="ml-auto text-[10px] text-muted-foreground">
+          Most recent failures — click Retry to re-run
+        </span>
+      </button>
+      {open && (
+        <div className="divide-y divide-border/50">
+          {tasks.map((task) => (
+            <div key={task.id} className="px-4 py-2.5 flex items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-foreground truncate">
+                  {task.title ?? task.prompt?.slice(0, 80) ?? `Task #${task.id}`}
+                </p>
+                {task.result && (
+                  <p className="text-[11px] text-destructive/80 mt-0.5 leading-snug line-clamp-2">
+                    {task.result}
+                  </p>
+                )}
+                <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-2">
+                  {task.createdAt && <span>{new Date(task.createdAt).toLocaleString()}</span>}
+                  {task.elapsedSeconds != null && task.elapsedSeconds > 0 && (
+                    <span className="text-muted-foreground/70">
+                      {task.elapsedSeconds < 60
+                        ? `${task.elapsedSeconds}s`
+                        : `${Math.round(task.elapsedSeconds / 60)}m`}
+                    </span>
+                  )}
+                </p>
+              </div>
+              {task.prompt && (
+                <button
+                  type="button"
+                  onClick={() => void handleRetry(task)}
+                  disabled={retryingId !== null}
+                  className="shrink-0 flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  title="Re-enqueue this task immediately"
+                >
+                  <RotateCcw
+                    className={cn("h-2.5 w-2.5", retryingId === task.id && "animate-spin")}
+                  />
+                  {retryingId === task.id ? "Queuing\u2026" : "Retry"}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function LogsTab({
   projectId,
   kind,
@@ -1151,6 +1265,19 @@ export function LogsTab({
 
       {/* Task + mobile build list */}
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        {/* ── Failed Jobs section ───────────────────────────────────────────── */}
+        {(() => {
+          const failedTasks = (tasks ?? []).filter((t) => t.status === "failed").slice(0, 10);
+          if (failedTasks.length === 0) return null;
+          return (
+            <FailedJobsSection
+              tasks={failedTasks}
+              projectId={projectId}
+              onTryFix={onTryFix ?? (() => {})}
+            />
+          );
+        })()}
+
         {/* Mobile cloud builds section */}
         {isMobile && mobileBuilds.length > 0 && (
           <div className="space-y-2 mb-4">
