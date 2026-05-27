@@ -122,11 +122,28 @@ async function runAgenticPreflightGate(
   if (containerId) {
     await emitEvent(taskId, "narration", "Waking your server…");
     const { ensureContainerAwake } = await import("./container");
-    const wakeResult = await ensureContainerAwake(containerId, projectId, containerUrl, 30);
+    let wakeResult = await ensureContainerAwake(containerId, projectId, containerUrl, 30);
     if (!wakeResult.ok) {
-      return { ok: false, message: wakeResult.message ?? "Container did not wake in time." };
+      // Single automatic retry after 10 s to recover from transient cold-start
+      // delays without requiring the user to re-submit their prompt.
+      logger.warn(
+        { projectId, taskId, containerId },
+        "Container did not wake on first attempt — waiting 10 s before retry",
+      );
+      await emitEvent(taskId, "narration", "Server is slow to wake — retrying in 10 seconds…");
+      await new Promise((r) => setTimeout(r, 10_000));
+      wakeResult = await ensureContainerAwake(containerId, projectId, containerUrl, 30);
+      if (!wakeResult.ok) {
+        return { ok: false, message: wakeResult.message ?? "Container did not wake in time." };
+      }
+      await emitEvent(taskId, "narration", "Server woke up after a delay — proceeding");
+      logger.info(
+        { projectId, taskId, containerId },
+        "Container awake after retry — proceeding with build",
+      );
+    } else {
+      logger.info({ projectId, taskId, containerId }, "Container awake — proceeding with build");
     }
-    logger.info({ projectId, taskId, containerId }, "Container awake — proceeding with build");
 
     // ── 2. Neon database health check ───────────────────────────────────────
     // Only run if the project has a DATABASE_URL secret.
