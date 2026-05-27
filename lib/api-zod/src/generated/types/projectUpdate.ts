@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProjectUpdateAgentMode } from './projectUpdateAgentMode';
+import type { ProjectUpdateBuilderMode } from './projectUpdateBuilderMode';
 import type { ProjectUpdateDefaultAgent } from './projectUpdateDefaultAgent';
 import type { ProjectUpdatePolicyStrictness } from './projectUpdatePolicyStrictness';
 import type { ProjectUpdateStatus } from './projectUpdateStatus';
@@ -28,6 +29,8 @@ export interface ProjectUpdate {
   /** Toggle the architect review subagent for this project. */
   architectReviewEnabled?: boolean;
   e2eEnabled?: boolean;
+  /** Upgrade this project to full-stack agentic mode. One-way transition: static-legacy → agentic triggers container + DB provisioning. */
+  builderMode?: ProjectUpdateBuilderMode;
   multiplayerEnabled?: boolean;
   redirectWwwApex?: boolean;
   /** Run Semgrep SAST on every build (Task #545). Default true. */

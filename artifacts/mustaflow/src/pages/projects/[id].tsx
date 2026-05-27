@@ -22,6 +22,7 @@ import {
   getListTasksQueryKey,
   getGetPageMapQueryKey,
   getListSuggestionsQueryKey,
+  useUpdateProject,
 } from "@workspace/api-client-react";
 import { AgentThinkingBubble } from "@/components/agent-thinking-bubble";
 import { AgentIcon } from "@/components/agent-icon";
@@ -166,6 +167,7 @@ import { AgentPromptCardsList, type AgentPromptCard } from "./components/agent-p
 import { CommentsPanel } from "./components/comments-panel";
 import { ActivityLogTab } from "./components/activity-log-tab";
 import { NotificationsBell } from "@/components/notifications-bell";
+import { AgenticOnboardingTooltip } from "@/components/agentic-onboarding-tooltip";
 import { cn } from "@/lib/utils";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -826,6 +828,41 @@ const QUICK_ACTIONS = [
   "Add a contact form",
 ];
 
+const BACKEND_KEYWORDS = [
+  "database",
+  "postgres",
+  "postgresql",
+  "mysql",
+  "sqlite",
+  "mongodb",
+  "redis",
+  "api",
+  "rest api",
+  "graphql",
+  "backend",
+  "server",
+  "express",
+  "fastapi",
+  "django",
+  "flask",
+  "node.js",
+  "nodejs",
+  "auth",
+  "authentication",
+  "login",
+  "sign in",
+  "user account",
+  "jwt",
+  "oauth",
+  "session",
+  "endpoint",
+  "crud",
+  "migration",
+  "drizzle",
+  "prisma",
+  "sequelize",
+];
+
 export default function ProjectWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const projectId = parseInt(id, 10);
@@ -1348,6 +1385,57 @@ export default function ProjectWorkspacePage() {
       .finally(() => setRetryingProvisioning(false));
   }, [projectId]);
   // ── End provisioning state ─────────────────────────────────────────────────
+
+  // ── Static-to-agentic upgrade nudge ─────────────────────────────────────────
+  // When a static project's prompt suggests a backend need (database, API, auth,
+  // etc.), show a one-time dismissable inline card offering to upgrade in-place.
+  const [upgradeNudgeDismissed, setUpgradeNudgeDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(`mf-upgrade-nudge-${projectId}`) === "1";
+    } catch {
+      return true;
+    }
+  });
+  const [upgradeNudgeVisible, setUpgradeNudgeVisible] = useState(false);
+  const [isUpgradingToAgentic, setIsUpgradingToAgentic] = useState(false);
+  const updateProject = useUpdateProject();
+
+  const checkUpgradeNudge = useCallback(
+    (messageText: string) => {
+      if (!project || project.builderMode === "agentic" || upgradeNudgeDismissed) return;
+      const lower = messageText.toLowerCase();
+      if (BACKEND_KEYWORDS.some((kw) => lower.includes(kw))) {
+        setUpgradeNudgeVisible(true);
+      }
+    },
+    [project, upgradeNudgeDismissed],
+  );
+
+  const dismissUpgradeNudge = useCallback(() => {
+    setUpgradeNudgeVisible(false);
+    setUpgradeNudgeDismissed(true);
+    try {
+      localStorage.setItem(`mf-upgrade-nudge-${projectId}`, "1");
+    } catch {
+      /* ignore */
+    }
+  }, [projectId]);
+
+  const upgradeToAgentic = useCallback(async () => {
+    if (!project || isUpgradingToAgentic) return;
+    setIsUpgradingToAgentic(true);
+    dismissUpgradeNudge();
+    try {
+      await updateProject.mutateAsync({
+        id: project.id,
+        data: { builderMode: "agentic" },
+      });
+      queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(project.id) });
+    } finally {
+      setIsUpgradingToAgentic(false);
+    }
+  }, [project, isUpgradingToAgentic, updateProject, queryClient, dismissUpgradeNudge]);
+  // ── End upgrade nudge state ─────────────────────────────────────────────────
 
   const [focusMode, setFocusMode] = useState(false);
   const [pageMapSyncing, setPageMapSyncing] = useState(false);
@@ -2371,6 +2459,7 @@ export default function ProjectWorkspacePage() {
           </span>
           {provisioningStatus !== "idle" && (
             <span
+              data-tour="provisioning-badge"
               className={cn(
                 "inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
                 provisioningStatus === "ready"
@@ -3470,6 +3559,49 @@ export default function ProjectWorkspacePage() {
                     </div>
                   )}
 
+                  {/* Static-to-agentic upgrade nudge */}
+                  {upgradeNudgeVisible && !upgradeNudgeDismissed && (
+                    <div className="shrink-0 mx-3 mb-2 rounded-xl border border-primary/30 bg-primary/6 px-3.5 py-3 flex items-start gap-3">
+                      <DatabaseZap className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <p className="text-[12px] font-semibold text-foreground leading-tight">
+                          This looks like a full-stack app
+                        </p>
+                        <p className="text-[11px] text-muted-foreground leading-snug">
+                          Your prompt mentions a database or backend. For a real server and Postgres
+                          database, start a full-stack project instead.
+                        </p>
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <button
+                            onClick={upgradeToAgentic}
+                            disabled={isUpgradingToAgentic}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-primary text-primary-foreground text-[11px] font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors"
+                          >
+                            {isUpgradingToAgentic ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Cpu className="h-3 w-3" />
+                            )}
+                            {isUpgradingToAgentic ? "Setting up…" : "Upgrade to full-stack"}
+                          </button>
+                          <button
+                            onClick={dismissUpgradeNudge}
+                            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                      <button
+                        onClick={dismissUpgradeNudge}
+                        className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                        aria-label="Dismiss upgrade nudge"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+
                   {/* Chat / Queue input */}
                   <div data-tour="chat-input">
                     <QueueComposer
@@ -3486,8 +3618,14 @@ export default function ProjectWorkspacePage() {
                       disabled={isBusy}
                       activeTaskId={activeTaskId}
                       onStopBuild={handleStopStream}
+                      chatPlaceholder={
+                        project?.builderMode === "agentic"
+                          ? "Describe a feature or change — I'll plan, build, and test it for you…"
+                          : undefined
+                      }
                       onSingleSend={(content, intent, attachments) => {
                         setPrompt("");
+                        checkUpgradeNudge(content);
                         if (chatScrolledUp) {
                           setChatScrolledUp(false);
                           chatAtBottomRef.current = true;
@@ -4147,6 +4285,14 @@ export default function ProjectWorkspacePage() {
         returnUrl={`${window.location.origin}/projects/${projectId}?credits_success=1`}
       />
       <WorkspaceTour active={tourActive} onClose={closeTour} />
+
+      {/* Agentic first-time onboarding tooltip — 3-step guide for full-stack projects */}
+      {project && (
+        <AgenticOnboardingTooltip
+          projectId={projectId}
+          isAgenticProject={project.builderMode === "agentic"}
+        />
+      )}
 
       {/* Build-in-progress navigation guard (Task #755) */}
       <AlertDialog open={navGuardOpen} onOpenChange={setNavGuardOpen}>

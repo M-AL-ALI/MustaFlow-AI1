@@ -5,6 +5,7 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { ProjectInputBuilderMode } from './projectInputBuilderMode';
 import type { ProjectInputKind } from './projectInputKind';
 import type { ProjectInputMode } from './projectInputMode';
 import type { ProjectInputStack } from './projectInputStack';
@@ -22,4 +23,6 @@ export interface ProjectInput {
   chipLabel?: string;
   /** Surface creating the project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE. */
   mode?: ProjectInputMode;
+  /** Explicit builder mode for this project. 'agentic' = auto-provision a real server + Postgres DB (default). 'static-legacy' = static hosting only, no infra provisioned. */
+  builderMode?: ProjectInputBuilderMode;
 }

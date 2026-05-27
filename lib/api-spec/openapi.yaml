@@ -5389,6 +5389,10 @@ components:
           type: string
           enum: [builder, developer]
           description: "Surface creating the project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE."
+        builderMode:
+          type: string
+          enum: [static-legacy, agentic]
+          description: "Explicit builder mode for this project. 'agentic' = auto-provision a real server + Postgres DB (default). 'static-legacy' = static hosting only, no infra provisioned."
 
     ProjectUpdate:
       type: object
@@ -5420,6 +5424,10 @@ components:
           type: boolean
           description: "Toggle the architect review subagent for this project."
         e2eEnabled: { type: boolean }
+        builderMode:
+          type: string
+          enum: [static-legacy, agentic]
+          description: "Upgrade this project to full-stack agentic mode. One-way transition: static-legacy → agentic triggers container + DB provisioning."
         multiplayerEnabled: { type: boolean }
         redirectWwwApex: { type: boolean }
         scannerSemgrepEnabled:

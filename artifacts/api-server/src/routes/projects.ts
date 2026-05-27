@@ -184,7 +184,13 @@ router.post("/projects", async (req, res): Promise<void> => {
     return;
   }
 
-  const { initialPrompt, chipLabel, mode, ...projectInput } = parsed.data;
+  const {
+    initialPrompt,
+    chipLabel,
+    mode,
+    builderMode: requestedBuilderMode,
+    ...projectInput
+  } = parsed.data;
 
   // Derive platform from kind
   const platformMap: Record<string, string> = {
@@ -217,10 +223,12 @@ router.post("/projects", async (req, res): Promise<void> => {
       platform,
       projectFormat,
       stack: resolvedStack,
-      // Task #738 — new projects opt into the agentic builder (real Fly
-      // container + Neon Postgres). Existing rows keep their legacy default.
-      builderMode: "agentic",
-      provisioningStatus: "provisioning",
+      // Task #738 — agentic projects get a real Fly container + Neon Postgres.
+      // The frontend mode selector explicitly sets builderMode; default to
+      // "agentic" when not provided (preserves backwards compatibility).
+      builderMode: requestedBuilderMode ?? "agentic",
+      provisioningStatus:
+        (requestedBuilderMode ?? "agentic") === "agentic" ? "provisioning" : "idle",
       lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
       chipLabel: chipLabel ?? null,
       projectMode: mode ?? "builder",
@@ -1177,10 +1185,14 @@ export default function HomeScreen() {
     });
   }
 
-  // Task #738 — kick off background provisioning for the new project. Fire
-  // and forget: the response returns immediately and the workspace UI polls
-  // `provisioningStatus` to surface progress.
-  enqueueProvisionProjectJob(project.id);
+  // Task #738 — kick off background provisioning for agentic projects. Only
+  // enqueue when the project is actually going to get a real server + DB;
+  // static-legacy projects remain idle and never incur provisioning costs.
+  // Fire and forget: the response returns immediately and the workspace UI
+  // polls `provisioningStatus` to surface progress.
+  if (project.builderMode === "agentic") {
+    enqueueProvisionProjectJob(project.id);
+  }
 
   res.status(201).json(GetProjectResponse.parse(project));
 });
@@ -1404,15 +1416,34 @@ router.patch("/projects/:id", requireProjectAccess("member"), async (req, res): 
     }
   }
 
+  // When upgrading to agentic mode, automatically set provisioningStatus to
+  // "provisioning" so the badge appears immediately without a refetch race.
+  const requestedBuilderMode = (parsed.data as { builderMode?: string }).builderMode;
+  const updatePayload =
+    requestedBuilderMode === "agentic"
+      ? { ...parsed.data, provisioningStatus: "provisioning", updatedAt: sql`now()` }
+      : { ...parsed.data, updatedAt: sql`now()` };
+
+  // Fetch current project so we can detect the static-legacy → agentic transition.
+  const [beforeUpdate] = await db
+    .select({ builderMode: projectsTable.builderMode })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, params.data.id), activeProjects));
+
   const [project] = await db
     .update(projectsTable)
-    .set({ ...parsed.data, updatedAt: sql`now()` })
+    .set(updatePayload)
     .where(and(eq(projectsTable.id, params.data.id), activeProjects))
     .returning();
 
   if (!project) {
     res.status(404).json({ error: "Project not found" });
     return;
+  }
+
+  // Trigger provisioning if the project was just upgraded to agentic mode.
+  if (requestedBuilderMode === "agentic" && beforeUpdate?.builderMode !== "agentic") {
+    enqueueProvisionProjectJob(project.id);
   }
 
   res.json(UpdateProjectResponse.parse(project));

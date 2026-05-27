@@ -275,6 +275,16 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
     const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
     if (!project) return;
 
+    // Safety guard: only provision agentic projects. Static-legacy projects
+    // must never incur infrastructure costs even if enqueued accidentally.
+    if (project.builderMode !== "agentic") {
+      logger.info(
+        { projectId, builderMode: project.builderMode },
+        "Skipping provisioning for non-agentic project",
+      );
+      return;
+    }
+
     await db
       .update(projectsTable)
       .set({ provisioningStatus: "provisioning", provisioningError: null })

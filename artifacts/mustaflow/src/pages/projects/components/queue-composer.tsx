@@ -195,6 +195,7 @@ interface QueueComposerProps {
   promptValue?: string;
   onPromptValueChange?: (v: string) => void;
   onAgentIdentityChange?: (identity: AgentType) => void;
+  chatPlaceholder?: string;
 }
 
 export function QueueComposer({
@@ -216,6 +217,7 @@ export function QueueComposer({
   promptValue,
   onPromptValueChange,
   onAgentIdentityChange,
+  chatPlaceholder,
 }: QueueComposerProps) {
   const lsKey = `mustaflow_agent_type_${projectId}`;
   const [agentType, setAgentTypeRaw] = useState<AgentType>(() => {
@@ -1220,7 +1222,7 @@ export function QueueComposer({
                       ? "Describe your app — I'll create a plan first…"
                       : isMultiRow
                         ? "Task 1…"
-                        : "Ask anything — I'll answer, plan, or build…"
+                        : (chatPlaceholder ?? "Ask anything — I'll answer, plan, or build…")
                     : `Task ${idx + 1}…`
                 }
                 rows={isMultiRow ? 1 : 2}

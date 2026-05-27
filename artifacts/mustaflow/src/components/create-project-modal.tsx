@@ -27,6 +27,7 @@ import {
   LayoutTemplate,
   PencilLine,
   ChevronLeft,
+  ChevronDown,
   Smartphone,
   ShoppingCart,
   MessageSquare,
@@ -34,6 +35,11 @@ import {
   Layers,
   Server,
   Code2,
+  CheckCircle2,
+  Clock,
+  Rocket,
+  KeyRound,
+  Cpu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TemplatePicker } from "@/components/template-picker";
@@ -104,7 +110,31 @@ const MOBILE_PROJECT_TYPES = [
   { label: "SaaS", kind: "mobile-cross", icon: CreditCard, preset: "mobile-subscription-saas" },
 ] as const;
 
+const FULLSTACK_CHECKLIST = [
+  {
+    icon: Server,
+    label: "Private server",
+    detail: "Your own isolated runtime — no shared hosting",
+  },
+  {
+    icon: Database,
+    label: "Postgres database",
+    detail: "A dedicated Neon Postgres project, auto-provisioned",
+  },
+  {
+    icon: KeyRound,
+    label: "Secret management",
+    detail: "DATABASE_URL and custom secrets, encrypted at rest",
+  },
+  {
+    icon: Rocket,
+    label: "Production pipeline",
+    detail: "Staging review + one-click promote to production",
+  },
+];
+
 type PlatformTab = "web" | "mobile";
+type AppMode = "simple" | "fullstack";
 
 type WebProjectKind = (typeof WEB_PROJECT_TYPES)[number]["kind"];
 type MobileProjectKind = "mobile-cross";
@@ -115,6 +145,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   initialPrompt?: string;
   initialTemplate?: TemplateDefinition;
+  initialAppMode?: AppMode;
 }
 
 function nameFromPrompt(prompt: string): string {
@@ -129,6 +160,7 @@ export function CreateProjectModal({
   onOpenChange,
   initialPrompt = "",
   initialTemplate,
+  initialAppMode,
 }: Props) {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
@@ -143,6 +175,8 @@ export function CreateProjectModal({
   const [nameDirty, setNameDirty] = useState(false);
   const [kind, setKind] = useState<ProjectKind>("web");
   const [prompt, setPrompt] = useState(initialPrompt);
+  const [appMode, setAppMode] = useState<AppMode>(initialAppMode ?? "simple");
+  const [checklistOpen, setChecklistOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | undefined>(
     initialTemplate,
   );
@@ -152,6 +186,8 @@ export function CreateProjectModal({
     setView("form");
     setNameDirty(false);
     setStack("react-vite");
+    setChecklistOpen(false);
+    setAppMode(initialAppMode ?? "simple");
     if (initialTemplate) {
       setSelectedTemplate(initialTemplate);
       setName(initialTemplate.title);
@@ -211,9 +247,14 @@ export function CreateProjectModal({
     }
   }
 
+  function handleAppModeChange(mode: AppMode) {
+    setAppMode(mode);
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const resolvedName = name.trim() || (prompt.trim() ? nameFromPrompt(prompt) : "New Project");
+    const builderMode = appMode === "fullstack" ? "agentic" : "static-legacy";
 
     createProject.mutate(
       {
@@ -224,6 +265,7 @@ export function CreateProjectModal({
           kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
           stack: platformTab === "web" ? (stack as ProjectInputStack) : undefined,
           initialPrompt: prompt.trim() || undefined,
+          builderMode,
         },
       },
       {
@@ -291,6 +333,142 @@ export function CreateProjectModal({
 
             <form onSubmit={handleSubmit} className="flex flex-col min-h-0 gap-5 pt-1">
               <div className="flex flex-col gap-5 overflow-y-auto max-h-[60vh] pr-1">
+                {/* ── App mode selector ── */}
+                {platformTab === "web" && (
+                  <div className="space-y-2">
+                    <Label>What do you want to build?</Label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* Simple app */}
+                      <button
+                        type="button"
+                        onClick={() => handleAppModeChange("simple")}
+                        className={cn(
+                          "flex flex-col gap-2 rounded-xl border p-3.5 text-left transition-all",
+                          appMode === "simple"
+                            ? "border-primary bg-primary/8 ring-1 ring-primary/20"
+                            : "border-border bg-card hover:bg-muted hover:border-border/80",
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div
+                            className={cn(
+                              "flex h-8 w-8 items-center justify-center rounded-lg shrink-0",
+                              appMode === "simple" ? "bg-primary/15" : "bg-muted",
+                            )}
+                          >
+                            <Zap
+                              className={cn(
+                                "h-4 w-4",
+                                appMode === "simple" ? "text-primary" : "text-muted-foreground",
+                              )}
+                            />
+                          </div>
+                          <span
+                            className={cn(
+                              "text-sm font-semibold",
+                              appMode === "simple" ? "text-primary" : "text-foreground",
+                            )}
+                          >
+                            Simple app
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-snug">
+                          Static site or client-only app. Ready instantly — no server setup.
+                        </p>
+                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground/70">
+                          <Clock className="h-3 w-3 shrink-0" />
+                          Builds in seconds
+                        </div>
+                      </button>
+
+                      {/* Full-stack app */}
+                      <button
+                        type="button"
+                        onClick={() => handleAppModeChange("fullstack")}
+                        className={cn(
+                          "flex flex-col gap-2 rounded-xl border p-3.5 text-left transition-all",
+                          appMode === "fullstack"
+                            ? "border-primary bg-primary/8 ring-1 ring-primary/20"
+                            : "border-border bg-card hover:bg-muted hover:border-border/80",
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div
+                            className={cn(
+                              "flex h-8 w-8 items-center justify-center rounded-lg shrink-0",
+                              appMode === "fullstack" ? "bg-primary/15" : "bg-muted",
+                            )}
+                          >
+                            <Cpu
+                              className={cn(
+                                "h-4 w-4",
+                                appMode === "fullstack" ? "text-primary" : "text-muted-foreground",
+                              )}
+                            />
+                          </div>
+                          <span
+                            className={cn(
+                              "text-sm font-semibold",
+                              appMode === "fullstack" ? "text-primary" : "text-foreground",
+                            )}
+                          >
+                            Full-stack app
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-snug">
+                          Real server + Postgres database. Ideal for APIs, auth, and data-driven
+                          apps.
+                        </p>
+                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground/70">
+                          <Clock className="h-3 w-3 shrink-0" />
+                          ~1 min setup
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* Full-stack checklist */}
+                    {appMode === "fullstack" && (
+                      <div className="rounded-xl border border-primary/20 bg-primary/5 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setChecklistOpen((v) => !v)}
+                          className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm font-medium text-primary hover:bg-primary/8 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4 shrink-0" />
+                            What gets set up automatically
+                          </div>
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 shrink-0 transition-transform duration-200",
+                              checklistOpen && "rotate-180",
+                            )}
+                          />
+                        </button>
+                        {checklistOpen && (
+                          <div className="px-3.5 pb-3.5 pt-1 space-y-2.5 border-t border-primary/10">
+                            {FULLSTACK_CHECKLIST.map(({ icon: Icon, label, detail }) => (
+                              <div key={label} className="flex items-start gap-2.5">
+                                <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 shrink-0 mt-0.5">
+                                  <Icon className="h-3.5 w-3.5 text-primary" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-[12px] font-semibold text-foreground">
+                                    {label}
+                                  </div>
+                                  <div className="text-[11px] text-muted-foreground leading-snug">
+                                    {detail}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Platform tab selector */}
                 <div className="flex items-center bg-muted border border-border rounded-lg p-1 gap-1">
                   <button
@@ -532,13 +710,15 @@ export function CreateProjectModal({
                     placeholder={
                       platformTab === "mobile"
                         ? "Describe your mobile app — e.g. A fitness tracker with workout logging, progress charts, and a home screen dashboard."
-                        : stack === "python-flask" || stack === "python-fastapi"
-                          ? "Describe your Python API — e.g. A REST API for a task management system with user authentication and CRUD endpoints."
-                          : stack === "node-api"
-                            ? "Describe your Node.js API — e.g. An Express REST API for a recipe book with search, categories, and user bookmarks."
-                            : stack === "go-gin"
-                              ? "Describe your Go API — e.g. A REST API for a URL shortener with Gin, in-memory store, and JSON responses."
-                              : "Describe what you want to build — e.g. A landing page for a local towing company with a hero section, services, and contact form."
+                        : appMode === "fullstack"
+                          ? "Describe your full-stack app — e.g. A task manager with user accounts, a REST API, and a Postgres database for storing tasks."
+                          : stack === "python-flask" || stack === "python-fastapi"
+                            ? "Describe your Python API — e.g. A REST API for a task management system with user authentication and CRUD endpoints."
+                            : stack === "node-api"
+                              ? "Describe your Node.js API — e.g. An Express REST API for a recipe book with search, categories, and user bookmarks."
+                              : stack === "go-gin"
+                                ? "Describe your Go API — e.g. A REST API for a URL shortener with Gin, in-memory store, and JSON responses."
+                                : "Describe what you want to build — e.g. A landing page for a local towing company with a hero section, services, and contact form."
                     }
                     rows={selectedTemplate ? 4 : 3}
                     className="resize-none"
@@ -546,7 +726,9 @@ export function CreateProjectModal({
                   <p className="text-xs text-muted-foreground">
                     {selectedTemplate
                       ? "This seed prompt is pre-filled from the template. You can refine it before building."
-                      : "If provided, the AI builder will start building immediately after you create the project."}
+                      : appMode === "fullstack"
+                        ? "The AI will plan, build, and test your app. A server and database are provisioned automatically."
+                        : "If provided, the AI builder will start building immediately after you create the project."}
                   </p>
                 </div>
               </div>
@@ -560,7 +742,11 @@ export function CreateProjectModal({
                   Cancel
                 </Button>
                 <Button type="submit" disabled={createProject.isPending}>
-                  {createProject.isPending ? "Creating…" : "Create project"}
+                  {createProject.isPending
+                    ? "Creating…"
+                    : appMode === "fullstack"
+                      ? "Create full-stack project"
+                      : "Create project"}
                 </Button>
               </DialogFooter>
             </form>

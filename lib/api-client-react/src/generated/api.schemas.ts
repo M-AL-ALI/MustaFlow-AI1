@@ -519,6 +519,17 @@ export const ProjectInputMode = {
   developer: 'developer',
 } as const;
 
+/**
+ * Explicit builder mode for this project. 'agentic' = auto-provision a real server + Postgres DB (default). 'static-legacy' = static hosting only, no infra provisioned.
+ */
+export type ProjectInputBuilderMode = typeof ProjectInputBuilderMode[keyof typeof ProjectInputBuilderMode];
+
+
+export const ProjectInputBuilderMode = {
+  'static-legacy': 'static-legacy',
+  agentic: 'agentic',
+} as const;
+
 export interface ProjectInput {
   /** @minLength 1 */
   name: string;
@@ -532,6 +543,8 @@ export interface ProjectInput {
   chipLabel?: string;
   /** Surface creating the project. 'builder' = AI Build Mode (default). 'developer' = Developer Mode cloud IDE. */
   mode?: ProjectInputMode;
+  /** Explicit builder mode for this project. 'agentic' = auto-provision a real server + Postgres DB (default). 'static-legacy' = static hosting only, no infra provisioned. */
+  builderMode?: ProjectInputBuilderMode;
 }
 
 export type ProjectUpdateStatus = typeof ProjectUpdateStatus[keyof typeof ProjectUpdateStatus];
@@ -576,6 +589,17 @@ export const ProjectUpdateDefaultAgent = {
   main: 'main',
 } as const;
 
+/**
+ * Upgrade this project to full-stack agentic mode. One-way transition: static-legacy → agentic triggers container + DB provisioning.
+ */
+export type ProjectUpdateBuilderMode = typeof ProjectUpdateBuilderMode[keyof typeof ProjectUpdateBuilderMode];
+
+
+export const ProjectUpdateBuilderMode = {
+  'static-legacy': 'static-legacy',
+  agentic: 'agentic',
+} as const;
+
 export interface ProjectUpdate {
   name?: string;
   description?: string;
@@ -594,6 +618,8 @@ export interface ProjectUpdate {
   /** Toggle the architect review subagent for this project. */
   architectReviewEnabled?: boolean;
   e2eEnabled?: boolean;
+  /** Upgrade this project to full-stack agentic mode. One-way transition: static-legacy → agentic triggers container + DB provisioning. */
+  builderMode?: ProjectUpdateBuilderMode;
   multiplayerEnabled?: boolean;
   redirectWwwApex?: boolean;
   /** Run Semgrep SAST on every build (Task #545). Default true. */
