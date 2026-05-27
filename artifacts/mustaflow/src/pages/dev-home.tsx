@@ -32,17 +32,8 @@ import {
   Smartphone,
   FileCode2,
   Zap,
-  RefreshCw,
 } from "lucide-react";
 
-const EXAMPLE_PROMPTS = [
-  "A REST API for a task manager with user auth and JWT",
-  "A real-time chat server with WebSocket rooms and presence",
-  "A React dashboard for monitoring server metrics",
-  "A Python web scraper with async job queue and SQLite storage",
-  "A Go microservice with gRPC and PostgreSQL",
-  "A Next.js blog with MDX, search, and RSS feed",
-];
 
 const TEMPLATE_CHIPS: Array<{
   label: string;
@@ -272,37 +263,20 @@ function DevCreateModal({
   );
 }
 
-function CreationZone({
-  onSubmit,
-  onChipClick,
-}: {
-  onSubmit: (prompt: string) => void;
-  onChipClick: (chip: (typeof TEMPLATE_CHIPS)[number]) => void;
-}) {
+function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
   const [prompt, setPrompt] = useState("");
-  const [exampleIndex, setExampleIndex] = useState(0);
   const [showDiscuss, setShowDiscuss] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   function handleSubmit() {
     if (!prompt.trim()) return;
     onSubmit(prompt.trim());
   }
 
-  function rotateExample() {
-    setExampleIndex((i) => (i + 1) % EXAMPLE_PROMPTS.length);
-  }
-
-  function applyExample() {
-    setPrompt(EXAMPLE_PROMPTS[exampleIndex] ?? "");
-    inputRef.current?.focus();
-  }
-
   return (
     <div className="flex flex-col items-center gap-6 w-full max-w-2xl mx-auto">
       <div className="text-center">
         <h1 className="text-3xl font-bold tracking-tight mb-1">What do you want to build?</h1>
-        <p className="text-sm text-muted-foreground">Describe your project or pick a stack below</p>
+        <p className="text-sm text-muted-foreground">Describe your project and let the AI get started</p>
       </div>
 
       {/* Prompt input */}
@@ -310,7 +284,6 @@ function CreationZone({
         <div className="flex items-center gap-2 w-full">
           <div className="flex-1 relative">
             <Input
-              ref={inputRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => {
@@ -349,44 +322,6 @@ function CreationZone({
             <BrainstormPanel onClose={() => setShowDiscuss(false)} />
           </div>
         )}
-      </div>
-
-      {/* Example prompt */}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span>Try:</span>
-        <button
-          type="button"
-          onClick={applyExample}
-          className="text-primary hover:underline text-left"
-        >
-          "{EXAMPLE_PROMPTS[exampleIndex]}"
-        </button>
-        <button
-          type="button"
-          onClick={rotateExample}
-          className="text-muted-foreground hover:text-foreground transition-colors"
-          aria-label="Next example"
-        >
-          <RefreshCw className="h-3 w-3" />
-        </button>
-      </div>
-
-      {/* Template chips */}
-      <div className="flex items-center gap-2 flex-wrap justify-center">
-        {TEMPLATE_CHIPS.map((chip) => {
-          const Icon = chip.icon;
-          return (
-            <button
-              key={chip.label}
-              type="button"
-              onClick={() => onChipClick(chip)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-muted transition-colors font-medium"
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {chip.label}
-            </button>
-          );
-        })}
       </div>
     </div>
   );
@@ -503,7 +438,7 @@ export default function DevHomePage() {
         <div className="min-h-full flex flex-col">
           {/* Creation zone — centered in the top portion */}
           <div className="flex items-center justify-center px-6 pt-16 pb-12">
-            <CreationZone onSubmit={handleQuickCreate} onChipClick={openModalWithChip} />
+            <CreationZone onSubmit={handleQuickCreate} />
           </div>
 
           {/* Project grid */}
