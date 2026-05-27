@@ -1529,6 +1529,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // Count of file-mutation tool calls (write_file / apply_patch / delete_file)
   // across all turns. Used to enforce the refine-mode "must edit something" gate.
   let totalMutations = 0;
+  // Counts turns where the model returned plain text (no tool calls) in refine mode
+  // with 0 mutations so far. Capped at 3 to prevent infinite loops.
+  let textOnlyTurns = 0;
 
   // Per-task skill registry: load index for the system prompt, then cache
   // already-loaded skills in this Map so a repeated load_skill is a free
@@ -1752,7 +1755,24 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
 
     if (toolReqs.length === 0) {
-      // Model returned plain text; treat finish_reason=stop as "done without finalize".
+      // Model returned plain text with no tool calls.
+      // In refine mode, if no files have been written yet, the model is explaining
+      // instead of acting — force it to use tools instead of accepting a text-only exit.
+      if (input.mode === "refine" && totalMutations === 0 && textOnlyTurns < 3) {
+        textOnlyTurns++;
+        if (msg.content) {
+          await emitThinkingEvent(input.onEvent, msg.content.slice(0, 300));
+        }
+        messages.push({
+          role: "user",
+          content:
+            "You responded with text but made no file changes. " +
+            "You MUST now call write_file or apply_patch to implement the requested changes. " +
+            "Do not explain further — make the actual code edits now.",
+        });
+        continue;
+      }
+      // Normal exit: model returned plain text as a terminal response.
       if (msg.content && msg.content.length > 0) {
         finalSummary = msg.content.slice(0, 600);
       }
