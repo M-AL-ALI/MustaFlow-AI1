@@ -267,18 +267,18 @@ describe("Secret revocation — revokePreviewForSecurityChange", () => {
 // ── Test group 4: Subdomain gateway auth ─────────────────────────────────
 
 describe("Subdomain gateway — HMAC cookie validation", () => {
-  const SESSION_SECRET = "test-gateway-secret";
+  const ENCRYPTION_KEY = "test-gateway-secret";
 
   /**
    * T07: A valid cookie (sessionId + matching HMAC) is accepted.
-   * The HMAC is computed over "preview:{sessionId}" with SESSION_SECRET.
+   * The HMAC is computed over "preview:{sessionId}" with ENCRYPTION_KEY.
    */
   it("T07: accepts a valid HMAC-signed cookie", () => {
     const sessionId = "01HSABC123";
-    const mac = createHmac("sha256", SESSION_SECRET).update(`preview:${sessionId}`).digest("hex");
+    const mac = createHmac("sha256", ENCRYPTION_KEY).update(`preview:${sessionId}`).digest("hex");
     const cookie = `${sessionId}.${mac}`;
 
-    expect(validatePreviewCookie(cookie, sessionId, SESSION_SECRET)).toBe(true);
+    expect(validatePreviewCookie(cookie, sessionId, ENCRYPTION_KEY)).toBe(true);
   });
 
   /**
@@ -289,7 +289,7 @@ describe("Subdomain gateway — HMAC cookie validation", () => {
     const sessionId = "01HSABC123";
     const tamperedCookie = `${sessionId}.deadbeefdeadbeef`;
 
-    expect(validatePreviewCookie(tamperedCookie, sessionId, SESSION_SECRET)).toBe(false);
+    expect(validatePreviewCookie(tamperedCookie, sessionId, ENCRYPTION_KEY)).toBe(false);
   });
 });
 
