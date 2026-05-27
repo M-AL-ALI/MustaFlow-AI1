@@ -263,9 +263,9 @@ function KnowledgeEntryCard({
                     Global
                   </span>
                 )}
-                {(entry.reinforcedCount ?? 0) > 0 && (
+                {((entry as unknown as Record<string, number>).reinforcedCount ?? 0) > 0 && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border border-border bg-muted text-muted-foreground">
-                    Reinforced {entry.reinforcedCount}×
+                    Reinforced {(entry as unknown as Record<string, number>).reinforcedCount}×
                   </span>
                 )}
                 <span className={cn("flex items-center gap-0.5 text-[10px]", severityColor)}>

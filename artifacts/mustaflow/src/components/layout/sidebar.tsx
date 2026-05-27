@@ -47,16 +47,15 @@ import { ThemeToggle } from "@/components/theme-toggle";
 const NAV_ITEMS = [
   { name: "Home", href: "/", icon: Home },
   { name: "Projects", href: "/projects", icon: FolderKanban },
-  { name: "Knowledge Vault", href: "/knowledge", icon: BookOpen },
-  { name: "Style Memory", href: "/memory", icon: BrainCircuit },
-  { name: "Public Library", href: "/library", icon: Library },
+  { name: "Published Projects", href: "/published", icon: Globe },
+  { name: "Integrations", href: "/integrations", icon: Blocks },
+  { name: "Security", href: "/security", icon: ShieldCheck },
+  { name: "Promotions", href: "/billing", icon: ShoppingCart },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 
 const SECONDARY_NAV_ITEMS = [
-  { name: "Published", href: "/published", icon: Globe },
   { name: "My Domains", href: "/account/domains", icon: ShoppingCart },
-  { name: "Integrations", href: "/integrations", icon: Blocks },
   { name: "Organizations", href: "/orgs/new", icon: Building2 },
   { name: "Developer Portal", href: "/developers", icon: Code2 },
 ];
@@ -67,10 +66,9 @@ const ECOSYSTEM_NAV_ITEMS = [
   { name: "Community", href: "/community", icon: Users },
 ];
 
-const TERTIARY_NAV_ITEMS = [
-  { name: "Trash", href: "/trash", icon: Trash2 },
+const BOTTOM_NAV_ITEMS = [
   { name: "Learn", href: "/learn", icon: GraduationCap },
-  { name: "Help Center", href: "/help", icon: HelpCircle },
+  { name: "Documentation", href: "/help", icon: BookOpen },
 ];
 
 function DevelopersNavGroup({ collapsed }: { collapsed?: boolean }) {
@@ -434,61 +432,57 @@ function SidebarInner({
         </div>
       )}
 
-      {/* Create button — visible when signed in */}
+      {/* Create + Import buttons — visible when signed in */}
       {isSignedIn && (
-        <div className="px-3 pb-2 shrink-0">
+        <div className="px-3 pb-2 shrink-0 space-y-1.5">
           <button
             onClick={() => setCreateOpen(true)}
-            className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/60 transition-colors px-3 py-2 text-sm font-semibold"
+            className="w-full flex items-center gap-2 rounded-lg border border-border bg-muted/40 text-foreground hover:bg-muted hover:border-border/80 transition-colors px-3 py-2 text-sm font-medium"
           >
-            <Plus className="h-4 w-4" />
-            New Project
+            <Plus className="h-4 w-4 shrink-0" />
+            Create something new
+          </button>
+          <button
+            className="w-full flex items-center gap-2 rounded-lg border border-border bg-muted/40 text-foreground hover:bg-muted hover:border-border/80 transition-colors px-3 py-2 text-sm font-medium"
+          >
+            <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Import code or design
           </button>
         </div>
       )}
 
       {/* Nav */}
-      <div className="flex-1 space-y-4">
+      <div className="flex-1 overflow-y-auto">
         <NavGroup items={NAV_ITEMS} />
-        <NavGroup items={ECOSYSTEM_NAV_ITEMS} title="Ecosystem" />
-        <div>
-          <NavGroup items={SECONDARY_NAV_ITEMS} title="Platform" />
-          <SecurityNavItem />
-          <BackgroundJobsPanel />
-        </div>
-        {isSignedIn && <DevelopersNavGroup />}
         <AdminNavItem />
+        <BackgroundJobsPanel />
       </div>
 
       {/* Credits widget — visible when signed in */}
       {isSignedIn && <CreditsWidget />}
 
-      {/* Resources + user */}
+      {/* Bottom nav + footer */}
       <div className="mt-auto">
-        <NavGroup items={TERTIARY_NAV_ITEMS} title="Resources" />
-        <div className="px-6 py-2 flex items-center flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground/60">
+        <NavGroup items={BOTTOM_NAV_ITEMS} />
+        <div className="px-6 py-2 flex items-center flex-wrap gap-x-2 gap-y-1 text-[10px] text-muted-foreground/60">
+          <a href="/changelog" className="hover:text-muted-foreground transition-colors font-medium">
+            MustaFlow
+          </a>
+          <span>·</span>
+          <a href="/changelog" className="hover:text-muted-foreground transition-colors">
+            Changelog
+          </a>
+          <span>·</span>
           <a href="/terms" className="hover:text-muted-foreground transition-colors">
             Terms
           </a>
           <span>·</span>
           <a href="/privacy" className="hover:text-muted-foreground transition-colors">
             Privacy
-          </a>
-          <span>·</span>
-          <a href="/trust" className="hover:text-muted-foreground transition-colors">
-            Trust
-          </a>
-          <span>·</span>
-          <a href="/pricing" className="hover:text-muted-foreground transition-colors">
-            Pricing
-          </a>
-          <span>·</span>
-          <a href="/help" className="hover:text-muted-foreground transition-colors">
-            Help
-          </a>
-          <span>·</span>
-          <a href="/developers" className="hover:text-muted-foreground transition-colors">
-            API Docs
           </a>
         </div>
         <UserSection />
