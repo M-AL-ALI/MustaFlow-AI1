@@ -425,6 +425,8 @@ export * from './taskEventEventType';
 export * from './taskFeedbackInput';
 export * from './taskFeedbackInputFeedback';
 export * from './testResult';
+export * from './toolCallEventPayload';
+export * from './toolCallEventPayloadArgs';
 export * from './transferDomainInput';
 export * from './transferDomainResponse';
 export * from './triggerChecksInput';

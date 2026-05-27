@@ -5692,6 +5692,32 @@ components:
           enum: [converse, plan, build]
           description: "The intent auto-detected or explicitly provided for this exchange."
 
+    ToolCallEventPayload:
+      type: object
+      description: >
+        JSON payload embedded in a `tool_call` TaskEvent's `message` field.
+        Emitted by the agentic builder loop for every tool invocation that does
+        not already have a dedicated event type (write_file → file_diff,
+        run_command → command_output, etc.).
+      required: [tool, args, ok, durationMs, preview]
+      properties:
+        tool:
+          type: string
+          description: Name of the tool that was invoked (e.g. read_file, web_search).
+        args:
+          type: object
+          additionalProperties: true
+          description: Sanitised + size-capped copy of the tool arguments.
+        ok:
+          type: boolean
+          description: True when the tool call succeeded.
+        durationMs:
+          type: integer
+          description: Wall-clock time the tool call took in milliseconds.
+        preview:
+          type: string
+          description: First ~400 chars of the observation returned to the model.
+
     TaskEvent:
       type: object
       required: [id, taskId, eventType, message, createdAt]
@@ -5700,6 +5726,11 @@ components:
         taskId: { type: integer }
         eventType:
           type: string
+          description: >
+            Lifecycle and step event types emitted by the agent task runner.
+            `tool_call` carries a JSON-serialised ToolCallEventPayload in
+            `message`; `file_diff` carries file path + diff stats; `command_output`
+            carries command argv + stdout/stderr.
           enum:
             [
               queued,
@@ -5714,6 +5745,9 @@ components:
               completed,
               failed,
               cancelled,
+              tool_call,
+              file_diff,
+              command_output,
             ]
         message: { type: string }
         filePath: { type: ["string", "null"] }

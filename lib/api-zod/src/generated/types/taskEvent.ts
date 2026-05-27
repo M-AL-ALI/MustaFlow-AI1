@@ -10,6 +10,8 @@ import type { TaskEventEventType } from './taskEventEventType';
 export interface TaskEvent {
   id: number;
   taskId: number;
+  /** Lifecycle and step event types emitted by the agent task runner. `tool_call` carries a JSON-serialised ToolCallEventPayload in `message`; `file_diff` carries file path + diff stats; `command_output` carries command argv + stdout/stderr.
+   */
   eventType: TaskEventEventType;
   message: string;
   /** @nullable */

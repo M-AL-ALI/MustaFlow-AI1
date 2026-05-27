@@ -1492,7 +1492,7 @@ export const ListTaskEventsParams = zod.object({
 export const ListTaskEventsResponseItem = zod.object({
   "id": zod.number(),
   "taskId": zod.number(),
-  "eventType": zod.enum(['queued', 'planning', 'reading_files', 'generating_code', 'editing_files', 'testing', 'fixing_errors', 'updating_preview', 'saving_version', 'completed', 'failed', 'cancelled']),
+  "eventType": zod.enum(['queued', 'planning', 'reading_files', 'generating_code', 'editing_files', 'testing', 'fixing_errors', 'updating_preview', 'saving_version', 'completed', 'failed', 'cancelled', 'tool_call', 'file_diff', 'command_output']).describe('Lifecycle and step event types emitted by the agent task runner. `tool_call` carries a JSON-serialised ToolCallEventPayload in `message`; `file_diff` carries file path + diff stats; `command_output` carries command argv + stdout\/stderr.\n'),
   "message": zod.string(),
   "filePath": zod.string().nullish(),
   "createdAt": zod.coerce.date()

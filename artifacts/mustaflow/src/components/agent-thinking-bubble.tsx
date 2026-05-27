@@ -365,6 +365,94 @@ function summarizeArgs(args: Record<string, unknown>): string {
     .join(" ");
 }
 
+/** Returns a short human-readable label for a tool name + args. */
+function humanizeTool(tool: string, args: Record<string, unknown>): string {
+  const str = (k: string) =>
+    typeof args[k] === "string" ? (args[k] as string).slice(0, 55) : null;
+  switch (tool) {
+    case "read_file":
+      return `Reading ${str("path") ?? "file"}`;
+    case "list_files":
+      return "Listing files";
+    case "search":
+      return `Searching "${str("query") ?? "…"}"`;
+    case "semantic_search":
+      return `Searching "${str("query") ?? "…"}"`;
+    case "web_fetch":
+      return `Fetching ${str("url") ?? "URL"}`;
+    case "web_search":
+      return `Web search "${str("query") ?? "…"}"`;
+    case "extract_branding":
+      return `Extracting branding from ${str("url") ?? "URL"}`;
+    case "take_screenshot":
+      return "Taking screenshot";
+    case "read_diagnostics":
+      return "Reading diagnostics";
+    case "list_uploads":
+      return "Listing uploads";
+    case "read_upload":
+      return "Reading upload";
+    case "read_inbox":
+      return "Reading inbox";
+    case "load_skill": {
+      const name = str("name");
+      return name ? `Loading skill "${name}"` : "Loading skill";
+    }
+    case "call_skill": {
+      const name = str("name");
+      return name ? `Calling skill "${name}"` : "Calling skill";
+    }
+    case "present_asset":
+      return `Presenting ${str("path") ?? "asset"}`;
+    case "delete_file":
+      return `Deleting ${str("path") ?? "file"}`;
+    case "apply_patch":
+      return `Patching ${str("path") ?? "file"}`;
+    case "write_file":
+      return `Writing ${str("path") ?? "file"}`;
+    case "report_progress":
+      return "Reporting progress";
+    case "finalize":
+      return "Finalising build";
+    case "generate_image":
+      return "Generating image";
+    case "generate_video":
+      return "Generating video";
+    case "generate_audio":
+      return "Generating audio";
+    case "remove_image_background":
+      return "Removing image background";
+    default:
+      return tool.replace(/_/g, " ");
+  }
+}
+
+/** Returns a human-readable single-line label for any step event. */
+function getStepLabel(step: StepEvent): string {
+  if (step.eventType === "tool_call") {
+    const tool = parseToolCall(step.eventType, step.message);
+    if (tool) return humanizeTool(tool.tool, tool.args);
+    return step.message.slice(0, 80);
+  }
+  if (step.eventType === "file_diff") {
+    const diff = parseFileDiff(step.eventType, step.message);
+    if (diff) {
+      const opLabel =
+        diff.op === "delete" ? "Deleting" : diff.op === "patch" ? "Patching" : "Writing";
+      return `${opLabel} ${diff.path}`;
+    }
+    return "File change";
+  }
+  if (step.eventType === "command_output") {
+    const cmd = parseCommandOutput(step.eventType, step.message);
+    if (cmd) return `$ ${cmd.argv.join(" ").slice(0, 60)}`;
+    return "Running command";
+  }
+  // Generic label from message
+  const msg = step.message;
+  return msg.length > 70 ? msg.slice(0, 70) + "…" : msg;
+}
+
 function ToolCallCard({ data }: { data: ToolCallPayload }) {
   const [expanded, setExpanded] = useState(false);
   const argSummary = summarizeArgs(data.args);
@@ -424,6 +512,43 @@ function getStepIcon(eventType: string): React.ElementType {
 
 function getStepColor(eventType: string): string {
   return STEP_COLOR[eventType] ?? "text-muted-foreground";
+}
+
+/**
+ * Task #960 — returns a tool-specific lucide icon for a named agent tool.
+ * Used in LiveStepRow so each tool_call row shows a meaningful icon instead
+ * of the generic Wrench fallback.
+ */
+const TOOL_ICON: Record<string, React.ElementType> = {
+  read_file: BookOpen,
+  list_files: BookOpen,
+  search: Search,
+  semantic_search: Search,
+  web_fetch: Globe,
+  web_search: Search,
+  extract_branding: Palette,
+  take_screenshot: Camera,
+  read_diagnostics: AlertCircle,
+  list_uploads: Database,
+  read_upload: Database,
+  read_inbox: BookOpen,
+  load_skill: BookOpen,
+  call_skill: BookOpen,
+  present_asset: Eye,
+  delete_file: X,
+  apply_patch: FilePen,
+  write_file: FilePen,
+  report_progress: Check,
+  finalize: CheckCircle2,
+  generate_image: Sparkles,
+  generate_video: Sparkles,
+  generate_audio: Sparkles,
+  remove_image_background: Sparkles,
+  generate_slides: Sparkles,
+};
+
+function getToolIcon(toolName: string): React.ElementType {
+  return TOOL_ICON[toolName] ?? Wrench;
 }
 
 function groupEventsByNarration(events: StepEvent[]): StepGroup[] {
@@ -517,49 +642,6 @@ function NarrationText({
     >
       {isActive && !isFinished ? displayed : text}
     </p>
-  );
-}
-
-function IconStrip({
-  steps,
-  isGroupActive,
-  isTerminal,
-}: {
-  steps: StepEvent[];
-  isGroupActive: boolean;
-  isTerminal: boolean;
-}) {
-  if (steps.length === 0) return null;
-
-  return (
-    <div className="flex flex-wrap items-center gap-1 mt-1.5">
-      {steps.map((step, idx) => {
-        const Icon = getStepIcon(step.eventType);
-        const color = getStepColor(step.eventType);
-        const isLast = idx === steps.length - 1;
-        const isActive = isGroupActive && isLast && !isTerminal;
-
-        return (
-          <div
-            key={step.id}
-            title={step.message + (step.filePath ? ` — ${step.filePath}` : "")}
-            className={cn(
-              "flex items-center justify-center rounded p-0.5 transition-all duration-200",
-              isActive ? "bg-primary/10" : "",
-            )}
-          >
-            <Icon
-              className={cn(
-                "h-3 w-3 shrink-0",
-                color,
-                isActive && "animate-pulse",
-                !isActive && "opacity-50",
-              )}
-            />
-          </div>
-        );
-      })}
-    </div>
   );
 }
 
@@ -918,6 +1000,89 @@ function ThinkingRow({ text, isActive }: { text: string; isActive: boolean }) {
   );
 }
 
+/**
+ * Task #960 — compact single-line row for a completed step event.
+ * Shows a tool-specific icon, human-readable label, and (for tool_call
+ * events) an ok/err chip + elapsed time.
+ */
+function LiveStepRow({
+  step,
+  isLast,
+  isTerminal,
+}: {
+  step: StepEvent;
+  isLast: boolean;
+  isTerminal: boolean;
+}) {
+  const tool = parseToolCall(step.eventType, step.message);
+  const diff = parseFileDiff(step.eventType, step.message);
+  const cmd = parseCommandOutput(step.eventType, step.message);
+  // For tool_call events use a tool-specific icon; fall back to event-type icon.
+  const Icon = tool ? getToolIcon(tool.tool) : getStepIcon(step.eventType);
+  const color = getStepColor(step.eventType);
+  const label = getStepLabel(step);
+  const isActiveStep = isLast && !isTerminal;
+
+  return (
+    <div className="flex items-center gap-1.5 text-[10px] py-0.5 min-w-0 group">
+      {isActiveStep ? (
+        <Loader2 className={cn("h-3 w-3 shrink-0 animate-spin", color)} />
+      ) : (
+        <Icon className={cn("h-3 w-3 shrink-0", color, "opacity-65")} />
+      )}
+      <span
+        className={cn(
+          "truncate flex-1 leading-tight",
+          isActiveStep ? "text-foreground/90 font-medium" : "text-muted-foreground/80",
+        )}
+      >
+        {label}
+      </span>
+      {/* ok / err chip for tool_call events */}
+      {tool && !isActiveStep && (
+        <span
+          className={cn(
+            "shrink-0 text-[9px] font-mono uppercase tracking-wide",
+            tool.ok ? "text-green-400/70" : "text-red-400/70",
+          )}
+        >
+          {tool.ok ? "ok" : "err"}
+        </span>
+      )}
+      {/* duration for tool_call events */}
+      {tool && !isActiveStep && tool.durationMs > 0 && (
+        <span className="shrink-0 text-[9px] font-mono text-muted-foreground/40">
+          {tool.durationMs >= 1000
+            ? `${(tool.durationMs / 1000).toFixed(1)}s`
+            : `${tool.durationMs}ms`}
+        </span>
+      )}
+      {/* +/- stats for file_diff */}
+      {diff && !isActiveStep && (
+        <span className="flex items-center gap-0.5 shrink-0">
+          {diff.added > 0 && (
+            <span className="text-green-400/70 text-[9px] font-mono">+{diff.added}</span>
+          )}
+          {diff.removed > 0 && (
+            <span className="text-red-400/70 text-[9px] font-mono">-{diff.removed}</span>
+          )}
+        </span>
+      )}
+      {/* exit status for command_output */}
+      {cmd && !isActiveStep && cmd.status === "final" && (
+        <span
+          className={cn(
+            "shrink-0 text-[9px] font-mono",
+            cmd.exitCode === 0 ? "text-green-400/70" : "text-red-400/70",
+          )}
+        >
+          {cmd.exitCode === 0 ? "ok" : `exit=${cmd.exitCode}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
 const HIDE_THINKING_KEY = "mustaflow_hide_thinking";
 function useHideThinking(): [boolean, (v: boolean) => void] {
   const [hide, setHide] = useState<boolean>(() => {
@@ -1076,12 +1241,18 @@ function FinishedGroupRow({
   );
 }
 
+/**
+ * Task #960 — The active group row shows all agent steps as compact rows
+ * rather than an icon strip + single big card. The last step is shown with a
+ * spinner while still "in progress" (waiting for the next event). Thinking
+ * events and QA cards keep their existing inline rendering.
+ */
 function ActiveGroupRow({
   group,
   isTerminal,
   hideThinking,
-  projectId,
-  taskId,
+  projectId: _projectId,
+  taskId: _taskId,
 }: {
   group: StepGroup;
   isTerminal: boolean;
@@ -1093,53 +1264,49 @@ function ActiveGroupRow({
     ? group.steps.filter((s) => s.eventType !== "thinking")
     : group.steps;
   const visibleSteps = dedupeQASteps(dedupeCommandOutputs(filtered));
-  const lastStep = visibleSteps[visibleSteps.length - 1];
-  // Task #733: when the current step is a structured payload (file_diff /
-  // command_output) the JSON blob is useless as a status string, so fall back
-  // to a friendlier label. For thinking events, surface the trimmed text.
-  const fallbackLabel = (() => {
-    if (!lastStep) return isTerminal ? "Done" : "Working…";
-    const diff = parseFileDiff(lastStep.eventType, lastStep.message);
-    if (diff) return `${diff.op} ${diff.path}`;
-    const cmd = parseCommandOutput(lastStep.eventType, lastStep.message);
-    if (cmd) return `${cmd.argv.join(" ").slice(0, 80)} (exit=${cmd.exitCode})`;
-    const tool = parseToolCall(lastStep.eventType, lastStep.message);
-    if (tool) return `${tool.tool}${tool.ok ? "" : " (failed)"}`;
-    return lastStep.message;
-  })();
 
-  // Render the latest structured step inline so live diffs / output appear
-  // without waiting for the group to finish.
-  const lastDiff = lastStep ? parseFileDiff(lastStep.eventType, lastStep.message) : null;
-  const lastCmd = lastStep ? parseCommandOutput(lastStep.eventType, lastStep.message) : null;
-  const lastTool = lastStep ? parseToolCall(lastStep.eventType, lastStep.message) : null;
-  const lastThinking = lastStep?.eventType === "thinking" ? lastStep.message : null;
-  const lastQA = lastStep ? parseQACard(lastStep.eventType, lastStep.message) : null;
+  // Separate "thinking" steps from actionable tool steps so we can render
+  // the thinking lines alongside the step list rather than inside it.
+  const actionSteps = visibleSteps.filter((s) => s.eventType !== "thinking");
+  const lastQA =
+    actionSteps.length > 0
+      ? parseQACard(
+          actionSteps[actionSteps.length - 1].eventType,
+          actionSteps[actionSteps.length - 1].message,
+        )
+      : null;
+
+  // Thinking text stays as an inline row beneath the step list.
+  const lastThinkingStep = [...visibleSteps].reverse().find((s) => s.eventType === "thinking");
+  const lastThinking = lastThinkingStep?.message ?? null;
+
+  // Show all action steps except QA steps (they get the collapsed QA card)
+  const rowSteps = lastQA ? actionSteps.slice(0, -1) : actionSteps;
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-0.5">
       <NarrationText text={group.narration} isActive={true} isFinished={isTerminal} />
-      <IconStrip steps={visibleSteps} isGroupActive={true} isTerminal={isTerminal} />
-      {lastThinking && <ThinkingRow text={lastThinking} isActive={!isTerminal} />}
+      {/* Compact per-step rows */}
+      {rowSteps.length > 0 && (
+        <div className="space-y-0">
+          {rowSteps.map((step, idx) => (
+            <LiveStepRow
+              key={step.id}
+              step={step}
+              isLast={idx === rowSteps.length - 1}
+              isTerminal={isTerminal}
+            />
+          ))}
+        </div>
+      )}
+      {/* QA card shown when the last deduplicated step is a qa_card */}
       {lastQA && <QACard data={lastQA} isActive={!isTerminal} />}
-      {lastDiff && <FileDiffCard data={lastDiff} />}
-      {lastCmd && <CommandOutputCard data={lastCmd} projectId={projectId} taskId={taskId} />}
-      {lastTool && <ToolCallCard data={lastTool} />}
-      {visibleSteps.length > 0 &&
-        !lastDiff &&
-        !lastCmd &&
-        !lastTool &&
-        !lastThinking &&
-        !lastQA && (
-          <p
-            className={cn(
-              "text-[10px] truncate leading-tight",
-              isTerminal ? "text-muted-foreground/50" : "text-muted-foreground",
-            )}
-          >
-            {fallbackLabel}
-          </p>
-        )}
+      {/* Thinking text below the step list */}
+      {lastThinking && !hideThinking && <ThinkingRow text={lastThinking} isActive={!isTerminal} />}
+      {/* Fallback when no steps yet */}
+      {visibleSteps.length === 0 && !isTerminal && (
+        <p className="text-[10px] text-muted-foreground leading-tight">Working…</p>
+      )}
     </div>
   );
 }
@@ -1149,12 +1316,27 @@ function BuildTimingRow({
   isFailed,
   groupsExpanded,
   onToggle,
+  stepCount,
 }: {
   elapsedSeconds: number;
   isFailed: boolean;
   groupsExpanded: boolean;
   onToggle: () => void;
+  /** Total number of agent tool-call steps for the "N steps · Xs" summary. */
+  stepCount?: number;
 }) {
+  const timeLabel =
+    elapsedSeconds < 60
+      ? `${elapsedSeconds}s`
+      : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`;
+
+  const summaryLabel =
+    stepCount != null && stepCount > 0
+      ? `${stepCount} step${stepCount !== 1 ? "s" : ""} · ${timeLabel}`
+      : isFailed
+        ? `Failed after ${formatElapsed(elapsedSeconds)}`
+        : `Worked for ${formatElapsed(elapsedSeconds)}`;
+
   return (
     <button
       onClick={onToggle}
@@ -1182,7 +1364,7 @@ function BuildTimingRow({
           isFailed ? "text-destructive/80" : "text-muted-foreground/70",
         )}
       >
-        {isFailed ? "Failed after" : "Worked for"} {formatElapsed(elapsedSeconds)}
+        {summaryLabel}
       </span>
     </button>
   );
@@ -1416,6 +1598,18 @@ export function AgentThinkingBubble({
   const isFailed = lastEvent?.eventType === "failed";
   const isCancelled = lastEvent?.eventType === "cancelled";
   const isIdle = useIdleGap(lastEventAt, isTerminal);
+
+  // Task #960 — auto-collapse the step list the moment the run reaches a
+  // terminal state so the "N steps · Xs" summary is the first thing the user
+  // sees.  Tracks the previous value so we only trigger once on the transition
+  // (not on every subsequent render).  The user can still manually re-expand.
+  const prevIsTerminalRef = useRef(false);
+  useEffect(() => {
+    if (isTerminal && !prevIsTerminalRef.current) {
+      setGroupsExpanded(false);
+    }
+    prevIsTerminalRef.current = isTerminal;
+  }, [isTerminal]);
   // True when the task is sitting in the queue (only event so far is "queued").
   // Once the job starts running it emits additional events and this flips false.
   const isQueued = events.length > 0 && events.every((e) => e.eventType === "queued");
@@ -1515,6 +1709,28 @@ export function AgentThinkingBubble({
   const groups = groupEventsByNarration(events as StepEvent[]);
   const finishedGroups = groups.slice(0, -1);
   const activeGroup = groups[groups.length - 1] ?? null;
+
+  // Task #960 — total actionable step count for the "N steps · Xs" summary.
+  // Use dedupeCommandOutputs so each command counts once (final event only),
+  // not once per streaming chunk. Exclude lifecycle/narration events.
+  const STEP_EVENT_TYPES = new Set([
+    "tool_call",
+    "file_diff",
+    "command_output",
+    "take_screenshot",
+    "web_fetch",
+    "web_search",
+    "extract_branding",
+    "generate_image",
+    "generate_video",
+    "generate_audio",
+    "remove_image_background",
+    "read_diagnostics",
+  ]);
+  const totalStepCount = groups.reduce((sum, g) => {
+    const deduped = dedupeCommandOutputs(g.steps);
+    return sum + deduped.filter((s) => STEP_EVENT_TYPES.has(s.eventType)).length;
+  }, 0);
 
   useEffect(() => {
     if (!isTerminal) return;
@@ -1664,6 +1880,7 @@ export function AgentThinkingBubble({
               isFailed={isFailed}
               groupsExpanded={groupsExpanded}
               onToggle={() => setGroupsExpanded((v) => !v)}
+              stepCount={totalStepCount}
             />
           </div>
         )}

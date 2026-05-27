@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * Lifecycle and step event types emitted by the agent task runner. `tool_call` carries a JSON-serialised ToolCallEventPayload in `message`; `file_diff` carries file path + diff stats; `command_output` carries command argv + stdout/stderr.
+
+ */
 export type TaskEventEventType = typeof TaskEventEventType[keyof typeof TaskEventEventType];
 
 
@@ -22,4 +26,7 @@ export const TaskEventEventType = {
   completed: 'completed',
   failed: 'failed',
   cancelled: 'cancelled',
+  tool_call: 'tool_call',
+  file_diff: 'file_diff',
+  command_output: 'command_output',
 } as const;

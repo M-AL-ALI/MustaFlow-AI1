@@ -1013,6 +1013,32 @@ export interface ChatExchange {
   detectedIntent?: ChatExchangeDetectedIntent;
 }
 
+/**
+ * Sanitised + size-capped copy of the tool arguments.
+ */
+export type ToolCallEventPayloadArgs = { [key: string]: unknown };
+
+/**
+ * JSON payload embedded in a `tool_call` TaskEvent's `message` field. Emitted by the agentic builder loop for every tool invocation that does not already have a dedicated event type (write_file → file_diff, run_command → command_output, etc.).
+
+ */
+export interface ToolCallEventPayload {
+  /** Name of the tool that was invoked (e.g. read_file, web_search). */
+  tool: string;
+  /** Sanitised + size-capped copy of the tool arguments. */
+  args: ToolCallEventPayloadArgs;
+  /** True when the tool call succeeded. */
+  ok: boolean;
+  /** Wall-clock time the tool call took in milliseconds. */
+  durationMs: number;
+  /** First ~400 chars of the observation returned to the model. */
+  preview: string;
+}
+
+/**
+ * Lifecycle and step event types emitted by the agent task runner. `tool_call` carries a JSON-serialised ToolCallEventPayload in `message`; `file_diff` carries file path + diff stats; `command_output` carries command argv + stdout/stderr.
+
+ */
 export type TaskEventEventType = typeof TaskEventEventType[keyof typeof TaskEventEventType];
 
 
@@ -1029,11 +1055,16 @@ export const TaskEventEventType = {
   completed: 'completed',
   failed: 'failed',
   cancelled: 'cancelled',
+  tool_call: 'tool_call',
+  file_diff: 'file_diff',
+  command_output: 'command_output',
 } as const;
 
 export interface TaskEvent {
   id: number;
   taskId: number;
+  /** Lifecycle and step event types emitted by the agent task runner. `tool_call` carries a JSON-serialised ToolCallEventPayload in `message`; `file_diff` carries file path + diff stats; `command_output` carries command argv + stdout/stderr.
+   */
   eventType: TaskEventEventType;
   message: string;
   /** @nullable */
