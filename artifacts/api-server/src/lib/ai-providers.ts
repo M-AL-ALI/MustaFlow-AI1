@@ -247,12 +247,19 @@ export interface CreateChatCompletionParams {
 export async function createChatCompletion(
   params: CreateChatCompletionParams,
 ): Promise<ChatCompletion> {
-  // Wrap all AI provider calls with the openai circuit breaker + retry.
-  // The circuit breaker is shared across all providers (it tracks upstream AI
-  // availability regardless of which backend is active).
-  const { openaiCircuit, withRetry, isTransientError } = await import("./resilience");
+  // Wrap AI provider calls with a per-provider circuit breaker + retry.
+  // Each provider gets its own breaker so an Anthropic outage does not open
+  // the OpenAI breaker and vice versa.
+  const { openaiCircuit, anthropicCircuit, geminiCircuit, withRetry, isTransientError } =
+    await import("./resilience");
+  const circuit =
+    params.provider === "anthropic"
+      ? anthropicCircuit
+      : params.provider === "gemini"
+        ? geminiCircuit
+        : openaiCircuit;
 
-  return openaiCircuit.call(() =>
+  return circuit.call(() =>
     withRetry(
       () => {
         if (params.provider === "openai") {
@@ -528,9 +535,13 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
       },
     }));
 
+  // Pick a max_tokens that the model can actually honour.
+  // Haiku-class models cap at 8 192; Sonnet/Opus Claude-4+ support 16 000.
+  // Using 32 000 causes HTTP 400 from haiku and trips the circuit breaker.
+  const defaultMaxTokens = /haiku/i.test(params.model) ? 8192 : 16000;
   const request: Record<string, unknown> = {
     model: params.model,
-    max_tokens: params.max_completion_tokens ?? 32000,
+    max_tokens: params.max_completion_tokens ?? defaultMaxTokens,
     system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
     messages: turns,
   };
@@ -561,12 +572,6 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
   for (const block of res.content ?? []) {
     if (block.type === "text") text += block.text ?? "";
     else if (block.type === "tool_use") {
-      const inputIsEmpty =
-        !block.input || (typeof block.input === "object" && Object.keys(block.input).length === 0);
-      if (res.stop_reason === "max_tokens" && inputIsEmpty) {
-        logger.warn({ blockName: block.name }, "anthropic: tool_use block has empty input due to max_tokens truncation — skipping");
-        continue;
-      }
       outToolCalls.push({
         id: block.id,
         type: "function",

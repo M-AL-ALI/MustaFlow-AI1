@@ -1714,6 +1714,16 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         terminationReason = "aborted";
         break;
       }
+      // Circuit breaker open — AI provider is temporarily degraded.
+      // Don't count against consecutiveErrors (it would silently exhaust
+      // REPEATED_ERROR_CAP). Instead break immediately with a clear message.
+      if (err instanceof Error && err.constructor.name === "CircuitOpenError") {
+        logger.warn({ err, step }, "agent-loop: circuit breaker open — aborting loop");
+        terminationReason = "repeated-error";
+        finalSummary =
+          "The AI service is temporarily unavailable. Please try again in 30 seconds.";
+        break;
+      }
       logger.warn({ err, step }, "agent-loop: model call failed");
       lastError = String((err as Error).message ?? err);
       consecutiveErrors++;
@@ -3588,6 +3598,15 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       const path = sanitizePath(args.path);
       if (!path) return { ok: false, observation: "ERROR: invalid path" };
       const content = typeof args.content === "string" ? args.content : "";
+      if (content.length === 0) {
+        return {
+          ok: false,
+          observation:
+            "ERROR: content is empty — provide the actual file content. " +
+            "If the file is large, write it in smaller sections using apply_patch, " +
+            "or split it into multiple files.",
+        };
+      }
       if (content.length > MAX_FILE_BYTES * 4) {
         return { ok: false, observation: `ERROR: content too large (${content.length} bytes)` };
       }

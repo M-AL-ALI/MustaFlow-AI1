@@ -286,6 +286,16 @@ export const openaiCircuit = new CircuitBreaker("openai", {
   cooldownMs: 30_000,
 });
 
+export const anthropicCircuit = new CircuitBreaker("anthropic", {
+  failureThreshold: 5,
+  cooldownMs: 30_000,
+});
+
+export const geminiCircuit = new CircuitBreaker("gemini", {
+  failureThreshold: 5,
+  cooldownMs: 30_000,
+});
+
 export const containerCircuit = new CircuitBreaker("fly-containers", {
   failureThreshold: 8,
   cooldownMs: 60_000,
@@ -300,4 +310,4 @@ export const stripeCircuit = new CircuitBreaker("stripe", {
  * All active circuit breakers — used by the status endpoint to report
  * component-level health.
  */
-export const ALL_BREAKERS = [openaiCircuit, containerCircuit, stripeCircuit];
+export const ALL_BREAKERS = [openaiCircuit, anthropicCircuit, geminiCircuit, containerCircuit, stripeCircuit];

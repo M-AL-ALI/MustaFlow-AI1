@@ -1,2 +1,3 @@
-- [Anthropic max_tokens truncation](anthropic-max-tokens.md) — callAnthropic defaults to 8192 tokens; large write_file calls silently produce empty files when truncated.
+- [Anthropic max_tokens truncation](anthropic-max-tokens.md) — callAnthropic defaults cap haiku at 8192 and sonnet/opus at 16000; exceeding model limits causes 400s that trip the circuit breaker.
 - [Anthropic assistant prefill rejection](anthropic-assistant-prefill.md) — Anthropic rejects calls where conversationHistory ends with role:"assistant"; need a bridge user message.
+- [AI provider circuit breaker isolation](circuit-breaker-provider-isolation.md) — each provider needs its own CircuitBreaker; shared breaker causes cross-provider outages silently masked as "Refined 0 files".
