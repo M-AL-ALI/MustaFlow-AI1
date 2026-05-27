@@ -2598,86 +2598,164 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             "generating_code",
             "First pass returned no changes — retrying with stricter instruction…",
           );
-          const stricterPrompt = `${userPrompt}\n\n[SYSTEM] The previous attempt returned zero file changes for a request that clearly asks for code modifications. You MUST now return at least one concrete file modification in the "files" array that addresses the request. If the request is genuinely ambiguous, pick the most likely interpretation and ship a minimal change.`;
-          const retryStackArgs = { ...stackRefineArgs, userPrompt: stricterPrompt };
+          const stricterPrompt = `${userPrompt}\n\n[SYSTEM] The previous attempt returned zero file changes for a request that clearly asks for code modifications. You MUST now return at least one concrete file modification that addresses the request. If the request is genuinely ambiguous, pick the most likely interpretation and ship a minimal change.`;
           try {
-            const retryResult = isMobileProject
-              ? await runMobileRefinePipeline({
-                  projectName: project.name,
-                  projectKind: project.kind,
-                  userPrompt: stricterPrompt,
-                  agentMode,
-                  existingFiles,
-                  conversationHistory,
-                  knowledgeContext: knowledgeContext || undefined,
-                  activeModuleIds,
-                  configuredSecretNames,
-                  imageAttachments,
-                  onEvent: async (type, message) => emitEvent(taskId, type, message),
-                  signal,
-                })
-              : isSlidesProject
-                ? await runSlidesRefinePipeline(retryStackArgs)
-                : isAnimationProject
-                  ? await runAnimationRefinePipeline(retryStackArgs)
-                  : isAutomationProject
-                    ? await runAutomationRefinePipeline(retryStackArgs)
-                    : isReactViteProject
-                      ? await runReactViteRefinePipeline({
-                          projectName: project.name,
-                          projectKind: project.kind,
-                          userPrompt: stricterPrompt,
-                          agentMode,
-                          existingFiles,
-                          conversationHistory,
-                          knowledgeContext: knowledgeContext || undefined,
-                          databaseContext,
-                          unchangedFilesHint:
-                            unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
-                          planContext: input.planContext ?? null,
-                          conversationSummary,
-                          imageAttachments,
-                          onEvent: async (type, message) => emitEvent(taskId, type, message),
-                          signal,
-                        })
-                      : isNextjsProject
-                        ? await runNextjsRefinePipeline(retryStackArgs)
-                        : isNodeApiProject
-                          ? await runNodeApiRefinePipeline(retryStackArgs)
-                          : isPythonFlaskProject
-                            ? await runFlaskRefinePipeline(retryStackArgs)
-                            : isPythonFastapiProject
-                              ? await runFastapiRefinePipeline(retryStackArgs)
-                              : isGoGinProject
-                                ? await runGoGinRefinePipeline(retryStackArgs)
-                                : await runRefinePipeline({
-                                    projectName: project.name,
-                                    projectKind: project.kind,
-                                    userPrompt: stricterPrompt,
-                                    agentMode,
-                                    existingFiles,
-                                    conversationHistory,
-                                    knowledgeContext: knowledgeContext || undefined,
-                                    databaseContext,
-                                    unchangedFilesHint:
-                                      unchangedFilesHint.length > 0
-                                        ? unchangedFilesHint
-                                        : undefined,
-                                    planContext: input.planContext ?? null,
-                                    conversationSummary,
-                                    imageAttachments,
-                                    builderMode: project.builderMode,
-                                    onEvent: async (type: string, message: string) =>
-                                      emitEvent(taskId, type, message),
-                                    onToken: (delta: string) => emitTokenEvent(taskId, delta),
-                                    signal,
-                                  });
-            if (!retryResult.correctionFailed) {
-              refineResult = retryResult;
-              refineResult.report.warnings = [
-                "First pass returned no file changes — retried once with a stricter instruction.",
-                ...(refineResult.report.warnings ?? []),
-              ];
+            if (USE_AGENT_LOOP_REFINE && !isSpecializedStaticProject) {
+              // Retry through the agentic loop for consistency — same parameters as the
+              // primary agentic refine path but with the stricter prompt appended.
+              const { runAgentLoop, loopResultToRefineResult } = await import("./agent-loop");
+              await emitEvent(taskId, "narration", "Agentic retry loop engaged.");
+              const retryLoopRes = await runAgentLoop({
+                mode: "refine",
+                projectId,
+                projectName: project.name,
+                projectKind: project.kind,
+                projectFormat: project.projectFormat ?? null,
+                stack: project.stack ?? null,
+                projectMode: project.projectMode ?? null,
+                userPrompt: stricterPrompt,
+                agentMode,
+                conversationHistory,
+                knowledgeContext: knowledgeContext || undefined,
+                planContext: input.planContext ?? null,
+                existingFiles,
+                containerId: project.containerId ?? null,
+                policyStrictness:
+                  (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
+                  null,
+                taskId,
+                wallClockMs: input.wallClockCapMs,
+                previewUrl: project.containerUrl ?? null,
+                e2eEnabled: project.e2eEnabled ?? true,
+                onEvent: async (t, m) => emitEvent(taskId, t, m),
+                signal,
+                onBillableSenseBatch: (credits, total) => {
+                  if (!project.ownerId) return;
+                  void deductCredits(project.ownerId, credits, {
+                    type: "senses",
+                    description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
+                    projectId,
+                  }).catch((err) =>
+                    logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
+                  );
+                },
+                onBillableCreativeCall: (credits, tool) => {
+                  if (!project.ownerId) return;
+                  void deductCredits(project.ownerId, credits, {
+                    type: "creative",
+                    description: `Agent ${tool} — project ${projectId}`,
+                    projectId,
+                  }).catch((err) =>
+                    logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
+                  );
+                },
+              });
+              const retryResult = loopResultToRefineResult(retryLoopRes, stricterPrompt);
+              const retryEmpty =
+                retryResult.changedFiles.length === 0 && retryResult.removedPaths.length === 0;
+              if (!retryResult.correctionFailed) {
+                refineResult = retryResult;
+                if (retryEmpty) {
+                  // Both passes returned 0 changes — surface a clear failure message so the
+                  // user knows the request needs clarification rather than silently showing
+                  // an unchanged preview.
+                  logger.warn(
+                    { taskId, projectId },
+                    "Agentic retry also returned 0 changes — surfacing double-fail to user",
+                  );
+                  refineResult.report.warnings = [
+                    "Neither the initial pass nor the retry produced any file changes. The request may be ambiguous or describe something already present — try rephrasing with a concrete code change in mind.",
+                    ...(refineResult.report.warnings ?? []),
+                  ];
+                } else {
+                  refineResult.report.warnings = [
+                    "First pass returned no file changes — retried once with a stricter instruction.",
+                    ...(refineResult.report.warnings ?? []),
+                  ];
+                }
+              }
+            } else {
+              // Specialized static project (mobile, slides, animation, automation, etc.) or
+              // agentic loop disabled — fall back to the per-stack legacy retry pipeline.
+              const retryStackArgs = { ...stackRefineArgs, userPrompt: stricterPrompt };
+              const retryResult = isMobileProject
+                ? await runMobileRefinePipeline({
+                    projectName: project.name,
+                    projectKind: project.kind,
+                    userPrompt: stricterPrompt,
+                    agentMode,
+                    existingFiles,
+                    conversationHistory,
+                    knowledgeContext: knowledgeContext || undefined,
+                    activeModuleIds,
+                    configuredSecretNames,
+                    imageAttachments,
+                    onEvent: async (type, message) => emitEvent(taskId, type, message),
+                    signal,
+                  })
+                : isSlidesProject
+                  ? await runSlidesRefinePipeline(retryStackArgs)
+                  : isAnimationProject
+                    ? await runAnimationRefinePipeline(retryStackArgs)
+                    : isAutomationProject
+                      ? await runAutomationRefinePipeline(retryStackArgs)
+                      : isReactViteProject
+                        ? await runReactViteRefinePipeline({
+                            projectName: project.name,
+                            projectKind: project.kind,
+                            userPrompt: stricterPrompt,
+                            agentMode,
+                            existingFiles,
+                            conversationHistory,
+                            knowledgeContext: knowledgeContext || undefined,
+                            databaseContext,
+                            unchangedFilesHint:
+                              unchangedFilesHint.length > 0 ? unchangedFilesHint : undefined,
+                            planContext: input.planContext ?? null,
+                            conversationSummary,
+                            imageAttachments,
+                            onEvent: async (type, message) => emitEvent(taskId, type, message),
+                            signal,
+                          })
+                        : isNextjsProject
+                          ? await runNextjsRefinePipeline(retryStackArgs)
+                          : isNodeApiProject
+                            ? await runNodeApiRefinePipeline(retryStackArgs)
+                            : isPythonFlaskProject
+                              ? await runFlaskRefinePipeline(retryStackArgs)
+                              : isPythonFastapiProject
+                                ? await runFastapiRefinePipeline(retryStackArgs)
+                                : isGoGinProject
+                                  ? await runGoGinRefinePipeline(retryStackArgs)
+                                  : await runRefinePipeline({
+                                      projectName: project.name,
+                                      projectKind: project.kind,
+                                      userPrompt: stricterPrompt,
+                                      agentMode,
+                                      existingFiles,
+                                      conversationHistory,
+                                      knowledgeContext: knowledgeContext || undefined,
+                                      databaseContext,
+                                      unchangedFilesHint:
+                                        unchangedFilesHint.length > 0
+                                          ? unchangedFilesHint
+                                          : undefined,
+                                      planContext: input.planContext ?? null,
+                                      conversationSummary,
+                                      imageAttachments,
+                                      builderMode: project.builderMode,
+                                      onEvent: async (type: string, message: string) =>
+                                        emitEvent(taskId, type, message),
+                                      onToken: (delta: string) => emitTokenEvent(taskId, delta),
+                                      signal,
+                                    });
+              if (!retryResult.correctionFailed) {
+                refineResult = retryResult;
+                refineResult.report.warnings = [
+                  "First pass returned no file changes — retried once with a stricter instruction.",
+                  ...(refineResult.report.warnings ?? []),
+                ];
+              }
             }
           } catch (err) {
             logger.warn(
