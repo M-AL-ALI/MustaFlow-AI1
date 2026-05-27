@@ -23,6 +23,7 @@ import { jobQueueDepth, jobsTotal } from "./metrics";
 
 export const QUEUE_BUILD = "mustaflow.build";
 export const QUEUE_REFINE = "mustaflow.refine";
+export const QUEUE_GDPR_ERASURE = "mustaflow.gdpr-erasure";
 
 const RETRY_LIMIT = 2;
 const RETRY_DELAY_SECONDS = 30;
@@ -169,6 +170,88 @@ export async function getQueueStats(): Promise<{
     };
   } catch {
     return { build: null, refine: null };
+  }
+}
+
+const GDPR_ERASURE_RETRY_LIMIT = 3;
+const GDPR_ERASURE_RETRY_DELAY_SECONDS = 300;
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Enqueue a GDPR erasure job for the given userId, scheduled to run 30 days
+ * from now. Uses singletonKey so only one pending erasure job exists per user
+ * at a time — safe to call multiple times (idempotent).
+ *
+ * Returns the pg-boss job ID, or null when the queue is unavailable.
+ */
+export async function enqueueGdprErasure(userId: string): Promise<string | null> {
+  if (!isDurableQueueReady() || !boss) return null;
+  const startAfter = new Date(Date.now() + THIRTY_DAYS_MS);
+  try {
+    await boss.createQueue(QUEUE_GDPR_ERASURE, {
+      retryLimit: GDPR_ERASURE_RETRY_LIMIT,
+      retryDelay: GDPR_ERASURE_RETRY_DELAY_SECONDS,
+      retryBackoff: true,
+    });
+    const id = await boss.send(
+      QUEUE_GDPR_ERASURE,
+      { userId },
+      {
+        retryLimit: GDPR_ERASURE_RETRY_LIMIT,
+        retryDelay: GDPR_ERASURE_RETRY_DELAY_SECONDS,
+        retryBackoff: true,
+        startAfter,
+        singletonKey: userId,
+        singletonNextSlot: true,
+      },
+    );
+    logger.info({ userId, startAfter, jobId: id }, "GDPR erasure job enqueued");
+    return id ?? null;
+  } catch (err) {
+    logger.error({ err, userId }, "Failed to enqueue GDPR erasure job");
+    return null;
+  }
+}
+
+/**
+ * Register a worker for the GDPR erasure queue. The handler receives the
+ * userId of the account to erase and must be idempotent.
+ *
+ * Call after startDurableQueue() has completed.
+ */
+export async function registerGdprErasureWorker(
+  handler: (userId: string) => Promise<void>,
+): Promise<void> {
+  if (!isDurableQueueReady() || !boss) return;
+  try {
+    await boss.createQueue(QUEUE_GDPR_ERASURE, {
+      retryLimit: GDPR_ERASURE_RETRY_LIMIT,
+      retryDelay: GDPR_ERASURE_RETRY_DELAY_SECONDS,
+      retryBackoff: true,
+    });
+    await boss.work(
+      QUEUE_GDPR_ERASURE,
+      { batchSize: 1, pollingIntervalSeconds: 60 },
+      async (jobs: Job<Record<string, unknown>>[]) => {
+        const job = jobs[0];
+        if (!job) return;
+        const userId = String(job.data.userId ?? "");
+        if (!userId) {
+          logger.warn({ jobId: job.id }, "GDPR erasure job missing userId — skipping");
+          return;
+        }
+        try {
+          await handler(userId);
+          logger.info({ userId, jobId: job.id }, "GDPR erasure job completed");
+        } catch (err) {
+          logger.error({ err, userId, jobId: job.id }, "GDPR erasure job failed");
+          throw err;
+        }
+      },
+    );
+    logger.info("GDPR erasure worker registered");
+  } catch (err) {
+    logger.error({ err }, "Failed to register GDPR erasure worker");
   }
 }
 

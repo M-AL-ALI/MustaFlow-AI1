@@ -154,6 +154,27 @@ export class ObjectStorageService {
     return objectFile;
   }
 
+  /**
+   * Generate a short-lived signed GET URL for an object given its objectPath.
+   * Returns null when the path is invalid or signing fails.
+   * Useful for GDPR exports so users can download their uploaded files.
+   */
+  async getSignedDownloadUrl(objectPath: string, ttlSec = 604800): Promise<string | null> {
+    try {
+      if (!objectPath.startsWith("/objects/")) return null;
+      const parts = objectPath.slice(1).split("/");
+      if (parts.length < 2) return null;
+      const entityId = parts.slice(1).join("/");
+      let entityDir = this.getPrivateObjectDir();
+      if (!entityDir.endsWith("/")) entityDir = `${entityDir}/`;
+      const objectEntityPath = `${entityDir}${entityId}`;
+      const { bucketName, objectName } = parseObjectPath(objectEntityPath);
+      return await signObjectURL({ bucketName, objectName, method: "GET", ttlSec });
+    } catch {
+      return null;
+    }
+  }
+
   normalizeObjectEntityPath(rawPath: string): string {
     if (!rawPath.startsWith("https://storage.googleapis.com/")) {
       return rawPath;

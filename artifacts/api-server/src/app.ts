@@ -18,8 +18,9 @@ import { startCfScheduler } from "./lib/cf-scheduler";
 import { startDeploymentScheduler } from "./lib/deployment-scheduler";
 import { initSentry, captureError, Sentry } from "./lib/sentry";
 import { httpRequestDuration, httpRequestsTotal } from "./lib/metrics";
-import { startDurableQueue, stopDurableQueue } from "./lib/durable-queue";
+import { startDurableQueue, stopDurableQueue, registerGdprErasureWorker } from "./lib/durable-queue";
 import { runJob } from "./lib/jobs";
+import { runGdprErasure } from "./lib/gdpr-erasure-worker";
 import { startDomainRenewalScheduler } from "./lib/domain-renewal-scheduler";
 import { startKnowledgePromotionScheduler } from "./lib/knowledge-promotion";
 
@@ -42,6 +43,8 @@ startDeploymentScheduler();
 // DURABLE_QUEUE_ENABLED=false. Falls back to in-memory enqueueJob silently.
 void startDurableQueue(async (payload) => {
   await runJob(payload as unknown as Parameters<typeof runJob>[0]);
+}).then(() => {
+  void registerGdprErasureWorker(runGdprErasure);
 });
 
 // Kick off the domain renewal scheduler (Task #559).

@@ -127,6 +127,56 @@ export async function sendOrgInvite(opts: {
   await sendEmail({ to, ...tmpl });
 }
 
+export async function sendGdprDeletionConfirmation(opts: {
+  to: string;
+  userId: string;
+  erasureDate: Date;
+}): Promise<void> {
+  const { to, userId, erasureDate } = opts;
+  const erasureDateStr = erasureDate.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const subject = "Your account deletion request has been received";
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111">
+  <h2 style="margin-top:0">We've received your deletion request</h2>
+  <p>We have received your request to delete your MustaFlow account and all associated data.</p>
+  <p>Your data will be permanently and irreversibly deleted on or before
+     <strong>${erasureDateStr}</strong>.</p>
+  <p>The following data will be removed:</p>
+  <ul>
+    <li>All your projects, files, and build history</li>
+    <li>AI chat messages and knowledge vault entries</li>
+    <li>Uploaded files and assets</li>
+    <li>Workspace memberships and activity history</li>
+    <li>Credit transaction history</li>
+    <li>Custom domain records</li>
+    <li>Deployment history</li>
+  </ul>
+  <p>If you did not make this request or wish to cancel it, please contact us within
+     30 days at <a href="mailto:privacy@mustaflow.app">privacy@mustaflow.app</a>.</p>
+  <p style="font-size:12px;color:#666">Reference ID: ${userId}</p>
+</body>
+</html>`;
+
+  const text = [
+    "We've received your account deletion request.",
+    "",
+    `Your data will be permanently deleted on or before ${erasureDateStr}.`,
+    "",
+    "To cancel this request, contact privacy@mustaflow.app within 30 days.",
+    "",
+    `Reference ID: ${userId}`,
+  ].join("\n");
+
+  await sendEmail({ to, subject, html, text });
+}
+
 export async function sendDomainRenewalFailure(opts: {
   to: string;
   hostname: string;

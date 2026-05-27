@@ -45,6 +45,23 @@ function summarise(user: {
 }
 
 /**
+ * Look up a single Clerk user by their user ID.
+ * Returns null when the user does not exist, Clerk is not configured, or the call fails.
+ */
+export async function getClerkUserById(userId: string): Promise<ClerkUserSummary | null> {
+  if (!userId) return null;
+  if (!clerkConfigured()) return null;
+  try {
+    const user = await clerkClient.users.getUser(userId);
+    if (!user) return null;
+    return summarise(user);
+  } catch (err) {
+    logger.warn({ err, userId }, "Clerk user lookup by ID failed");
+    return null;
+  }
+}
+
+/**
  * Look up a Clerk user by email address. Returns null when no user exists for
  * the email, when Clerk is not configured, or when the Clerk call fails.
  */
