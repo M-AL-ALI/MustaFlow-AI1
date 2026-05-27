@@ -1023,6 +1023,12 @@ export default function ProjectWorkspacePage() {
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [agentMode, setAgentMode] = useState<AgentMode>("power");
   const [subscriptionTier, setSubscriptionTier] = useState<"free" | "pro" | "team">("free");
+  const [showCreditConfirm, setShowCreditConfirm] = useState<{
+    mode: string;
+    cost: number;
+  } | null>(null);
+  const pendingCreditConfirmRef = useRef<(() => void) | null>(null);
+  const creditConfirmedRef = useRef(false);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -2059,6 +2065,29 @@ export default function ProjectWorkspacePage() {
         (converseKeywords.test(content.trim()) && !effectivePlanMode);
       pendingIsConverseRef.current = isLikelyConverse;
       setPendingIsConverse(isLikelyConverse);
+
+      // Credit confirmation for Power/Pro builds — skip for converse-intent
+      // messages so casual questions aren't gated behind a dialog.
+      // Use creditConfirmedRef (a stable ref) to bypass the dialog on the
+      // second call so we avoid any stale-closure issues with useCallback.
+      const CREDIT_COST: Record<string, number> = { lite: 1, eco: 2, power: 5, pro: 10 };
+      const modeCost = CREDIT_COST[effectiveMode] ?? 0;
+      if (
+        (effectiveMode === "power" || effectiveMode === "pro") &&
+        !isLikelyConverse &&
+        !creditConfirmedRef.current
+      ) {
+        pendingCreditConfirmRef.current = () => {
+          setShowCreditConfirm(null);
+          pendingCreditConfirmRef.current = null;
+          creditConfirmedRef.current = true;
+          send(content, opts);
+        };
+        setShowCreditConfirm({ mode: effectiveMode, cost: modeCost });
+        return;
+      }
+      // Reset bypass flag so the next independent build shows the dialog again
+      creditConfirmedRef.current = false;
 
       // For plan/build or background tasks skip streaming and go straight to the regular path
       if (
@@ -4632,6 +4661,50 @@ export default function ProjectWorkspacePage() {
           isAgenticProject={project.builderMode === "agentic"}
         />
       )}
+
+      {/* Credit confirmation dialog for Power / Pro builds */}
+      <AlertDialog
+        open={!!showCreditConfirm}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowCreditConfirm(null);
+            pendingCreditConfirmRef.current = null;
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Confirm {showCreditConfirm?.mode === "pro" ? "Pro" : "Power"} build
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This build uses{" "}
+              <span className="font-semibold text-foreground">
+                {showCreditConfirm?.cost} credit{(showCreditConfirm?.cost ?? 0) !== 1 ? "s" : ""}
+              </span>{" "}
+              ({showCreditConfirm?.mode === "pro" ? "Pro" : "Power"} mode). Your balance will be
+              updated after the build completes. Continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setShowCreditConfirm(null);
+                pendingCreditConfirmRef.current = null;
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                pendingCreditConfirmRef.current?.();
+              }}
+            >
+              Build now
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Build-in-progress navigation guard (Task #755) */}
       <AlertDialog open={navGuardOpen} onOpenChange={setNavGuardOpen}>

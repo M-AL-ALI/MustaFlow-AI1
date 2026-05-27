@@ -1691,6 +1691,39 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       break;
     }
 
+    // Emit a live progress event so the frontend can show a step counter and
+    // wall-clock progress bar without polling. Include the last executed tool
+    // name so the UI can show context about what just happened.
+    await safeEvent(
+      input.onEvent,
+      "loop:step",
+      JSON.stringify({
+        stepIndex: toolCalls.length + 1,
+        stepCap: STEP_CAP,
+        wallClockElapsedMs: Date.now() - startedAt,
+        wallClockBudgetMs: wallClockMs,
+        toolName: toolCalls[toolCalls.length - 1]?.tool ?? null,
+      }),
+    );
+
+    // Inject any mid-run steering hint the user submitted via POST /steer.
+    // Consumed once (deleted after this read) so it only applies to this turn.
+    if (input.taskId) {
+      const { consumeSteeringHint } = await import("./steering-hints");
+      const hint = consumeSteeringHint(input.taskId);
+      if (hint) {
+        messages.push({
+          role: "system",
+          content: `[User steering hint — apply immediately]: ${hint}`,
+        });
+        await safeEvent(
+          input.onEvent,
+          "narration",
+          `Applying your update: "${hint.slice(0, 120)}"`,
+        );
+      }
+    }
+
     let response;
     try {
       const { createChatCompletion, resolveStageProvider, VISION_MODEL } =
@@ -2300,6 +2333,33 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // If the loop exited via the for-condition without break, it's a step-cap exhaustion.
   if (step > STEP_CAP && terminationReason === "model-stopped" && !finalized) {
     terminationReason = "step-cap";
+  }
+
+  // Emit a plain-language narration for hard termination reasons so the chat
+  // bubble gives the user actionable context instead of just going silent.
+  if (!input.signal.aborted) {
+    const changedCount = workspace.diff().changed.length;
+    if (terminationReason === "step-cap") {
+      const fileNote =
+        changedCount > 0
+          ? ` — ${changedCount} file${changedCount !== 1 ? "s" : ""} were created or modified`
+          : "";
+      await safeEvent(
+        input.onEvent,
+        "narration",
+        `Reached the step limit${fileNote}. You can continue with a follow-up prompt.`,
+      );
+    } else if (terminationReason === "wall-clock") {
+      const fileNote =
+        changedCount > 0
+          ? ` after modifying ${changedCount} file${changedCount !== 1 ? "s" : ""}`
+          : "";
+      await safeEvent(
+        input.onEvent,
+        "narration",
+        `Reached the time budget${fileNote}. You can continue with a follow-up prompt.`,
+      );
+    }
   }
 
   // ── Post-loop: run required checks (whether the model finalized or not) ──

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   useListTasks,
   getListTasksQueryKey,
@@ -45,6 +45,8 @@ import {
   TerminalSquare,
   EyeOff,
   Eye,
+  SendHorizonal,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -551,12 +553,51 @@ function getToolIcon(toolName: string): React.ElementType {
   return TOOL_ICON[toolName] ?? Wrench;
 }
 
+/** Parse the latest loop:step payload from the raw event stream. */
+type LoopStepPayload = {
+  stepIndex: number;
+  stepCap: number;
+  wallClockElapsedMs: number;
+  wallClockBudgetMs: number;
+  toolName: string | null;
+};
+
+function parseLatestLoopStep(events: StepEvent[]): LoopStepPayload | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e && e.eventType === "loop:step" && e.message.startsWith("{")) {
+      try {
+        const obj = JSON.parse(e.message) as Partial<LoopStepPayload>;
+        if (
+          typeof obj.stepIndex === "number" &&
+          typeof obj.stepCap === "number" &&
+          typeof obj.wallClockElapsedMs === "number" &&
+          typeof obj.wallClockBudgetMs === "number"
+        ) {
+          return {
+            stepIndex: obj.stepIndex,
+            stepCap: obj.stepCap,
+            wallClockElapsedMs: obj.wallClockElapsedMs,
+            wallClockBudgetMs: obj.wallClockBudgetMs,
+            toolName: typeof obj.toolName === "string" ? obj.toolName : null,
+          };
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return null;
+}
+
 function groupEventsByNarration(events: StepEvent[]): StepGroup[] {
   const groups: StepGroup[] = [];
   let groupIndex = 0;
 
   for (const event of events) {
     if (event.eventType === "queued") continue;
+    // loop:step events are metadata for the progress bar — not rendered in groups
+    if (event.eventType === "loop:step") continue;
 
     if (event.eventType === "narration") {
       if (groups.length > 0) {
@@ -1311,6 +1352,146 @@ function ActiveGroupRow({
   );
 }
 
+/** Live step-counter + wall-clock progress bar shown while the loop is running.
+ *  `liveWallClockMs` is interpolated every second by the parent so the time bar
+ *  ticks forward continuously instead of only updating on SSE events.
+ */
+function LoopProgressBar({
+  stepIndex,
+  stepCap,
+  liveWallClockMs,
+  wallClockBudgetMs,
+  toolName,
+}: {
+  stepIndex: number;
+  stepCap: number;
+  liveWallClockMs: number;
+  wallClockBudgetMs: number;
+  toolName: string | null;
+}) {
+  const stepPct = Math.min(100, Math.round((stepIndex / stepCap) * 100));
+  const timePct = Math.min(100, Math.round((liveWallClockMs / wallClockBudgetMs) * 100));
+  const elapsedSec = Math.floor(liveWallClockMs / 1000);
+  const timeLabel =
+    elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
+  const toolLabel = toolName ? humanizeTool(toolName, {}) : null;
+
+  return (
+    <div className="flex items-center gap-2 py-0.5">
+      <Gauge className="h-2.5 w-2.5 shrink-0 text-primary/60" />
+      <div className="flex-1 space-y-0.5 min-w-0">
+        {/* step bar + optional last-tool label */}
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full bg-primary/60 rounded-full transition-all duration-500"
+              style={{ width: `${stepPct}%` }}
+            />
+          </div>
+          <span className="shrink-0 text-[9px] font-mono text-muted-foreground/60">
+            step {stepIndex}/{stepCap}
+          </span>
+        </div>
+        {/* time bar */}
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 h-0.5 rounded-full bg-muted overflow-hidden">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-500",
+                timePct > 80 ? "bg-yellow-400/60" : "bg-muted-foreground/30",
+              )}
+              style={{ width: `${timePct}%` }}
+            />
+          </div>
+          <span className="shrink-0 text-[9px] font-mono text-muted-foreground/50">
+            {timeLabel}
+          </span>
+        </div>
+        {/* last action context */}
+        {toolLabel && (
+          <p className="text-[9px] text-muted-foreground/40 truncate leading-tight">{toolLabel}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Mid-run steering input — lets the user nudge the agent mid-build. */
+function SteeringInput({ projectId, taskId }: { projectId: number; taskId: number }) {
+  const [hint, setHint] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleSend = useCallback(async () => {
+    const trimmed = hint.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/tasks/${taskId}/steer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hint: trimmed }),
+      });
+      if (resp.ok) {
+        setHint("");
+        setSent(true);
+        setTimeout(() => setSent(false), 3000);
+      }
+    } catch {
+      // ignore — non-fatal
+    } finally {
+      setSending(false);
+    }
+  }, [hint, projectId, taskId, sending]);
+
+  return (
+    <div className="mt-1.5 rounded-md border border-border/50 bg-background/60 overflow-hidden">
+      <div className="px-2 pt-1.5 pb-1 flex items-start gap-1.5">
+        <textarea
+          ref={textareaRef}
+          value={hint}
+          onChange={(e) => setHint(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void handleSend();
+            }
+          }}
+          placeholder="Steer the build — press Enter to send…"
+          rows={1}
+          disabled={sending}
+          className="flex-1 min-w-0 resize-none bg-transparent text-[11px] text-foreground/90 placeholder:text-muted-foreground/40 outline-none leading-snug pt-px disabled:opacity-60"
+        />
+        <button
+          onClick={() => void handleSend()}
+          disabled={!hint.trim() || sending}
+          title="Send steering hint (Enter)"
+          className={cn(
+            "shrink-0 flex items-center justify-center h-5 w-5 rounded transition-colors",
+            hint.trim() && !sending
+              ? "text-primary hover:text-primary/80"
+              : "text-muted-foreground/30 cursor-not-allowed",
+          )}
+        >
+          {sending ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <SendHorizonal className="h-3 w-3" />
+          )}
+        </button>
+      </div>
+      {sent && (
+        <div className="px-2 pb-1.5">
+          <span className="text-[10px] text-green-400">
+            Hint queued — the agent will apply it on the next step.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BuildTimingRow({
   elapsedSeconds,
   isFailed,
@@ -1579,8 +1760,11 @@ export function AgentThinkingBubble({
   const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
   const [groupsExpanded, setGroupsExpanded] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  const [cancelConfirming, setCancelConfirming] = useState(false);
   const [forceStarting, setForceStarting] = useState(false);
   const [hideThinking, setHideThinking] = useHideThinking();
+  // Live interpolation of the wall-clock elapsed time between SSE events.
+  const [liveWallClockMs, setLiveWallClockMs] = useState(0);
   const cancelTask = useCancelTask();
   const forceStartTask = useForceStartTask();
 
@@ -1614,8 +1798,14 @@ export function AgentThinkingBubble({
   // Once the job starts running it emits additional events and this flips false.
   const isQueued = events.length > 0 && events.every((e) => e.eventType === "queued");
 
-  const handleCancel = () => {
+  const handleCancelRequest = () => {
     if (cancelling || isTerminal) return;
+    setCancelConfirming(true);
+  };
+
+  const handleCancelConfirm = () => {
+    if (cancelling || isTerminal) return;
+    setCancelConfirming(false);
     setCancelling(true);
     cancelTask.mutate(
       { id: projectId, taskId },
@@ -1705,6 +1895,19 @@ export function AgentThinkingBubble({
       setElapsedSeconds(Math.max(1, Math.round((Date.now() - origin.getTime()) / 1000)));
     }
   }, [isTerminal, startedAt, completedTask?.elapsedSeconds]);
+
+  const loopStep = isTerminal ? null : parseLatestLoopStep(events as StepEvent[]);
+
+  // Interpolate the wall-clock timer every second so the time bar ticks
+  // smoothly between SSE events rather than only jumping on new events.
+  useEffect(() => {
+    if (isTerminal || !loopStep) return;
+    setLiveWallClockMs(loopStep.wallClockElapsedMs);
+    const interval = setInterval(() => {
+      setLiveWallClockMs((prev) => prev + 1000);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isTerminal, loopStep?.stepIndex, loopStep?.wallClockElapsedMs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const groups = groupEventsByNarration(events as StepEvent[]);
   const finishedGroups = groups.slice(0, -1);
@@ -1849,9 +2052,9 @@ export function AgentThinkingBubble({
               Run now
             </button>
           )}
-          {!isTerminal && !isQueued && (
+          {!isTerminal && !isQueued && !cancelConfirming && (
             <button
-              onClick={handleCancel}
+              onClick={handleCancelRequest}
               disabled={cancelling}
               title="Cancel build"
               data-testid="cancel-build-btn"
@@ -1870,7 +2073,37 @@ export function AgentThinkingBubble({
               Cancel
             </button>
           )}
+          {!isTerminal && !isQueued && cancelConfirming && (
+            <>
+              <button
+                onClick={handleCancelConfirm}
+                className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-destructive/50 text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              >
+                <Square className="h-2.5 w-2.5" />
+                Confirm cancel
+              </button>
+              <button
+                onClick={() => setCancelConfirming(false)}
+                className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              >
+                Keep building
+              </button>
+            </>
+          )}
         </div>
+
+        {/* Live step/time progress bar — shown only while building */}
+        {!isTerminal && !isQueued && loopStep && (
+          <div className="px-3 pb-1">
+            <LoopProgressBar
+              stepIndex={loopStep.stepIndex}
+              stepCap={loopStep.stepCap}
+              liveWallClockMs={liveWallClockMs}
+              wallClockBudgetMs={loopStep.wallClockBudgetMs}
+              toolName={loopStep.toolName}
+            />
+          </div>
+        )}
 
         {/* Build timing row (shown when terminal) */}
         {isTerminal && elapsedSeconds !== null && (
@@ -1910,6 +2143,11 @@ export function AgentThinkingBubble({
             )}
 
             {isIdle && !isTerminal && !isQueued && <ThinkingIdleIndicator />}
+
+            {/* Mid-run steering input — visible while the build is in progress */}
+            {!isTerminal && !isQueued && loopStep && (
+              <SteeringInput projectId={projectId} taskId={taskId} />
+            )}
 
             {groups.length === 0 && !isTerminal && (
               <div className="flex items-center gap-2 text-muted-foreground">
