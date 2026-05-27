@@ -18,7 +18,11 @@ import { startCfScheduler } from "./lib/cf-scheduler";
 import { startDeploymentScheduler } from "./lib/deployment-scheduler";
 import { initSentry, captureError, Sentry } from "./lib/sentry";
 import { httpRequestDuration, httpRequestsTotal } from "./lib/metrics";
-import { startDurableQueue, stopDurableQueue, registerGdprErasureWorker } from "./lib/durable-queue";
+import {
+  startDurableQueue,
+  stopDurableQueue,
+  registerGdprErasureWorker,
+} from "./lib/durable-queue";
 import { runJob, registerJobWorkers } from "./lib/jobs";
 import { runGdprErasure } from "./lib/gdpr-erasure-worker";
 import { startDomainRenewalScheduler } from "./lib/domain-renewal-scheduler";

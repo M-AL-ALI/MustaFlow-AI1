@@ -12,6 +12,74 @@ import { getOrCreateCredits } from "./credits";
 import { buildEmbeddingInput, generateEmbedding } from "../lib/embeddings";
 import { anonymiseContent } from "../lib/knowledge-promotion";
 import type { SQL } from "drizzle-orm";
+import { z } from "zod";
+
+// Public column projection — excludes internal-only fields (embedding vector, contributorRewardedAt).
+// Use this for all SELECT and RETURNING clauses that send data to the client.
+const publicKnowledgeColumns = {
+  id: knowledgeEntriesTable.id,
+  title: knowledgeEntriesTable.title,
+  content: knowledgeEntriesTable.content,
+  category: knowledgeEntriesTable.category,
+  type: knowledgeEntriesTable.type,
+  severity: knowledgeEntriesTable.severity,
+  scope: knowledgeEntriesTable.scope,
+  tags: knowledgeEntriesTable.tags,
+  annotation: knowledgeEntriesTable.annotation,
+  approvedForReuse: knowledgeEntriesTable.approvedForReuse,
+  isPublic: knowledgeEntriesTable.isPublic,
+  thumbsUp: knowledgeEntriesTable.thumbsUp,
+  thumbsDown: knowledgeEntriesTable.thumbsDown,
+  usageCount: knowledgeEntriesTable.usageCount,
+  reinforcedCount: knowledgeEntriesTable.reinforcedCount,
+  projectId: knowledgeEntriesTable.projectId,
+  userId: knowledgeEntriesTable.userId,
+  relatedTaskId: knowledgeEntriesTable.relatedTaskId,
+  relatedVersionId: knowledgeEntriesTable.relatedVersionId,
+  diffSummary: knowledgeEntriesTable.diffSummary,
+  archivedAt: knowledgeEntriesTable.archivedAt,
+  createdAt: knowledgeEntriesTable.createdAt,
+} as const;
+
+// Zod schemas for request validation
+const patchKnowledgeSchema = z
+  .object({
+    annotation: z.string().trim().max(5000).nullable().optional(),
+    approvedForReuse: z.boolean().optional(),
+    archived: z.boolean().optional(),
+    title: z.string().trim().min(1).max(500).optional(),
+    content: z.string().trim().min(1).max(10000).optional(),
+    isPublic: z.boolean().optional(),
+    scope: z.enum(["project", "global", "user", "org"]).optional(),
+    category: z.string().trim().min(1).max(100).optional(),
+    severity: z.enum(["info", "warning", "error"]).optional(),
+    tags: z.array(z.string().trim().max(100)).max(50).optional(),
+  })
+  .strict();
+
+const importKnowledgeEntrySchema = z.object({
+  title: z.string().trim().min(1).max(500),
+  content: z.string().trim().min(1).max(10000),
+  category: z.string().trim().max(100).optional(),
+  type: z.string().trim().max(100).optional(),
+  severity: z.enum(["info", "warning", "error"]).optional(),
+  scope: z.enum(["project", "global", "user", "org"]).optional(),
+  tags: z.string().trim().max(500).nullable().optional(),
+  annotation: z.string().trim().max(5000).nullable().optional(),
+  approvedForReuse: z.boolean().optional(),
+  isPublic: z.boolean().optional(),
+});
+
+const importKnowledgeSchema = z.object({
+  entries: z.array(importKnowledgeEntrySchema).min(1).max(500),
+});
+
+const brandProfileSchema = z.object({
+  primaryColor: z.string().max(32).optional(),
+  accentColor: z.string().max(32).optional(),
+  fontPairing: z.string().max(120).optional(),
+  tone: z.string().max(60).optional(),
+});
 
 const router: IRouter = Router();
 
@@ -102,7 +170,7 @@ router.get("/knowledge", async (req, res): Promise<void> => {
   const whereClause = conditions.length === 1 ? conditions[0]! : and(...conditions);
 
   const rows = await db
-    .select()
+    .select(publicKnowledgeColumns)
     .from(knowledgeEntriesTable)
     .where(whereClause)
     .orderBy(desc(knowledgeEntriesTable.createdAt))
@@ -144,7 +212,7 @@ router.post("/knowledge", async (req, res): Promise<void> => {
       tags: body.tags ? body.tags.join(",") : null,
       approvedForReuse: false,
     })
-    .returning();
+    .returning(publicKnowledgeColumns);
 
   res.status(201).json(row);
 });
@@ -186,15 +254,13 @@ router.patch("/knowledge/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const body = req.body as {
-    annotation?: string | null;
-    approvedForReuse?: boolean;
-    archived?: boolean;
-    title?: string;
-    content?: string;
-    isPublic?: boolean;
-    scope?: string;
-  };
+  const parseResult = patchKnowledgeSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    res.status(400).json({ error: "Invalid request body", detail: parseResult.error.flatten() });
+    return;
+  }
+
+  const body = parseResult.data;
 
   const updates: Partial<{
     annotation: string | null;
@@ -204,17 +270,22 @@ router.patch("/knowledge/:id", async (req, res): Promise<void> => {
     content: string;
     isPublic: boolean;
     scope: string;
+    category: string;
+    severity: string;
+    tags: string | null;
   }> = {};
 
   if ("annotation" in body) updates.annotation = body.annotation ?? null;
   if (typeof body.approvedForReuse === "boolean") updates.approvedForReuse = body.approvedForReuse;
   if (typeof body.archived === "boolean") updates.archivedAt = body.archived ? new Date() : null;
-  if (typeof body.title === "string" && body.title.trim().length > 0)
-    updates.title = body.title.trim();
-  if (typeof body.content === "string" && body.content.trim().length > 0)
-    updates.content = body.content.trim();
+  // Zod has already trimmed title/content and enforced min(1), so use directly
+  if (typeof body.title === "string") updates.title = body.title;
+  if (typeof body.content === "string") updates.content = body.content;
   if (typeof body.isPublic === "boolean") updates.isPublic = body.isPublic;
   if (typeof body.scope === "string") updates.scope = body.scope;
+  if (typeof body.category === "string") updates.category = body.category;
+  if (typeof body.severity === "string") updates.severity = body.severity;
+  if (Array.isArray(body.tags)) updates.tags = body.tags.join(",");
 
   if (Object.keys(updates).length === 0) {
     res.status(400).json({ error: "No valid fields to update" });
@@ -225,7 +296,7 @@ router.patch("/knowledge/:id", async (req, res): Promise<void> => {
     .update(knowledgeEntriesTable)
     .set(updates)
     .where(eq(knowledgeEntriesTable.id, entryId))
-    .returning();
+    .returning(publicKnowledgeColumns);
 
   res.json(updated);
 });
@@ -345,7 +416,9 @@ router.post("/knowledge/:id/rate", async (req, res): Promise<void> => {
     }
   }
 
-  res.json({ ...updated, contributorRewardGranted, contributorRewardCredits });
+  // Strip internal fields before responding
+  const { embedding: _emb, contributorRewardedAt: _cra, ...publicUpdated } = updated ?? {};
+  res.json({ ...publicUpdated, contributorRewardGranted, contributorRewardCredits });
 });
 
 // GET /api/knowledge/export — export all accessible knowledge entries as JSON.
@@ -413,53 +486,36 @@ router.post("/knowledge/import", async (req, res): Promise<void> => {
     return;
   }
 
-  const body = req.body as {
-    entries?: Array<{
-      title?: string;
-      content?: string;
-      category?: string;
-      type?: string;
-      severity?: string;
-      scope?: string;
-      tags?: string | null;
-      annotation?: string | null;
-      approvedForReuse?: boolean;
-      isPublic?: boolean;
-    }>;
-  };
-
-  if (!Array.isArray(body.entries) || body.entries.length === 0) {
-    res.status(400).json({ error: "entries array is required and must not be empty" });
+  const parseResult = importKnowledgeSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    res.status(400).json({ error: "Invalid request body", detail: parseResult.error.flatten() });
     return;
   }
 
-  const MAX_IMPORT = 500;
-  const toImport = body.entries.slice(0, MAX_IMPORT);
+  const toImport = parseResult.data.entries;
 
-  const inserted: number[] = [];
-  for (const entry of toImport) {
-    if (!entry.title || !entry.content) continue;
-    const [row] = await db
-      .insert(knowledgeEntriesTable)
-      .values({
-        title: String(entry.title).slice(0, 500),
-        content: String(entry.content).slice(0, 10000),
-        category: entry.category ?? "note",
-        type: entry.type ?? "note",
-        severity: (entry.severity as "info" | "warning" | "error") ?? "info",
-        scope: entry.scope ?? "project",
-        tags: entry.tags ?? null,
-        annotation: entry.annotation ?? null,
-        approvedForReuse: entry.approvedForReuse ?? false,
-        isPublic: entry.isPublic ?? false,
-        userId,
-        projectId: null,
-      })
-      .returning({ id: knowledgeEntriesTable.id });
-    if (row) inserted.push(row.id);
-  }
+  const batchValues = toImport.map((entry) => ({
+    title: entry.title,
+    content: entry.content,
+    category: entry.category ?? "note",
+    type: entry.type ?? "note",
+    severity: (entry.severity ?? "info") as "info" | "warning" | "error",
+    scope: entry.scope ?? "project",
+    tags: entry.tags ?? null,
+    annotation: entry.annotation ?? null,
+    approvedForReuse: entry.approvedForReuse ?? false,
+    isPublic: entry.isPublic ?? false,
+    userId,
+    projectId: null as number | null,
+  }));
 
-  res.status(201).json({ imported: inserted.length, ids: inserted });
+  const rows = await db
+    .insert(knowledgeEntriesTable)
+    .values(batchValues)
+    .returning({ id: knowledgeEntriesTable.id });
+
+  const ids = rows.map((r) => r.id);
+  res.status(201).json({ imported: ids.length, ids });
 });
 
 // POST /api/knowledge/infer-style — trigger style memory inference for the current user.
@@ -555,18 +611,19 @@ router.put("/knowledge/brand-profile", async (req, res): Promise<void> => {
     return;
   }
 
-  const body = req.body as {
-    primaryColor?: string;
-    accentColor?: string;
-    fontPairing?: string;
-    tone?: string;
-  };
+  const parseResult = brandProfileSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    res.status(400).json({ error: "Invalid request body", detail: parseResult.error.flatten() });
+    return;
+  }
+
+  const body = parseResult.data;
 
   const clean = {
-    primaryColor: (body.primaryColor ?? "").trim().slice(0, 32),
-    accentColor: (body.accentColor ?? "").trim().slice(0, 32),
-    fontPairing: (body.fontPairing ?? "").trim().slice(0, 120),
-    tone: (body.tone ?? "").trim().slice(0, 60),
+    primaryColor: (body.primaryColor ?? "").trim(),
+    accentColor: (body.accentColor ?? "").trim(),
+    fontPairing: (body.fontPairing ?? "").trim(),
+    tone: (body.tone ?? "").trim(),
   };
 
   if (!clean.primaryColor && !clean.accentColor && !clean.fontPairing && !clean.tone) {
@@ -727,7 +784,7 @@ router.post("/projects/:projectId/knowledge/:entryId/promote", async (req, res):
   const isAdmin = await isAdminUser(userId);
 
   const [existing] = await db
-    .select()
+    .select(publicKnowledgeColumns)
     .from(knowledgeEntriesTable)
     .where(eq(knowledgeEntriesTable.id, entryId));
 
@@ -776,7 +833,7 @@ router.post("/projects/:projectId/knowledge/:entryId/promote", async (req, res):
       scope: "global",
     })
     .where(eq(knowledgeEntriesTable.id, entryId))
-    .returning();
+    .returning(publicKnowledgeColumns);
 
   // Regenerate embedding using sanitized text so the newly global entry
   // participates in semantic search without leaking raw project content.

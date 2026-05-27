@@ -335,25 +335,27 @@ Extract 3–8 distinct, confident preferences. Only include preferences you can 
       );
   }
 
-  const inserted: number[] = [];
-  for (const pref of preferences) {
-    if (!pref.title || !pref.content) continue;
-    const [row] = await db
-      .insert(knowledgeEntriesTable)
-      .values({
+  const validPrefs = preferences.filter((p) => p.title && p.content);
+  if (validPrefs.length === 0) {
+    return { inferred: 0 };
+  }
+
+  const rows = await db
+    .insert(knowledgeEntriesTable)
+    .values(
+      validPrefs.map((pref) => ({
         title: pref.title.slice(0, 500),
         content: pref.content.slice(0, 5000),
         category: pref.category ?? "style",
         type: "style_memory",
         scope: "user",
-        severity: "info",
+        severity: "info" as const,
         userId,
-        projectId: null,
+        projectId: null as number | null,
         approvedForReuse: false,
-      })
-      .returning({ id: knowledgeEntriesTable.id });
-    if (row) inserted.push(row.id);
-  }
+      })),
+    )
+    .returning({ id: knowledgeEntriesTable.id });
 
-  return { inferred: inserted.length };
+  return { inferred: rows.length };
 }

@@ -194,10 +194,7 @@ async function handleUserCreated(data: Record<string, unknown>): Promise<void> {
   }
 
   // Use ON CONFLICT DO NOTHING so concurrent/duplicate webhook deliveries are safe.
-  await db
-    .insert(userCreditsTable)
-    .values({ userId, balance: 100 })
-    .onConflictDoNothing();
+  await db.insert(userCreditsTable).values({ userId, balance: 100 }).onConflictDoNothing();
 
   logger.info({ userId }, "Clerk user.created — starter 100 credits granted via webhook");
 }
