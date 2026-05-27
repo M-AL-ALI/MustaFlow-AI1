@@ -1382,14 +1382,8 @@ export default function ProjectWorkspacePage() {
       // endpoint instead of the full project payload to keep the request
       // small and avoid re-fetching unrelated project state on a 4s timer.
       getProjectProvisioningStatus(projectId)
-        .then((raw) => {
-          if (!raw) return;
-          // The server returns additional fields (provisioningStep, estimatedSecondsRemaining)
-          // that are not yet in the generated OpenAPI type.
-          const data = raw as typeof raw & {
-            provisioningStep?: ProvisioningStep;
-            estimatedSecondsRemaining?: number | null;
-          };
+        .then((data) => {
+          if (!data) return;
           const newStatus = data.provisioningStatus as ProvisioningStatus | undefined;
           if (newStatus) {
             setProvisioningStatus(newStatus);
