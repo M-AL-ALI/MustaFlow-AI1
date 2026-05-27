@@ -1,2 +1,2 @@
-- [Mode-select migration](mode-select-migration.md) — preferred_mode column must be migrated before mode-select buttons work; easy to miss on fresh DBs.
-- [Post-merge migration pattern](post-merge-migrations.md) — after task merges, db push often fails non-interactively; run named migration scripts individually instead.
+- [Anthropic max_tokens truncation](anthropic-max-tokens.md) — callAnthropic defaults to 8192 tokens; large write_file calls silently produce empty files when truncated.
+- [Anthropic assistant prefill rejection](anthropic-assistant-prefill.md) — Anthropic rejects calls where conversationHistory ends with role:"assistant"; need a bridge user message.

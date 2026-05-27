@@ -530,7 +530,7 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
 
   const request: Record<string, unknown> = {
     model: params.model,
-    max_tokens: params.max_completion_tokens ?? 8192,
+    max_tokens: params.max_completion_tokens ?? 32000,
     system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
     messages: turns,
   };
@@ -549,11 +549,24 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
     signal: params.signal,
   });
 
+  if (res.stop_reason === "max_tokens") {
+    logger.warn(
+      { model: params.model, outputTokens: res.usage?.output_tokens },
+      "anthropic: response truncated at max_tokens — tool call arguments may be incomplete",
+    );
+  }
+
   let text = "";
   const outToolCalls: ChatCompletionMessageToolCall[] = [];
   for (const block of res.content ?? []) {
     if (block.type === "text") text += block.text ?? "";
     else if (block.type === "tool_use") {
+      const inputIsEmpty =
+        !block.input || (typeof block.input === "object" && Object.keys(block.input).length === 0);
+      if (res.stop_reason === "max_tokens" && inputIsEmpty) {
+        logger.warn({ blockName: block.name }, "anthropic: tool_use block has empty input due to max_tokens truncation — skipping");
+        continue;
+      }
       outToolCalls.push({
         id: block.id,
         type: "function",
