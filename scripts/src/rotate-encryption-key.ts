@@ -1,40 +1,23 @@
 #!/usr/bin/env npx tsx
 /**
- * ENCRYPTION KEY ROTATION SCRIPT — PLACEHOLDER
+ * ENCRYPTION KEY ROTATION SCRIPT
  *
- * This script re-encrypts all project secrets from the old ENCRYPTION_KEY
- * to a new one. Until this script is run, all secrets encrypted with the
- * old key will be unreadable.
+ * Re-encrypts all AES-256-GCM encrypted columns from OLD_ENCRYPTION_KEY to
+ * NEW_ENCRYPTION_KEY. Covers:
+ *   - project_secrets.value_encrypted
+ *   - projects.preview_db_url
+ *   - project_github_connections.encrypted_token
  *
- * ─────────────────────────────────────────────────────────────────────────────
- * OPERATOR INSTRUCTIONS
- * ─────────────────────────────────────────────────────────────────────────────
+ * Run with --dry-run to print row counts without writing any changes.
  *
- * BEFORE ROTATING:
- *   1. Back up ENCRYPTION_KEY securely (password manager, cloud secrets vault).
- *   2. Back up the database: pg_dump $DATABASE_URL > backup_$(date +%s).sql
- *   3. Schedule a maintenance window — secrets will be inaccessible briefly.
- *
- * ROTATION PROCEDURE:
- *   1. Set OLD_ENCRYPTION_KEY to the current value.
- *   2. Generate a new 32-byte base64 key:
- *        node -e "require('crypto').randomBytes(32).toString('base64')"  | pbcopy
- *   3. Set NEW_ENCRYPTION_KEY to the new value.
- *   4. Run this script in a TEST environment first.
- *   5. Verify secrets decrypt correctly in the app.
- *   6. Set ENCRYPTION_KEY to the new value in Replit Secrets.
- *   7. Remove OLD_ENCRYPTION_KEY and NEW_ENCRYPTION_KEY from env.
- *
- * IF ENCRYPTION_KEY IS LOST:
- *   - Existing secrets CANNOT be decrypted. The AES-256-GCM tag will not verify.
- *   - Users must re-enter all secrets manually.
- *   - Set ENCRYPTION_KEY to a new value, then ask users to re-add their secrets.
- *
- * ─────────────────────────────────────────────────────────────────────────────
+ * See docs/runbook-key-rotation.md for the full operational procedure.
  */
 
 import crypto from "crypto";
 import { pool } from "@workspace/db";
+
+const BATCH_SIZE = 100;
+const isDryRun = process.argv.includes("--dry-run");
 
 function encrypt(key: Buffer, plaintext: string): string {
   const iv = crypto.randomBytes(12);
@@ -45,7 +28,7 @@ function encrypt(key: Buffer, plaintext: string): string {
 }
 
 function decrypt(key: Buffer, value: string): string {
-  if (!value.startsWith("v1:")) return value; // legacy plaintext
+  if (!value.startsWith("v1:")) return value; // legacy plaintext — pass through
   const parts = value.slice(3).split(":");
   if (parts.length !== 3) throw new Error("Malformed v1 encrypted value");
   const iv = Buffer.from(parts[0]!, "base64");
@@ -54,6 +37,79 @@ function decrypt(key: Buffer, value: string): string {
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
   decipher.setAuthTag(tag);
   return decipher.update(ct).toString("utf8") + decipher.final("utf8");
+}
+
+interface RotationResult {
+  rotated: number;
+  skipped: number;
+  errors: number;
+}
+
+/**
+ * Rotate a single encrypted column in batches of BATCH_SIZE.
+ * Rows that fail decryption are logged and skipped (not aborted).
+ */
+async function rotateColumn(opts: {
+  table: string;
+  idCol: string;
+  encryptedCol: string;
+  oldKey: Buffer;
+  newKey: Buffer;
+  dryRun: boolean;
+}): Promise<RotationResult> {
+  const { table, idCol, encryptedCol, oldKey, newKey, dryRun } = opts;
+
+  // Count rows with a non-null encrypted value
+  const countResult = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM ${table} WHERE ${encryptedCol} IS NOT NULL`,
+  );
+  const totalRows = parseInt(countResult.rows[0]!.count, 10);
+
+  console.log(`\n[${table}.${encryptedCol}] ${totalRows} row(s) to process.`);
+
+  if (dryRun) {
+    return { rotated: 0, skipped: 0, errors: 0 };
+  }
+
+  let rotated = 0;
+  let skipped = 0;
+  let errors = 0;
+  let offset = 0;
+
+  while (offset < totalRows) {
+    const { rows } = await pool.query<Record<string, string>>(
+      `SELECT ${idCol}, ${encryptedCol} FROM ${table} WHERE ${encryptedCol} IS NOT NULL ORDER BY ${idCol} LIMIT $1 OFFSET $2`,
+      [BATCH_SIZE, offset],
+    );
+
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      const id = row[idCol]!;
+      const encryptedValue = row[encryptedCol]!;
+
+      try {
+        const plaintext = decrypt(oldKey, encryptedValue);
+        const reencrypted = encrypt(newKey, plaintext);
+        await pool.query(`UPDATE ${table} SET ${encryptedCol} = $1 WHERE ${idCol} = $2`, [
+          reencrypted,
+          id,
+        ]);
+        rotated++;
+      } catch (err) {
+        console.warn(
+          `  WARN: skipping ${table} ${idCol}=${id} — ${err instanceof Error ? err.message : String(err)}`,
+        );
+        skipped++;
+        errors++;
+      }
+    }
+
+    offset += rows.length;
+    console.log(`  [${table}] Processed ${Math.min(offset, totalRows)} / ${totalRows}`);
+  }
+
+  return { rotated, skipped, errors };
 }
 
 async function main() {
@@ -74,38 +130,64 @@ async function main() {
     process.exit(1);
   }
 
-  const { rows } = await pool.query<{ id: number; value_encrypted: string }>(
-    "SELECT id, value_encrypted FROM project_secrets ORDER BY id",
-  );
+  if (isDryRun) {
+    console.log("DRY RUN — no rows will be updated.\n");
+  }
 
-  console.log(`Found ${rows.length} secrets to rotate.`);
+  const startMs = Date.now();
 
-  let rotated = 0;
-  let skipped = 0;
-  let errors = 0;
+  const tables = [
+    { table: "project_secrets", idCol: "id", encryptedCol: "value_encrypted" },
+    { table: "projects", idCol: "id", encryptedCol: "preview_db_url" },
+    {
+      table: "project_github_connections",
+      idCol: "id",
+      encryptedCol: "encrypted_token",
+    },
+  ];
 
-  for (const row of rows) {
-    try {
-      const plaintext = decrypt(oldKey, row.value_encrypted);
-      const reencrypted = encrypt(newKey, plaintext);
-      await pool.query("UPDATE project_secrets SET value_encrypted = $1 WHERE id = $2", [
-        reencrypted,
-        row.id,
-      ]);
-      rotated++;
-    } catch (err) {
-      console.error(`  ERROR on secret id ${row.id}:`, err instanceof Error ? err.message : err);
-      errors++;
-      skipped++;
+  let totalRotated = 0;
+  let totalSkipped = 0;
+  let totalErrors = 0;
+
+  for (const spec of tables) {
+    const result = await rotateColumn({ ...spec, oldKey, newKey, dryRun: isDryRun });
+    totalRotated += result.rotated;
+    totalSkipped += result.skipped;
+    totalErrors += result.errors;
+  }
+
+  const durationMs = Date.now() - startMs;
+
+  console.log("\n─────────────────────────────────────────────────");
+  if (isDryRun) {
+    console.log("DRY RUN complete — no rows were written.");
+    // Print per-table row counts for informational purposes
+    for (const spec of tables) {
+      const { rows } = await pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM ${spec.table} WHERE ${spec.encryptedCol} IS NOT NULL`,
+      );
+      console.log(
+        `  ${spec.table}.${spec.encryptedCol}: ${rows[0]!.count} row(s) would be rotated`,
+      );
+    }
+  } else {
+    console.log("Rotation summary:", {
+      rotated: totalRotated,
+      skipped: totalSkipped,
+      errors: totalErrors,
+      durationMs,
+    });
+    if (totalErrors > 0) {
+      console.warn(`\n${totalErrors} row(s) could not be rotated and still carry the old key.`);
+      console.warn(
+        "Review the warnings above. These rows may be legacy plaintext or already rotated.",
+      );
+    } else {
+      console.log("\nAll rows rotated successfully.");
     }
   }
 
-  console.log(`Rotation complete. Rotated: ${rotated}, Skipped/Errors: ${skipped}`);
-  if (errors > 0) {
-    console.warn(
-      "Some secrets could not be rotated. They may still be encrypted with the old key.",
-    );
-  }
   await pool.end();
 }
 
