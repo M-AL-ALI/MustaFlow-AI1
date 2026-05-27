@@ -689,7 +689,8 @@ export default function DocsDevModePage() {
               },
               {
                 icon: Plug,
-                title: "Integrations provisioned through the platform, injected as environment variables",
+                title:
+                  "Integrations provisioned through the platform, injected as environment variables",
                 note: "documented publicly",
                 body: "Third-party service connections (Stripe, GitHub, and others) are set up through Replit's integration layer. Credentials are stored in the platform's secrets store and injected into the container as environment variables at runtime. The agent references them by name — it never handles the raw values.",
               },
