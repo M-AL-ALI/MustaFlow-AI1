@@ -1613,6 +1613,16 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   for (const turn of (input.conversationHistory ?? []).slice(-6)) {
     messages.push({ role: turn.role, content: turn.content });
   }
+  // Anthropic rejects conversations that end with an assistant turn ("assistant
+  // prefill" is not supported). When conversationHistory ends on an assistant
+  // message, append a minimal user bridge so the first API call is valid for
+  // all providers. OpenAI accepts this turn harmlessly.
+  if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+    messages.push({
+      role: "user",
+      content: "(Previous assistant response noted — proceed with the current request above.)",
+    });
+  }
 
   const model = MODEL_FOR_MODE[input.agentMode] ?? "gpt-5-mini";
   const containerState = { id: input.containerId ?? null, installed: false };
