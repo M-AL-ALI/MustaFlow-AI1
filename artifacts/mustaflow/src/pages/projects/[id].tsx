@@ -144,6 +144,14 @@ import {
   getGetCveScanStatusQueryKey,
   useAcknowledgeCveScan,
   useCancelTask,
+  getBillingSubscription,
+  resumePausedQueue,
+  getContainerStatus,
+  startContainer,
+  stopContainer,
+  getProjectProvisioningStatus,
+  retryProjectProvisioning,
+  submitProjectQueue,
 } from "@workspace/api-client-react";
 import { GithubTab } from "./components/github-tab";
 import { RecipesTab } from "./components/recipes-tab";
@@ -982,9 +990,7 @@ export default function ProjectWorkspacePage() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/billing/subscription");
-        if (!res.ok) return;
-        const data = (await res.json()) as { tier?: string };
+        const data = await getBillingSubscription();
         if (cancelled) return;
         const t = data.tier === "pro" || data.tier === "team" ? data.tier : "free";
         setSubscriptionTier(t);
@@ -1170,12 +1176,8 @@ export default function ProjectWorkspacePage() {
     window.history.replaceState({}, "", url.toString());
     // Task #638 — after a successful top-up, automatically resume any
     // background tasks that were paused for insufficient credits.
-    void fetch(`/api/projects/${projectId}/queue/resume-paused`, {
-      method: "POST",
-      credentials: "include",
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { resumed?: number } | null) => {
+    resumePausedQueue(projectId)
+      .then((data) => {
         if (data && (data.resumed ?? 0) > 0) {
           void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
         }
@@ -1280,9 +1282,8 @@ export default function ProjectWorkspacePage() {
     if (containerStatus === "starting" || containerStarting) {
       if (containerPollRef.current) return;
       containerPollRef.current = setInterval(() => {
-        fetch(`/api/projects/${projectId}/container/status`)
-          .then((r) => (r.ok ? r.json() : null))
-          .then((data: { containerStatus?: string; containerUrl?: string | null } | null) => {
+        getContainerStatus(projectId)
+          .then((data) => {
             if (!data) return;
             const newStatus = (data.containerStatus ?? "stopped") as ContainerStatus;
             setContainerStatus(newStatus);
@@ -1314,9 +1315,8 @@ export default function ProjectWorkspacePage() {
   const handleStartContainer = useCallback(() => {
     setContainerStarting(true);
     setContainerStatus("starting");
-    fetch(`/api/projects/${projectId}/container/start`, { method: "POST" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { containerStatus?: string; containerUrl?: string | null } | null) => {
+    startContainer(projectId)
+      .then((data) => {
         if (!data) return;
         setContainerStatus((data.containerStatus ?? "starting") as ContainerStatus);
         if (data.containerUrl) setContainerUrl(data.containerUrl);
@@ -1325,7 +1325,7 @@ export default function ProjectWorkspacePage() {
   }, [projectId]);
 
   const handleStopContainer = useCallback(() => {
-    fetch(`/api/projects/${projectId}/container/stop`, { method: "POST" })
+    stopContainer(projectId)
       .then(() => {
         setContainerStatus("hibernated");
         setContainerStarting(false);
@@ -1357,9 +1357,8 @@ export default function ProjectWorkspacePage() {
       // Task #738 — poll the dedicated lightweight provisioning-status
       // endpoint instead of the full project payload to keep the request
       // small and avoid re-fetching unrelated project state on a 4s timer.
-      fetch(`/api/projects/${projectId}/provision/status`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data: { provisioningStatus?: string; provisioningError?: string | null } | null) => {
+      getProjectProvisioningStatus(projectId)
+        .then((data) => {
           if (!data) return;
           if (data.provisioningStatus) {
             setProvisioningStatus(data.provisioningStatus as ProvisioningStatus);
@@ -1373,9 +1372,8 @@ export default function ProjectWorkspacePage() {
 
   const handleRetryProvisioning = useCallback(() => {
     setRetryingProvisioning(true);
-    fetch(`/api/projects/${projectId}/provision/retry`, { method: "POST" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { provisioningStatus?: string } | null) => {
+    retryProjectProvisioning(projectId)
+      .then((data) => {
         if (data?.provisioningStatus) {
           setProvisioningStatus(data.provisioningStatus as ProvisioningStatus);
           setProvisioningError(null);
@@ -2187,14 +2185,12 @@ export default function ProjectWorkspacePage() {
         return;
       }
       try {
-        const res = await fetch(`/api/projects/${projectId}/queue`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: remainingMessages, agentMode: retryMode, planMode }),
-          credentials: "include",
+        const data = await submitProjectQueue(projectId, {
+          messages: remainingMessages,
+          agentMode: retryMode,
+          planMode,
         });
-        if (res.ok) {
-          const data = (await res.json()) as { batchId: string; totalTasks: number };
+        if (data) {
           handleBatchStarted(data.batchId, data.totalTasks);
         }
       } catch {

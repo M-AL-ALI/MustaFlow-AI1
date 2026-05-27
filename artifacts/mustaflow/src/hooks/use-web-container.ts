@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { WebContainer, FileSystemTree } from "@webcontainer/api";
+import { getProjectAllFileContent } from "@workspace/api-client-react";
 
 export type WebContainerStatus =
   | "idle"
@@ -148,9 +149,7 @@ export function useWebContainer({
 
         // Fetch all project files with content in one shot
         addLog("[WC] Fetching project files…");
-        const res = await fetch(`/api/projects/${pid}/files/all-content`);
-        if (!res.ok) throw new Error(`Failed to fetch files: ${res.statusText}`);
-        const files = (await res.json()) as Array<{ path: string; content: string }>;
+        const files = await getProjectAllFileContent(pid);
         if (!mountedRef.current || projectIdRef.current !== pid) return;
 
         if (files.length === 0) {

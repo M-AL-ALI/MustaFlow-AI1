@@ -45,6 +45,7 @@ import type {
   AppTestRun,
   ApplyFileSuggestion200,
   ApplyFileSuggestionBody,
+  ApproveAdminSkillDraft200,
   ApprovePreviewEnv200,
   ApproveVersionForTesting200,
   AttachPurchasedDomainToProjectBody,
@@ -55,6 +56,7 @@ import type {
   BrainstormChatInput,
   BrainstormChatOutput,
   BrainstormResolveOutput,
+  CancelProjectQueueBatch200,
   ChatExchange,
   ChatMessage,
   ChatMessageInput,
@@ -111,15 +113,20 @@ import type {
   GenerateImageResponse,
   GetAccountSecurityFindingsParams,
   GetAdminAuditLogParams,
+  GetAdminEvalResults200,
+  GetAdminSkillDraft200,
   GetAgentRouting200,
   GetAgentRoutingParams,
+  GetBillingSubscription200,
   GetCheckRunTrendsParams,
   GetCheckRunsParams,
   GetContainerLogsParams,
   GetPreviewEnvStatus200,
+  GetProjectAllFileContent200Item,
   GetProjectDomainDnsHistory200,
   GetProjectDomainDnsHistoryParams,
   GetProjectProvisioningStatus200,
+  GetProjectQueueBatch200,
   GetPublishReadinessParams,
   GetPurchasedDomainAuthCode200,
   GetSecretAuditLogParams,
@@ -143,6 +150,8 @@ import type {
   KnowledgeUpdate,
   ListAdminRecentUnreadInboxParams,
   ListAdminRoles200,
+  ListAdminSkillDrafts200,
+  ListAdminSkills200,
   ListAgentInboxParams,
   ListBackgroundJobsParams,
   ListBackgroundJobsResponse,
@@ -208,6 +217,7 @@ import type {
   RebuildPreviewEnv202,
   RefreshPurchasedDomainInfo200,
   RegisterProjectUploadBody,
+  RejectAdminSkillDraft200,
   ReleasePurchasedDomain200,
   RemoveProjectDomain200,
   RemoveProjectDomainCertificate200,
@@ -220,6 +230,7 @@ import type {
   RequestProjectUploadUrl200,
   RequestProjectUploadUrlBody,
   RerunTestsResult,
+  ResumePausedQueue200,
   RetryProjectProvisioning200,
   RevokeAdminRole200,
   RollbackInput,
@@ -249,15 +260,23 @@ import type {
   StripeWebhook200,
   SubdomainInput,
   SubdomainResult,
+  SubmitAbuseReport201,
+  SubmitAbuseReportBody,
+  SubmitProjectQueue200,
+  SubmitProjectQueueBody,
   SuggestionAcceptResult,
   TaskEvent,
   TaskFeedbackInput,
+  ToggleAdminSkill200,
+  ToggleAdminSkillBody,
   TransferDomainInput,
   TransferDomainResponse,
   TriggerChecksInput,
   TriggerChecksResult,
   UnpublishContainer200,
   UnpublishProject200,
+  UpdateAdminSkillDraft200,
+  UpdateAdminSkillDraftBody,
   UpdateAgentInboxItemBody,
   UpdatePreferencesBody,
   UpdateProjectDomainDnsRecord200,
@@ -12436,6 +12455,83 @@ export function useListGithubBranches<TData = Awaited<ReturnType<typeof listGith
 
 
 
+export const getGetProjectAllFileContentUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/files/all-content`
+}
+
+/**
+ * @summary Get all project files with full content in one request (WebContainer boot)
+ */
+export const getProjectAllFileContent = async (id: number, options?: RequestInit): Promise<GetProjectAllFileContent200Item[]> => {
+
+  return customFetch<GetProjectAllFileContent200Item[]>(getGetProjectAllFileContentUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectAllFileContentQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/files/all-content`
+    ] as const;
+    }
+
+
+export const getGetProjectAllFileContentQueryOptions = <TData = Awaited<ReturnType<typeof getProjectAllFileContent>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectAllFileContent>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectAllFileContentQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectAllFileContent>>> = ({ signal }) => getProjectAllFileContent(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectAllFileContent>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectAllFileContentQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectAllFileContent>>>
+export type GetProjectAllFileContentQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get all project files with full content in one request (WebContainer boot)
+ */
+
+export function useGetProjectAllFileContent<TData = Awaited<ReturnType<typeof getProjectAllFileContent>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectAllFileContent>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectAllFileContentQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
 export const getGetProjectFileRawUrl = (id: number,
     fileId: number,) => {
 
@@ -13051,6 +13147,302 @@ export const useStopContainer = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getStopContainerMutationOptions(options));
+    }
+
+export const getSubmitProjectQueueUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/queue`
+}
+
+/**
+ * @summary Submit a batch of messages to the project task queue
+ */
+export const submitProjectQueue = async (id: number,
+    submitProjectQueueBody: SubmitProjectQueueBody, options?: RequestInit): Promise<SubmitProjectQueue200> => {
+
+  return customFetch<SubmitProjectQueue200>(getSubmitProjectQueueUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      submitProjectQueueBody,)
+  }
+);}
+
+
+
+
+export const getSubmitProjectQueueMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitProjectQueue>>, TError,{id: number;data: BodyType<SubmitProjectQueueBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitProjectQueue>>, TError,{id: number;data: BodyType<SubmitProjectQueueBody>}, TContext> => {
+
+const mutationKey = ['submitProjectQueue'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitProjectQueue>>, {id: number;data: BodyType<SubmitProjectQueueBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  submitProjectQueue(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitProjectQueueMutationResult = NonNullable<Awaited<ReturnType<typeof submitProjectQueue>>>
+    export type SubmitProjectQueueMutationBody = BodyType<SubmitProjectQueueBody>
+    export type SubmitProjectQueueMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Submit a batch of messages to the project task queue
+ */
+export const useSubmitProjectQueue = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitProjectQueue>>, TError,{id: number;data: BodyType<SubmitProjectQueueBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitProjectQueue>>,
+        TError,
+        {id: number;data: BodyType<SubmitProjectQueueBody>},
+        TContext
+      > => {
+      return useMutation(getSubmitProjectQueueMutationOptions(options));
+    }
+
+export const getResumePausedQueueUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/queue/resume-paused`
+}
+
+/**
+ * @summary Resume tasks paused due to insufficient credits (called after a top-up)
+ */
+export const resumePausedQueue = async (id: number, options?: RequestInit): Promise<ResumePausedQueue200> => {
+
+  return customFetch<ResumePausedQueue200>(getResumePausedQueueUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getResumePausedQueueMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumePausedQueue>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resumePausedQueue>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['resumePausedQueue'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resumePausedQueue>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  resumePausedQueue(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResumePausedQueueMutationResult = NonNullable<Awaited<ReturnType<typeof resumePausedQueue>>>
+
+    export type ResumePausedQueueMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Resume tasks paused due to insufficient credits (called after a top-up)
+ */
+export const useResumePausedQueue = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumePausedQueue>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resumePausedQueue>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getResumePausedQueueMutationOptions(options));
+    }
+
+export const getGetProjectQueueBatchUrl = (id: number,
+    batchId: string,) => {
+
+
+
+
+  return `/api/projects/${id}/queue/${batchId}`
+}
+
+/**
+ * @summary Get status and tasks for a queue batch
+ */
+export const getProjectQueueBatch = async (id: number,
+    batchId: string, options?: RequestInit): Promise<GetProjectQueueBatch200> => {
+
+  return customFetch<GetProjectQueueBatch200>(getGetProjectQueueBatchUrl(id,batchId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectQueueBatchQueryKey = (id: number,
+    batchId: string,) => {
+    return [
+    `/api/projects/${id}/queue/${batchId}`
+    ] as const;
+    }
+
+
+export const getGetProjectQueueBatchQueryOptions = <TData = Awaited<ReturnType<typeof getProjectQueueBatch>>, TError = ErrorType<ApiError>>(id: number,
+    batchId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectQueueBatch>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectQueueBatchQueryKey(id,batchId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectQueueBatch>>> = ({ signal }) => getProjectQueueBatch(id,batchId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && batchId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectQueueBatch>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectQueueBatchQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectQueueBatch>>>
+export type GetProjectQueueBatchQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get status and tasks for a queue batch
+ */
+
+export function useGetProjectQueueBatch<TData = Awaited<ReturnType<typeof getProjectQueueBatch>>, TError = ErrorType<ApiError>>(
+ id: number,
+    batchId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectQueueBatch>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectQueueBatchQueryOptions(id,batchId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCancelProjectQueueBatchUrl = (id: number,
+    batchId: string,) => {
+
+
+
+
+  return `/api/projects/${id}/queue/${batchId}`
+}
+
+/**
+ * @summary Cancel all queued (not yet running) tasks in a batch
+ */
+export const cancelProjectQueueBatch = async (id: number,
+    batchId: string, options?: RequestInit): Promise<CancelProjectQueueBatch200> => {
+
+  return customFetch<CancelProjectQueueBatch200>(getCancelProjectQueueBatchUrl(id,batchId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getCancelProjectQueueBatchMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelProjectQueueBatch>>, TError,{id: number;batchId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelProjectQueueBatch>>, TError,{id: number;batchId: string}, TContext> => {
+
+const mutationKey = ['cancelProjectQueueBatch'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelProjectQueueBatch>>, {id: number;batchId: string}> = (props) => {
+          const {id,batchId} = props ?? {};
+
+          return  cancelProjectQueueBatch(id,batchId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelProjectQueueBatchMutationResult = NonNullable<Awaited<ReturnType<typeof cancelProjectQueueBatch>>>
+
+    export type CancelProjectQueueBatchMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Cancel all queued (not yet running) tasks in a batch
+ */
+export const useCancelProjectQueueBatch = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelProjectQueueBatch>>, TError,{id: number;batchId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelProjectQueueBatch>>,
+        TError,
+        {id: number;batchId: string},
+        TContext
+      > => {
+      return useMutation(getCancelProjectQueueBatchMutationOptions(options));
     }
 
 export const getGetContainerLogsUrl = (id: number,
@@ -14453,6 +14845,154 @@ export function useListBillingTransactions<TData = Awaited<ReturnType<typeof lis
 
 
 
+export const getGetBillingSubscriptionUrl = () => {
+
+
+
+
+  return `/api/billing/subscription`
+}
+
+/**
+ * @summary Current subscription tier and status for the authenticated user
+ */
+export const getBillingSubscription = async ( options?: RequestInit): Promise<GetBillingSubscription200> => {
+
+  return customFetch<GetBillingSubscription200>(getGetBillingSubscriptionUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBillingSubscriptionQueryKey = () => {
+    return [
+    `/api/billing/subscription`
+    ] as const;
+    }
+
+
+export const getGetBillingSubscriptionQueryOptions = <TData = Awaited<ReturnType<typeof getBillingSubscription>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBillingSubscription>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBillingSubscriptionQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBillingSubscription>>> = ({ signal }) => getBillingSubscription({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBillingSubscription>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetBillingSubscriptionQueryResult = NonNullable<Awaited<ReturnType<typeof getBillingSubscription>>>
+export type GetBillingSubscriptionQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Current subscription tier and status for the authenticated user
+ */
+
+export function useGetBillingSubscription<TData = Awaited<ReturnType<typeof getBillingSubscription>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBillingSubscription>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetBillingSubscriptionQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSubmitAbuseReportUrl = () => {
+
+
+
+
+  return `/api/abuse-reports`
+}
+
+/**
+ * @summary Submit an abuse report for a hosted site (public — no auth required)
+ */
+export const submitAbuseReport = async (submitAbuseReportBody: SubmitAbuseReportBody, options?: RequestInit): Promise<SubmitAbuseReport201> => {
+
+  return customFetch<SubmitAbuseReport201>(getSubmitAbuseReportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      submitAbuseReportBody,)
+  }
+);}
+
+
+
+
+export const getSubmitAbuseReportMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitAbuseReport>>, TError,{data: BodyType<SubmitAbuseReportBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitAbuseReport>>, TError,{data: BodyType<SubmitAbuseReportBody>}, TContext> => {
+
+const mutationKey = ['submitAbuseReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitAbuseReport>>, {data: BodyType<SubmitAbuseReportBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  submitAbuseReport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitAbuseReportMutationResult = NonNullable<Awaited<ReturnType<typeof submitAbuseReport>>>
+    export type SubmitAbuseReportMutationBody = BodyType<SubmitAbuseReportBody>
+    export type SubmitAbuseReportMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Submit an abuse report for a hosted site (public — no auth required)
+ */
+export const useSubmitAbuseReport = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitAbuseReport>>, TError,{data: BodyType<SubmitAbuseReportBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitAbuseReport>>,
+        TError,
+        {data: BodyType<SubmitAbuseReportBody>},
+        TContext
+      > => {
+      return useMutation(getSubmitAbuseReportMutationOptions(options));
+    }
+
 export const getGetAdminMeUrl = () => {
 
 
@@ -14974,6 +15514,598 @@ export function useGetAdminAuditLog<TData = Awaited<ReturnType<typeof getAdminAu
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAdminAuditLogQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListAdminSkillsUrl = () => {
+
+
+
+
+  return `/api/admin/skills`
+}
+
+/**
+ * @summary List all builder skills with enable/disable state and load counts
+ */
+export const listAdminSkills = async ( options?: RequestInit): Promise<ListAdminSkills200> => {
+
+  return customFetch<ListAdminSkills200>(getListAdminSkillsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAdminSkillsQueryKey = () => {
+    return [
+    `/api/admin/skills`
+    ] as const;
+    }
+
+
+export const getListAdminSkillsQueryOptions = <TData = Awaited<ReturnType<typeof listAdminSkills>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminSkills>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAdminSkillsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAdminSkills>>> = ({ signal }) => listAdminSkills({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAdminSkills>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAdminSkillsQueryResult = NonNullable<Awaited<ReturnType<typeof listAdminSkills>>>
+export type ListAdminSkillsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List all builder skills with enable/disable state and load counts
+ */
+
+export function useListAdminSkills<TData = Awaited<ReturnType<typeof listAdminSkills>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminSkills>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAdminSkillsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getToggleAdminSkillUrl = (name: string,) => {
+
+
+
+
+  return `/api/admin/skills/${name}`
+}
+
+/**
+ * @summary Enable or disable a builder skill by name
+ */
+export const toggleAdminSkill = async (name: string,
+    toggleAdminSkillBody: ToggleAdminSkillBody, options?: RequestInit): Promise<ToggleAdminSkill200> => {
+
+  return customFetch<ToggleAdminSkill200>(getToggleAdminSkillUrl(name),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      toggleAdminSkillBody,)
+  }
+);}
+
+
+
+
+export const getToggleAdminSkillMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof toggleAdminSkill>>, TError,{name: string;data: BodyType<ToggleAdminSkillBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof toggleAdminSkill>>, TError,{name: string;data: BodyType<ToggleAdminSkillBody>}, TContext> => {
+
+const mutationKey = ['toggleAdminSkill'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof toggleAdminSkill>>, {name: string;data: BodyType<ToggleAdminSkillBody>}> = (props) => {
+          const {name,data} = props ?? {};
+
+          return  toggleAdminSkill(name,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ToggleAdminSkillMutationResult = NonNullable<Awaited<ReturnType<typeof toggleAdminSkill>>>
+    export type ToggleAdminSkillMutationBody = BodyType<ToggleAdminSkillBody>
+    export type ToggleAdminSkillMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Enable or disable a builder skill by name
+ */
+export const useToggleAdminSkill = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof toggleAdminSkill>>, TError,{name: string;data: BodyType<ToggleAdminSkillBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof toggleAdminSkill>>,
+        TError,
+        {name: string;data: BodyType<ToggleAdminSkillBody>},
+        TContext
+      > => {
+      return useMutation(getToggleAdminSkillMutationOptions(options));
+    }
+
+export const getListAdminSkillDraftsUrl = () => {
+
+
+
+
+  return `/api/admin/skills/drafts`
+}
+
+/**
+ * @summary List agent-authored skill drafts awaiting admin review
+ */
+export const listAdminSkillDrafts = async ( options?: RequestInit): Promise<ListAdminSkillDrafts200> => {
+
+  return customFetch<ListAdminSkillDrafts200>(getListAdminSkillDraftsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAdminSkillDraftsQueryKey = () => {
+    return [
+    `/api/admin/skills/drafts`
+    ] as const;
+    }
+
+
+export const getListAdminSkillDraftsQueryOptions = <TData = Awaited<ReturnType<typeof listAdminSkillDrafts>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminSkillDrafts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAdminSkillDraftsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAdminSkillDrafts>>> = ({ signal }) => listAdminSkillDrafts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAdminSkillDrafts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAdminSkillDraftsQueryResult = NonNullable<Awaited<ReturnType<typeof listAdminSkillDrafts>>>
+export type ListAdminSkillDraftsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List agent-authored skill drafts awaiting admin review
+ */
+
+export function useListAdminSkillDrafts<TData = Awaited<ReturnType<typeof listAdminSkillDrafts>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminSkillDrafts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAdminSkillDraftsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetAdminSkillDraftUrl = (name: string,) => {
+
+
+
+
+  return `/api/admin/skills/drafts/${name}`
+}
+
+/**
+ * @summary Get raw SKILL.md content for a draft skill
+ */
+export const getAdminSkillDraft = async (name: string, options?: RequestInit): Promise<GetAdminSkillDraft200> => {
+
+  return customFetch<GetAdminSkillDraft200>(getGetAdminSkillDraftUrl(name),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminSkillDraftQueryKey = (name: string,) => {
+    return [
+    `/api/admin/skills/drafts/${name}`
+    ] as const;
+    }
+
+
+export const getGetAdminSkillDraftQueryOptions = <TData = Awaited<ReturnType<typeof getAdminSkillDraft>>, TError = ErrorType<ApiError>>(name: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminSkillDraft>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminSkillDraftQueryKey(name);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminSkillDraft>>> = ({ signal }) => getAdminSkillDraft(name, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(name), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminSkillDraft>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminSkillDraftQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminSkillDraft>>>
+export type GetAdminSkillDraftQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get raw SKILL.md content for a draft skill
+ */
+
+export function useGetAdminSkillDraft<TData = Awaited<ReturnType<typeof getAdminSkillDraft>>, TError = ErrorType<ApiError>>(
+ name: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminSkillDraft>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminSkillDraftQueryOptions(name,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateAdminSkillDraftUrl = (name: string,) => {
+
+
+
+
+  return `/api/admin/skills/drafts/${name}`
+}
+
+/**
+ * @summary Overwrite a draft skill's SKILL.md content
+ */
+export const updateAdminSkillDraft = async (name: string,
+    updateAdminSkillDraftBody: UpdateAdminSkillDraftBody, options?: RequestInit): Promise<UpdateAdminSkillDraft200> => {
+
+  return customFetch<UpdateAdminSkillDraft200>(getUpdateAdminSkillDraftUrl(name),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateAdminSkillDraftBody,)
+  }
+);}
+
+
+
+
+export const getUpdateAdminSkillDraftMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAdminSkillDraft>>, TError,{name: string;data: BodyType<UpdateAdminSkillDraftBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAdminSkillDraft>>, TError,{name: string;data: BodyType<UpdateAdminSkillDraftBody>}, TContext> => {
+
+const mutationKey = ['updateAdminSkillDraft'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAdminSkillDraft>>, {name: string;data: BodyType<UpdateAdminSkillDraftBody>}> = (props) => {
+          const {name,data} = props ?? {};
+
+          return  updateAdminSkillDraft(name,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateAdminSkillDraftMutationResult = NonNullable<Awaited<ReturnType<typeof updateAdminSkillDraft>>>
+    export type UpdateAdminSkillDraftMutationBody = BodyType<UpdateAdminSkillDraftBody>
+    export type UpdateAdminSkillDraftMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Overwrite a draft skill's SKILL.md content
+ */
+export const useUpdateAdminSkillDraft = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAdminSkillDraft>>, TError,{name: string;data: BodyType<UpdateAdminSkillDraftBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateAdminSkillDraft>>,
+        TError,
+        {name: string;data: BodyType<UpdateAdminSkillDraftBody>},
+        TContext
+      > => {
+      return useMutation(getUpdateAdminSkillDraftMutationOptions(options));
+    }
+
+export const getApproveAdminSkillDraftUrl = (name: string,) => {
+
+
+
+
+  return `/api/admin/skills/drafts/${name}/approve`
+}
+
+/**
+ * @summary Approve a draft skill — moves it to the active skills directory
+ */
+export const approveAdminSkillDraft = async (name: string, options?: RequestInit): Promise<ApproveAdminSkillDraft200> => {
+
+  return customFetch<ApproveAdminSkillDraft200>(getApproveAdminSkillDraftUrl(name),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApproveAdminSkillDraftMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveAdminSkillDraft>>, TError,{name: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveAdminSkillDraft>>, TError,{name: string}, TContext> => {
+
+const mutationKey = ['approveAdminSkillDraft'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveAdminSkillDraft>>, {name: string}> = (props) => {
+          const {name} = props ?? {};
+
+          return  approveAdminSkillDraft(name,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveAdminSkillDraftMutationResult = NonNullable<Awaited<ReturnType<typeof approveAdminSkillDraft>>>
+
+    export type ApproveAdminSkillDraftMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Approve a draft skill — moves it to the active skills directory
+ */
+export const useApproveAdminSkillDraft = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveAdminSkillDraft>>, TError,{name: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approveAdminSkillDraft>>,
+        TError,
+        {name: string},
+        TContext
+      > => {
+      return useMutation(getApproveAdminSkillDraftMutationOptions(options));
+    }
+
+export const getRejectAdminSkillDraftUrl = (name: string,) => {
+
+
+
+
+  return `/api/admin/skills/drafts/${name}/reject`
+}
+
+/**
+ * @summary Reject and permanently delete a draft skill
+ */
+export const rejectAdminSkillDraft = async (name: string, options?: RequestInit): Promise<RejectAdminSkillDraft200> => {
+
+  return customFetch<RejectAdminSkillDraft200>(getRejectAdminSkillDraftUrl(name),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRejectAdminSkillDraftMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectAdminSkillDraft>>, TError,{name: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rejectAdminSkillDraft>>, TError,{name: string}, TContext> => {
+
+const mutationKey = ['rejectAdminSkillDraft'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rejectAdminSkillDraft>>, {name: string}> = (props) => {
+          const {name} = props ?? {};
+
+          return  rejectAdminSkillDraft(name,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RejectAdminSkillDraftMutationResult = NonNullable<Awaited<ReturnType<typeof rejectAdminSkillDraft>>>
+
+    export type RejectAdminSkillDraftMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Reject and permanently delete a draft skill
+ */
+export const useRejectAdminSkillDraft = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectAdminSkillDraft>>, TError,{name: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rejectAdminSkillDraft>>,
+        TError,
+        {name: string},
+        TContext
+      > => {
+      return useMutation(getRejectAdminSkillDraftMutationOptions(options));
+    }
+
+export const getGetAdminEvalResultsUrl = () => {
+
+
+
+
+  return `/api/admin/eval-results`
+}
+
+/**
+ * @summary Latest prompt-eval harness run results
+ */
+export const getAdminEvalResults = async ( options?: RequestInit): Promise<GetAdminEvalResults200> => {
+
+  return customFetch<GetAdminEvalResults200>(getGetAdminEvalResultsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminEvalResultsQueryKey = () => {
+    return [
+    `/api/admin/eval-results`
+    ] as const;
+    }
+
+
+export const getGetAdminEvalResultsQueryOptions = <TData = Awaited<ReturnType<typeof getAdminEvalResults>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminEvalResults>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminEvalResultsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminEvalResults>>> = ({ signal }) => getAdminEvalResults({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminEvalResults>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminEvalResultsQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminEvalResults>>>
+export type GetAdminEvalResultsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Latest prompt-eval harness run results
+ */
+
+export function useGetAdminEvalResults<TData = Awaited<ReturnType<typeof getAdminEvalResults>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminEvalResults>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminEvalResultsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

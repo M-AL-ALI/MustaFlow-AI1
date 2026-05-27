@@ -4247,6 +4247,14 @@ export type ListGithubBranches200 = {
   branches: ListGithubBranches200BranchesItem[];
 };
 
+export type GetProjectAllFileContent200Item = {
+  id: number;
+  path: string;
+  mimeType: string;
+  content: string;
+  updatedAt: string;
+};
+
 export type GetProjectProvisioningStatus200ProvisioningStatus = typeof GetProjectProvisioningStatus200ProvisioningStatus[keyof typeof GetProjectProvisioningStatus200ProvisioningStatus];
 
 
@@ -4278,6 +4286,38 @@ export type RetryProjectProvisioning200 = {
 
 export type StopContainer200 = {
   containerStatus: string;
+};
+
+export type SubmitProjectQueueBody = {
+  messages: string[];
+  agentMode: string;
+  planMode?: boolean;
+  agentIdentity?: string;
+};
+
+export type SubmitProjectQueue200 = {
+  batchId: string;
+  taskIds: number[];
+  totalTasks: number;
+};
+
+export type ResumePausedQueue200 = {
+  resumed: number;
+};
+
+export type GetProjectQueueBatch200 = {
+  batchId: string;
+  projectId: number;
+  tasks: AgentTask[];
+  totalCount: number;
+  completedCount: number;
+  failedCount: number;
+  cancelledCount: number;
+};
+
+export type CancelProjectQueueBatch200 = {
+  cancelled: number;
+  batchId: string;
 };
 
 export type GetContainerLogsParams = {
@@ -4317,6 +4357,48 @@ export type ListBillingTransactions200 = {
   transactions: CreditTransaction[];
 };
 
+export type GetBillingSubscription200TiersItem = {
+  id: string;
+  name: string;
+  priceUsd: number;
+  monthlyCredits: number;
+  maxConcurrentBuilds: number;
+  features: string[];
+  available: boolean;
+  current: boolean;
+};
+
+export type GetBillingSubscription200 = {
+  tier: string;
+  status: string;
+  currentPeriodEnd?: string | null;
+  gracePeriodEnd?: string | null;
+  cancelAtPeriodEnd: boolean;
+  monthlyCredits: number;
+  maxConcurrentBuilds: number;
+  stripeConfigured: boolean;
+  publishableKey: string;
+  tiers: GetBillingSubscription200TiersItem[];
+};
+
+export type SubmitAbuseReportBody = {
+  hostname: string;
+  category: string;
+  /**
+     * @minLength 10
+     * @maxLength 2000
+     */
+  reason: string;
+  details?: string;
+  reporterEmail?: string;
+};
+
+export type SubmitAbuseReport201 = {
+  ok: boolean;
+  reportId?: number | null;
+  message: string;
+};
+
 export type ListAdminRoles200 = {
   roles: AdminRole[];
 };
@@ -4343,6 +4425,57 @@ limit?: number;
  */
 offset?: number;
 };
+
+export type ListAdminSkills200SkillsItem = { [key: string]: unknown };
+
+export type ListAdminSkills200 = {
+  skills: ListAdminSkills200SkillsItem[];
+};
+
+export type ToggleAdminSkillBody = {
+  enabled: boolean;
+};
+
+export type ToggleAdminSkill200 = {
+  name: string;
+  enabled: boolean;
+};
+
+export type ListAdminSkillDrafts200DraftsItem = { [key: string]: unknown };
+
+export type ListAdminSkillDrafts200 = {
+  drafts: ListAdminSkillDrafts200DraftsItem[];
+};
+
+export type GetAdminSkillDraft200 = {
+  name: string;
+  raw: string;
+};
+
+export type UpdateAdminSkillDraftBody = {
+  /** @maxLength 60000 */
+  raw: string;
+};
+
+export type UpdateAdminSkillDraft200 = {
+  name: string;
+  updated: boolean;
+};
+
+export type ApproveAdminSkillDraft200 = {
+  name: string;
+  approved: boolean;
+};
+
+export type RejectAdminSkillDraft200 = {
+  name: string;
+  rejected: boolean;
+};
+
+export type GetAdminEvalResults200 = {
+  ran: boolean;
+  [key: string]: unknown;
+ };
 
 export type SearchPurchaseableDomainsParams = {
 /**

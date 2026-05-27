@@ -35,6 +35,14 @@ import {
   getGetAdminLaunchReadinessQueryKey,
   getListAdminRolesQueryKey,
   getGetAdminAuditLogQueryKey,
+  listAdminSkills,
+  listAdminSkillDrafts,
+  getAdminSkillDraft,
+  updateAdminSkillDraft,
+  approveAdminSkillDraft,
+  rejectAdminSkillDraft,
+  toggleAdminSkill,
+  getAdminEvalResults,
 } from "@workspace/api-client-react";
 
 import type { AdminLaunchCheck, AdminRole, AdminAuditLogEntry } from "@workspace/api-client-react";
@@ -648,18 +656,9 @@ function SkillsPanel() {
     setLoading(true);
     setError(null);
     try {
-      const [active, pending] = await Promise.all([
-        fetch("/api/admin/skills").then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json() as Promise<{ skills: SkillSummary[] }>;
-        }),
-        fetch("/api/admin/skills/drafts").then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json() as Promise<{ drafts: SkillSummary[] }>;
-        }),
-      ]);
-      setSkills(active.skills);
-      setDrafts(pending.drafts);
+      const [active, pending] = await Promise.all([listAdminSkills(), listAdminSkillDrafts()]);
+      setSkills((active as { skills: SkillSummary[] }).skills);
+      setDrafts((pending as { drafts: SkillSummary[] }).drafts);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -676,9 +675,7 @@ function SkillsPanel() {
     setDraftRaw("");
     setDraftLoading(true);
     try {
-      const res = await fetch(`/api/admin/skills/drafts/${encodeURIComponent(name)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as { raw: string };
+      const json = await getAdminSkillDraft(name);
       setDraftRaw(json.raw);
     } catch (err) {
       setError((err as Error).message);
@@ -691,15 +688,7 @@ function SkillsPanel() {
   async function saveDraft(name: string) {
     setPendingName(name);
     try {
-      const res = await fetch(`/api/admin/skills/drafts/${encodeURIComponent(name)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ raw: draftRaw }),
-      });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? `HTTP ${res.status}`);
-      }
+      await updateAdminSkillDraft(name, { raw: draftRaw });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -710,13 +699,7 @@ function SkillsPanel() {
   async function approveDraft(name: string) {
     setPendingName(name);
     try {
-      const res = await fetch(`/api/admin/skills/drafts/${encodeURIComponent(name)}/approve`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? `HTTP ${res.status}`);
-      }
+      await approveAdminSkillDraft(name);
       setEditingDraft(null);
       await reload();
     } catch (err) {
@@ -730,10 +713,7 @@ function SkillsPanel() {
     if (!confirm(`Delete draft "${name}" permanently?`)) return;
     setPendingName(name);
     try {
-      const res = await fetch(`/api/admin/skills/drafts/${encodeURIComponent(name)}/reject`, {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await rejectAdminSkillDraft(name);
       setEditingDraft(null);
       await reload();
     } catch (err) {
@@ -746,12 +726,7 @@ function SkillsPanel() {
   async function toggle(name: string, enabled: boolean) {
     setPendingName(name);
     try {
-      const res = await fetch(`/api/admin/skills/${encodeURIComponent(name)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await toggleAdminSkill(name, { enabled });
       setSkills((cur) => (cur ? cur.map((s) => (s.name === name ? { ...s, enabled } : s)) : cur));
     } catch (err) {
       setError((err as Error).message);
@@ -1308,8 +1283,8 @@ function EvalResultsTile() {
   useEffect(() => {
     void (async () => {
       try {
-        const r = await fetch("/api/admin/eval-results");
-        if (r.ok) setData((await r.json()) as EvalFullRecord);
+        const result = await getAdminEvalResults();
+        setData(result as unknown as EvalFullRecord);
       } catch {
         /* ignore */
       } finally {

@@ -4332,6 +4332,23 @@ export const ListGithubBranchesResponse = zod.object({
 
 
 /**
+ * @summary Get all project files with full content in one request (WebContainer boot)
+ */
+export const GetProjectAllFileContentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetProjectAllFileContentResponseItem = zod.object({
+  "id": zod.number(),
+  "path": zod.string(),
+  "mimeType": zod.string(),
+  "content": zod.string(),
+  "updatedAt": zod.coerce.date()
+})
+export const GetProjectAllFileContentResponse = zod.array(GetProjectAllFileContentResponseItem)
+
+
+/**
  * @summary Get raw (plain text) content of a project file by id
  */
 export const GetProjectFileRawParams = zod.object({
@@ -4477,6 +4494,112 @@ export const StopContainerParams = zod.object({
 
 export const StopContainerResponse = zod.object({
   "containerStatus": zod.string()
+})
+
+
+/**
+ * @summary Submit a batch of messages to the project task queue
+ */
+export const SubmitProjectQueueParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SubmitProjectQueueBody = zod.object({
+  "messages": zod.array(zod.string()),
+  "agentMode": zod.string(),
+  "planMode": zod.boolean().optional(),
+  "agentIdentity": zod.string().optional()
+})
+
+export const SubmitProjectQueueResponse = zod.object({
+  "batchId": zod.string(),
+  "taskIds": zod.array(zod.number()),
+  "totalTasks": zod.number()
+})
+
+
+/**
+ * @summary Resume tasks paused due to insufficient credits (called after a top-up)
+ */
+export const ResumePausedQueueParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ResumePausedQueueResponse = zod.object({
+  "resumed": zod.number()
+})
+
+
+/**
+ * @summary Get status and tasks for a queue batch
+ */
+export const GetProjectQueueBatchParams = zod.object({
+  "id": zod.coerce.number(),
+  "batchId": zod.coerce.string()
+})
+
+export const GetProjectQueueBatchResponse = zod.object({
+  "batchId": zod.string(),
+  "projectId": zod.number(),
+  "tasks": zod.array(zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "title": zod.string(),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'completed', 'failed', 'canceled', 'discarded']),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
+  "prompt": zod.string().nullish(),
+  "result": zod.string().nullish(),
+  "queueBatchId": zod.string().nullish(),
+  "queueIndex": zod.number().nullish(),
+  "report": zod.object({
+  "userRequest": zod.string().optional(),
+  "filesCreated": zod.array(zod.string()).optional(),
+  "filesChanged": zod.array(zod.string()).optional(),
+  "filesRemoved": zod.array(zod.string()).optional(),
+  "previewUpdated": zod.boolean().optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "nextRecommendation": zod.string().optional(),
+  "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
+  "knowledgeApplied": zod.array(zod.object({
+  "title": zod.string().optional(),
+  "category": zod.string().optional()
+})).optional(),
+  "versionId": zod.number().nullish()
+}).nullish(),
+  "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish(),
+  "elapsedSeconds": zod.number().nullish(),
+  "runMode": zod.union([zod.literal('foreground'),zod.literal('background'),zod.literal(null)]).nullish().describe('Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.'),
+  "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
+  "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
+  "pausedAt": zod.coerce.date().nullish(),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "discardedAt": zod.coerce.date().nullish()
+})),
+  "totalCount": zod.number(),
+  "completedCount": zod.number(),
+  "failedCount": zod.number(),
+  "cancelledCount": zod.number()
+})
+
+
+/**
+ * @summary Cancel all queued (not yet running) tasks in a batch
+ */
+export const CancelProjectQueueBatchParams = zod.object({
+  "id": zod.coerce.number(),
+  "batchId": zod.coerce.string()
+})
+
+export const CancelProjectQueueBatchResponse = zod.object({
+  "cancelled": zod.number(),
+  "batchId": zod.string()
 })
 
 
@@ -4789,6 +4912,49 @@ export const ListBillingTransactionsResponse = zod.object({
 
 
 /**
+ * @summary Current subscription tier and status for the authenticated user
+ */
+export const GetBillingSubscriptionResponse = zod.object({
+  "tier": zod.string(),
+  "status": zod.string(),
+  "currentPeriodEnd": zod.coerce.date().nullish(),
+  "gracePeriodEnd": zod.coerce.date().nullish(),
+  "cancelAtPeriodEnd": zod.boolean(),
+  "monthlyCredits": zod.number(),
+  "maxConcurrentBuilds": zod.number(),
+  "stripeConfigured": zod.boolean(),
+  "publishableKey": zod.string(),
+  "tiers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "priceUsd": zod.number(),
+  "monthlyCredits": zod.number(),
+  "maxConcurrentBuilds": zod.number(),
+  "features": zod.array(zod.string()),
+  "available": zod.boolean(),
+  "current": zod.boolean()
+}))
+})
+
+
+/**
+ * @summary Submit an abuse report for a hosted site (public — no auth required)
+ */
+export const submitAbuseReportBodyReasonMin = 10;
+export const submitAbuseReportBodyReasonMax = 2000;
+
+
+
+export const SubmitAbuseReportBody = zod.object({
+  "hostname": zod.string(),
+  "category": zod.string(),
+  "reason": zod.string().min(submitAbuseReportBodyReasonMin).max(submitAbuseReportBodyReasonMax),
+  "details": zod.string().optional(),
+  "reporterEmail": zod.string().email().optional()
+})
+
+
+/**
  * @summary Current user admin status and role
  */
 export const GetAdminMeResponse = zod.object({
@@ -4940,6 +5106,107 @@ export const GetAdminAuditLogResponse = zod.object({
   "total": zod.number(),
   "limit": zod.number(),
   "offset": zod.number()
+})
+
+
+/**
+ * @summary List all builder skills with enable/disable state and load counts
+ */
+export const ListAdminSkillsResponse = zod.object({
+  "skills": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+
+
+/**
+ * @summary Enable or disable a builder skill by name
+ */
+export const ToggleAdminSkillParams = zod.object({
+  "name": zod.coerce.string()
+})
+
+export const ToggleAdminSkillBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const ToggleAdminSkillResponse = zod.object({
+  "name": zod.string(),
+  "enabled": zod.boolean()
+})
+
+
+/**
+ * @summary List agent-authored skill drafts awaiting admin review
+ */
+export const ListAdminSkillDraftsResponse = zod.object({
+  "drafts": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+
+
+/**
+ * @summary Get raw SKILL.md content for a draft skill
+ */
+export const GetAdminSkillDraftParams = zod.object({
+  "name": zod.coerce.string()
+})
+
+export const GetAdminSkillDraftResponse = zod.object({
+  "name": zod.string(),
+  "raw": zod.string()
+})
+
+
+/**
+ * @summary Overwrite a draft skill's SKILL.md content
+ */
+export const UpdateAdminSkillDraftParams = zod.object({
+  "name": zod.coerce.string()
+})
+
+export const updateAdminSkillDraftBodyRawMax = 60000;
+
+
+
+export const UpdateAdminSkillDraftBody = zod.object({
+  "raw": zod.string().max(updateAdminSkillDraftBodyRawMax)
+})
+
+export const UpdateAdminSkillDraftResponse = zod.object({
+  "name": zod.string(),
+  "updated": zod.boolean()
+})
+
+
+/**
+ * @summary Approve a draft skill — moves it to the active skills directory
+ */
+export const ApproveAdminSkillDraftParams = zod.object({
+  "name": zod.coerce.string()
+})
+
+export const ApproveAdminSkillDraftResponse = zod.object({
+  "name": zod.string(),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Reject and permanently delete a draft skill
+ */
+export const RejectAdminSkillDraftParams = zod.object({
+  "name": zod.coerce.string()
+})
+
+export const RejectAdminSkillDraftResponse = zod.object({
+  "name": zod.string(),
+  "rejected": zod.boolean()
+})
+
+
+/**
+ * @summary Latest prompt-eval harness run results
+ */
+export const GetAdminEvalResultsResponse = zod.object({
+  "ran": zod.boolean()
 })
 
 

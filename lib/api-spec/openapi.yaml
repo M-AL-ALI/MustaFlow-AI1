@@ -3729,6 +3729,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/files/all-content:
+    get:
+      operationId: getProjectAllFileContent
+      tags: [projects]
+      summary: Get all project files with full content in one request (WebContainer boot)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Array of file objects with full text content
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, path, mimeType, content, updatedAt]
+                  properties:
+                    id: { type: integer }
+                    path: { type: string }
+                    mimeType: { type: string }
+                    content: { type: string }
+                    updatedAt: { type: string, format: date-time }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/files/{fileId}/raw:
     get:
       operationId: getProjectFileRaw
@@ -3924,6 +3954,139 @@ paths:
                   containerStatus: { type: string }
         "404":
           description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/queue:
+    post:
+      operationId: submitProjectQueue
+      tags: [projects]
+      summary: Submit a batch of messages to the project task queue
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages, agentMode]
+              properties:
+                messages:
+                  type: array
+                  items: { type: string }
+                agentMode: { type: string }
+                planMode: { type: boolean }
+                agentIdentity: { type: string }
+      responses:
+        "200":
+          description: Queue batch created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [batchId, taskIds, totalTasks]
+                properties:
+                  batchId: { type: string }
+                  taskIds:
+                    type: array
+                    items: { type: integer }
+                  totalTasks: { type: integer }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/queue/resume-paused:
+    post:
+      operationId: resumePausedQueue
+      tags: [projects]
+      summary: Resume tasks paused due to insufficient credits (called after a top-up)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Paused tasks resumed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [resumed]
+                properties:
+                  resumed: { type: integer }
+
+  /projects/{id}/queue/{batchId}:
+    get:
+      operationId: getProjectQueueBatch
+      tags: [projects]
+      summary: Get status and tasks for a queue batch
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: batchId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Batch status
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [
+                    batchId,
+                    projectId,
+                    tasks,
+                    totalCount,
+                    completedCount,
+                    failedCount,
+                    cancelledCount,
+                  ]
+                properties:
+                  batchId: { type: string }
+                  projectId: { type: integer }
+                  tasks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentTask"
+                  totalCount: { type: integer }
+                  completedCount: { type: integer }
+                  failedCount: { type: integer }
+                  cancelledCount: { type: integer }
+        "404":
+          description: Batch not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      operationId: cancelProjectQueueBatch
+      tags: [projects]
+      summary: Cancel all queued (not yet running) tasks in a batch
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: batchId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Tasks cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cancelled, batchId]
+                properties:
+                  cancelled: { type: integer }
+                  batchId: { type: string }
+        "400":
+          description: Validation error
           content:
             application/json:
               schema:
@@ -4347,6 +4510,109 @@ paths:
                     items:
                       $ref: "#/components/schemas/CreditTransaction"
 
+  /billing/subscription:
+    get:
+      operationId: getBillingSubscription
+      tags: [billing]
+      summary: Current subscription tier and status for the authenticated user
+      responses:
+        "200":
+          description: Subscription info
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [
+                    tier,
+                    status,
+                    cancelAtPeriodEnd,
+                    monthlyCredits,
+                    maxConcurrentBuilds,
+                    stripeConfigured,
+                    publishableKey,
+                    tiers,
+                  ]
+                properties:
+                  tier: { type: string }
+                  status: { type: string }
+                  currentPeriodEnd: { type: string, format: date-time, nullable: true }
+                  gracePeriodEnd: { type: string, format: date-time, nullable: true }
+                  cancelAtPeriodEnd: { type: boolean }
+                  monthlyCredits: { type: integer }
+                  maxConcurrentBuilds: { type: integer }
+                  stripeConfigured: { type: boolean }
+                  publishableKey: { type: string }
+                  tiers:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        [
+                          id,
+                          name,
+                          priceUsd,
+                          monthlyCredits,
+                          maxConcurrentBuilds,
+                          features,
+                          available,
+                          current,
+                        ]
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        priceUsd: { type: number }
+                        monthlyCredits: { type: integer }
+                        maxConcurrentBuilds: { type: integer }
+                        features:
+                          type: array
+                          items: { type: string }
+                        available: { type: boolean }
+                        current: { type: boolean }
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /abuse-reports:
+    post:
+      operationId: submitAbuseReport
+      tags: [public]
+      summary: Submit an abuse report for a hosted site (public — no auth required)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hostname, category, reason]
+              properties:
+                hostname: { type: string }
+                category: { type: string }
+                reason: { type: string, minLength: 10, maxLength: 2000 }
+                details: { type: string }
+                reporterEmail: { type: string, format: email }
+      responses:
+        "201":
+          description: Report submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, message]
+                properties:
+                  ok: { type: boolean }
+                  reportId: { type: integer, nullable: true }
+                  message: { type: string }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /admin/me:
     get:
       operationId: getAdminMe
@@ -4504,6 +4770,204 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+
+  /admin/skills:
+    get:
+      operationId: listAdminSkills
+      tags: [admin]
+      summary: List all builder skills with enable/disable state and load counts
+      responses:
+        "200":
+          description: Skills list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [skills]
+                properties:
+                  skills:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+
+  /admin/skills/{name}:
+    patch:
+      operationId: toggleAdminSkill
+      tags: [admin]
+      summary: Enable or disable a builder skill by name
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Skill updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, enabled]
+                properties:
+                  name: { type: string }
+                  enabled: { type: boolean }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /admin/skills/drafts:
+    get:
+      operationId: listAdminSkillDrafts
+      tags: [admin]
+      summary: List agent-authored skill drafts awaiting admin review
+      responses:
+        "200":
+          description: Draft skills list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [drafts]
+                properties:
+                  drafts:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+
+  /admin/skills/drafts/{name}:
+    get:
+      operationId: getAdminSkillDraft
+      tags: [admin]
+      summary: Get raw SKILL.md content for a draft skill
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Draft skill content
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, raw]
+                properties:
+                  name: { type: string }
+                  raw: { type: string }
+        "404":
+          description: Draft not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateAdminSkillDraft
+      tags: [admin]
+      summary: Overwrite a draft skill's SKILL.md content
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [raw]
+              properties:
+                raw: { type: string, maxLength: 60000 }
+      responses:
+        "200":
+          description: Draft updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, updated]
+                properties:
+                  name: { type: string }
+                  updated: { type: boolean }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /admin/skills/drafts/{name}/approve:
+    post:
+      operationId: approveAdminSkillDraft
+      tags: [admin]
+      summary: Approve a draft skill — moves it to the active skills directory
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Draft approved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, approved]
+                properties:
+                  name: { type: string }
+                  approved: { type: boolean }
+        "400":
+          description: Error during approval
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /admin/skills/drafts/{name}/reject:
+    post:
+      operationId: rejectAdminSkillDraft
+      tags: [admin]
+      summary: Reject and permanently delete a draft skill
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Draft rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, rejected]
+                properties:
+                  name: { type: string }
+                  rejected: { type: boolean }
+        "400":
+          description: Error during rejection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /admin/eval-results:
+    get:
+      operationId: getAdminEvalResults
+      tags: [admin]
+      summary: Latest prompt-eval harness run results
+      responses:
+        "200":
+          description: Eval results (ran=false when no results file exists)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ran]
+                properties:
+                  ran: { type: boolean }
+                additionalProperties: true
 
   # ── Purchased domains (Namecheap reseller) ───────────────────────────────────
 
