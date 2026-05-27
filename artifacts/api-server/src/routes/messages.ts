@@ -38,6 +38,7 @@ import { deductCreditsAtomic, getOrCreateCredits, CREDITS_ENFORCEMENT_ENABLED } 
 import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
 import { fetchAttachmentAsDataUri } from "./images";
+import { createStreamSession, getStreamSession } from "../lib/stream-sessions";
 
 const router: IRouter = Router();
 
@@ -696,12 +697,160 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 });
 
 /**
+ * GET /projects/:id/messages/stream/resume
+ *
+ * SSE resume endpoint. A client that already received part of a stream can
+ * reconnect here after a dropped connection without restarting the AI call.
+ *
+ * Query params:
+ *   sessionId          — the streamSessionId received in the initial "session" event
+ *   resumeAfterTokens  — how many token events the client already received (integer)
+ *
+ * The endpoint replays buffered tokens starting at `resumeAfterTokens`, then
+ * continues forwarding new tokens as the original pipeline produces them, and
+ * finally emits the "done" or "error" terminal event.
+ */
+router.get(
+  "/projects/:id/messages/stream/resume",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = SendMessageParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+
+    const { sessionId, resumeAfterTokens: rawOffset } = req.query as Record<string, string>;
+    if (!sessionId || typeof sessionId !== "string") {
+      res.status(400).json({ error: "sessionId query param is required" });
+      return;
+    }
+
+    const offset = Math.max(0, parseInt(rawOffset ?? "0", 10) || 0);
+
+    const session = getStreamSession(sessionId);
+    if (!session) {
+      res.status(404).json({ error: "Stream session not found or expired" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const sendEvent = (data: Record<string, unknown>): void => {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      }
+    };
+
+    // Track client disconnect
+    let clientGone = false;
+    req.on("close", () => {
+      clientGone = true;
+    });
+
+    // Replay already-buffered tokens the client has not yet seen
+    const startIndex = offset;
+    for (let i = startIndex; i < session.tokens.length; i++) {
+      if (clientGone) {
+        res.end();
+        return;
+      }
+      sendEvent({ type: "token", content: session.tokens[i] });
+    }
+
+    // If the session is already complete, emit the terminal event and close
+    if (session.complete) {
+      if (session.errorPayload) {
+        sendEvent({ type: "error", ...session.errorPayload });
+      } else if (session.donePayload) {
+        sendEvent({ type: "done", ...session.donePayload });
+      }
+      res.end();
+      return;
+    }
+
+    // Session is still in progress — subscribe to new tokens via EventEmitter.
+    // Register listeners BEFORE the double-check so we cannot miss the terminal
+    // event if the pipeline completes between the first complete check and here.
+    let nextIndex = session.tokens.length;
+
+    const onToken = (): void => {
+      if (clientGone) return;
+      // Emit any tokens that arrived since we last checked
+      while (nextIndex < session.tokens.length) {
+        sendEvent({ type: "token", content: session.tokens[nextIndex] });
+        nextIndex++;
+      }
+    };
+
+    const onDone = (): void => {
+      if (clientGone) {
+        res.end();
+        return;
+      }
+      if (session.donePayload) {
+        sendEvent({ type: "done", ...session.donePayload });
+      }
+      res.end();
+    };
+
+    const onError = (): void => {
+      if (clientGone) {
+        res.end();
+        return;
+      }
+      if (session.errorPayload) {
+        sendEvent({ type: "error", ...session.errorPayload });
+      }
+      res.end();
+    };
+
+    session.emitter.on("token", onToken);
+    session.emitter.once("done", onDone);
+    session.emitter.once("error", onError);
+
+    // Double-check: the pipeline may have completed between the initial
+    // `session.complete` check above and the listener registration.
+    // If so, flush any remaining tokens and emit the terminal event now.
+    if (session.complete) {
+      onToken(); // flush any tokens buffered since startIndex
+      if (session.errorPayload) {
+        onError();
+      } else {
+        onDone();
+      }
+      return;
+    }
+
+    // Keep-alive pings so proxies don't close the connection
+    const keepAliveTimer = setInterval(() => {
+      if (!res.writableEnded) res.write(": keep-alive\n\n");
+    }, 15_000);
+
+    const cleanup = (): void => {
+      clearInterval(keepAliveTimer);
+      session.emitter.off("token", onToken);
+      session.emitter.off("done", onDone);
+      session.emitter.off("error", onError);
+    };
+
+    res.on("close", cleanup);
+    res.on("finish", cleanup);
+  },
+);
+
+/**
  * POST /projects/:id/messages/stream
  *
  * SSE endpoint for conversational (converse-intent) messages.
  * Streams OpenAI tokens word-by-word so the UI feels instant.
  *
  * Event types emitted:
+ *   {"type":"session","streamSessionId":"…"}  — first event; use for reconnect/resume
  *   {"type":"token","content":"…"}   — incremental text chunk
  *   {"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}  — stream complete
  *   {"type":"fallback","intent":"build"|"plan"}  — not a converse message; client should
@@ -824,9 +973,15 @@ router.post(
       abortController.abort();
     });
 
+    // Create a stream session for resume support
+    const { sessionId: streamSessionId, session: streamSession } = createStreamSession();
+
     const sendEvent = (data: Record<string, unknown>): void => {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
+
+    // Emit the session ID as the very first event so the client can resume if dropped
+    sendEvent({ type: "session", streamSessionId });
 
     // Load project files + recent conversation history
     const currentProjectFiles = await db
@@ -1006,7 +1161,7 @@ router.post(
         }
       }, 15_000);
 
-      // Stream tokens directly to the client
+      // Stream tokens directly to the client, buffering each one for resume support
       const converseResult = await runConverseStreamPipeline(
         {
           projectName: project.name,
@@ -1020,6 +1175,8 @@ router.post(
           systemPromptOverride,
         },
         (token) => {
+          streamSession.tokens.push(token);
+          streamSession.emitter.emit("token");
           sendEvent({ type: "token", content: token });
         },
       );
@@ -1086,22 +1243,26 @@ router.post(
         .set({ updatedAt: sql`now()`, lastTaskSummary: content.slice(0, 140), agentMode: mode })
         .where(eq(projectsTable.id, project.id));
 
+      const donePayload = {
+        userMessageId,
+        assistantMessageId: assistantMessage.id,
+        plan,
+      };
+
       // Cache the done payload so a retried request with the same idempotency key
       // gets the same result without re-running the AI pipeline or deducting credits.
       if (streamIdempotencyKey) {
         idempotencyStore.set(streamIdempotencyKey, {
           status: "done",
-          result: { userMessageId, assistantMessageId: assistantMessage.id, plan },
+          result: donePayload,
           timestamp: Date.now(),
         });
       }
-
-      sendEvent({
-        type: "done",
-        userMessageId,
-        assistantMessageId: assistantMessage.id,
-        plan,
-      });
+      // Mark session complete so resume clients get the terminal event
+      streamSession.complete = true;
+      streamSession.donePayload = donePayload;
+      streamSession.emitter.emit("done");
+      sendEvent({ type: "done", ...donePayload });
     } catch (err) {
       // Stop keep-alive pings on any error path
       stopKeepAlive();
@@ -1118,6 +1279,9 @@ router.post(
             .set({ status: "failed", result: "Aborted by client", completedAt: sql`now()` })
             .where(eq(agentTasksTable.id, converseTask.id));
         }
+        // Mark session complete so resume clients don't hang
+        streamSession.complete = true;
+        streamSession.emitter.emit("done");
         res.end();
         return;
       }
@@ -1142,14 +1306,21 @@ router.post(
             origin: streamMessageOrigin,
           })
           .returning();
-        sendEvent({
-          type: "error",
+        const errorPayload = {
           message: msg,
           userMessageId,
           assistantMessageId: errMsg?.id,
-        });
+        };
+        streamSession.complete = true;
+        streamSession.errorPayload = errorPayload;
+        streamSession.emitter.emit("error");
+        sendEvent({ type: "error", ...errorPayload });
       } catch {
-        sendEvent({ type: "error", message: msg, userMessageId });
+        const errorPayload = { message: msg, userMessageId };
+        streamSession.complete = true;
+        streamSession.errorPayload = errorPayload;
+        streamSession.emitter.emit("error");
+        sendEvent({ type: "error", ...errorPayload });
       }
     }
 

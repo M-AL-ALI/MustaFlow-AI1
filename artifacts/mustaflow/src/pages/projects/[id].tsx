@@ -2140,25 +2140,42 @@ export default function ProjectWorkspacePage() {
 
       void (async () => {
         // connectionEstablished tracks whether the server acknowledged the request
-        // (i.e. we got a 2xx response). Once true, we must NOT re-POST — the server
-        // already persisted the user message and may have deducted credits. Any drop
-        // after that point goes straight to the error state so the user can decide.
+        // (i.e. we got a 2xx response). Once true we must NOT re-POST — the server
+        // already persisted the user message and may have deducted credits.
+        // When a stream session ID has been received we CAN reconnect via the
+        // resume endpoint, which replays only the tokens the client missed.
         let connectionEstablished = false;
         let attempt = 0;
+        // Session ID sent by the server in the first "session" SSE event.
+        // Needed to reconnect via the resume endpoint.
+        let activeSessionId: string | null = null;
+        // Accumulated text and token count persist across resume reconnects so
+        // the streaming bubble never resets mid-reply.
+        let accText = "";
+        let tokenCount = 0;
 
         while (true) {
           try {
-            const resp = await fetch(`/api/projects/${projectId}/messages/stream`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body,
-              signal: ctrl.signal,
-            });
+            let resp: Response;
+
+            if (connectionEstablished && activeSessionId) {
+              // Resume mode: request only the tokens the client has not yet seen.
+              const resumeUrl =
+                `/api/projects/${projectId}/messages/stream/resume` +
+                `?sessionId=${encodeURIComponent(activeSessionId)}` +
+                `&resumeAfterTokens=${tokenCount}`;
+              resp = await fetch(resumeUrl, { method: "GET", signal: ctrl.signal });
+            } else {
+              resp = await fetch(`/api/projects/${projectId}/messages/stream`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body,
+                signal: ctrl.signal,
+              });
+            }
 
             if (!resp.ok || !resp.body) {
-              // Non-2xx or no body — the server may have partially processed the
-              // request, so automatic re-send is not safe. Surface the error and let
-              // the user decide whether to retry explicitly.
+              // Non-2xx or no body — surface the error and let the user decide.
               setIsStreaming(false);
               setStreamingText("");
               setStreamReconnectAttempt(0);
@@ -2171,11 +2188,10 @@ export default function ProjectWorkspacePage() {
               return;
             }
 
-            // Server accepted the request — mark connection established so we never
-            // re-POST on a subsequent error (would create duplicate messages / charges).
+            // Server accepted the request.
             connectionEstablished = true;
 
-            // Clear reconnect indicator once we have a live connection
+            // Clear reconnect indicator once we have a live connection.
             if (attempt > 0) {
               setStreamReconnectAttempt(0);
             }
@@ -2183,7 +2199,6 @@ export default function ProjectWorkspacePage() {
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
             let buf = "";
-            let accText = "";
             let finished = false;
 
             while (!finished) {
@@ -2202,7 +2217,11 @@ export default function ProjectWorkspacePage() {
                   continue;
                 }
 
-                if (event.type === "token") {
+                if (event.type === "session") {
+                  // Store session ID for potential resume on reconnect.
+                  activeSessionId = (event.streamSessionId as string) ?? null;
+                } else if (event.type === "token") {
+                  tokenCount++;
                   accText += (event.content as string) ?? "";
                   setStreamingText(accText);
                 } else if (event.type === "done") {
@@ -2222,7 +2241,7 @@ export default function ProjectWorkspacePage() {
                     queryKey: getGetProjectQueryKey(projectId),
                   });
                 } else if (event.type === "fallback") {
-                  // Server says it's a build/plan — use the regular path
+                  // Server says it's a build/plan — use the regular path.
                   finished = true;
                   setIsStreaming(false);
                   setStreamingText("");
@@ -2259,10 +2278,40 @@ export default function ProjectWorkspacePage() {
               }
             }
 
-            // If the inner loop exited without a terminal event the server closed the
-            // connection unexpectedly. Since the request was already accepted we must
-            // not re-POST — surface the error so the user can decide.
+            // Inner loop exited without a terminal event — the server closed the
+            // connection unexpectedly. If we have a session ID we can resume;
+            // otherwise surface the error.
             if (!finished) {
+              if (activeSessionId) {
+                attempt++;
+                if (attempt > MAX_STREAM_RETRIES) {
+                  setIsStreaming(false);
+                  setStreamingText("");
+                  setStreamReconnectAttempt(0);
+                  setStreamError(true);
+                  setPendingBuildStartedAt(null);
+                  pendingIsPlanRef.current = false;
+                  setPendingIsPlan(false);
+                  pendingIsConverseRef.current = false;
+                  setPendingIsConverse(false);
+                  return;
+                }
+                setStreamReconnectAttempt(attempt);
+                const delay = STREAM_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+                await new Promise<void>((resolve) => setTimeout(resolve, delay));
+                if (ctrl.signal.aborted) {
+                  setIsStreaming(false);
+                  setStreamingText("");
+                  setStreamReconnectAttempt(0);
+                  setStreamError(false);
+                  setPendingIsConverse(false);
+                  pendingIsConverseRef.current = false;
+                  return;
+                }
+                // Loop back — will use resume endpoint (connectionEstablished && activeSessionId).
+                continue;
+              }
+              // No session ID — cannot resume; surface the error.
               setIsStreaming(false);
               setStreamingText("");
               setStreamReconnectAttempt(0);
@@ -2277,7 +2326,7 @@ export default function ProjectWorkspacePage() {
             return;
           } catch (err) {
             if ((err as { name?: string }).name === "AbortError") {
-              // User aborted — clean up without retrying
+              // User aborted — clean up without retrying.
               setIsStreaming(false);
               setStreamingText("");
               setStreamReconnectAttempt(0);
@@ -2287,10 +2336,39 @@ export default function ProjectWorkspacePage() {
               return;
             }
 
-            // If the server already accepted the request, do NOT re-POST — it would
-            // create a duplicate user message and charge credits again. Surface the
-            // error immediately so the user can explicitly choose to retry.
             if (connectionEstablished) {
+              // Server already processed the POST. Re-POSTing is not safe.
+              // If we have a session ID we can resume via the GET endpoint.
+              if (activeSessionId) {
+                attempt++;
+                if (attempt > MAX_STREAM_RETRIES) {
+                  setIsStreaming(false);
+                  setStreamingText("");
+                  setStreamReconnectAttempt(0);
+                  setStreamError(true);
+                  setPendingBuildStartedAt(null);
+                  pendingIsPlanRef.current = false;
+                  setPendingIsPlan(false);
+                  pendingIsConverseRef.current = false;
+                  setPendingIsConverse(false);
+                  return;
+                }
+                setStreamReconnectAttempt(attempt);
+                const delay = STREAM_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+                await new Promise<void>((resolve) => setTimeout(resolve, delay));
+                if (ctrl.signal.aborted) {
+                  setIsStreaming(false);
+                  setStreamingText("");
+                  setStreamReconnectAttempt(0);
+                  setStreamError(false);
+                  setPendingIsConverse(false);
+                  pendingIsConverseRef.current = false;
+                  return;
+                }
+                // Loop back — will use resume endpoint.
+                continue;
+              }
+              // No session ID — surface error immediately.
               setIsStreaming(false);
               setStreamingText("");
               setStreamReconnectAttempt(0);
@@ -2303,12 +2381,11 @@ export default function ProjectWorkspacePage() {
               return;
             }
 
-            // The fetch() itself threw before we got a response — the server almost
-            // certainly never received the request, so it is safe to retry.
+            // The fetch() threw before we got any response — safe to re-POST.
             attempt++;
 
             if (attempt > MAX_STREAM_RETRIES) {
-              // Max retries exhausted — show persistent error with Try again button
+              // Max retries exhausted — show persistent error with Try again button.
               setIsStreaming(false);
               setStreamingText("");
               setStreamReconnectAttempt(0);
@@ -2321,13 +2398,13 @@ export default function ProjectWorkspacePage() {
               return;
             }
 
-            // Show reconnecting indicator and wait with exponential backoff
+            // Show reconnecting indicator and wait with exponential backoff.
             setStreamReconnectAttempt(attempt);
             setStreamingText("");
             const delay = STREAM_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
             await new Promise<void>((resolve) => setTimeout(resolve, delay));
 
-            // Check if user aborted during the delay
+            // Check if user aborted during the delay.
             if (ctrl.signal.aborted) {
               setIsStreaming(false);
               setStreamingText("");

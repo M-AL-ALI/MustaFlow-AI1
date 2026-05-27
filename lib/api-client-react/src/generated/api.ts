@@ -233,6 +233,7 @@ import type {
   RequestProjectUploadUrlBody,
   RerunTestsResult,
   ResumePausedQueue200,
+  ResumeStreamParams,
   RetryProjectProvisioning200,
   RevokeAdminRole200,
   RollbackInput,
@@ -262,6 +263,7 @@ import type {
   StreamDoneEvent,
   StreamErrorEvent,
   StreamFallbackEvent,
+  StreamSessionEvent,
   StreamTokenEvent,
   StripeWebhook200,
   SubdomainInput,
@@ -3609,6 +3611,110 @@ export const useSendMessage = <TError = ErrorType<unknown>,
       return useMutation(getSendMessageMutationOptions(options));
     }
 
+export const getResumeStreamUrl = (id: number,
+    params: ResumeStreamParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/projects/${id}/messages/stream/resume?${stringifiedParams}` : `/api/projects/${id}/messages/stream/resume`
+}
+
+/**
+ * SSE resume endpoint. When a client loses the connection mid-stream it can
+reconnect here without restarting the AI call. The server replays only
+the buffered tokens the client has not yet received, then continues
+forwarding live tokens until the pipeline completes.
+
+The `sessionId` is received as the first `{"type":"session"}` event on
+the original `POST /projects/{id}/messages/stream` connection.
+`resumeAfterTokens` must equal the number of `token` events the client
+already processed.
+
+Event shapes emitted on the resumed stream:
+- `{"type":"token","content":"…"}` — replayed or new incremental chunk
+- `{"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}` — stream complete
+- `{"type":"error","message":"…"}` — something went wrong
+
+ * @summary Resume a dropped SSE stream from a token offset
+ */
+export const resumeStream = async (id: number,
+    params: ResumeStreamParams, options?: RequestInit): Promise<StreamTokenEvent | StreamDoneEvent | StreamErrorEvent> => {
+
+  return customFetch<StreamTokenEvent | StreamDoneEvent | StreamErrorEvent>(getResumeStreamUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getResumeStreamQueryKey = (id: number,
+    params?: ResumeStreamParams,) => {
+    return [
+    `/api/projects/${id}/messages/stream/resume`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getResumeStreamQueryOptions = <TData = Awaited<ReturnType<typeof resumeStream>>, TError = ErrorType<ApiError>>(id: number,
+    params: ResumeStreamParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof resumeStream>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getResumeStreamQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof resumeStream>>> = ({ signal }) => resumeStream(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof resumeStream>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ResumeStreamQueryResult = NonNullable<Awaited<ReturnType<typeof resumeStream>>>
+export type ResumeStreamQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Resume a dropped SSE stream from a token offset
+ */
+
+export function useResumeStream<TData = Awaited<ReturnType<typeof resumeStream>>, TError = ErrorType<ApiError>>(
+ id: number,
+    params: ResumeStreamParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof resumeStream>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getResumeStreamQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
 export const getStreamMessageUrl = (id: number,) => {
 
 
@@ -3623,6 +3729,7 @@ Streams OpenAI tokens word-by-word so the UI feels instant. The raw `fetch` + `R
 loop in the frontend is intentional — Orval cannot generate a TanStack Query hook for SSE.
 
 Event shapes emitted on the stream:
+- `{"type":"session","streamSessionId":"…"}` — first event; store this ID for use with the resume endpoint if the connection drops
 - `{"type":"token","content":"…"}` — incremental text chunk
 - `{"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}` — stream complete
 - `{"type":"fallback","intent":"build"|"plan"}` — not a converse message; client should re-send via `POST /projects/{id}/messages`
@@ -3631,9 +3738,9 @@ Event shapes emitted on the stream:
  * @summary Stream a conversational AI response over SSE (text/event-stream)
  */
 export const streamMessage = async (id: number,
-    chatMessageInput: ChatMessageInput, options?: RequestInit): Promise<StreamTokenEvent | StreamDoneEvent | StreamFallbackEvent | StreamErrorEvent> => {
+    chatMessageInput: ChatMessageInput, options?: RequestInit): Promise<StreamSessionEvent | StreamTokenEvent | StreamDoneEvent | StreamFallbackEvent | StreamErrorEvent> => {
 
-  return customFetch<StreamTokenEvent | StreamDoneEvent | StreamFallbackEvent | StreamErrorEvent>(getStreamMessageUrl(id),
+  return customFetch<StreamSessionEvent | StreamTokenEvent | StreamDoneEvent | StreamFallbackEvent | StreamErrorEvent>(getStreamMessageUrl(id),
   {
     ...options,
     method: 'POST',

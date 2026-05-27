@@ -1370,11 +1370,44 @@ export const SendMessageResponse = zod.object({
 
 
 /**
+ * SSE resume endpoint. When a client loses the connection mid-stream it can
+reconnect here without restarting the AI call. The server replays only
+the buffered tokens the client has not yet received, then continues
+forwarding live tokens until the pipeline completes.
+
+The `sessionId` is received as the first `{"type":"session"}` event on
+the original `POST /projects/{id}/messages/stream` connection.
+`resumeAfterTokens` must equal the number of `token` events the client
+already processed.
+
+Event shapes emitted on the resumed stream:
+- `{"type":"token","content":"…"}` — replayed or new incremental chunk
+- `{"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}` — stream complete
+- `{"type":"error","message":"…"}` — something went wrong
+
+ * @summary Resume a dropped SSE stream from a token offset
+ */
+export const ResumeStreamParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const resumeStreamQueryResumeAfterTokensMin = 0;
+
+
+
+export const ResumeStreamQueryParams = zod.object({
+  "sessionId": zod.coerce.string().describe('The streamSessionId from the initial session event.'),
+  "resumeAfterTokens": zod.coerce.number().min(resumeStreamQueryResumeAfterTokensMin).optional().describe('Number of token events already received; defaults to 0.')
+})
+
+
+/**
  * SSE endpoint for converse-family messages (converse, debug, refactor, review, explain).
 Streams OpenAI tokens word-by-word so the UI feels instant. The raw `fetch` + `ReadableStream`
 loop in the frontend is intentional — Orval cannot generate a TanStack Query hook for SSE.
 
 Event shapes emitted on the stream:
+- `{"type":"session","streamSessionId":"…"}` — first event; store this ID for use with the resume endpoint if the connection drops
 - `{"type":"token","content":"…"}` — incremental text chunk
 - `{"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}` — stream complete
 - `{"type":"fallback","intent":"build"|"plan"}` — not a converse message; client should re-send via `POST /projects/{id}/messages`

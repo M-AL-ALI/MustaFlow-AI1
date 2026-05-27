@@ -905,6 +905,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChatExchange"
+  /projects/{id}/messages/stream/resume:
+    get:
+      operationId: resumeStream
+      tags: [chat]
+      summary: Resume a dropped SSE stream from a token offset
+      description: |
+        SSE resume endpoint. When a client loses the connection mid-stream it can
+        reconnect here without restarting the AI call. The server replays only
+        the buffered tokens the client has not yet received, then continues
+        forwarding live tokens until the pipeline completes.
+
+        The `sessionId` is received as the first `{"type":"session"}` event on
+        the original `POST /projects/{id}/messages/stream` connection.
+        `resumeAfterTokens` must equal the number of `token` events the client
+        already processed.
+
+        Event shapes emitted on the resumed stream:
+        - `{"type":"token","content":"…"}` — replayed or new incremental chunk
+        - `{"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}` — stream complete
+        - `{"type":"error","message":"…"}` — something went wrong
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - name: sessionId
+          in: query
+          required: true
+          schema: { type: string }
+          description: The streamSessionId from the initial session event.
+        - name: resumeAfterTokens
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+          description: Number of token events already received; defaults to 0.
+      responses:
+        "200":
+          description: >
+            Server-Sent Events stream continuing from the given token offset.
+          content:
+            text/event-stream:
+              schema:
+                description: >
+                  Each SSE `data:` line carries a JSON object. Discriminate on the `type`
+                  field to determine the frame shape.
+                oneOf:
+                  - $ref: "#/components/schemas/StreamTokenEvent"
+                  - $ref: "#/components/schemas/StreamDoneEvent"
+                  - $ref: "#/components/schemas/StreamErrorEvent"
+        "404":
+          description: Session not found or expired (TTL is 10 minutes)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/messages/stream:
     post:
       operationId: streamMessage
@@ -916,6 +969,7 @@ paths:
         loop in the frontend is intentional — Orval cannot generate a TanStack Query hook for SSE.
 
         Event shapes emitted on the stream:
+        - `{"type":"session","streamSessionId":"…"}` — first event; store this ID for use with the resume endpoint if the connection drops
         - `{"type":"token","content":"…"}` — incremental text chunk
         - `{"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}` — stream complete
         - `{"type":"fallback","intent":"build"|"plan"}` — not a converse message; client should re-send via `POST /projects/{id}/messages`
@@ -943,6 +997,7 @@ paths:
                   Each SSE `data:` line carries a JSON object. Discriminate on the `type`
                   field to determine the frame shape.
                 oneOf:
+                  - $ref: "#/components/schemas/StreamSessionEvent"
                   - $ref: "#/components/schemas/StreamTokenEvent"
                   - $ref: "#/components/schemas/StreamDoneEvent"
                   - $ref: "#/components/schemas/StreamFallbackEvent"
@@ -950,6 +1005,7 @@ paths:
                 discriminator:
                   propertyName: type
                   mapping:
+                    session: "#/components/schemas/StreamSessionEvent"
                     token: "#/components/schemas/StreamTokenEvent"
                     done: "#/components/schemas/StreamDoneEvent"
                     fallback: "#/components/schemas/StreamFallbackEvent"
@@ -8927,6 +8983,23 @@ components:
         size: { type: integer, description: File size in bytes (content length) }
         artifactId: { type: integer, nullable: true }
         updatedAt: { type: string, format: date-time }
+
+    StreamSessionEvent:
+      type: object
+      description: >
+        First event emitted on every new converse stream. Carries a session ID the client
+        must store and pass to `GET /projects/{id}/messages/stream/resume` if the connection
+        drops before the terminal `done` or `error` event arrives.
+      required: [type, streamSessionId]
+      properties:
+        type:
+          type: string
+          enum: [session]
+        streamSessionId:
+          type: string
+          description: >
+            UUID identifying this stream session. Valid for 10 minutes after stream start.
+            Pass as the `sessionId` query param on the resume endpoint.
 
     StreamTokenEvent:
       type: object

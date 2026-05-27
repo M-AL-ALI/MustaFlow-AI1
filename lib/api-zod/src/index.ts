@@ -51,3 +51,4 @@ export { SubmitProjectQueueBody } from "./generated/api";
 export { SubmitAbuseReportBody } from "./generated/api";
 export { ToggleAdminSkillBody } from "./generated/api";
 export { UpdateAdminSkillDraftBody } from "./generated/api";
+export { ResumeStreamParams } from "./generated/api";

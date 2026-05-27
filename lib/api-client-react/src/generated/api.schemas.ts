@@ -3674,6 +3674,24 @@ export interface V1FileMeta {
   updatedAt?: string;
 }
 
+export type StreamSessionEventType = typeof StreamSessionEventType[keyof typeof StreamSessionEventType];
+
+
+export const StreamSessionEventType = {
+  session: 'session',
+} as const;
+
+/**
+ * First event emitted on every new converse stream. Carries a session ID the client must store and pass to `GET /projects/{id}/messages/stream/resume` if the connection drops before the terminal `done` or `error` event arrives.
+
+ */
+export interface StreamSessionEvent {
+  type: StreamSessionEventType;
+  /** UUID identifying this stream session. Valid for 10 minutes after stream start. Pass as the `sessionId` query param on the resume endpoint.
+   */
+  streamSessionId: string;
+}
+
 /**
  * Discriminant field identifying this as a token frame.
  */
@@ -3921,6 +3939,18 @@ export const ListProjectsMode = {
   builder: 'builder',
   developer: 'developer',
 } as const;
+
+export type ResumeStreamParams = {
+/**
+ * The streamSessionId from the initial session event.
+ */
+sessionId: string;
+/**
+ * Number of token events already received; defaults to 0.
+ * @minimum 0
+ */
+resumeAfterTokens?: number;
+};
 
 export type SearchMessagesParams = {
 q: string;
