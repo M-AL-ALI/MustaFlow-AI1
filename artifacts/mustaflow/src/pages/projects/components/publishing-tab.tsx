@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useEventSource } from "@/lib/use-event-source";
 import {
   useListSecrets,
   useCreateSecret,
@@ -4171,10 +4172,9 @@ export function PublishingTab({
   // ── Domain SSE stream ─────────────────────────────────────────────────────
   // Subscribe to real-time domain events (verified, ssl_issued, error) so the
   // domain list updates inline without requiring a manual refresh.
-  useEffect(() => {
-    const es = new EventSource(`/api/projects/${projectId}/domains/events/stream`);
-
-    es.onmessage = (evt) => {
+  // useEventSource handles exponential back-off reconnection automatically.
+  useEventSource(`/api/projects/${projectId}/domains/events/stream`, {
+    onMessage: (evt) => {
       try {
         const payload = JSON.parse(evt.data as string) as {
           type: string;
@@ -4234,19 +4234,8 @@ export function PublishingTab({
       } catch {
         /* ignore malformed events */
       }
-    };
-
-    // Do NOT call es.close() on error — native EventSource auto-reconnects.
-    // Each reconnect triggers the replay-then-stream on the server, so state
-    // will sync correctly without manual intervention.
-    es.onerror = () => {
-      /* allow auto-reconnect */
-    };
-
-    return () => {
-      es.close();
-    };
-  }, [projectId, fetchDomains]);
+    },
+  });
 
   const webChecklist = webEnv === "testing" ? WEB_TESTING_CHECKLIST : WEB_PRODUCTION_CHECKLIST;
   const webRequired = webChecklist.flatMap((s) => s.items).filter((i) => i.required);

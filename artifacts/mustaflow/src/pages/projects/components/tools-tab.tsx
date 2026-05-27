@@ -31,6 +31,7 @@ import {
   PenLine,
   AlertTriangle,
 } from "lucide-react";
+import { useEventSource } from "@/lib/use-event-source";
 import { IntegrationsRegistry } from "./integrations-registry";
 import { GithubTab } from "./github-tab";
 import { VersionTimeline } from "./version-timeline";
@@ -1212,10 +1213,11 @@ export function ToolsTab({
   // directly (no full refetch) and briefly highlight the affected row.
   const [flashedSecretIds, setFlashedSecretIds] = useState<Set<number>>(new Set());
 
-  useEffect(() => {
-    const es = new EventSource(`/api/projects/${projectId}/secrets/events/stream`);
-
-    es.onmessage = (evt) => {
+  // useEventSource handles exponential back-off reconnection automatically.
+  // Each reconnect triggers the server's replay-then-stream, so the snapshot
+  // reconciles any state missed during the disconnect.
+  useEventSource(`/api/projects/${projectId}/secrets/events/stream`, {
+    onMessage: (evt) => {
       try {
         type SnapshotPayload = {
           type: "snapshot";
@@ -1297,19 +1299,8 @@ export function ToolsTab({
       } catch {
         /* ignore malformed events */
       }
-    };
-
-    // Do NOT call es.close() on error — native EventSource auto-reconnects.
-    // Each reconnect triggers the server's replay-then-stream, so the snapshot
-    // reconciles any state missed during the disconnect.
-    es.onerror = () => {
-      /* allow auto-reconnect */
-    };
-
-    return () => {
-      es.close();
-    };
-  }, [projectId, queryClient]);
+    },
+  });
 
   useEffect(() => {
     if (prefillSecretName) {
