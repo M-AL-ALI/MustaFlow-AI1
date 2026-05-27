@@ -1,0 +1,34 @@
+#1041 - Logo-triggered slide-out navigation panel
+What & Why
+Replace the current full sidebar with a minimal layout: only the MustaFlow logo is always visible in the top-left corner. Clicking the logo slides open a panel (overlay drawer) containing all navigation. This gives the workspace more breathing room and feels less cluttered.
+
+Done looks like
+The app layout shows only the MustaFlow logo mark in the top-left corner at all times — no expanded sidebar visible by default.
+Clicking the logo opens a smooth slide-in panel from the left covering the logo area.
+The panel contains, in order:
+Create something new — navigates to /projects and opens the new project flow (or focuses the HomeHero prompt textarea)
+Import code or design — navigates to the import flow
+Workspace section — shows the current workspace name with a "Create workspace" sub-action
+Projects section — links to /projects with a "Create project" sub-action inline
+Billing — links to /billing
+Settings — links to /settings
+Clicking outside the panel (or the logo again) slides it closed.
+The credits widget and user avatar/sign-out remain inside the panel at the bottom.
+Admin nav item appears inside the panel for admin users, same as before.
+No horizontal space is consumed by the sidebar when the panel is closed — the main content fills the full width.
+The slide animation is fast (150–200 ms ease-out), matching the dark theme.
+On the project workspace page (/projects/:id), the same logo + slide-out applies; the workspace tab bar and AI chat remain untouched.
+Out of scope
+Mobile/responsive breakpoints (desktop only for now)
+Keyboard navigation / focus trap inside the panel
+Pinning the panel open permanently (always-closed-by-default only)
+Any changes to the AI builder chat, tab bar, or preview pane
+Steps
+New SlideOutNav component — Build a new component that renders only the logo button when closed, and a fixed left-side drawer overlay when open. Use a useState(false) open flag; close on outside click via a backdrop div. Replace the <SidebarInner> usage in app-layout.tsx with this new component.
+Panel content — Wire the six nav items (Create something new, Import code, Workspace + Create workspace, Projects + Create project, Billing, Settings) with their links and actions. Reuse the credits widget and user section from the existing sidebar.
+Layout shell change — Remove the fixed-width sidebar column from app-layout.tsx. The main content area should span full width when the panel is closed. The logo button is absolutely/fixed positioned in the top-left corner so it never pushes content.
+Clean up old sidebar — The existing sidebar.tsx / SidebarInner is no longer rendered in the main layout. Keep the file but it can be unused (the dev-sidebar and any other consumers are separate).
+Relevant files
+artifacts/mustaflow/src/components/layout/app-layout.tsx
+artifacts/mustaflow/src/components/layout/sidebar.tsx
+artifacts/mustaflow/src/pages/projects.tsx
