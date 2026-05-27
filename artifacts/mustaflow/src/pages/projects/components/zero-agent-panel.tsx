@@ -694,7 +694,11 @@ export function ZeroAgentPanel({
             agentMode: useMode,
             planMode: usePlan,
             background: useBg,
-            agentIntent: usePlan ? ("plan" as const) : ("build" as const),
+            // Only force intent when Plan Mode is explicitly enabled. Otherwise
+            // omit it so the server-side classifier can route conversational
+            // questions to the converse pipeline instead of silently completing
+            // through refine with "Refined 0 files".
+            ...(usePlan ? { agentIntent: "plan" as const } : {}),
             origin: "zero",
             ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
           },

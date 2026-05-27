@@ -586,7 +586,12 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
             agentMode,
             planMode,
             background: false,
-            agentIntent: planMode ? ("plan" as const) : ("build" as const),
+            // Only force intent when the user explicitly enabled Plan Mode.
+            // Otherwise, omit it so the server-side classifier can route
+            // conversational questions ("what is happening?") to the converse
+            // pipeline instead of forcing them through refine, which silently
+            // completes with "Refined 0 files" and leaves the user without a reply.
+            ...(planMode ? { agentIntent: "plan" as const } : {}),
             origin: "zero",
             ...(attachments.length > 0 ? { attachments } : {}),
           },
