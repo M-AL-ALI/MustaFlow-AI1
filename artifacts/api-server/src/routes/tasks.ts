@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, projectsTable, agentTasksTable } from "@workspace/db";
 import {
   ListTasksParams,
@@ -78,8 +78,9 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
 
   const prompt = parsed.data.prompt ?? parsed.data.title;
 
-  // Conflict detection: check if any task is currently building or planning for this project.
-  // If so, queue the new task instead of launching it immediately.
+  // Conflict detection: check if any non-background task is currently building or planning for
+  // this project. Background tasks (provisioning, blueprint npm-install, etc.) must not block
+  // the user from submitting new tasks.
   const activeTasks = await db
     .select({ id: agentTasksTable.id, status: agentTasksTable.status })
     .from(agentTasksTable)
@@ -87,6 +88,7 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
       and(
         eq(agentTasksTable.projectId, project.id),
         inArray(agentTasksTable.status, ["building", "planning"]),
+        ne(agentTasksTable.kind, "background"),
       ),
     )
     .limit(1);

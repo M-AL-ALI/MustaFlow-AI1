@@ -42,6 +42,7 @@ import {
   Blocks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 import { useListSecrets } from "@workspace/api-client-react";
 import { IntegrationsRegistry } from "./integrations-registry";
 
@@ -236,6 +237,7 @@ function ConnectorsPanel({ projectId }: { projectId: number }) {
 // ─── Blueprints panel ─────────────────────────────────────────────────────────
 
 function BlueprintsPanel({ projectId }: { projectId: number }) {
+  const { toast } = useToast();
   const [catalog, setCatalog] = useState<BlueprintListItem[]>([]);
   const [installed, setInstalled] = useState<InstalledRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -290,6 +292,8 @@ function BlueprintsPanel({ projectId }: { projectId: number }) {
           filesWritten?: string[];
           filesSkipped?: string[];
           platformNotices?: string[];
+          packagesInstalling?: boolean;
+          reason?: string;
         };
         if (!res.ok || !body.installed) {
           throw new Error(body.error ?? `HTTP ${res.status}`);
@@ -342,6 +346,18 @@ function BlueprintsPanel({ projectId }: { projectId: number }) {
           );
         }
 
+        if (body.packagesInstalling) {
+          toast({
+            title: "Blueprint installed",
+            description: "Packages are being installed in the background.",
+          });
+        } else if (body.reason === "container_not_ready") {
+          toast({
+            title: "Blueprint installed",
+            description: "Packages will be available after your next build.",
+          });
+        }
+
         await refresh();
       } catch (err) {
         setError(`Install failed: ${(err as Error).message}`);
@@ -349,7 +365,7 @@ function BlueprintsPanel({ projectId }: { projectId: number }) {
         setInstalling(null);
       }
     },
-    [projectId, refresh],
+    [projectId, refresh, toast],
   );
 
   const handleUninstall = useCallback(

@@ -22,6 +22,8 @@ import {
   projectBlueprintsTable,
   projectsTable,
   secretsTable,
+  agentTasksTable,
+  taskEventsTable,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { requireAdmin } from "../lib/adminAuth";
@@ -30,12 +32,148 @@ import {
   installBlueprint,
   loadBlueprints,
   type BlueprintManifest,
+  type BlueprintPackageSpec,
 } from "../lib/blueprints";
 import { discoverMcpTools, assertSafeMcpEndpoint } from "../lib/mcp";
 import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
 import { encryptionService } from "../lib/encryption";
+import { execInContainer } from "../lib/container";
+import { publishTaskEvent } from "../lib/event-bus";
 import { z } from "zod";
+
+// ─── Async npm install helper ─────────────────────────────────────────────────
+
+interface NpmInstallContext {
+  containerId: string;
+  projectId: number;
+  blueprintId: string;
+  blueprintName: string;
+  packages: BlueprintPackageSpec[];
+}
+
+/**
+ * Fires an async npm install inside the project's Fly.io container after a
+ * blueprint is installed via the HTTP route. Returns the synthetic task ID
+ * so the caller can include it in the HTTP response for frontend correlation.
+ * Does not block the HTTP response — the install runs fully in the background.
+ *
+ * Creates a background-kind agent task so progress events are visible in the
+ * project activity stream. Background tasks are excluded from the active-build
+ * conflict detection in routes/tasks.ts and routes/messages.ts, so user
+ * submissions are never blocked.
+ */
+async function triggerBlueprintNpmInstall(ctx: NpmInstallContext): Promise<number | null> {
+  const { containerId, projectId, blueprintId, blueprintName, packages } = ctx;
+
+  // Create a background task row so task events have a valid FK. Using
+  // kind="background" ensures the conflict-detection query (ne(kind, "background"))
+  // in tasks.ts / messages.ts skips this row.
+  let taskId: number;
+  try {
+    const [row] = await db
+      .insert(agentTasksTable)
+      .values({
+        projectId,
+        title: `blueprint:npm-install:${blueprintId}`,
+        kind: "background",
+        status: "building",
+        prompt: `npm install for blueprint ${blueprintName}`,
+      })
+      .returning({ id: agentTasksTable.id });
+    if (!row) {
+      logger.warn({ blueprintId, projectId }, "blueprint npm install: task row not returned");
+      return null;
+    }
+    taskId = row.id;
+  } catch (err) {
+    logger.warn(
+      { err, blueprintId, projectId },
+      "blueprint npm install: could not create task row",
+    );
+    return null;
+  }
+
+  const emit = async (eventType: string, message: string): Promise<void> => {
+    try {
+      const [row] = await db
+        .insert(taskEventsTable)
+        .values({ taskId, eventType, message })
+        .returning();
+      if (row) {
+        publishTaskEvent({
+          id: row.id,
+          taskId: row.taskId,
+          eventType: row.eventType,
+          message: row.message,
+          filePath: row.filePath ?? null,
+          createdAt: row.createdAt,
+        });
+      }
+    } catch (e) {
+      logger.warn({ e, taskId }, "blueprint npm install: event emit failed");
+    }
+  };
+
+  const finishTask = async (status: "completed" | "failed"): Promise<void> => {
+    try {
+      await db.update(agentTasksTable).set({ status }).where(eq(agentTasksTable.id, taskId));
+    } catch (e) {
+      logger.warn({ e, taskId }, "blueprint npm install: task status update failed");
+    }
+  };
+
+  await emit("narration", `Installing blueprint packages for ${blueprintName}…`);
+
+  void (async () => {
+    try {
+      const prodPkgs = packages
+        .filter((p) => !p.dev)
+        .map((p) => (p.version ? `${p.name}@${p.version}` : p.name));
+      const devPkgs = packages
+        .filter((p) => p.dev)
+        .map((p) => (p.version ? `${p.name}@${p.version}` : p.name));
+
+      if (prodPkgs.length > 0) {
+        const r = await execInContainer(
+          containerId,
+          ["npm", "install", "--prefix", "/app", ...prodPkgs],
+          projectId,
+          "/app",
+        );
+        if (!r.ok) {
+          await emit("failed", `Package install failed: ${r.stderr.slice(0, 500)}`);
+          await finishTask("failed");
+          return;
+        }
+      }
+
+      if (devPkgs.length > 0) {
+        const r = await execInContainer(
+          containerId,
+          ["npm", "install", "--prefix", "/app", "--save-dev", ...devPkgs],
+          projectId,
+          "/app",
+        );
+        if (!r.ok) {
+          await emit("failed", `Dev package install failed: ${r.stderr.slice(0, 500)}`);
+          await finishTask("failed");
+          return;
+        }
+      }
+
+      await emit("completed", `Blueprint packages for ${blueprintName} installed successfully.`);
+      await finishTask("completed");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn({ err, blueprintId, projectId }, "blueprint npm install threw unexpectedly");
+      await emit("failed", `Package install error: ${msg}`);
+      await finishTask("failed");
+    }
+  })();
+
+  return taskId;
+}
 
 const router: IRouter = Router();
 
@@ -237,7 +375,12 @@ router.post(
       return;
     }
     const [project] = await db
-      .select({ id: projectsTable.id, projectFormat: projectsTable.projectFormat })
+      .select({
+        id: projectsTable.id,
+        projectFormat: projectsTable.projectFormat,
+        containerId: projectsTable.containerId,
+        provisioningStatus: projectsTable.provisioningStatus,
+      })
       .from(projectsTable)
       .where(eq(projectsTable.id, projectId))
       .limit(1);
@@ -255,9 +398,10 @@ router.post(
     }
     const actor = req.userId ?? null;
     try {
-      // HTTP install: no package install (will be picked up by the next build's
-      // container `npm install`), no secret request UI (the UI lists required
-      // secrets so the user knows what to add manually).
+      // HTTP install: registers the blueprint record and injects platform secrets.
+      // If the project has a ready Fly.io container, packages are installed
+      // immediately via triggerBlueprintNpmInstall (async, non-blocking).
+      // Otherwise they will be picked up by the next build's container npm install.
       const result = await installBlueprint(bp, { projectId, actor });
 
       // ── Knowledge Vault: record integration usage for future AI context ──
@@ -292,7 +436,44 @@ router.post(
         if (r.injected && r.notice) platformNotices.push(r.notice);
       }
 
-      res.json({ installed: true, ...result, platformNotices });
+      // ── Async npm install on agentic container (when ready) ───────────────
+      const npmPackages = bp.packages.filter((p) => p.runtime === "node");
+      const containerReady =
+        project.containerId != null &&
+        project.provisioningStatus === "ready" &&
+        npmPackages.length > 0;
+
+      if (containerReady) {
+        const blueprintTaskId = await triggerBlueprintNpmInstall({
+          containerId: project.containerId!,
+          projectId,
+          blueprintId: bp.id,
+          blueprintName: bp.name,
+          packages: npmPackages,
+        });
+        // Only report packagesInstalling if the task was actually created.
+        // If task row creation failed, blueprintTaskId is null and no install
+        // is running — fall through to the not-ready response to avoid misleading the UI.
+        if (blueprintTaskId != null) {
+          res.json({
+            installed: true,
+            ...result,
+            platformNotices,
+            packagesInstalling: true,
+            blueprintTaskId,
+          });
+          return;
+        }
+      }
+
+      // Either the container is not ready, packages already installed elsewhere,
+      // or the background task row could not be created. Return container_not_ready
+      // whenever there are npm packages and the container is unavailable.
+      const extra: Record<string, unknown> = { packagesInstalling: false };
+      if (npmPackages.length > 0) {
+        extra.reason = "container_not_ready";
+      }
+      res.json({ installed: true, ...result, platformNotices, ...extra });
     } catch (err) {
       req.log.error({ err, blueprintId: bp.id }, "blueprint install failed");
       res.status(500).json({ error: "Install failed", detail: (err as Error).message });

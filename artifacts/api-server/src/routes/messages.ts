@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { asc, and, desc, eq, inArray, sql } from "drizzle-orm";
+import { asc, and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -412,6 +412,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     // Check for an active build/refine — prevent concurrent runs for the same project.
     // needs_review is included so a queued Task Agent staging that hasn't been
     // applied/discarded yet blocks new runs (Task #509 review-gate serialization).
+    // Background tasks (provisioning, blueprint npm-install, etc.) are excluded so
+    // they do not block user-initiated runs.
     const [activeTask] = await db
       .select({ id: agentTasksTable.id })
       .from(agentTasksTable)
@@ -419,6 +421,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         and(
           eq(agentTasksTable.projectId, project.id),
           inArray(agentTasksTable.status, ["building", "planning", "needs_review"]),
+          ne(agentTasksTable.kind, "background"),
         ),
       )
       .limit(1);
