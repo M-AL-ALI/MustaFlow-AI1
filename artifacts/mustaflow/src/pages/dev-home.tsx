@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { SlideOutNav } from "@/components/layout/slide-out-nav";
+import { BrainstormPanel } from "@/components/brainstorm-panel";
 import {
   SendHorizonal,
   Clock,
@@ -280,6 +281,7 @@ function CreationZone({
 }) {
   const [prompt, setPrompt] = useState("");
   const [exampleIndex, setExampleIndex] = useState(0);
+  const [showDiscuss, setShowDiscuss] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function handleSubmit() {
@@ -304,27 +306,49 @@ function CreationZone({
       </div>
 
       {/* Prompt input */}
-      <div className="flex items-center gap-2 w-full">
-        <div className="flex-1 relative">
-          <Input
-            ref={inputRef}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleSubmit();
-            }}
-            placeholder="A REST API for a task manager with user auth..."
-            className="h-12 text-base pr-4"
-          />
+      <div className="w-full">
+        <div className="flex items-center gap-2 w-full">
+          <div className="flex-1 relative">
+            <Input
+              ref={inputRef}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSubmit();
+              }}
+              placeholder="A REST API for a task manager with user auth..."
+              className="h-12 text-base pr-4"
+            />
+          </div>
+          <Button
+            onClick={handleSubmit}
+            disabled={!prompt.trim()}
+            size="lg"
+            className="h-12 px-5 shrink-0"
+          >
+            <SendHorizonal className="h-4 w-4" />
+          </Button>
         </div>
-        <Button
-          onClick={handleSubmit}
-          disabled={!prompt.trim()}
-          size="lg"
-          className="h-12 px-5 shrink-0"
-        >
-          <SendHorizonal className="h-4 w-4" />
-        </Button>
+
+        {/* Discuss first link */}
+        {!showDiscuss && (
+          <div className="flex justify-end mt-1.5">
+            <button
+              type="button"
+              onClick={() => setShowDiscuss(true)}
+              className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors px-1"
+            >
+              Discuss first
+            </button>
+          </div>
+        )}
+
+        {/* Brainstorm panel */}
+        {showDiscuss && (
+          <div className="mt-3">
+            <BrainstormPanel onClose={() => setShowDiscuss(false)} />
+          </div>
+        )}
       </div>
 
       {/* Example prompt */}
