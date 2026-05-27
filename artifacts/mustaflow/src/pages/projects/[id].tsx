@@ -871,6 +871,41 @@ const BACKEND_KEYWORDS = [
   "sequelize",
 ];
 
+/**
+ * Categorises a pre-flight failure message and returns a short suggested
+ * action + whether a "Go to Secrets" shortcut should be shown.
+ */
+function getPreflightSuggestion(message: string): {
+  suggestion: string;
+  showSecretsLink: boolean;
+} {
+  const lower = message.toLowerCase();
+  if (lower.includes("database is unreachable") || lower.includes("database_url")) {
+    return {
+      suggestion:
+        "Check your DATABASE_URL secret in the Secrets tab — make sure the connection string is correct and the database is accessible.",
+      showSecretsLink: true,
+    };
+  }
+  if (
+    lower.includes("pre-flight check failed unexpectedly") ||
+    lower.includes("decrypt") ||
+    lower.includes("encryption")
+  ) {
+    return {
+      suggestion:
+        "This may be caused by a misconfigured ENCRYPTION_KEY or an invalid DATABASE_URL. Verify your secrets are correctly set.",
+      showSecretsLink: true,
+    };
+  }
+  // Default: container wake failure
+  return {
+    suggestion:
+      "Your server container is taking longer than expected to wake up. Wait a moment and retry — it usually recovers on its own.",
+    showSecretsLink: false,
+  };
+}
+
 export default function ProjectWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const projectId = parseInt(id, 10);
@@ -2723,39 +2758,62 @@ export default function ProjectWorkspacePage() {
       </div>
 
       {/* ── Pre-flight failure banner ── */}
-      {preflightBanner && (
-        <div className="shrink-0 flex items-center gap-3 px-4 py-2.5 bg-destructive/10 border-b border-destructive/20 z-10 relative">
-          <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
-          <div className="flex-1 min-w-0">
-            <span className="text-xs font-semibold text-destructive mr-1.5">Build blocked.</span>
-            <span className="text-xs text-destructive/80 break-words">
-              {preflightBanner.message}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {preflightBanner.lastPrompt && (
-              <button
-                onClick={() => {
-                  const promptToRetry = preflightBanner.lastPrompt;
-                  setPreflightBanner(null);
-                  send(promptToRetry);
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-destructive/15 border border-destructive/30 text-destructive text-xs font-medium hover:bg-destructive/25 transition-colors"
-              >
-                <RotateCcw className="h-3 w-3" />
-                Retry
-              </button>
-            )}
-            <button
-              onClick={() => setPreflightBanner(null)}
-              className="flex items-center justify-center h-6 w-6 rounded-md text-destructive/70 hover:text-destructive hover:bg-destructive/15 transition-colors"
-              aria-label="Dismiss"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-      )}
+      {preflightBanner &&
+        (() => {
+          const { suggestion, showSecretsLink } = getPreflightSuggestion(preflightBanner.message);
+          return (
+            <div className="shrink-0 flex items-start gap-3 px-4 py-3 bg-destructive/10 border-b border-destructive/20 z-10 relative">
+              <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div>
+                  <span className="text-xs font-semibold text-destructive mr-1.5">
+                    Build blocked.
+                  </span>
+                  <span className="text-xs text-destructive/80 break-words">
+                    {preflightBanner.message}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 mt-1 flex-wrap">
+                  <span className="text-xs text-destructive/70">{suggestion}</span>
+                  {showSecretsLink && (
+                    <button
+                      onClick={() => {
+                        setPrefillSecretName("DATABASE_URL");
+                        setActiveTab("tools-files");
+                        setPreflightBanner(null);
+                      }}
+                      className="text-xs font-medium text-destructive underline underline-offset-2 hover:text-destructive/80 transition-colors whitespace-nowrap"
+                    >
+                      Go to Secrets
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {preflightBanner.lastPrompt && (
+                  <button
+                    onClick={() => {
+                      const promptToRetry = preflightBanner.lastPrompt;
+                      setPreflightBanner(null);
+                      send(promptToRetry);
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-destructive/15 border border-destructive/30 text-destructive text-xs font-medium hover:bg-destructive/25 transition-colors"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    Retry
+                  </button>
+                )}
+                <button
+                  onClick={() => setPreflightBanner(null)}
+                  className="flex items-center justify-center h-6 w-6 rounded-md text-destructive/70 hover:text-destructive hover:bg-destructive/15 transition-colors"
+                  aria-label="Dismiss"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
       {/* ── Main split: chat LEFT + preview RIGHT ── */}
       <div
