@@ -1529,6 +1529,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // Count of file-mutation tool calls (write_file / apply_patch / delete_file)
   // across all turns. Used to enforce the refine-mode "must edit something" gate.
   let totalMutations = 0;
+  // Separate counter for "finalize blocked because 0 mutations" events.
+  // These are NOT real errors — the gate is working as intended — so they must
+  // NOT increment consecutiveErrors (which would trip REPEATED_ERROR_CAP in 3 turns).
+  let blockedFinalizeCount = 0;
   // Per-task skill registry: load index for the system prompt, then cache
   // already-loaded skills in this Map so a repeated load_skill is a free
   // cache hit (no double-count, no second LLM trip into the body).
@@ -2159,18 +2163,25 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         // failure mode where the model calls finalize immediately on a vague
         // prompt without doing any work.
         if (input.mode === "refine" && totalMutations === 0) {
+          blockedFinalizeCount++;
+          // Give up only after many blocked attempts — this is a model behaviour
+          // issue, not a real execution error, so it must NOT touch consecutiveErrors.
+          if (blockedFinalizeCount > 6) {
+            terminationReason = "model-stopped";
+            break;
+          }
+          // Reset consecutiveErrors so real errors are tracked independently.
+          consecutiveErrors = 0;
+          lastError = "";
           const noMutMsg =
             "BLOCKED: You have not written or modified any files yet. " +
             "You MUST call write_file or apply_patch to make at least one concrete change before calling finalize. " +
-            "Read the existing files to understand the current state, then apply the change the user is asking for.";
+            "Read the existing files first if needed, then write or patch the file(s) that implement the user's request.";
           messages[messages.length - 1] = {
             role: "tool",
             tool_call_id: call.id,
             content: noMutMsg,
           };
-          if (lastError === noMutMsg) consecutiveErrors++;
-          else consecutiveErrors = 1;
-          lastError = noMutMsg;
           continue;
         }
 
