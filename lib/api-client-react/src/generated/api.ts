@@ -259,6 +259,10 @@ import type {
   StartPreviewEnv202,
   StopContainer200,
   StopPreviewEnv200,
+  StreamDoneEvent,
+  StreamErrorEvent,
+  StreamFallbackEvent,
+  StreamTokenEvent,
   StripeWebhook200,
   SubdomainInput,
   SubdomainResult,
@@ -3627,9 +3631,9 @@ Event shapes emitted on the stream:
  * @summary Stream a conversational AI response over SSE (text/event-stream)
  */
 export const streamMessage = async (id: number,
-    chatMessageInput: ChatMessageInput, options?: RequestInit): Promise<string> => {
+    chatMessageInput: ChatMessageInput, options?: RequestInit): Promise<StreamTokenEvent | StreamDoneEvent | StreamFallbackEvent | StreamErrorEvent> => {
 
-  return customFetch<string>(getStreamMessageUrl(id),
+  return customFetch<StreamTokenEvent | StreamDoneEvent | StreamFallbackEvent | StreamErrorEvent>(getStreamMessageUrl(id),
   {
     ...options,
     method: 'POST',

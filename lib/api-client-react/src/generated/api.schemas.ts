@@ -3672,6 +3672,119 @@ export interface V1FileMeta {
   updatedAt?: string;
 }
 
+/**
+ * Discriminant field identifying this as a token frame.
+ */
+export type StreamTokenEventType = typeof StreamTokenEventType[keyof typeof StreamTokenEventType];
+
+
+export const StreamTokenEventType = {
+  token: 'token',
+} as const;
+
+/**
+ * Emitted for each incremental text chunk streamed from the AI model.
+ */
+export interface StreamTokenEvent {
+  /** Discriminant field identifying this as a token frame. */
+  type: StreamTokenEventType;
+  /** The incremental text chunk to append to the in-progress assistant message. */
+  content: string;
+}
+
+/**
+ * Discriminant field identifying this as a done frame.
+ */
+export type StreamDoneEventType = typeof StreamDoneEventType[keyof typeof StreamDoneEventType];
+
+
+export const StreamDoneEventType = {
+  done: 'done',
+} as const;
+
+/**
+ * Structured plan payload present when the resolved intent produces a plan card. Shape varies by kind: `{kind:"converse", taskId, intent?, streaming}` — standard conversational reply with task reference; `{kind:"clarifying", taskId, question, options, streaming?}` — AI needs clarification before proceeding; `{kind:"task-queued", taskId}` — build/refine was queued (background agent); `{kind:"task-done", taskId}` — build/refine completed inline; `{kind:"error", message}` — pipeline failed after stream start. Null or absent when there is no structured plan (pure conversational reply).
+
+ */
+export type StreamDoneEventPlan = { [key: string]: unknown } | null;
+
+/**
+ * Emitted once when the stream is complete. Carries the persisted message IDs so the client can reconcile optimistic UI state, plus an optional structured plan payload rendered as a plan card when the intent is "plan".
+
+ */
+export interface StreamDoneEvent {
+  /** Discriminant field identifying this as a done frame. */
+  type: StreamDoneEventType;
+  /** Database ID of the persisted user chat message. */
+  userMessageId: number;
+  /** Database ID of the persisted assistant chat message. */
+  assistantMessageId: number;
+  /** Structured plan payload present when the resolved intent produces a plan card. Shape varies by kind: `{kind:"converse", taskId, intent?, streaming}` — standard conversational reply with task reference; `{kind:"clarifying", taskId, question, options, streaming?}` — AI needs clarification before proceeding; `{kind:"task-queued", taskId}` — build/refine was queued (background agent); `{kind:"task-done", taskId}` — build/refine completed inline; `{kind:"error", message}` — pipeline failed after stream start. Null or absent when there is no structured plan (pure conversational reply).
+   */
+  plan?: StreamDoneEventPlan;
+}
+
+/**
+ * Discriminant field identifying this as a fallback frame.
+ */
+export type StreamFallbackEventType = typeof StreamFallbackEventType[keyof typeof StreamFallbackEventType];
+
+
+export const StreamFallbackEventType = {
+  fallback: 'fallback',
+} as const;
+
+/**
+ * The resolved intent that triggered the fallback. Always "build" or "plan" — converse-family intents (converse, debug, refactor, review, explain) are never redirected and always stream their response directly.
+
+ */
+export type StreamFallbackEventIntent = typeof StreamFallbackEventIntent[keyof typeof StreamFallbackEventIntent];
+
+
+export const StreamFallbackEventIntent = {
+  build: 'build',
+  plan: 'plan',
+} as const;
+
+/**
+ * Emitted when the resolved intent is not a converse-family intent (i.e. "build" or "plan") and the stream endpoint cannot handle the request itself. The client must re-send the message via POST /projects/{id}/messages using the regular non-streaming path.
+
+ */
+export interface StreamFallbackEvent {
+  /** Discriminant field identifying this as a fallback frame. */
+  type: StreamFallbackEventType;
+  /** The resolved intent that triggered the fallback. Always "build" or "plan" — converse-family intents (converse, debug, refactor, review, explain) are never redirected and always stream their response directly.
+   */
+  intent: StreamFallbackEventIntent;
+}
+
+/**
+ * Discriminant field identifying this as an error frame.
+ */
+export type StreamErrorEventType = typeof StreamErrorEventType[keyof typeof StreamErrorEventType];
+
+
+export const StreamErrorEventType = {
+  error: 'error',
+} as const;
+
+/**
+ * Emitted when an unrecoverable error occurs during streaming (e.g. AI provider failure, database write error). The stream terminates immediately after this frame. When the error occurred after the assistant message was persisted to the DB, `userMessageId` and `assistantMessageId` are also present so the client can reconcile optimistic UI state even on failure.
+
+ */
+export interface StreamErrorEvent {
+  /** Discriminant field identifying this as an error frame. */
+  type: StreamErrorEventType;
+  /** Human-readable error description suitable for display in the chat UI. */
+  message: string;
+  /** Database ID of the persisted user chat message. Present when the user message was written to the DB before the error occurred; absent or null otherwise.
+   */
+  userMessageId?: number | null;
+  /** Database ID of the persisted assistant error message. Present when the fallback error assistant message was successfully written to the DB before the stream terminated; absent or null otherwise.
+   */
+  assistantMessageId?: number | null;
+}
+
 export type RequestProjectUploadUrlBody = {
   name: string;
   contentType?: string;
