@@ -84,6 +84,7 @@ import tokensRouter from "./tokens";
 import previewEnvRouter from "./preview-env";
 import clerkWebhookRouter from "./clerk-webhook";
 import brainstormRouter from "./brainstorm";
+import apiDocsRouter from "./api-docs";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -109,6 +110,7 @@ router.use("/v1", v1Router); // POST/GET /v1/* — PAT-authed public REST API (o
 router.use(abuseRouter); // POST /abuse-reports (public intake, no auth)
 router.use(publicCanvasRouter); // GET /canvas/share/:token, /canvas/ab/:testId — public variant previews
 router.use(publicShareRouter); // GET /share/:token (public, no auth)
+router.use(apiDocsRouter); // GET /docs, GET /docs/openapi.yaml (public API reference)
 
 // ── Brainstorm (public, AI-powered, rate-limited) ─────────────────────────────
 router.post("/brainstorm/chat", aiBuilderLimiter);
@@ -169,6 +171,7 @@ const KNOWN_PREFIXES = [
   "/extensions",
   "/profiles",
   "/brainstorm",
+  "/docs",
 ];
 
 router.use((req, res, next) => {
