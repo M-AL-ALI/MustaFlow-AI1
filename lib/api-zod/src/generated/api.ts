@@ -3905,6 +3905,39 @@ export const DeleteKnowledgeResponse = zod.object({
 
 
 /**
+ * @summary Promote a knowledge entry to the global community pool
+ */
+export const PromoteKnowledgeToGlobalParams = zod.object({
+  "id": zod.coerce.number(),
+  "entryId": zod.coerce.number()
+})
+
+export const PromoteKnowledgeToGlobalResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "content": zod.string(),
+  "type": zod.string(),
+  "severity": zod.string(),
+  "scope": zod.string(),
+  "projectId": zod.number().nullish(),
+  "userId": zod.string().nullish(),
+  "relatedTaskId": zod.number().nullish(),
+  "relatedVersionId": zod.number().nullish(),
+  "tags": zod.string().nullish(),
+  "approvedForReuse": zod.boolean(),
+  "isPublic": zod.boolean(),
+  "thumbsUp": zod.number(),
+  "thumbsDown": zod.number(),
+  "usageCount": zod.number(),
+  "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
+  "annotation": zod.string().nullish(),
+  "archivedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Record explicit thumbs-up or thumbs-down on a knowledge entry
  */
 export const RateKnowledgeParams = zod.object({

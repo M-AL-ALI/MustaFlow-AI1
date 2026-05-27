@@ -9,6 +9,8 @@ import {
 } from "@workspace/db";
 import { isAdminUser } from "../lib/adminAuth";
 import { getOrCreateCredits } from "./credits";
+import { buildEmbeddingInput, generateEmbedding } from "../lib/embeddings";
+import { anonymiseContent } from "../lib/knowledge-promotion";
 import type { SQL } from "drizzle-orm";
 
 const router: IRouter = Router();
@@ -812,6 +814,110 @@ router.get("/knowledge/public", async (req, res): Promise<void> => {
     .offset(offset);
 
   res.json(rows);
+});
+
+// POST /api/projects/:projectId/knowledge/:entryId/promote — manually promote a
+// knowledge entry to the global community pool.
+// Authorization: requester must be a member (owner) of the project OR own the entry.
+// Sets approvedForReuse=true, isPublic=true, scope='global' and regenerates embedding.
+router.post("/projects/:projectId/knowledge/:entryId/promote", async (req, res): Promise<void> => {
+  const projectId = parseInt(req.params.projectId, 10);
+  const entryId = parseInt(req.params.entryId, 10);
+
+  if (!Number.isFinite(projectId) || !Number.isFinite(entryId)) {
+    res.status(400).json({ error: "Invalid project or entry id" });
+    return;
+  }
+
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  // Verify the project exists. Fetch name for anonymization below.
+  const [project] = await db
+    .select({ id: projectsTable.id, ownerId: projectsTable.ownerId, name: projectsTable.name })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const isAdmin = await isAdminUser(userId);
+
+  const [existing] = await db
+    .select()
+    .from(knowledgeEntriesTable)
+    .where(eq(knowledgeEntriesTable.id, entryId));
+
+  if (!existing) {
+    res.status(404).json({ error: "Knowledge entry not found" });
+    return;
+  }
+
+  // Hard project-binding: the entry must belong to the requested project.
+  // Return 404 (not 403) to avoid leaking that the entry exists in another project.
+  if (existing.projectId !== projectId) {
+    res.status(404).json({ error: "Knowledge entry not found" });
+    return;
+  }
+
+  // Authorization: the requester must own the entry, own the project, or be admin.
+  const userOwnsEntry = existing.userId === userId;
+  const userOwnsProject = project.ownerId === userId;
+
+  if (!isAdmin && !userOwnsProject && !userOwnsEntry) {
+    res.status(403).json({ error: "You do not have permission to promote this lesson" });
+    return;
+  }
+
+  if (existing.approvedForReuse) {
+    // Already global — return as-is (idempotent).
+    res.json(existing);
+    return;
+  }
+
+  // Anonymise title/content before writing to the global pool.
+  // Pass the project name so it is stripped alongside emails and numeric IDs.
+  const projectTerms = [project.name].filter(Boolean) as string[];
+  const safeTitle = anonymiseContent(existing.title, projectTerms);
+  const safeContent = anonymiseContent(existing.content ?? "", projectTerms);
+
+  const [updated] = await db
+    .update(knowledgeEntriesTable)
+    .set({
+      title: safeTitle,
+      // Always write the sanitized value. If sanitization empties the content,
+      // use a placeholder rather than falling back to raw (potentially identifiable) text.
+      ...(existing.content != null ? { content: safeContent || "[content removed]" } : {}),
+      approvedForReuse: true,
+      isPublic: true,
+      scope: "global",
+    })
+    .where(eq(knowledgeEntriesTable.id, entryId))
+    .returning();
+
+  // Regenerate embedding using sanitized text so the newly global entry
+  // participates in semantic search without leaking raw project content.
+  if (updated) {
+    const inputText = buildEmbeddingInput(updated.title, updated.content, updated.tags);
+    void generateEmbedding(inputText)
+      .then(async (vec) => {
+        if (!vec) return;
+        await db
+          .update(knowledgeEntriesTable)
+          .set({ embedding: vec })
+          .where(eq(knowledgeEntriesTable.id, entryId));
+      })
+      .catch((err: unknown) => {
+        req.log.warn({ err, id: entryId }, "promote: embedding regeneration failed");
+      });
+  }
+
+  res.json(updated);
 });
 
 // DELETE /api/knowledge/:id — hard-delete a knowledge entry.

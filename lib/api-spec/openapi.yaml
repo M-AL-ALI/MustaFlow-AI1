@@ -3237,6 +3237,34 @@ paths:
                 properties:
                   ok: { type: boolean }
 
+  /projects/{id}/knowledge/{entryId}/promote:
+    post:
+      operationId: promoteKnowledgeToGlobal
+      tags: [knowledge]
+      summary: Promote a knowledge entry to the global community pool
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: entryId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Promoted entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeEntry"
+        "403":
+          description: Not authorised
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /knowledge/{id}/rate:
     post:
       operationId: rateKnowledge

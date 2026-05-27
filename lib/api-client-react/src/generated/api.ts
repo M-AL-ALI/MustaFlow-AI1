@@ -10970,6 +10970,78 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       return useMutation(getDeleteKnowledgeMutationOptions(options));
     }
 
+export const getPromoteKnowledgeToGlobalUrl = (id: number,
+    entryId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/knowledge/${entryId}/promote`
+}
+
+/**
+ * @summary Promote a knowledge entry to the global community pool
+ */
+export const promoteKnowledgeToGlobal = async (id: number,
+    entryId: number, options?: RequestInit): Promise<KnowledgeEntry> => {
+
+  return customFetch<KnowledgeEntry>(getPromoteKnowledgeToGlobalUrl(id,entryId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getPromoteKnowledgeToGlobalMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof promoteKnowledgeToGlobal>>, TError,{id: number;entryId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof promoteKnowledgeToGlobal>>, TError,{id: number;entryId: number}, TContext> => {
+
+const mutationKey = ['promoteKnowledgeToGlobal'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof promoteKnowledgeToGlobal>>, {id: number;entryId: number}> = (props) => {
+          const {id,entryId} = props ?? {};
+
+          return  promoteKnowledgeToGlobal(id,entryId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PromoteKnowledgeToGlobalMutationResult = NonNullable<Awaited<ReturnType<typeof promoteKnowledgeToGlobal>>>
+
+    export type PromoteKnowledgeToGlobalMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Promote a knowledge entry to the global community pool
+ */
+export const usePromoteKnowledgeToGlobal = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof promoteKnowledgeToGlobal>>, TError,{id: number;entryId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof promoteKnowledgeToGlobal>>,
+        TError,
+        {id: number;entryId: number},
+        TContext
+      > => {
+      return useMutation(getPromoteKnowledgeToGlobalMutationOptions(options));
+    }
+
 export const getRateKnowledgeUrl = (id: number,) => {
 
 

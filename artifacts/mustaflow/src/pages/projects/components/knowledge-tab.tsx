@@ -3,9 +3,11 @@ import {
   useListKnowledge,
   useUpdateKnowledge,
   useCreateKnowledge,
+  usePromoteKnowledgeToGlobal,
   getListKnowledgeQueryKey,
 } from "@workspace/api-client-react";
 import type { KnowledgeEntry, KnowledgeInput } from "@workspace/api-client-react";
+import { useClerkUser } from "@/lib/clerk-safe";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -35,6 +37,7 @@ import {
   CheckSquare,
   Square,
   Plus,
+  Share2,
 } from "lucide-react";
 
 function getTypeIcon(type: string) {
@@ -105,12 +108,16 @@ function KnowledgeEntryCard({
   selectionMode,
   selected,
   onToggleSelect,
+  currentUserId,
+  projectId,
 }: {
   entry: KnowledgeEntry;
   onUpdate: () => void;
   selectionMode: boolean;
   selected: boolean;
   onToggleSelect: (id: number) => void;
+  currentUserId?: string;
+  projectId: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showAnnotationInput, setShowAnnotationInput] = useState(false);
@@ -118,7 +125,10 @@ function KnowledgeEntryCard({
   const [showMenu, setShowMenu] = useState(false);
   const [showConfirmPromote, setShowConfirmPromote] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [promotePending, setPromotePending] = useState(false);
+  const [promoteSuccess, setPromoteSuccess] = useState(false);
   const updateKnowledge = useUpdateKnowledge();
+  const promoteToGlobal = usePromoteKnowledgeToGlobal();
 
   const TypeIcon = getTypeIcon(entry.type);
   const typeColor = getTypeColor(entry.type, entry.severity);
@@ -143,6 +153,21 @@ function KnowledgeEntryCard({
     );
   };
 
+  const handleShareWithCommunity = () => {
+    if (promotePending || entry.approvedForReuse) return;
+    setPromotePending(true);
+    promoteToGlobal.mutate(
+      { id: projectId, entryId: entry.id },
+      {
+        onSuccess: () => {
+          setPromoteSuccess(true);
+          onUpdate();
+        },
+        onSettled: () => setPromotePending(false),
+      },
+    );
+  };
+
   const handleArchive = () => {
     setShowMenu(false);
     updateKnowledge.mutate(
@@ -151,11 +176,15 @@ function KnowledgeEntryCard({
     );
   };
 
-  const handlePromote = () => {
+  // Used only for the "Remove from Global" de-promotion action (no anonymization
+  // needed in that direction). The "Approve as Global Lesson" confirm path now
+  // calls handleShareWithCommunity so that all promotions go through the
+  // anonymization + embedding pipeline.
+  const handleDemote = () => {
     setShowMenu(false);
     setShowConfirmPromote(false);
     updateKnowledge.mutate(
-      { id: entry.id, data: { approvedForReuse: !entry.approvedForReuse } },
+      { id: entry.id, data: { approvedForReuse: false } },
       { onSuccess: onUpdate },
     );
   };
@@ -273,6 +302,24 @@ function KnowledgeEntryCard({
               >
                 <MessageSquare className="h-3 w-3" />
               </button>
+              {/* Share with community — only visible for entries owned by current user that aren't yet global */}
+              {currentUserId && entry.userId === currentUserId && !entry.approvedForReuse && (
+                <button
+                  onClick={handleShareWithCommunity}
+                  disabled={promotePending}
+                  className={cn(
+                    "w-5 h-5 flex items-center justify-center transition-colors",
+                    promoteSuccess ? "text-green-400" : "text-muted-foreground hover:text-primary",
+                  )}
+                  title="Share with community — promotes this lesson to the global knowledge pool"
+                >
+                  {promotePending ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Share2 className="h-3 w-3" />
+                  )}
+                </button>
+              )}
               <div className="relative">
                 <button
                   onClick={() => {
@@ -288,7 +335,7 @@ function KnowledgeEntryCard({
                     {!showConfirmPromote ? (
                       <button
                         onClick={() =>
-                          entry.approvedForReuse ? handlePromote() : setShowConfirmPromote(true)
+                          entry.approvedForReuse ? handleDemote() : setShowConfirmPromote(true)
                         }
                         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted transition-colors text-left"
                       >
@@ -309,10 +356,14 @@ function KnowledgeEntryCard({
                           <Button
                             size="sm"
                             className="h-6 text-xs px-2"
-                            onClick={handlePromote}
-                            disabled={updateKnowledge.isPending}
+                            onClick={() => {
+                              setShowMenu(false);
+                              setShowConfirmPromote(false);
+                              handleShareWithCommunity();
+                            }}
+                            disabled={promotePending}
                           >
-                            {updateKnowledge.isPending ? (
+                            {promotePending ? (
                               <Loader2 className="h-3 w-3 animate-spin" />
                             ) : (
                               "Confirm"
@@ -575,6 +626,7 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
   const [showNewEntryForm, setShowNewEntryForm] = useState(false);
   const queryClient = useQueryClient();
   const updateKnowledge = useUpdateKnowledge();
+  const { user } = useClerkUser();
 
   const params = useMemo(
     () => ({
@@ -886,6 +938,8 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
                 selectionMode={selectionMode}
                 selected={selectedIds.has(entry.id)}
                 onToggleSelect={toggleSelect}
+                currentUserId={user?.id}
+                projectId={projectId}
               />
             ))}
           </>

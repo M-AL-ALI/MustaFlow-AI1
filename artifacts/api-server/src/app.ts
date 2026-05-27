@@ -21,6 +21,7 @@ import { httpRequestDuration, httpRequestsTotal } from "./lib/metrics";
 import { startDurableQueue, stopDurableQueue } from "./lib/durable-queue";
 import { runJob } from "./lib/jobs";
 import { startDomainRenewalScheduler } from "./lib/domain-renewal-scheduler";
+import { startKnowledgePromotionScheduler } from "./lib/knowledge-promotion";
 
 // Initialise Sentry before anything else so uncaught exceptions are captured.
 initSentry();
@@ -47,6 +48,10 @@ void startDurableQueue(async (payload) => {
 // Daily sweep: expiry warnings at 60/30/7/1 days + auto-renew for domains ≤ 30 days out.
 // No-ops gracefully when Namecheap / Stripe credentials are not set.
 startDomainRenewalScheduler();
+
+// Kick off the Knowledge Vault auto-promotion scheduler.
+// Every 6 h: promotes project-scoped entries with thumbsUp>=3 and usageCount>=2 to global scope.
+startKnowledgePromotionScheduler();
 
 const app: Express = express();
 
