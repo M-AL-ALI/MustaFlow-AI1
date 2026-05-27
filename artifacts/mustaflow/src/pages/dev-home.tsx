@@ -268,6 +268,7 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
   const [prompt, setPrompt] = useState("");
   const [planMode, setPlanMode] = useState(false);
   const [showDiscuss, setShowDiscuss] = useState(false);
+  const [, setLocation] = useLocation();
 
   function handleSubmit() {
     if (!prompt.trim()) return;
@@ -386,7 +387,13 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
         </div>
 
         {/* Brainstorm panel */}
-        {showDiscuss && <BrainstormPanel onClose={() => setShowDiscuss(false)} />}
+        {showDiscuss && (
+          <BrainstormPanel
+            onClose={() => setShowDiscuss(false)}
+            mode="developer"
+            onCreated={(id) => setLocation(`/dev/workspace/${id}`)}
+          />
+        )}
       </div>
     </div>
   );

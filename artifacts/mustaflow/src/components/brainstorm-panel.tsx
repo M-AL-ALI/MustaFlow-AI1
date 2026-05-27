@@ -18,6 +18,10 @@ interface Message {
 
 interface BrainstormPanelProps {
   onClose: () => void;
+  /** Project surface to create under. Defaults to 'builder'. */
+  mode?: "builder" | "developer";
+  /** Called with the new project id after creation. Defaults to navigating to /projects/:id. */
+  onCreated?: (projectId: number) => void;
 }
 
 const OPENING_MESSAGE: Message = {
@@ -26,7 +30,7 @@ const OPENING_MESSAGE: Message = {
     "What are you thinking of building? Tell me as much or as little as you'd like and I'll help shape it.",
 };
 
-export function BrainstormPanel({ onClose }: BrainstormPanelProps) {
+export function BrainstormPanel({ onClose, mode, onCreated }: BrainstormPanelProps) {
   const [visible, setVisible] = useState(false);
   const [messages, setMessages] = useState<Message[]>([OPENING_MESSAGE]);
   const [input, setInput] = useState("");
@@ -145,12 +149,17 @@ export function BrainstormPanel({ onClose }: BrainstormPanelProps) {
           description: resolvedSpec.prompt,
           kind: resolvedSpec.kind,
           initialPrompt: resolvedSpec.prompt,
+          ...(mode ? { mode } : {}),
         },
       },
       {
         onSuccess: (project) => {
           void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
-          setLocation(`/projects/${project.id}`);
+          if (onCreated) {
+            onCreated(project.id);
+          } else {
+            setLocation(`/projects/${project.id}`);
+          }
         },
         onError: () => {
           toast({
@@ -162,7 +171,7 @@ export function BrainstormPanel({ onClose }: BrainstormPanelProps) {
         },
       },
     );
-  }, [resolvedSpec, isCreating, createProject, queryClient, setLocation, toast]);
+  }, [resolvedSpec, isCreating, createProject, queryClient, setLocation, toast, mode, onCreated]);
 
   return (
     <div
