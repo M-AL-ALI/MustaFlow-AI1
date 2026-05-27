@@ -988,6 +988,7 @@ async function r2Request(opts: {
   key: string;
   body?: Buffer;
   contentType?: string;
+  cacheControl?: string;
 }): Promise<{ ok: boolean; status: number }> {
   const acctId = accountId();
   const accessKeyId = process.env.CF_R2_ACCESS_KEY_ID!;
@@ -1013,6 +1014,9 @@ async function r2Request(opts: {
   if (opts.method === "PUT" && opts.body) {
     headersToSign["content-type"] = contentType;
     headersToSign["content-length"] = String(body.length);
+    if (opts.cacheControl) {
+      headersToSign["cache-control"] = opts.cacheControl;
+    }
   }
 
   const authorization = buildSignatureV4({
@@ -1048,8 +1052,33 @@ async function r2Request(opts: {
 }
 
 /**
+ * Delays between upload attempts in milliseconds (exponential backoff).
+ * 3 entries → 4 total attempts (1 initial + 3 retries): 500 ms, 1 s, 2 s.
+ */
+const R2_RETRY_DELAYS_MS = [500, 1000, 2000];
+
+/** Maximum upload attempts per file (1 initial + 3 retries = 4 total). */
+const R2_MAX_ATTEMPTS = R2_RETRY_DELAYS_MS.length + 1;
+
+/**
+ * Derive the correct Cache-Control value for an R2 file path.
+ * HTML entry points use `no-cache` so browsers always revalidate.
+ * All other assets (JS, CSS, images, etc.) use long-lived immutable caching.
+ */
+export function r2CacheControl(filePath: string): string {
+  return filePath.endsWith(".html") ? "no-cache" : "public, max-age=31536000, immutable";
+}
+
+/**
  * Upload all snapshot files to R2 under `{projectId}/{versionId}/{path}`.
  * Falls back gracefully (logs + returns false) when R2 env vars are missing.
+ *
+ * Each file upload is retried up to 3 attempts with exponential backoff
+ * (500 ms → 1 s → 2 s) before being marked as failed.
+ *
+ * Every PUT includes a `Cache-Control` header:
+ *   - HTML files → `no-cache`
+ *   - All other files → `public, max-age=31536000, immutable`
  *
  * @returns true if all files uploaded successfully, false otherwise.
  */
@@ -1068,14 +1097,29 @@ export async function uploadSnapshotToR2(
       const isBase64 = f.mimeType ? isBinaryMime(f.mimeType) : false;
       const body = isBase64 ? Buffer.from(f.content, "base64") : Buffer.from(f.content, "utf8");
       const contentType = f.mimeType ?? "application/octet-stream";
-      const result = await r2Request({ method: "PUT", key, body, contentType });
-      if (!result.ok) {
+      const cacheControl = r2CacheControl(f.path);
+
+      let lastStatus = 0;
+      for (let attempt = 0; attempt < R2_MAX_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, R2_RETRY_DELAYS_MS[attempt - 1]),
+          );
+        }
+        const result = await r2Request({ method: "PUT", key, body, contentType, cacheControl });
+        if (result.ok) return;
+        lastStatus = result.status;
         logger.warn(
-          { projectId, versionId, path: f.path, status: result.status },
-          "R2 upload failed for file",
+          { projectId, versionId, path: f.path, status: result.status, attempt: attempt + 1 },
+          "R2 upload attempt failed",
         );
-        allOk = false;
       }
+
+      logger.warn(
+        { projectId, versionId, path: f.path, status: lastStatus, attempts: R2_MAX_ATTEMPTS },
+        "R2 upload failed for file after all retries",
+      );
+      allOk = false;
     }),
   );
 

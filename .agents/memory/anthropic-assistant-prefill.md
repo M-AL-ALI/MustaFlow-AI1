@@ -4,6 +4,7 @@ description: Anthropic rejects API calls where the last message in the conversat
 ---
 
 ## Rule
+
 Before calling the Anthropic API in the agentic loop, ensure the conversation always ends with a user turn.
 
 **Why:** The agent loop appends `conversationHistory` (past turns) to the messages array. If history ends with an assistant turn, Anthropic returns HTTP 400. OpenAI allows this; Anthropic does not.

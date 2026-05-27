@@ -310,4 +310,10 @@ export const stripeCircuit = new CircuitBreaker("stripe", {
  * All active circuit breakers — used by the status endpoint to report
  * component-level health.
  */
-export const ALL_BREAKERS = [openaiCircuit, anthropicCircuit, geminiCircuit, containerCircuit, stripeCircuit];
+export const ALL_BREAKERS = [
+  openaiCircuit,
+  anthropicCircuit,
+  geminiCircuit,
+  containerCircuit,
+  stripeCircuit,
+];

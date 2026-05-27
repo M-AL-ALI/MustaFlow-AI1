@@ -1720,8 +1720,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       if (err instanceof Error && err.constructor.name === "CircuitOpenError") {
         logger.warn({ err, step }, "agent-loop: circuit breaker open — aborting loop");
         terminationReason = "repeated-error";
-        finalSummary =
-          "The AI service is temporarily unavailable. Please try again in 30 seconds.";
+        finalSummary = "The AI service is temporarily unavailable. Please try again in 30 seconds.";
         break;
       }
       logger.warn({ err, step }, "agent-loop: model call failed");

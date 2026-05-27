@@ -4,6 +4,7 @@ description: callAnthropic in ai-providers.ts had a hardcoded 8192 default — l
 ---
 
 ## Rule
+
 Always set `max_tokens` high enough for agentic tool calls. The current value is 32000.
 
 **Why:** When stop_reason="max_tokens", `block.input` comes back as `{}`. `parseArgs()` catches JSON errors and returns `{}`, so `args.content` defaults to `""`. The file is written as empty with no error surfaced. This caused "Refined 0 files" despite the loop running normally.
