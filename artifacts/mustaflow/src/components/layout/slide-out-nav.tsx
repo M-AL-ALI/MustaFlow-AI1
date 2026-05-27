@@ -270,19 +270,29 @@ export function SlideOutNav() {
               const isActive =
                 location === href || (href !== "/" && location.startsWith(href + "/"));
               return (
-                <Link key={href} href={href} onClick={close}>
-                  <div
-                    className={cn(
-                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
-                      isActive
-                        ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
-                        : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
-                    )}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    {name}
-                  </div>
-                </Link>
+                <div key={href}>
+                  <Link href={href} onClick={close}>
+                    <div
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
+                        isActive
+                          ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
+                          : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      {name}
+                    </div>
+                  </Link>
+                  {name === "Projects" && (
+                    <Link href="/projects" onClick={close}>
+                      <div className="ml-7 mt-0.5 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer">
+                        <Plus className="h-3 w-3 shrink-0" />
+                        New project
+                      </div>
+                    </Link>
+                  )}
+                </div>
               );
             })}
           </div>

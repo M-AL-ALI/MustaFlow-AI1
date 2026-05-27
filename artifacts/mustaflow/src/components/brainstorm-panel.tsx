@@ -2,9 +2,13 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { X, ArrowUp, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useCreateProject } from "@workspace/api-client-react";
+import {
+  useBrainstormChat,
+  useBrainstormResolve,
+  useCreateProject,
+  getListProjectsQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getListProjectsQueryKey } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Message {
@@ -23,108 +27,116 @@ const OPENING_MESSAGE: Message = {
 };
 
 export function BrainstormPanel({ onClose }: BrainstormPanelProps) {
+  const [visible, setVisible] = useState(false);
   const [messages, setMessages] = useState<Message[]>([OPENING_MESSAGE]);
   const [input, setInput] = useState("");
-  const [isFetching, setIsFetching] = useState(false);
   const [buildIntent, setBuildIntent] = useState(false);
-  const [isResolving, setIsResolving] = useState(false);
+  const [pulseIntent, setPulseIntent] = useState(false);
   const [resolvedSpec, setResolvedSpec] = useState<{
     name: string;
     prompt: string;
     kind: "web" | "mobile-cross";
   } | null>(null);
-  const [editableName, setEditableName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLSpanElement>(null);
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-  const createProject = useCreateProject();
   const { toast } = useToast();
+
+  const chatMutation = useBrainstormChat();
+  const resolveMutation = useBrainstormResolve();
+  const createProject = useCreateProject();
 
   const userTurns = messages.filter((m) => m.role === "user").length;
   const showBuildButton = userTurns >= 2 || buildIntent;
+  const isFetching = chatMutation.isPending;
 
+  // Mount animation: 0 → visible
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 10);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, isFetching]);
 
-  const sendMessage = useCallback(async () => {
+  // One-shot pulse when buildIntent first fires
+  useEffect(() => {
+    if (!buildIntent) return;
+    setPulseIntent(true);
+    const t = setTimeout(() => setPulseIntent(false), 1000);
+    return () => clearTimeout(t);
+  }, [buildIntent]);
+
+  const sendMessage = useCallback(() => {
     const text = input.trim();
-    if (!text || isFetching) return;
+    if (!text || chatMutation.isPending) return;
     setInput("");
 
+    const chatMessages = messages.filter((m) => m !== OPENING_MESSAGE);
     const newMessages: Message[] = [...messages, { role: "user", content: text }];
     setMessages(newMessages);
-    setIsFetching(true);
 
-    try {
-      const res = await fetch("/api/brainstorm/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages.filter((m) => m !== OPENING_MESSAGE) }),
-      });
-
-      if (!res.ok) throw new Error("request failed");
-
-      const data = (await res.json()) as { reply: string; buildIntent: boolean };
-      setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
-      if (data.buildIntent) setBuildIntent(true);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Sorry, I had trouble connecting. Please try again." },
-      ]);
-    } finally {
-      setIsFetching(false);
-    }
-  }, [input, isFetching, messages]);
+    chatMutation.mutate(
+      {
+        data: {
+          messages: [...chatMessages, { role: "user", content: text }],
+        },
+      },
+      {
+        onSuccess: (data) => {
+          setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+          if (data.buildIntent) setBuildIntent(true);
+        },
+        onError: () => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: "Sorry, I had trouble connecting. Please try again.",
+            },
+          ]);
+        },
+      },
+    );
+  }, [input, chatMutation, messages]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      void sendMessage();
+      sendMessage();
     }
   };
 
-  const handleBuildIt = useCallback(async () => {
-    if (isResolving || isFetching) return;
-    setIsResolving(true);
-
+  const handleBuildIt = useCallback(() => {
+    if (resolveMutation.isPending || chatMutation.isPending) return;
     const chatMessages = messages.filter((m) => m !== OPENING_MESSAGE);
-    try {
-      const res = await fetch("/api/brainstorm/resolve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: chatMessages }),
-      });
-
-      if (!res.ok) throw new Error("resolve failed");
-
-      const data = (await res.json()) as {
-        name: string;
-        prompt: string;
-        kind: "web" | "mobile-cross";
-      };
-      setResolvedSpec(data);
-      setEditableName(data.name);
-    } catch {
-      toast({
-        title: "Something went wrong",
-        description: "Could not resolve your project spec — try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsResolving(false);
-    }
-  }, [isResolving, isFetching, messages, toast]);
+    resolveMutation.mutate(
+      { data: { messages: chatMessages } },
+      {
+        onSuccess: (data) => {
+          setResolvedSpec(data);
+        },
+        onError: () => {
+          toast({
+            title: "Something went wrong",
+            description: "Could not resolve your project spec — try again.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  }, [resolveMutation, chatMutation.isPending, messages, toast]);
 
   const handleCreateProject = useCallback(() => {
     if (!resolvedSpec || isCreating) return;
-    const name = (nameRef.current?.textContent ?? editableName).trim() || resolvedSpec.name;
+    const name = (nameRef.current?.textContent ?? "").trim() || resolvedSpec.name;
     setIsCreating(true);
     createProject.mutate(
       {
@@ -150,12 +162,14 @@ export function BrainstormPanel({ onClose }: BrainstormPanelProps) {
         },
       },
     );
-  }, [resolvedSpec, isCreating, editableName, createProject, queryClient, setLocation, toast]);
+  }, [resolvedSpec, isCreating, createProject, queryClient, setLocation, toast]);
 
   return (
     <div
-      className="w-full overflow-hidden transition-all duration-200 ease-out"
-      style={{ maxHeight: "460px" }}
+      className={cn(
+        "w-full overflow-hidden transition-all duration-200 ease-out",
+        visible ? "max-h-[460px] opacity-100" : "max-h-0 opacity-0",
+      )}
     >
       <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden mt-2">
         {/* Header */}
@@ -247,14 +261,14 @@ export function BrainstormPanel({ onClose }: BrainstormPanelProps) {
         {showBuildButton && !resolvedSpec && (
           <div className="px-4 pb-2 pt-1 border-t border-border">
             <button
-              onClick={() => void handleBuildIt()}
-              disabled={isResolving || isFetching}
+              onClick={handleBuildIt}
+              disabled={resolveMutation.isPending || isFetching}
               className={cn(
                 "w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors px-3 py-2 text-sm font-medium",
-                buildIntent && !isResolving && "animate-pulse",
+                pulseIntent && "animate-pulse",
               )}
             >
-              {isResolving ? (
+              {resolveMutation.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Preparing project...
@@ -266,7 +280,7 @@ export function BrainstormPanel({ onClose }: BrainstormPanelProps) {
           </div>
         )}
 
-        {/* Input bar */}
+        {/* Input bar — hidden once resolved */}
         {!resolvedSpec && (
           <div className="flex items-end gap-2 px-3 pb-3 pt-2 border-t border-border">
             <textarea
@@ -279,7 +293,7 @@ export function BrainstormPanel({ onClose }: BrainstormPanelProps) {
               className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[28px] max-h-[72px] overflow-y-auto"
             />
             <button
-              onClick={() => void sendMessage()}
+              onClick={sendMessage}
               disabled={isFetching || !input.trim()}
               className={cn(
                 "h-8 w-8 flex items-center justify-center rounded-lg transition-colors shrink-0",

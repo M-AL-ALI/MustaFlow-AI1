@@ -151,86 +151,88 @@ function HomeHero() {
             className="w-full resize-none bg-transparent px-4 pt-4 pb-2 text-sm text-foreground placeholder:text-muted-foreground outline-none"
           />
 
-          {/* Bottom bar */}
-          <div className="flex items-center gap-2 px-3 pb-3">
-            {/* Attachment button */}
-            <button
-              type="button"
-              className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-              title="Attach file"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
+          {/* Bottom bar — hidden when brainstorm panel is open */}
+          {!showDiscuss && (
+            <div className="flex items-center gap-2 px-3 pb-3">
+              {/* Attachment button */}
+              <button
+                type="button"
+                className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                title="Attach file"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
 
-            <div className="flex-1" />
+              <div className="flex-1" />
 
-            {/* Plan toggle */}
-            <button
-              type="button"
-              onClick={() => setPlanMode((v) => !v)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-                planMode
-                  ? "bg-primary/15 text-primary border border-primary/30"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent",
-              )}
-            >
-              <span
+              {/* Plan toggle */}
+              <button
+                type="button"
+                onClick={() => setPlanMode((v) => !v)}
                 className={cn(
-                  "h-3.5 w-3.5 rounded-sm border flex items-center justify-center shrink-0",
-                  planMode ? "bg-primary border-primary" : "border-muted-foreground/40",
+                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+                  planMode
+                    ? "bg-primary/15 text-primary border border-primary/30"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent",
                 )}
               >
-                {planMode && (
-                  <svg viewBox="0 0 10 8" className="h-2 w-2 fill-primary-foreground">
-                    <path
-                      d="M1 4l3 3 5-6"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      fill="none"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                <span
+                  className={cn(
+                    "h-3.5 w-3.5 rounded-sm border flex items-center justify-center shrink-0",
+                    planMode ? "bg-primary border-primary" : "border-muted-foreground/40",
+                  )}
+                >
+                  {planMode && (
+                    <svg viewBox="0 0 10 8" className="h-2 w-2 fill-primary-foreground">
+                      <path
+                        d="M1 4l3 3 5-6"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        fill="none"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </span>
+                Plan
+              </button>
+
+              {/* Mic button */}
+              <button
+                type="button"
+                className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                title="Voice input"
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+
+              {/* Discuss first */}
+              <button
+                type="button"
+                onClick={() => setShowDiscuss(true)}
+                className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors shrink-0 px-1"
+              >
+                Discuss first
+              </button>
+
+              {/* Send button */}
+              <button
+                type="button"
+                onClick={handleBuild}
+                disabled={createProject.isPending || !prompt.trim()}
+                className={cn(
+                  "h-8 w-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
+                  prompt.trim()
+                    ? "bg-foreground text-background hover:bg-foreground/80"
+                    : "bg-muted text-muted-foreground cursor-not-allowed",
                 )}
-              </span>
-              Plan
-            </button>
-
-            {/* Mic button */}
-            <button
-              type="button"
-              className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-              title="Voice input"
-            >
-              <Mic className="h-4 w-4" />
-            </button>
-
-            {/* Discuss first */}
-            <button
-              type="button"
-              onClick={() => setShowDiscuss(true)}
-              className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors shrink-0 px-1"
-            >
-              Discuss first
-            </button>
-
-            {/* Send button */}
-            <button
-              type="button"
-              onClick={handleBuild}
-              disabled={createProject.isPending || !prompt.trim()}
-              className={cn(
-                "h-8 w-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
-                prompt.trim()
-                  ? "bg-foreground text-background hover:bg-foreground/80"
-                  : "bg-muted text-muted-foreground cursor-not-allowed",
-              )}
-              title="Build"
-            >
-              <ArrowUp className="h-4 w-4" />
-            </button>
-          </div>
+                title="Build"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Brainstorm panel */}
