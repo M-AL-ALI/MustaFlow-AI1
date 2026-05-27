@@ -107,6 +107,12 @@ export const projectsTable = pgTable("projects", {
   //   error        — last attempt failed. See provisioningError for the message.
   provisioningStatus: text("provisioning_status").notNull().default("idle"),
   provisioningError: text("provisioning_error"),
+  // provisioningStep: the named step currently executing inside the provisioning pipeline.
+  // null = not started or finished. Values: "create_container" | "create_database" | "connect_and_test"
+  provisioningStep: text("provisioning_step"),
+  // provisioningStartedAt: wall-clock timestamp when the most recent provisioning attempt began.
+  // Used to compute an estimated time remaining in the workspace UI.
+  provisioningStartedAt: timestamp("provisioning_started_at", { withTimezone: true }),
   // blockPublishOnCritical: when true, the publish readiness gate blocks publish if any
   // unresolved critical (error-severity) security findings exist from the latest check run.
   // Default true — matches Replit's "block on critical vulnerabilities" opt-in model.

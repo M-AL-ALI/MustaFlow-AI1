@@ -105,3 +105,28 @@ export function subscribeSecretEvents(
   bus.on(channel, handler);
   return () => bus.off(channel, handler);
 }
+
+// ── Provisioning step events (Task #988) ──────────────────────────────────────
+
+export interface ProvisioningStepPayload {
+  projectId: number;
+  /** Which named step just changed state. */
+  step: "create_container" | "create_database" | "connect_and_test";
+  /** The new state of that step. */
+  state: "started" | "completed" | "failed";
+  /** Human-readable error message — only present when state is "failed". */
+  error?: string;
+}
+
+export function publishProvisioningStep(payload: ProvisioningStepPayload): void {
+  bus.emit(`provisioning:step:${payload.projectId}`, payload);
+}
+
+export function subscribeProvisioningStep(
+  projectId: number,
+  handler: (payload: ProvisioningStepPayload) => void,
+): () => void {
+  const channel = `provisioning:step:${projectId}`;
+  bus.on(channel, handler);
+  return () => bus.off(channel, handler);
+}

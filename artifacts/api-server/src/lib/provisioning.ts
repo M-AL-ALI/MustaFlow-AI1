@@ -19,6 +19,11 @@
  * marks the project as "error" with a human-readable `provisioningError`,
  * so the workspace header surfaces a Retry instead of a false-positive
  * "ready" badge.
+ *
+ * Task #988 — Step-by-step progress tracking:
+ * Each pipeline phase now stamps `provisioningStep` so the UI can render
+ * a granular progress list. An in-memory rolling average of past completion
+ * times drives `estimatedSecondsRemaining` on the status endpoint.
  */
 
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -27,8 +32,91 @@ import { logger } from "./logger";
 import { createContainer } from "./container";
 import { ensureContainerLogTailer } from "./container-logs";
 import { encryptionService } from "./encryption";
+import { publishProvisioningStep } from "./event-bus";
 
 const NEON_API_BASE = "https://console.neon.tech/api/v2";
+
+// ── ETA: rolling average of past provisioning durations ───────────────────────
+// Kept in-memory; resets on server restart (initialised to 60 s as a baseline
+// so the first project gets a reasonable estimate before real data accumulates).
+const ROLLING_WINDOW = 10;
+const pastDurationsMs: number[] = [];
+let rollingAverageMs = 60_000;
+
+function recordCompletionDurationMs(durationMs: number): void {
+  pastDurationsMs.push(durationMs);
+  if (pastDurationsMs.length > ROLLING_WINDOW) pastDurationsMs.shift();
+  rollingAverageMs = pastDurationsMs.reduce((a, b) => a + b, 0) / pastDurationsMs.length;
+}
+
+export function getRollingAverageMs(): number {
+  return rollingAverageMs;
+}
+
+// ── Plain-English error message mapper ────────────────────────────────────────
+// Maps raw API error text / HTTP status codes to user-facing messages.
+
+function humanizeError(raw: string | undefined, provider: "fly" | "neon"): string {
+  if (!raw) {
+    return provider === "fly"
+      ? "Could not reach Fly.io. Check your FLY_API_TOKEN and try again."
+      : "Could not reach Neon. Check your NEON_API_KEY and try again.";
+  }
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes("401") ||
+    lower.includes("403") ||
+    lower.includes("unauthorized") ||
+    lower.includes("forbidden")
+  ) {
+    return provider === "fly"
+      ? "Fly.io rejected our credentials — your FLY_API_TOKEN may be invalid or expired."
+      : "Neon rejected our credentials — your NEON_API_KEY may be invalid or expired.";
+  }
+  if (
+    lower.includes("429") ||
+    lower.includes("rate limit") ||
+    lower.includes("too many requests")
+  ) {
+    return provider === "fly"
+      ? "Fly.io rate limit hit — please wait a moment and retry."
+      : "Neon rate limit hit — please wait a moment and retry.";
+  }
+  if (
+    lower.includes("quota") ||
+    lower.includes("limit exceeded") ||
+    lower.includes("project limit")
+  ) {
+    return "Account quota reached — you may need to delete unused projects or upgrade your plan.";
+  }
+  if (lower.includes("timeout") || lower.includes("timed out")) {
+    return provider === "fly"
+      ? "Fly.io timed out while creating the machine. The service may be under heavy load — please retry."
+      : "Neon timed out while creating the database. Please retry.";
+  }
+  if (
+    lower.includes("500") ||
+    lower.includes("502") ||
+    lower.includes("503") ||
+    lower.includes("internal server error")
+  ) {
+    return provider === "fly"
+      ? "Fly.io is temporarily unavailable. Please retry in a few minutes."
+      : "Neon is temporarily unavailable. Please retry in a few minutes.";
+  }
+  if (lower.includes("org_id") || lower.includes("organization")) {
+    return "Neon organization configuration error — check your NEON_ORG_ID setting.";
+  }
+  if (lower.includes("network") || lower.includes("econnrefused") || lower.includes("enotfound")) {
+    return provider === "fly"
+      ? "Could not reach Fly.io — check your network configuration."
+      : "Could not reach Neon — check your network configuration.";
+  }
+  // Fall back to a sanitized excerpt of the raw error
+  const excerpt = raw.slice(0, 120).replace(/\n/g, " ").trim();
+  return provider === "fly" ? `Fly.io error: ${excerpt}` : `Neon error: ${excerpt}`;
+}
 
 /** Stable, deterministic Neon project name for a given MustaFlow project. */
 function neonProjectNameFor(projectId: number): string {
@@ -57,16 +145,10 @@ async function resolveNeonOrgId(apiKey: string): Promise<string | null> {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (res.status === 403 || res.status === 404) {
-      // Personal API key — endpoint isn't available. Cache "no org needed"
-      // so we don't keep retrying for the lifetime of the process.
       cachedNeonOrgId = null;
       return null;
     }
     if (!res.ok) {
-      // Transient (429/5xx) or unexpected status — do NOT cache, so a
-      // later call can retry. Returning null here lets the current
-      // create attempt fall through to Neon's own error response, which
-      // surfaces the real cause to the user via provisioningError.
       logger.warn({ status: res.status }, "Neon org_id lookup returned non-OK status; not caching");
       return null;
     }
@@ -74,7 +156,6 @@ async function resolveNeonOrgId(apiKey: string): Promise<string | null> {
     cachedNeonOrgId = data.organizations?.[0]?.id ?? null;
     return cachedNeonOrgId;
   } catch (err) {
-    // Network error — also transient, don't cache.
     logger.warn({ err }, "Neon org_id auto-detection failed; not caching");
     return null;
   }
@@ -118,8 +199,6 @@ async function fetchNeonConnectionUri(neonProjectId: string): Promise<string | n
   const apiKey = process.env.NEON_API_KEY;
   if (!apiKey) return null;
   try {
-    // Pull the default branch + role/database so we can construct the
-    // connection URI request.
     const projRes = await fetch(`${NEON_API_BASE}/projects/${neonProjectId}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
@@ -131,10 +210,6 @@ async function fetchNeonConnectionUri(neonProjectId: string): Promise<string | n
     const branchId = projData.project?.default_branch_id ?? projData.branch?.id;
     if (!branchId) return null;
 
-    // Default role + database created by Neon when omitted are "neondb_owner"
-    // / "neondb". For our created projects we asked for "mustaflow" / project
-    // name, but we don't reliably remember those across restarts, so list the
-    // databases and roles and pick the first ones.
     const dbsRes = await fetch(
       `${NEON_API_BASE}/projects/${neonProjectId}/branches/${branchId}/databases`,
       { headers: { Authorization: `Bearer ${apiKey}` } },
@@ -163,13 +238,13 @@ async function fetchNeonConnectionUri(neonProjectId: string): Promise<string | n
   }
 }
 
-/** Call the Neon API to create a fresh Postgres project. */
+/** Call the Neon API to create a fresh Postgres project. Returns the error text on failure for better UX. */
 async function createNeonProject(
   projectId: number,
   projectName: string,
-): Promise<{ connectionString: string; neonProjectId: string } | null> {
+): Promise<{ connectionString: string; neonProjectId: string } | { error: string }> {
   const apiKey = process.env.NEON_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) return { error: humanizeError(undefined, "neon") };
 
   const safeName = neonProjectNameFor(projectId);
   const dbName =
@@ -178,9 +253,6 @@ async function createNeonProject(
       .replace(/[^a-z0-9]/g, "-")
       .slice(0, 32) || `project_${projectId}`;
 
-  // Org-scoped Neon API keys require `org_id` in the body. Personal keys
-  // accept the request without it. We pass it when available either way —
-  // Neon ignores it for personal keys.
   const orgId = await resolveNeonOrgId(apiKey);
 
   try {
@@ -209,7 +281,7 @@ async function createNeonProject(
     if (!res.ok) {
       const errText = await res.text();
       logger.error({ projectId, status: res.status, err: errText }, "Neon project creation failed");
-      return null;
+      return { error: humanizeError(`${res.status} ${errText}`, "neon") };
     }
 
     const data = (await res.json()) as {
@@ -218,11 +290,13 @@ async function createNeonProject(
     };
     const connectionString = data.connection_uris?.[0]?.connection_uri;
     const neonProjectId = data.project?.id;
-    if (!connectionString || !neonProjectId) return null;
+    if (!connectionString || !neonProjectId)
+      return { error: humanizeError("missing connection_uri or project.id in response", "neon") };
     return { connectionString, neonProjectId };
   } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err);
     logger.error({ err, projectId }, "Error calling Neon API");
-    return null;
+    return { error: humanizeError(raw, "neon") };
   }
 }
 
@@ -250,7 +324,15 @@ async function upsertDatabaseUrlSecret(projectId: number, connectionString: stri
   }
 }
 
-async function markError(projectId: number, message: string): Promise<void> {
+/**
+ * Mark a project as errored. Intentionally does NOT clear provisioningStep so
+ * the UI can display a red X on the exact step that failed.
+ */
+async function markError(
+  projectId: number,
+  message: string,
+  failedStep?: "create_container" | "create_database" | "connect_and_test",
+): Promise<void> {
   await db
     .update(projectsTable)
     .set({ provisioningStatus: "error", provisioningError: message })
@@ -258,6 +340,32 @@ async function markError(projectId: number, message: string): Promise<void> {
     .catch(() => {
       /* best-effort */
     });
+  if (failedStep) {
+    publishProvisioningStep({ projectId, step: failedStep, state: "failed", error: message });
+  }
+}
+
+/** Stamp the current provisioning step and emit an EventBus start event. */
+async function setStep(
+  projectId: number,
+  step: "create_container" | "create_database" | "connect_and_test",
+): Promise<void> {
+  await db
+    .update(projectsTable)
+    .set({ provisioningStep: step })
+    .where(eq(projectsTable.id, projectId))
+    .catch(() => {
+      /* best-effort */
+    });
+  publishProvisioningStep({ projectId, step, state: "started" });
+}
+
+/** Emit an EventBus completion event for a step and optionally clear the DB step. */
+async function completeStep(
+  projectId: number,
+  step: "create_container" | "create_database" | "connect_and_test",
+): Promise<void> {
+  publishProvisioningStep({ projectId, step, state: "completed" });
 }
 
 /**
@@ -271,12 +379,12 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
   }
   activeProvisioning.add(projectId);
 
+  const startedAt = new Date();
+
   try {
     const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
     if (!project) return;
 
-    // Safety guard: only provision agentic projects. Static-legacy projects
-    // must never incur infrastructure costs even if enqueued accidentally.
     if (project.builderMode !== "agentic") {
       logger.info(
         { projectId, builderMode: project.builderMode },
@@ -287,13 +395,15 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
 
     await db
       .update(projectsTable)
-      .set({ provisioningStatus: "provisioning", provisioningError: null })
+      .set({
+        provisioningStatus: "provisioning",
+        provisioningError: null,
+        provisioningStep: null,
+        provisioningStartedAt: startedAt,
+      })
       .where(eq(projectsTable.id, projectId));
 
     // Pre-flight: both providers must be configured for full agentic provisioning.
-    // When credentials are absent (common in dev/CI), gracefully degrade to
-    // "idle" rather than "error" so the workspace badge stays neutral and no
-    // alarming toast appears. The user can still add the secrets and retry.
     if (!process.env.FLY_API_TOKEN || !process.env.NEON_API_KEY) {
       const missing: string[] = [];
       if (!process.env.FLY_API_TOKEN) missing.push("FLY_API_TOKEN");
@@ -304,7 +414,7 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       );
       await db
         .update(projectsTable)
-        .set({ provisioningStatus: "idle", provisioningError: null })
+        .set({ provisioningStatus: "idle", provisioningError: null, provisioningStep: null })
         .where(eq(projectsTable.id, projectId))
         .catch(() => {
           /* best-effort */
@@ -315,41 +425,47 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
     // Step 1 — container (idempotent: skip if already present)
     let containerId = project.containerId;
     if (!containerId) {
-      const info = await createContainer(projectId, project.stack);
-      if (!info) {
-        await markError(projectId, "Failed to create Fly.io machine for this project.");
+      await setStep(projectId, "create_container");
+      let containerError: string | undefined;
+      try {
+        const info = await createContainer(projectId, project.stack);
+        if (!info) {
+          containerError = "Failed to create Fly.io machine for this project.";
+        } else if ("error" in info) {
+          containerError = humanizeError(info.error, "fly");
+        } else {
+          containerId = info.containerId;
+          await db
+            .update(projectsTable)
+            .set({
+              containerId: info.containerId,
+              containerUrl: info.containerUrl,
+              containerStatus: info.status,
+            })
+            .where(eq(projectsTable.id, projectId));
+        }
+      } catch (err) {
+        const raw = err instanceof Error ? err.message : String(err);
+        containerError = humanizeError(raw, "fly");
+      }
+      if (containerError) {
+        await markError(projectId, containerError, "create_container");
         return;
       }
-      containerId = info.containerId;
-      await db
-        .update(projectsTable)
-        .set({
-          containerId: info.containerId,
-          containerUrl: info.containerUrl,
-          containerStatus: info.status,
-        })
-        .where(eq(projectsTable.id, projectId));
+      await completeStep(projectId, "create_container");
     }
 
-    // Start tailing this machine's stdout/stderr so the workspace Logs tab
-    // can stream live output. Idempotent — re-runs on retry are a no-op
-    // once a tailer is already active for this projectId+machineId.
+    // Start tailing this machine's stdout/stderr
     if (containerId) {
       ensureContainerLogTailer(projectId, containerId);
     }
 
-    // Step 2 — Neon Postgres. Idempotency is critical: a partial failure
-    // (e.g. crash after Neon create but before persistence) must NOT result
-    // in a second Postgres project being created. We use a stable name keyed
-    // on the project id so a remote lookup can de-duplicate before any
-    // create call, and we persist `neonProjectId` BEFORE attempting the
-    // secret upsert so subsequent retries take the "already created" path.
+    // Step 2 — Neon Postgres
     let neonProjectId = project.neonProjectId;
     let connectionString: string | null = null;
 
     if (!neonProjectId) {
-      // Remote dedupe: if a previous run already created the Neon project
-      // but crashed before we recorded the id, look it up by stable name.
+      await setStep(projectId, "create_database");
       const existing = await findNeonProjectByName(neonProjectNameFor(projectId));
       if (existing) {
         neonProjectId = existing;
@@ -365,15 +481,12 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
         connectionString = await fetchNeonConnectionUri(existing);
       } else {
         const neon = await createNeonProject(projectId, project.name);
-        if (!neon) {
-          await markError(projectId, "Failed to create Neon Postgres project.");
+        if ("error" in neon) {
+          await markError(projectId, neon.error, "create_database");
           return;
         }
         neonProjectId = neon.neonProjectId;
         connectionString = neon.connectionString;
-        // Persist the Neon id FIRST so that any failure after this point
-        // (including a process crash) is recoverable without creating a
-        // duplicate Neon project on retry.
         await db
           .update(projectsTable)
           .set({
@@ -384,18 +497,20 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
           })
           .where(eq(projectsTable.id, projectId));
       }
+      await completeStep(projectId, "create_database");
     }
 
-    // Ensure DATABASE_URL secret exists. On a fresh create we already have
-    // the connection string; on a retry where neonProjectId was persisted
-    // but the secret never landed, fetch the URI from Neon and (re)write it.
+    // Step 3 — connect and test (store DATABASE_URL secret)
+    await setStep(projectId, "connect_and_test");
+
     if (!connectionString) {
       connectionString = await fetchNeonConnectionUri(neonProjectId);
     }
     if (!connectionString) {
       await markError(
         projectId,
-        "Could not retrieve Neon connection string. Please retry provisioning.",
+        "Could not retrieve the database connection string. Please retry provisioning.",
+        "connect_and_test",
       );
       return;
     }
@@ -403,13 +518,11 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       await upsertDatabaseUrlSecret(projectId, connectionString);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "unknown";
-      await markError(projectId, `Failed to store DATABASE_URL secret: ${msg}`);
+      await markError(projectId, `Failed to store DATABASE_URL secret: ${msg}`, "connect_and_test");
       return;
     }
 
-    // Strict success criteria: both infra pieces must be persisted before we
-    // call this "ready". Re-read the row instead of trusting the in-memory
-    // variables in case a concurrent retry partially mutated state.
+    // Strict success criteria
     const [final] = await db
       .select({
         containerId: projectsTable.containerId,
@@ -421,16 +534,21 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
       await markError(
         projectId,
         "Provisioning completed without both a container and a database. Please retry.",
+        "connect_and_test",
       );
       return;
     }
+    await completeStep(projectId, "connect_and_test");
+
+    const durationMs = Date.now() - startedAt.getTime();
+    recordCompletionDurationMs(durationMs);
 
     await db
       .update(projectsTable)
-      .set({ provisioningStatus: "ready", provisioningError: null })
+      .set({ provisioningStatus: "ready", provisioningError: null, provisioningStep: null })
       .where(eq(projectsTable.id, projectId));
 
-    logger.info({ projectId }, "Project provisioning complete");
+    logger.info({ projectId, durationMs }, "Project provisioning complete");
   } catch (err) {
     logger.error({ err, projectId }, "Provisioning job failed");
     const message = err instanceof Error ? err.message : "Unknown provisioning error";
@@ -512,9 +630,6 @@ export async function provisionPreviewDb(projectId: number): Promise<void> {
       connectionString = await fetchNeonConnectionUri(existingId);
     } else {
       // Create a new Neon project with the stable preview name.
-      // We call the Neon API directly here because createNeonProject() builds the
-      // name from neonProjectNameFor(projectId) = "mf-project-<id>", which collides
-      // with the main provisioning project. We need "mf-preview-<id>" instead.
       const orgId = await resolveNeonOrgId(apiKey);
       const dbName =
         project.name

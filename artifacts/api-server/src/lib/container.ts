@@ -153,7 +153,7 @@ export async function createContainer(
   projectId: number,
   stack?: string | null,
   extraEnv?: Record<string, string>,
-): Promise<ContainerInfo | null> {
+): Promise<ContainerInfo | { error: string } | null> {
   if (!isConfigured()) {
     logger.warn({ projectId }, "FLY_API_TOKEN not set — container creation skipped");
     return null;
@@ -223,7 +223,8 @@ export async function createContainer(
       const text = await res.text();
       logger.error({ projectId, status: res.status, body: text }, "Failed to create Fly machine");
       await writeLog(projectId, "system", `Container creation failed: ${text}`);
-      return null;
+      const reason = `Fly API ${res.status}: ${text.slice(0, 300)}`;
+      return { error: reason };
     }
 
     const data = (await res.json()) as { id: string; state?: string };
@@ -240,7 +241,8 @@ export async function createContainer(
     };
   } catch (err) {
     logger.error({ err, projectId }, "Error creating Fly machine");
-    return null;
+    const msg = err instanceof Error ? err.message : String(err);
+    return { error: msg };
   }
 }
 
@@ -590,7 +592,7 @@ export async function provisionContainer(
   if (!machineId) {
     // Create new machine — stack selects the right image; extraEnv injects project secrets
     const info = await createContainer(projectId, project.stack, extraEnv);
-    if (!info) {
+    if (!info || "error" in info) {
       await db
         .update(projectsTable)
         .set({ containerStatus: "error" })

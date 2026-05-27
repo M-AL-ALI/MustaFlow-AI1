@@ -25,7 +25,11 @@ import {
 } from "@workspace/api-zod";
 import { buildInitialAssistantMessage } from "../lib/ai";
 import { resolveAgentIdentity } from "../lib/jobs";
-import { enqueueProvisionProjectJob, provisionPreviewDb } from "../lib/provisioning";
+import {
+  enqueueProvisionProjectJob,
+  provisionPreviewDb,
+  getRollingAverageMs,
+} from "../lib/provisioning";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -1228,6 +1232,8 @@ router.get(
         builderMode: projectsTable.builderMode,
         provisioningStatus: projectsTable.provisioningStatus,
         provisioningError: projectsTable.provisioningError,
+        provisioningStep: projectsTable.provisioningStep,
+        provisioningStartedAt: projectsTable.provisioningStartedAt,
         containerStatus: projectsTable.containerStatus,
       })
       .from(projectsTable)
@@ -1236,10 +1242,21 @@ router.get(
       res.status(404).json({ error: "Project not found" });
       return;
     }
+
+    // Compute estimated seconds remaining based on rolling average minus elapsed time.
+    let estimatedSecondsRemaining: number | null = null;
+    if (row.provisioningStatus === "provisioning" && row.provisioningStartedAt) {
+      const elapsedMs = Date.now() - new Date(row.provisioningStartedAt).getTime();
+      const remainingMs = getRollingAverageMs() - elapsedMs;
+      estimatedSecondsRemaining = Math.max(0, Math.round(remainingMs / 1000));
+    }
+
     res.json({
       builderMode: row.builderMode,
       provisioningStatus: row.provisioningStatus,
       provisioningError: row.provisioningError,
+      provisioningStep: row.provisioningStep ?? null,
+      estimatedSecondsRemaining,
       containerStatus: row.containerStatus,
     });
   },

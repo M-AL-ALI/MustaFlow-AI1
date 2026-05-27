@@ -672,6 +672,9 @@ async function startTestContainer(
       "Container creation failed — FLY_API_TOKEN may be missing or Fly returned an error",
     );
   }
+  if ("error" in containerInfo) {
+    throw new Error(`Container creation failed: ${containerInfo.error}`);
+  }
 
   // Wait for the machine to enter "started" state (poll up to 60 s).
   const machineReady = await pollMachineReady(containerInfo.containerId, 60);

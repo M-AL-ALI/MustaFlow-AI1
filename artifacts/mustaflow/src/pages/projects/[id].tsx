@@ -79,8 +79,6 @@ import {
   Crown,
   Cpu,
   Loader2,
-  AlertCircle,
-  Moon,
   Bug,
   CheckSquare,
 } from "lucide-react";
@@ -176,6 +174,8 @@ import { CommentsPanel } from "./components/comments-panel";
 import { ActivityLogTab } from "./components/activity-log-tab";
 import { NotificationsBell } from "@/components/notifications-bell";
 import { AgenticOnboardingTooltip } from "@/components/agentic-onboarding-tooltip";
+import { useToast } from "@/hooks/use-toast";
+import { ProvisioningProgress } from "./components/provisioning-progress";
 import { cn } from "@/lib/utils";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -1334,14 +1334,21 @@ export default function ProjectWorkspacePage() {
   }, [projectId]);
   // ── End container state ────────────────────────────────────────────────────
 
-  // ── Provisioning state (Task #738) ─────────────────────────────────────────
+  // ── Provisioning state (Task #738 + #988) ──────────────────────────────────
   // Tracks the agentic auto-provisioning lifecycle for new projects:
   // provisioning → ready → hibernated → error. Polls while in flight and
   // exposes a retry action when the last attempt failed.
+  // Task #988 adds step-level granularity, ETA, completion toast, and timeout warning.
   type ProvisioningStatus = "idle" | "provisioning" | "ready" | "hibernated" | "error";
+  type ProvisioningStep = "create_container" | "create_database" | "connect_and_test" | null;
+  const { toast } = useToast();
   const [provisioningStatus, setProvisioningStatus] = useState<ProvisioningStatus>("idle");
   const [provisioningError, setProvisioningError] = useState<string | null>(null);
+  const [provisioningStep, setProvisioningStep] = useState<ProvisioningStep>(null);
+  const [estimatedSecondsRemaining, setEstimatedSecondsRemaining] = useState<number | null>(null);
   const [retryingProvisioning, setRetryingProvisioning] = useState(false);
+  const [provisioningStartWallMs, setProvisioningStartWallMs] = useState<number | null>(null);
+  const [provisioningElapsedSeconds, setProvisioningElapsedSeconds] = useState(0);
 
   useEffect(() => {
     if (!project) return;
@@ -1350,6 +1357,23 @@ export default function ProjectWorkspacePage() {
     const err = project.provisioningError;
     setProvisioningError(err ?? null);
   }, [project]);
+
+  // Track elapsed seconds on a 1s ticker while provisioning
+  useEffect(() => {
+    if (provisioningStatus !== "provisioning") {
+      setProvisioningElapsedSeconds(0);
+      return;
+    }
+    if (!provisioningStartWallMs) {
+      setProvisioningStartWallMs(Date.now());
+    }
+    const tick = setInterval(() => {
+      setProvisioningElapsedSeconds(
+        Math.floor((Date.now() - (provisioningStartWallMs ?? Date.now())) / 1000),
+      );
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [provisioningStatus, provisioningStartWallMs]);
 
   useEffect(() => {
     if (provisioningStatus !== "provisioning") return;
@@ -1360,23 +1384,37 @@ export default function ProjectWorkspacePage() {
       getProjectProvisioningStatus(projectId)
         .then((data) => {
           if (!data) return;
-          if (data.provisioningStatus) {
-            setProvisioningStatus(data.provisioningStatus as ProvisioningStatus);
-          }
-          setProvisioningError(data.provisioningError ?? null);
-        })
+          const newStatus = data.provisioningStatus as ProvisioningStatus | undefined;
+          if (newStatus) {
+            setProvisioningStatus(newStatus);
+            // Completion: fire toast and auto-navigate to Preview
+            if (newStatus === "ready") {
+              toast({
+                title: "Environment ready",
+                description: "Your project server and database are up. You can start building.",
+              });
+              setActiveTab("preview");
+            }
+            setProvisioningError(data.provisioningError ?? null);
+            setProvisioningStep(data.provisioningStep ?? null);
+            setEstimatedSecondsRemaining(data.estimatedSecondsRemaining ?? null);
+          },
+        )
         .catch(() => {});
     }, 4000);
     return () => clearInterval(t);
-  }, [provisioningStatus, projectId]);
+  }, [provisioningStatus, projectId, toast]);
 
   const handleRetryProvisioning = useCallback(() => {
     setRetryingProvisioning(true);
+    setProvisioningStartWallMs(Date.now());
+    setProvisioningElapsedSeconds(0);
     retryProjectProvisioning(projectId)
       .then((data) => {
         if (data?.provisioningStatus) {
           setProvisioningStatus(data.provisioningStatus as ProvisioningStatus);
           setProvisioningError(null);
+          setProvisioningStep(null);
         }
       })
       .catch(() => {})
@@ -2453,56 +2491,16 @@ export default function ProjectWorkspacePage() {
           >
             {project.status}
           </span>
-          {provisioningStatus !== "idle" && (
-            <span
-              data-tour="provisioning-badge"
-              className={cn(
-                "inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
-                provisioningStatus === "ready"
-                  ? "bg-green-500/10 text-green-400 border-green-500/20"
-                  : provisioningStatus === "provisioning"
-                    ? "bg-primary/10 text-primary border-primary/20"
-                    : provisioningStatus === "hibernated"
-                      ? "bg-muted text-muted-foreground border-border"
-                      : "bg-destructive/10 text-destructive border-destructive/20",
-              )}
-              title={
-                provisioningStatus === "error" && provisioningError
-                  ? provisioningError
-                  : provisioningStatus === "provisioning"
-                    ? "Setting up your container and database…"
-                    : provisioningStatus === "ready"
-                      ? "Container + database ready"
-                      : provisioningStatus === "hibernated"
-                        ? "Container is hibernated (auto-stopped). It will wake on next use."
-                        : ""
-              }
-            >
-              {provisioningStatus === "provisioning" ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : provisioningStatus === "ready" ? (
-                <CheckCircle2 className="h-3 w-3" />
-              ) : provisioningStatus === "hibernated" ? (
-                <Moon className="h-3 w-3" />
-              ) : (
-                <AlertCircle className="h-3 w-3" />
-              )}
-              <span className="capitalize">
-                {provisioningStatus === "ready" ? "Running" : provisioningStatus}
-              </span>
-              {provisioningStatus === "error" && (
-                <button
-                  type="button"
-                  onClick={handleRetryProvisioning}
-                  disabled={retryingProvisioning}
-                  className="ml-1 inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-foreground disabled:opacity-60"
-                  title="Retry provisioning"
-                >
-                  {retryingProvisioning ? "Retrying…" : "Retry"}
-                </button>
-              )}
-            </span>
-          )}
+          <ProvisioningProgress
+            status={provisioningStatus}
+            step={provisioningStep}
+            error={provisioningError}
+            estimatedSecondsRemaining={estimatedSecondsRemaining}
+            elapsedSeconds={provisioningElapsedSeconds}
+            retrying={retryingProvisioning}
+            onRetry={handleRetryProvisioning}
+            onLogsClick={() => setActiveTab("logs")}
+          />
         </div>
         <div className="w-px h-5 bg-border shrink-0" />
         <div className="flex-1 overflow-x-auto min-w-0">
