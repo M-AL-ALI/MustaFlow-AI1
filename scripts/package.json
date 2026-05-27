@@ -78,6 +78,7 @@
     "migrate-canvas-state": "tsx ./src/migrate-canvas-state.ts",
     "migrate-low-credit-email": "tsx ./src/migrate-low-credit-email.ts",
     "migrate-gdpr-erasure-job": "tsx ./src/migrate-gdpr-erasure-job.ts",
+    "migrate-drop-conversations": "tsx ./src/migrate-drop-conversations.ts",
     "migrate-command-approval": "tsx ./src/migrate-command-approval.ts",
     "migrate-message-origin": "tsx ./src/migrate-message-origin.ts",
     "backfill-message-origin": "tsx ./src/backfill-message-origin.ts",

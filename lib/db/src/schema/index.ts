@@ -51,7 +51,6 @@ export * from "./scheduled-job-runs";
 export * from "./managed-addons";
 export * from "./project-environments";
 export * from "./usage-events";
-export * from "./conversations";
 export * from "./organizations";
 export * from "./org-members";
 export * from "./org-invites";

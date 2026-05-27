@@ -82,6 +82,7 @@ import projectActivityRouter from "./project-activity";
 import gdprRouter from "./gdpr";
 import tokensRouter from "./tokens";
 import previewEnvRouter from "./preview-env";
+import clerkWebhookRouter from "./clerk-webhook";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -99,6 +100,7 @@ router.use(analyticsRouter); // POST /p/:slug/analytics/ping (public ping)
 router.use(publicProdLogRouter); // POST /p/:slug/log (public browser error beacon)
 router.use(sslWebhookRouter); // POST /domain/ssl-webhook (Cloudflare → us)
 router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
+router.use(clerkWebhookRouter); // POST /webhooks/clerk     (Clerk → us)
 router.use(publicGalleryRouter); // GET /gallery-templates[/:slug] — public browsing
 router.use(publicExtensionsRouter); // GET /extensions[/:slug] — public browsing
 router.use(publicProfilesRouter); // GET /profiles/:username[/projects] — public profiles
@@ -156,6 +158,7 @@ const KNOWN_PREFIXES = [
   "/canvas",
   "/preview-env",
   "/tokens",
+  "/webhooks",
   "/gallery-templates",
   "/extensions",
   "/profiles",

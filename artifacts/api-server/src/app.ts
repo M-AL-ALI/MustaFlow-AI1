@@ -100,24 +100,23 @@ app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
 app.use(cors({ credentials: true, origin: true }));
 
-// Capture raw body for Stripe webhook signature verification.
+// Capture raw body for webhook signature verification.
 // Must run BEFORE express.json() so the Buffer is still intact.
-app.use(
-  "/api/billing/webhook",
-  express.raw({ type: "application/json" }),
-  (req: Request, _res: Response, next: NextFunction) => {
-    (req as unknown as { rawBody: Buffer }).rawBody = req.body as Buffer;
-    // Re-parse as JSON so the rest of the handler can read req.body as an object.
-    if (Buffer.isBuffer(req.body)) {
-      try {
-        req.body = JSON.parse(req.body.toString()) as unknown;
-      } catch {
-        req.body = {};
-      }
+// Applied to both Stripe and Clerk webhook endpoints.
+function rawBodyMiddleware(req: Request, _res: Response, next: NextFunction): void {
+  (req as unknown as { rawBody: Buffer }).rawBody = req.body as Buffer;
+  if (Buffer.isBuffer(req.body)) {
+    try {
+      req.body = JSON.parse(req.body.toString()) as unknown;
+    } catch {
+      req.body = {};
     }
-    next();
-  },
-);
+  }
+  next();
+}
+
+app.use("/api/billing/webhook", express.raw({ type: "application/json" }), rawBodyMiddleware);
+app.use("/api/webhooks/clerk", express.raw({ type: "application/json" }), rawBodyMiddleware);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
