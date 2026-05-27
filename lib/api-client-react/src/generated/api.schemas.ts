@@ -13,6 +13,46 @@ export interface ApiError {
   error: string;
 }
 
+export type BrainstormMessageRole = typeof BrainstormMessageRole[keyof typeof BrainstormMessageRole];
+
+
+export const BrainstormMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface BrainstormMessage {
+  role: BrainstormMessageRole;
+  /** @maxLength 2000 */
+  content: string;
+}
+
+export interface BrainstormChatInput {
+  /** @maxItems 30 */
+  messages: BrainstormMessage[];
+}
+
+export interface BrainstormChatOutput {
+  reply: string;
+  buildIntent: boolean;
+}
+
+export type BrainstormResolveOutputKind = typeof BrainstormResolveOutputKind[keyof typeof BrainstormResolveOutputKind];
+
+
+export const BrainstormResolveOutputKind = {
+  web: 'web',
+  'mobile-cross': 'mobile-cross',
+} as const;
+
+export interface BrainstormResolveOutput {
+  /** @maxLength 80 */
+  name: string;
+  /** @maxLength 500 */
+  prompt: string;
+  kind: BrainstormResolveOutputKind;
+}
+
 export type WorkspaceType = typeof WorkspaceType[keyof typeof WorkspaceType];
 
 

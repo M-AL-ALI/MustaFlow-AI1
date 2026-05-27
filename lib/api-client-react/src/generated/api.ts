@@ -52,6 +52,9 @@ import type {
   BillingCheckoutResult,
   BillingCheckoutSessionStatus,
   BillingPackagesResult,
+  BrainstormChatInput,
+  BrainstormChatOutput,
+  BrainstormResolveOutput,
   ChatExchange,
   ChatMessage,
   ChatMessageInput,
@@ -16787,4 +16790,146 @@ export function useV1DownloadFile<TData = Awaited<ReturnType<typeof v1DownloadFi
 
 
 
+
+export const getBrainstormChatUrl = () => {
+
+
+
+
+  return `/api/brainstorm/chat`
+}
+
+/**
+ * @summary Send a message to the brainstorm AI ideation assistant.
+ */
+export const brainstormChat = async (brainstormChatInput: BrainstormChatInput, options?: RequestInit): Promise<BrainstormChatOutput> => {
+
+  return customFetch<BrainstormChatOutput>(getBrainstormChatUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      brainstormChatInput,)
+  }
+);}
+
+
+
+
+export const getBrainstormChatMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof brainstormChat>>, TError,{data: BodyType<BrainstormChatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof brainstormChat>>, TError,{data: BodyType<BrainstormChatInput>}, TContext> => {
+
+const mutationKey = ['brainstormChat'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof brainstormChat>>, {data: BodyType<BrainstormChatInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  brainstormChat(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BrainstormChatMutationResult = NonNullable<Awaited<ReturnType<typeof brainstormChat>>>
+    export type BrainstormChatMutationBody = BodyType<BrainstormChatInput>
+    export type BrainstormChatMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Send a message to the brainstorm AI ideation assistant.
+ */
+export const useBrainstormChat = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof brainstormChat>>, TError,{data: BodyType<BrainstormChatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof brainstormChat>>,
+        TError,
+        {data: BodyType<BrainstormChatInput>},
+        TContext
+      > => {
+      return useMutation(getBrainstormChatMutationOptions(options));
+    }
+
+export const getBrainstormResolveUrl = () => {
+
+
+
+
+  return `/api/brainstorm/resolve`
+}
+
+/**
+ * @summary Resolve a brainstorm conversation into a structured project spec.
+ */
+export const brainstormResolve = async (brainstormChatInput: BrainstormChatInput, options?: RequestInit): Promise<BrainstormResolveOutput> => {
+
+  return customFetch<BrainstormResolveOutput>(getBrainstormResolveUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      brainstormChatInput,)
+  }
+);}
+
+
+
+
+export const getBrainstormResolveMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof brainstormResolve>>, TError,{data: BodyType<BrainstormChatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof brainstormResolve>>, TError,{data: BodyType<BrainstormChatInput>}, TContext> => {
+
+const mutationKey = ['brainstormResolve'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof brainstormResolve>>, {data: BodyType<BrainstormChatInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  brainstormResolve(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BrainstormResolveMutationResult = NonNullable<Awaited<ReturnType<typeof brainstormResolve>>>
+    export type BrainstormResolveMutationBody = BodyType<BrainstormChatInput>
+    export type BrainstormResolveMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Resolve a brainstorm conversation into a structured project spec.
+ */
+export const useBrainstormResolve = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof brainstormResolve>>, TError,{data: BodyType<BrainstormChatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof brainstormResolve>>,
+        TError,
+        {data: BodyType<BrainstormChatInput>},
+        TContext
+      > => {
+      return useMutation(getBrainstormResolveMutationOptions(options));
+    }
 

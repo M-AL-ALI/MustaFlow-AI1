@@ -5093,6 +5093,59 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
 
+  /brainstorm/chat:
+    post:
+      operationId: brainstormChat
+      tags: [brainstorm]
+      summary: Send a message to the brainstorm AI ideation assistant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BrainstormChatInput"
+      responses:
+        "200":
+          description: AI reply and build-intent flag
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrainstormChatOutput"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "502":
+          description: AI service unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /brainstorm/resolve:
+    post:
+      operationId: brainstormResolve
+      tags: [brainstorm]
+      summary: Resolve a brainstorm conversation into a structured project spec.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BrainstormChatInput"
+      responses:
+        "200":
+          description: Resolved project name, prompt, and kind
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrainstormResolveOutput"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
 components:
   schemas:
     HealthStatus:
@@ -5106,6 +5159,50 @@ components:
       properties:
         error: { type: string }
       required: [error]
+
+    BrainstormMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          maxLength: 2000
+
+    BrainstormChatInput:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrainstormMessage"
+          maxItems: 30
+
+    BrainstormChatOutput:
+      type: object
+      required: [reply, buildIntent]
+      properties:
+        reply:
+          type: string
+        buildIntent:
+          type: boolean
+
+    BrainstormResolveOutput:
+      type: object
+      required: [name, prompt, kind]
+      properties:
+        name:
+          type: string
+          maxLength: 80
+        prompt:
+          type: string
+          maxLength: 500
+        kind:
+          type: string
+          enum: [web, mobile-cross]
 
     Workspace:
       type: object

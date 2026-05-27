@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { Link, useLocation } from "wouter";
+import { BrainstormPanel } from "@/components/brainstorm-panel";
 import {
   useGetProjectsSummary,
   useGetRecentActivity,
@@ -87,6 +88,7 @@ function HomeHero() {
   const [planMode, setPlanMode] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [exampleIndex, setExampleIndex] = useState(0);
+  const [showDiscuss, setShowDiscuss] = useState(false);
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const createProject = useCreateProject();
@@ -204,6 +206,15 @@ function HomeHero() {
               <Mic className="h-4 w-4" />
             </button>
 
+            {/* Discuss first */}
+            <button
+              type="button"
+              onClick={() => setShowDiscuss(true)}
+              className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors shrink-0 px-1"
+            >
+              Discuss first
+            </button>
+
             {/* Send button */}
             <button
               type="button"
@@ -221,6 +232,9 @@ function HomeHero() {
             </button>
           </div>
         </div>
+
+        {/* Brainstorm panel */}
+        {showDiscuss && <BrainstormPanel onClose={() => setShowDiscuss(false)} />}
 
         {/* Category chips */}
         <div className="flex items-center justify-center gap-3 mt-5 flex-wrap">

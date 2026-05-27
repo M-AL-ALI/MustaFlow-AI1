@@ -83,6 +83,7 @@ import gdprRouter from "./gdpr";
 import tokensRouter from "./tokens";
 import previewEnvRouter from "./preview-env";
 import clerkWebhookRouter from "./clerk-webhook";
+import brainstormRouter from "./brainstorm";
 import { attachUser } from "../lib/auth";
 import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
 
@@ -108,6 +109,11 @@ router.use("/v1", v1Router); // POST/GET /v1/* — PAT-authed public REST API (o
 router.use(abuseRouter); // POST /abuse-reports (public intake, no auth)
 router.use(publicCanvasRouter); // GET /canvas/share/:token, /canvas/ab/:testId — public variant previews
 router.use(publicShareRouter); // GET /share/:token (public, no auth)
+
+// ── Brainstorm (public, AI-powered, rate-limited) ─────────────────────────────
+router.post("/brainstorm/chat", aiBuilderLimiter);
+router.post("/brainstorm/resolve", aiBuilderLimiter);
+router.use(brainstormRouter);
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
@@ -162,6 +168,7 @@ const KNOWN_PREFIXES = [
   "/gallery-templates",
   "/extensions",
   "/profiles",
+  "/brainstorm",
 ];
 
 router.use((req, res, next) => {

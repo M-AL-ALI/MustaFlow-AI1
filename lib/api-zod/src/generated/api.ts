@@ -5741,3 +5741,54 @@ export const V1DownloadFileParams = zod.object({
 })
 
 
+/**
+ * @summary Send a message to the brainstorm AI ideation assistant.
+ */
+export const brainstormChatBodyMessagesItemContentMax = 2000;
+
+export const brainstormChatBodyMessagesMax = 30;
+
+
+
+export const BrainstormChatBody = zod.object({
+  "messages": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string().max(brainstormChatBodyMessagesItemContentMax)
+})).max(brainstormChatBodyMessagesMax)
+})
+
+export const BrainstormChatResponse = zod.object({
+  "reply": zod.string(),
+  "buildIntent": zod.boolean()
+})
+
+
+/**
+ * @summary Resolve a brainstorm conversation into a structured project spec.
+ */
+export const brainstormResolveBodyMessagesItemContentMax = 2000;
+
+export const brainstormResolveBodyMessagesMax = 30;
+
+
+
+export const BrainstormResolveBody = zod.object({
+  "messages": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string().max(brainstormResolveBodyMessagesItemContentMax)
+})).max(brainstormResolveBodyMessagesMax)
+})
+
+export const brainstormResolveResponseNameMax = 80;
+
+export const brainstormResolveResponsePromptMax = 500;
+
+
+
+export const BrainstormResolveResponse = zod.object({
+  "name": zod.string().max(brainstormResolveResponseNameMax),
+  "prompt": zod.string().max(brainstormResolveResponsePromptMax),
+  "kind": zod.enum(['web', 'mobile-cross'])
+})
+
+
