@@ -24,7 +24,7 @@ import { eq } from "drizzle-orm";
 import { db, projectsTable } from "@workspace/db";
 import { logger } from "./logger";
 import { publishTaskEvent } from "./event-bus";
-import { deductCredits } from "../routes/credits";
+import { deductCreditsAtomic } from "../routes/credits";
 import { runArchitectReview, type ArchitectInput, type ArchitectResponse } from "./architect";
 import { runE2eScenarios, defaultSmokeScenarios, type E2eScenario } from "./checks/e2e-runner";
 import {
@@ -146,7 +146,7 @@ async function chargeRoleCredits(
   const cost = ROLE_CREDIT_COST[role];
   if (!ownerId) return { ok: true, charged: 0 };
   try {
-    const debit = await deductCredits(ownerId, cost, {
+    const debit = await deductCreditsAtomic(ownerId, cost, {
       projectId: input.projectId,
       type: "architect",
       description: `Subagent dispatch (${role}) for task #${taskId ?? "?"}`,

@@ -65,7 +65,7 @@ import { generateEmbedding, cosineSimilarity } from "./embeddings";
 import type { DiffSummary } from "@workspace/db";
 import {
   getOrCreateCredits,
-  deductCredits,
+  deductCreditsAtomic,
   refundCredits,
   CREDITS_ENFORCEMENT_ENABLED,
 } from "../routes/credits";
@@ -1949,23 +1949,41 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   signal,
                   onBillableSenseBatch: (credits, total) => {
                     if (!project.ownerId) return;
-                    void deductCredits(project.ownerId, credits, {
+                    void deductCreditsAtomic(project.ownerId, credits, {
                       type: "senses",
                       description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
                       projectId,
-                    }).catch((err) =>
-                      logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
-                    );
+                    })
+                      .then((result) => {
+                        if ("insufficient" in result) {
+                          logger.warn(
+                            { projectId, credits },
+                            "Sense credit deduction: insufficient balance — work already delivered",
+                          );
+                        }
+                      })
+                      .catch((err) =>
+                        logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
+                      );
                   },
                   onBillableCreativeCall: (credits, tool) => {
                     if (!project.ownerId) return;
-                    void deductCredits(project.ownerId, credits, {
+                    void deductCreditsAtomic(project.ownerId, credits, {
                       type: "creative",
                       description: `Agent ${tool} — project ${projectId}`,
                       projectId,
-                    }).catch((err) =>
-                      logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
-                    );
+                    })
+                      .then((result) => {
+                        if ("insufficient" in result) {
+                          logger.warn(
+                            { projectId, credits, tool },
+                            "Creative credit deduction: insufficient balance — work already delivered",
+                          );
+                        }
+                      })
+                      .catch((err) =>
+                        logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
+                      );
                   },
                 });
                 return loopResultToBuildResult(loopRes, userPrompt, project.name);
@@ -2380,23 +2398,41 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   signal,
                   onBillableSenseBatch: (credits, total) => {
                     if (!project.ownerId) return;
-                    void deductCredits(project.ownerId, credits, {
+                    void deductCreditsAtomic(project.ownerId, credits, {
                       type: "senses",
                       description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
                       projectId,
-                    }).catch((err) =>
-                      logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
-                    );
+                    })
+                      .then((result) => {
+                        if ("insufficient" in result) {
+                          logger.warn(
+                            { projectId, credits },
+                            "Sense credit deduction: insufficient balance — work already delivered",
+                          );
+                        }
+                      })
+                      .catch((err) =>
+                        logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
+                      );
                   },
                   onBillableCreativeCall: (credits, tool) => {
                     if (!project.ownerId) return;
-                    void deductCredits(project.ownerId, credits, {
+                    void deductCreditsAtomic(project.ownerId, credits, {
                       type: "creative",
                       description: `Agent ${tool} — project ${projectId}`,
                       projectId,
-                    }).catch((err) =>
-                      logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
-                    );
+                    })
+                      .then((result) => {
+                        if ("insufficient" in result) {
+                          logger.warn(
+                            { projectId, credits, tool },
+                            "Creative credit deduction: insufficient balance — work already delivered",
+                          );
+                        }
+                      })
+                      .catch((err) =>
+                        logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
+                      );
                   },
                 });
                 return loopResultToRefineResult(loopRes, userPrompt);
@@ -2649,7 +2685,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 signal,
                 onBillableSenseBatch: (credits, total) => {
                   if (!project.ownerId) return;
-                  void deductCredits(project.ownerId, credits, {
+                  void deductCreditsAtomic(project.ownerId, credits, {
                     type: "senses",
                     description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
                     projectId,
@@ -2659,7 +2695,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 },
                 onBillableCreativeCall: (credits, tool) => {
                   if (!project.ownerId) return;
-                  void deductCredits(project.ownerId, credits, {
+                  void deductCreditsAtomic(project.ownerId, credits, {
                     type: "creative",
                     description: `Agent ${tool} — project ${projectId}`,
                     projectId,
@@ -3322,7 +3358,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             let creditsCharged = 0;
             if (project.ownerId) {
               try {
-                const debit = await deductCredits(project.ownerId, ARCHITECT_CREDIT_COST, {
+                const debit = await deductCreditsAtomic(project.ownerId, ARCHITECT_CREDIT_COST, {
                   projectId,
                   type: "architect",
                   description: `Architect review for task #${taskId} (verdict: ${review.verdict}, findings: ${review.findings.length})`,
@@ -4098,11 +4134,25 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       // --- Deduct credits after a successful AI build/refine ---
       // Skip when credits were reserved upfront (background jobs — Task #509).
       if (project.ownerId && !creditsAlreadyReserved) {
-        void deductCredits(project.ownerId, creditCost, {
+        void deductCreditsAtomic(project.ownerId, creditCost, {
           type: kind,
           description: `${kind === "build" ? "Build" : "Refine"} (${agentMode}) — project ${projectId}`,
           projectId,
-        }).catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
+        })
+          .then((result) => {
+            if ("insufficient" in result) {
+              logger.warn(
+                { projectId, taskId, creditCost, agentMode },
+                "Post-build credit deduction: insufficient balance — build was already delivered",
+              );
+              void emitEvent(
+                taskId,
+                "credit_insufficient",
+                `Insufficient credits to charge for this ${kind} — balance ${result.balance} < ${creditCost}`,
+              );
+            }
+          })
+          .catch((err) => logger.warn({ err }, "Credit deduction failed (non-fatal)"));
       }
 
       // --- Task #529: web sense credits are now charged in-loop ---
@@ -4901,11 +4951,25 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     const { creditCostFor, resolveStageProvider } = await import("./ai-providers");
     const { provider: costProvider } = resolveStageProvider("refine", agentMode);
     const creditCost = creditCostFor(agentMode, costProvider);
-    void deductCredits(project.ownerId, creditCost, {
+    void deductCreditsAtomic(project.ownerId, creditCost, {
       type: "refine",
       description: `Task Agent apply — Task #${taskId}, project ${projectId}`,
       projectId,
-    }).catch((err) => logger.warn({ err }, "Credit deduction failed after apply (non-fatal)"));
+    })
+      .then((result) => {
+        if ("insufficient" in result) {
+          logger.warn(
+            { projectId, taskId, creditCost, agentMode },
+            "Task Agent apply credit deduction: insufficient balance — changes already applied",
+          );
+          void emitEvent(
+            taskId,
+            "credit_insufficient",
+            `Insufficient credits to charge for Task Agent apply — balance ${result.balance} < ${creditCost}`,
+          );
+        }
+      })
+      .catch((err) => logger.warn({ err }, "Credit deduction failed after apply (non-fatal)"));
   }
 
   logger.info({ taskId, projectId, fileCount: stagingFiles.length }, "Task Agent staging applied");

@@ -94,8 +94,12 @@ router.get("/credits/transactions", async (req, res): Promise<void> => {
   res.json({ transactions: rows });
 });
 
-// Internal helper used by the builder to deduct credits.
-// Returns the new balance after deduction, or null if insufficient.
+/**
+ * @deprecated — use deductCreditsAtomic instead.
+ * This function reads the balance, subtracts in JavaScript, and writes back — it is NOT
+ * atomic and allows concurrent requests to both succeed when the balance is tight.
+ * It is kept only to avoid a breaking change during migration; callers must be updated.
+ */
 export async function deductCredits(
   userId: string,
   amount: number,
@@ -105,6 +109,10 @@ export async function deductCredits(
     description: string;
   },
 ): Promise<{ newBalance: number } | { insufficient: true; balance: number }> {
+  logger.warn(
+    { userId, amount, description: opts.description },
+    "deductCredits (non-atomic) called — migrate caller to deductCreditsAtomic",
+  );
   const credits = await getOrCreateCredits(userId);
 
   // When credit enforcement is disabled, no-op: don't deduct, don't write

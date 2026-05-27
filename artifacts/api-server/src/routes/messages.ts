@@ -34,12 +34,7 @@ import {
   CREDIT_COST,
   backgroundWallClockFor,
 } from "../lib/jobs";
-import {
-  deductCredits,
-  deductCreditsAtomic,
-  getOrCreateCredits,
-  CREDITS_ENFORCEMENT_ENABLED,
-} from "./credits";
+import { deductCreditsAtomic, getOrCreateCredits, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
 import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
 import { fetchAttachmentAsDataUri } from "./images";
@@ -456,7 +451,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         });
         return;
       }
-      const deduct = await deductCredits(project.ownerId, cost, {
+      const deduct = await deductCreditsAtomic(project.ownerId, cost, {
         type: kind === "build" ? "build" : "refine",
         description: `Reserve for background task — project ${project.id} (${mode})`,
         projectId: project.id,

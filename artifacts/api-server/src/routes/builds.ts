@@ -12,7 +12,7 @@ import { eq, and, inArray, desc } from "drizzle-orm";
 import { db, projectsTable, deploymentLogsTable, secretsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService } from "../lib/encryption";
-import { getOrCreateCredits, deductCredits, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
+import { getOrCreateCredits, deductCreditsAtomic, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
 import { logger } from "../lib/logger";
 import { getEasBuildLogs } from "../lib/eas";
 import { enqueueEasJob, EAS_BUILD_CREDIT_COST, extractAppJsonSummary } from "../lib/jobs";
@@ -95,11 +95,17 @@ router.post("/projects/:id/builds", requireProjectOwnership, async (req, res): P
   // Deduct credits immediately (at queue time, not post-success)
   if (project.ownerId) {
     try {
-      await deductCredits(userId, EAS_BUILD_CREDIT_COST, {
+      const debit = await deductCreditsAtomic(userId, EAS_BUILD_CREDIT_COST, {
         type: "build",
         description: `EAS ${platform} build queued — project ${projectId}`,
         projectId,
       });
+      if ("insufficient" in debit) {
+        res.status(402).json({
+          error: `Insufficient credits. An EAS build costs ${EAS_BUILD_CREDIT_COST} credits but your balance is ${debit.balance}. Top up in Billing to continue.`,
+        });
+        return;
+      }
     } catch (creditErr) {
       logger.warn({ creditErr }, "Credit deduction failed at queue time");
       res.status(402).json({ error: "Credit deduction failed. Check your balance." });
