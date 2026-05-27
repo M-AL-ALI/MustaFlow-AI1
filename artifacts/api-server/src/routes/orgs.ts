@@ -7,11 +7,13 @@ import {
   orgInvitesTable,
   projectsTable,
   projectActivityTable,
+  notificationsTable,
 } from "@workspace/db";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { logger } from "../lib/logger";
 import { sendOrgInvite } from "../lib/emailClient";
+import { findClerkUserByEmail } from "../lib/clerk-users";
 
 function getBaseUrl(req: { protocol: string; get: (h: string) => string | undefined }): string {
   const envDomain = (process.env.REPLIT_DOMAINS ?? "").split(",")[0]?.trim();
@@ -385,6 +387,32 @@ router.post("/orgs/:orgId/invites", async (req, res): Promise<void> => {
     acceptUrl,
     expiresAt,
   });
+
+  // Notify the invited user if they already have an account (fire-and-forget)
+  void (async () => {
+    try {
+      const clerkUser = await findClerkUserByEmail(parsed.data.email);
+      if (clerkUser) {
+        await db.insert(notificationsTable).values({
+          recipientId: clerkUser.userId,
+          type: "org_invite",
+          title: `You've been invited to ${orgRow?.name ?? "a team"}`,
+          body: `You were invited as ${parsed.data.role}. Click to accept.`,
+          actorId: userId,
+          resourceType: "org_invite",
+          resourceId: invite ? String(invite.id) : null,
+          metadata: {
+            orgId,
+            orgName: orgRow?.name ?? "",
+            role: parsed.data.role,
+            token,
+          },
+        });
+      }
+    } catch (err) {
+      logger.warn({ err, orgId }, "Failed to send org_invite notification");
+    }
+  })();
 
   logger.info({ orgId, email: parsed.data.email }, "Org invite created");
   res.status(201).json({ ...invite, acceptUrl });

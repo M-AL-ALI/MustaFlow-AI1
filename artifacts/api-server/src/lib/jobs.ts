@@ -20,6 +20,7 @@ import {
   projectDomainsTable,
   userSubscriptionsTable,
   projectActivityTable,
+  notificationsTable,
   type TaskReport,
   type FileSnapshotEntry,
   type CvePatchStatus,
@@ -4045,6 +4046,26 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       await emitEvent(taskId, "completed", "Task completed.");
 
+      // Notify project owner of build completion (fire-and-forget)
+      if (project.ownerId) {
+        void db
+          .insert(notificationsTable)
+          .values({
+            recipientId: project.ownerId,
+            type: "build_complete",
+            title: `${kind === "build" ? "Build" : "Refine"} completed`,
+            body: `Your ${agentMode} ${kind} on "${project.name}" finished successfully.`,
+            actorId: project.ownerId,
+            resourceType: "build",
+            resourceId: String(taskId),
+            projectId,
+            metadata: { taskId, agentMode, durationMs: Date.now() - jobStartTime },
+          })
+          .catch((err) =>
+            logger.warn({ err, taskId }, "Failed to insert build_complete notification"),
+          );
+      }
+
       // Drain batch tasks, then any orphaned project-level queued tasks
       void drainNextBatchTask(taskId).catch((err) =>
         logger.warn({ err, taskId }, "Failed to drain next batch task"),
@@ -4373,6 +4394,26 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       logger.error({ err, taskId, projectId }, "Builder job failed");
       const message = err instanceof Error ? err.message : "Unknown builder error";
       await emitEvent(taskId, "failed", message);
+
+      // Notify project owner of build failure (fire-and-forget)
+      if (project?.ownerId) {
+        void db
+          .insert(notificationsTable)
+          .values({
+            recipientId: project.ownerId,
+            type: "build_failed",
+            title: `${kind === "build" ? "Build" : "Refine"} failed`,
+            body: message.slice(0, 200),
+            actorId: project.ownerId,
+            resourceType: "build",
+            resourceId: String(taskId),
+            projectId,
+            metadata: { taskId, reason: message.slice(0, 500) },
+          })
+          .catch((notifErr) =>
+            logger.warn({ err: notifErr, taskId }, "Failed to insert build_failed notification"),
+          );
+      }
 
       // Generate specific fix suggestions via AI (parallel with DB writes)
       const finalTokenCount = flushTokenCount(taskId);

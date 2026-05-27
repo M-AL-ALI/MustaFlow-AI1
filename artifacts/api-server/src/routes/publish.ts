@@ -46,6 +46,8 @@ import {
   projectDomainsTable,
   secretsTable,
   userSubscriptionsTable,
+  orgMembersTable,
+  notificationsTable,
   type FileSnapshotEntry,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
@@ -626,6 +628,49 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     projectId,
     userId: req.userId,
   });
+
+  // Notify all org members with at least viewer access (fire-and-forget)
+  if (project.organizationId && req.userId) {
+    const publisherId = req.userId;
+    const projectName = project.name;
+    const projectSlug = slug;
+    const orgId = project.organizationId;
+    setImmediate(() => {
+      void (async () => {
+        try {
+          const members = await db
+            .select({ userId: orgMembersTable.userId })
+            .from(orgMembersTable)
+            .where(
+              and(
+                eq(orgMembersTable.organizationId, orgId),
+                // all roles (viewer|member|admin|owner) have at least viewer access
+              ),
+            );
+          const recipients = members
+            .map((m) => m.userId)
+            .filter((uid) => uid !== publisherId);
+          if (recipients.length === 0) return;
+          await db.insert(notificationsTable).values(
+            recipients.map((uid) => ({
+              recipientId: uid,
+              type: "project_published",
+              title: `"${projectName}" was published`,
+              body: `A new version is live at ${projectSlug}.${PLATFORM_DOMAIN}`,
+              actorId: publisherId,
+              resourceType: "project",
+              resourceId: String(projectId),
+              projectId,
+              metadata: { projectId, projectName, slug: projectSlug },
+            })),
+          );
+        } catch (err) {
+          // best-effort — don't fail publish over notification errors
+          void err;
+        }
+      })();
+    });
+  }
 
   setImmediate(() => {
     void db

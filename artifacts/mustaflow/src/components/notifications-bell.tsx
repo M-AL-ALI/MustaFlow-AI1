@@ -10,6 +10,7 @@ interface Notification {
   body: string | null;
   actorName: string | null;
   projectId: number | null;
+  metadata: Record<string, unknown> | null;
   read: boolean;
   createdAt: string;
 }
@@ -21,10 +22,41 @@ interface NotificationsResponse {
 }
 
 function typeIcon(type: string) {
-  if (type.startsWith("comment")) return MessageSquare;
+  if (type.startsWith("comment") || type === "mention") return MessageSquare;
   if (type.startsWith("org") || type.startsWith("member")) return Users;
   if (type === "build_complete" || type === "build_failed") return Zap;
   return Rocket;
+}
+
+function getNotificationHref(n: Notification): string | null {
+  const meta = n.metadata ?? {};
+  switch (n.type) {
+    case "build_complete":
+    case "build_failed":
+      if (n.projectId) return `/projects/${n.projectId}?tab=activity`;
+      return null;
+    case "org_invite": {
+      const token = meta.token as string | undefined;
+      if (token) return `/orgs/invites/${token}`;
+      return "/orgs";
+    }
+    case "project_published":
+      if (n.projectId) return `/projects/${n.projectId}?tab=publishing`;
+      return null;
+    case "mention": {
+      const commentId = meta.commentId as number | undefined;
+      if (n.projectId && commentId)
+        return `/projects/${n.projectId}?tab=comments&comment=${commentId}`;
+      if (n.projectId) return `/projects/${n.projectId}?tab=comments`;
+      return null;
+    }
+    case "comment_reply":
+      if (n.projectId) return `/projects/${n.projectId}?tab=comments`;
+      return null;
+    default:
+      if (n.projectId) return `/projects/${n.projectId}`;
+      return null;
+  }
 }
 
 function timeAgo(iso: string): string {
@@ -99,6 +131,15 @@ export function NotificationsBell() {
     );
   };
 
+  const handleNotificationClick = (n: Notification) => {
+    const href = getNotificationHref(n);
+    if (!n.read) void markRead(n.id);
+    if (href) {
+      setOpen(false);
+      window.location.href = href;
+    }
+  };
+
   const unread = data?.unreadCount ?? 0;
 
   return (
@@ -161,13 +202,16 @@ export function NotificationsBell() {
               )}
               {data?.notifications.map((n) => {
                 const Icon = typeIcon(n.type);
+                const href = getNotificationHref(n);
                 return (
                   <div
                     key={n.id}
                     className={cn(
                       "flex items-start gap-3 px-4 py-3 transition-colors hover:bg-accent/50",
                       !n.read && "bg-accent/20",
+                      href && "cursor-pointer",
                     )}
+                    onClick={() => handleNotificationClick(n)}
                   >
                     <div
                       className={cn(
@@ -188,7 +232,10 @@ export function NotificationsBell() {
                         {timeAgo(n.createdAt)}
                       </p>
                     </div>
-                    <div className="flex flex-shrink-0 items-center gap-1">
+                    <div
+                      className="flex flex-shrink-0 items-center gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {!n.read && (
                         <button
                           onClick={() => void markRead(n.id)}

@@ -3,6 +3,7 @@ import { and, eq, isNull, desc, asc } from "drizzle-orm";
 import { db, projectCommentsTable, projectsTable, notificationsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { z } from "zod";
+import { findClerkUserByUsername } from "../lib/clerk-users";
 
 // Express v5 types params as string | string[] — extract the scalar value.
 const pstr = (v: string | string[]): string => (Array.isArray(v) ? (v[0] ?? "") : v);
@@ -107,9 +108,37 @@ router.post("/projects/:id/comments", requireProjectOwnership, async (req, res):
   // Parse @mentions and create notifications
   const mentions = [...parsed.data.body.matchAll(/@([a-zA-Z0-9_.-]+)/g)].map((m) => m[1]);
   if (mentions.length > 0) {
-    // Get project members from org to resolve mentions to user IDs
-    // For now, log the mentions — full mention resolution requires a user directory API
-    // which is Clerk-dependent and can be wired up as a follow-up.
+    // Resolve each @username to a Clerk userId and notify (fire-and-forget)
+    void (async () => {
+      try {
+        const uniqueMentions = [...new Set(mentions)];
+        const excerpt = parsed.data.body.slice(0, 200);
+        for (const username of uniqueMentions) {
+          const clerkUser = await findClerkUserByUsername(username);
+          if (!clerkUser || clerkUser.userId === userId) continue;
+          await db.insert(notificationsTable).values({
+            recipientId: clerkUser.userId,
+            type: "mention",
+            title: `${parsed.data.authorName ?? "Someone"} mentioned you`,
+            body: excerpt,
+            actorId: userId,
+            actorName: parsed.data.authorName ?? null,
+            resourceType: "comment",
+            resourceId: String(comment.id),
+            projectId,
+            metadata: {
+              commentId: comment.id,
+              projectId,
+              authorName: parsed.data.authorName ?? null,
+              excerpt,
+            },
+          });
+        }
+      } catch (err) {
+        // best-effort
+        void err;
+      }
+    })();
   }
 
   // Notify parent comment author of the reply
