@@ -81,6 +81,8 @@ import {
   Loader2,
   Bug,
   CheckSquare,
+  WifiOff,
+  RefreshCw,
 } from "lucide-react";
 
 function SubscriptionTierBadge({ tier }: { tier: "free" | "pro" | "team" }) {
@@ -1575,6 +1577,20 @@ export default function ProjectWorkspacePage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState<string>("");
   const streamAbortRef = useRef<AbortController | null>(null);
+  // Reconnect state: attempt count (0 = connected/idle) and error flag (max retries hit)
+  const [streamReconnectAttempt, setStreamReconnectAttempt] = useState(0);
+  const [streamError, setStreamError] = useState(false);
+  // Stored params for "Try again" retry after exhausted reconnects
+  const streamRetryParamsRef = useRef<{
+    content: string;
+    opts?: {
+      planMode?: boolean;
+      background?: boolean;
+      agentMode?: AgentMode;
+      agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
+      attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
+    };
+  } | null>(null);
 
   // Combined busy state — true when either the regular mutation or the streaming fetch is active.
   // Declared early so query refetchInterval options can reference it without a forward-reference.
@@ -2064,127 +2080,224 @@ export default function ProjectWorkspacePage() {
 
       setIsStreaming(true);
       setStreamingText("");
+      setStreamReconnectAttempt(0);
+      setStreamError(false);
+      streamRetryParamsRef.current = { content, opts };
+
+      const MAX_STREAM_RETRIES = 3;
+      const STREAM_RETRY_BASE_DELAY_MS = 1000;
+
+      const body = JSON.stringify({
+        content,
+        agentMode: effectiveMode,
+        planMode: effectivePlanMode,
+        background: false,
+        agentIdentity,
+        ...(effectiveAgentIntent ? { agentIntent: effectiveAgentIntent } : {}),
+        ...(opts?.attachments && opts.attachments.length > 0
+          ? { attachments: opts.attachments }
+          : {}),
+      });
 
       void (async () => {
-        try {
-          const body = JSON.stringify({
-            content,
-            agentMode: effectiveMode,
-            planMode: effectivePlanMode,
-            background: false,
-            agentIdentity,
-            ...(effectiveAgentIntent ? { agentIntent: effectiveAgentIntent } : {}),
-            ...(opts?.attachments && opts.attachments.length > 0
-              ? { attachments: opts.attachments }
-              : {}),
-          });
+        // connectionEstablished tracks whether the server acknowledged the request
+        // (i.e. we got a 2xx response). Once true, we must NOT re-POST — the server
+        // already persisted the user message and may have deducted credits. Any drop
+        // after that point goes straight to the error state so the user can decide.
+        let connectionEstablished = false;
+        let attempt = 0;
 
-          const resp = await fetch(`/api/projects/${projectId}/messages/stream`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body,
-            signal: ctrl.signal,
-          });
+        while (true) {
+          try {
+            const resp = await fetch(`/api/projects/${projectId}/messages/stream`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body,
+              signal: ctrl.signal,
+            });
 
-          if (!resp.ok || !resp.body) {
-            // Non-2xx or no body — fall back to regular
-            setIsStreaming(false);
-            setStreamingText("");
-            setPendingIsConverse(false);
-            pendingIsConverseRef.current = false;
-            sendRegular(content, opts);
-            return;
-          }
+            if (!resp.ok || !resp.body) {
+              // Non-2xx or no body — the server may have partially processed the
+              // request, so automatic re-send is not safe. Surface the error and let
+              // the user decide whether to retry explicitly.
+              setIsStreaming(false);
+              setStreamingText("");
+              setStreamReconnectAttempt(0);
+              setStreamError(true);
+              setPendingBuildStartedAt(null);
+              pendingIsPlanRef.current = false;
+              setPendingIsPlan(false);
+              pendingIsConverseRef.current = false;
+              setPendingIsConverse(false);
+              return;
+            }
 
-          const reader = resp.body.getReader();
-          const decoder = new TextDecoder();
-          let buf = "";
-          let accText = "";
-          let finished = false;
+            // Server accepted the request — mark connection established so we never
+            // re-POST on a subsequent error (would create duplicate messages / charges).
+            connectionEstablished = true;
 
-          while (!finished) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const lines = buf.split("\n");
-            buf = lines.pop() ?? "";
+            // Clear reconnect indicator once we have a live connection
+            if (attempt > 0) {
+              setStreamReconnectAttempt(0);
+            }
 
-            for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              let event: Record<string, unknown>;
-              try {
-                event = JSON.parse(line.slice(6)) as Record<string, unknown>;
-              } catch {
-                continue;
-              }
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = "";
+            let accText = "";
+            let finished = false;
 
-              if (event.type === "token") {
-                accText += (event.content as string) ?? "";
-                setStreamingText(accText);
-              } else if (event.type === "done") {
-                finished = true;
-                setIsStreaming(false);
-                setStreamingText("");
-                setPendingBuildStartedAt(null);
-                pendingIsPlanRef.current = false;
-                setPendingIsPlan(false);
-                pendingIsConverseRef.current = false;
-                setPendingIsConverse(false);
-                void queryClient.invalidateQueries({
-                  queryKey: getListMessagesQueryKey(projectId),
-                });
-                void queryClient.invalidateQueries({
-                  queryKey: getGetProjectQueryKey(projectId),
-                });
-              } else if (event.type === "fallback") {
-                // Server says it's a build/plan — use the regular path
-                finished = true;
-                setIsStreaming(false);
-                setStreamingText("");
-                const fallbackIntent = event.intent as
-                  | "build"
-                  | "plan"
-                  | "debug"
-                  | "refactor"
-                  | "review"
-                  | "explain"
-                  | undefined;
-                sendRegular(content, {
-                  ...opts,
-                  agentMode: effectiveMode,
-                  planMode: effectivePlanMode,
-                  ...(fallbackIntent ? { agentIntent: fallbackIntent } : {}),
-                });
-              } else if (event.type === "error") {
-                finished = true;
-                setIsStreaming(false);
-                setStreamingText("");
-                setPendingBuildStartedAt(null);
-                pendingIsPlanRef.current = false;
-                setPendingIsPlan(false);
-                pendingIsConverseRef.current = false;
-                setPendingIsConverse(false);
-                void queryClient.invalidateQueries({
-                  queryKey: getListMessagesQueryKey(projectId),
-                });
+            while (!finished) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const lines = buf.split("\n");
+              buf = lines.pop() ?? "";
+
+              for (const line of lines) {
+                if (!line.startsWith("data: ")) continue;
+                let event: Record<string, unknown>;
+                try {
+                  event = JSON.parse(line.slice(6)) as Record<string, unknown>;
+                } catch {
+                  continue;
+                }
+
+                if (event.type === "token") {
+                  accText += (event.content as string) ?? "";
+                  setStreamingText(accText);
+                } else if (event.type === "done") {
+                  finished = true;
+                  setIsStreaming(false);
+                  setStreamingText("");
+                  setStreamReconnectAttempt(0);
+                  setPendingBuildStartedAt(null);
+                  pendingIsPlanRef.current = false;
+                  setPendingIsPlan(false);
+                  pendingIsConverseRef.current = false;
+                  setPendingIsConverse(false);
+                  void queryClient.invalidateQueries({
+                    queryKey: getListMessagesQueryKey(projectId),
+                  });
+                  void queryClient.invalidateQueries({
+                    queryKey: getGetProjectQueryKey(projectId),
+                  });
+                } else if (event.type === "fallback") {
+                  // Server says it's a build/plan — use the regular path
+                  finished = true;
+                  setIsStreaming(false);
+                  setStreamingText("");
+                  setStreamReconnectAttempt(0);
+                  const fallbackIntent = event.intent as
+                    | "build"
+                    | "plan"
+                    | "debug"
+                    | "refactor"
+                    | "review"
+                    | "explain"
+                    | undefined;
+                  sendRegular(content, {
+                    ...opts,
+                    agentMode: effectiveMode,
+                    planMode: effectivePlanMode,
+                    ...(fallbackIntent ? { agentIntent: fallbackIntent } : {}),
+                  });
+                } else if (event.type === "error") {
+                  finished = true;
+                  setIsStreaming(false);
+                  setStreamingText("");
+                  setStreamReconnectAttempt(0);
+                  setPendingBuildStartedAt(null);
+                  pendingIsPlanRef.current = false;
+                  setPendingIsPlan(false);
+                  pendingIsConverseRef.current = false;
+                  setPendingIsConverse(false);
+                  void queryClient.invalidateQueries({
+                    queryKey: getListMessagesQueryKey(projectId),
+                  });
+                }
               }
             }
-          }
-        } catch (err) {
-          if ((err as { name?: string }).name === "AbortError") {
-            // User aborted — clean up streaming state without re-sending
-            setIsStreaming(false);
-            setStreamingText("");
-            setPendingIsConverse(false);
-            pendingIsConverseRef.current = false;
+
+            // If the inner loop exited without a terminal event the server closed the
+            // connection unexpectedly. Since the request was already accepted we must
+            // not re-POST — surface the error so the user can decide.
+            if (!finished) {
+              setIsStreaming(false);
+              setStreamingText("");
+              setStreamReconnectAttempt(0);
+              setStreamError(true);
+              setPendingBuildStartedAt(null);
+              pendingIsPlanRef.current = false;
+              setPendingIsPlan(false);
+              pendingIsConverseRef.current = false;
+              setPendingIsConverse(false);
+            }
+
             return;
+          } catch (err) {
+            if ((err as { name?: string }).name === "AbortError") {
+              // User aborted — clean up without retrying
+              setIsStreaming(false);
+              setStreamingText("");
+              setStreamReconnectAttempt(0);
+              setStreamError(false);
+              setPendingIsConverse(false);
+              pendingIsConverseRef.current = false;
+              return;
+            }
+
+            // If the server already accepted the request, do NOT re-POST — it would
+            // create a duplicate user message and charge credits again. Surface the
+            // error immediately so the user can explicitly choose to retry.
+            if (connectionEstablished) {
+              setIsStreaming(false);
+              setStreamingText("");
+              setStreamReconnectAttempt(0);
+              setStreamError(true);
+              setPendingBuildStartedAt(null);
+              pendingIsPlanRef.current = false;
+              setPendingIsPlan(false);
+              pendingIsConverseRef.current = false;
+              setPendingIsConverse(false);
+              return;
+            }
+
+            // The fetch() itself threw before we got a response — the server almost
+            // certainly never received the request, so it is safe to retry.
+            attempt++;
+
+            if (attempt > MAX_STREAM_RETRIES) {
+              // Max retries exhausted — show persistent error with Try again button
+              setIsStreaming(false);
+              setStreamingText("");
+              setStreamReconnectAttempt(0);
+              setStreamError(true);
+              setPendingBuildStartedAt(null);
+              pendingIsPlanRef.current = false;
+              setPendingIsPlan(false);
+              pendingIsConverseRef.current = false;
+              setPendingIsConverse(false);
+              return;
+            }
+
+            // Show reconnecting indicator and wait with exponential backoff
+            setStreamReconnectAttempt(attempt);
+            setStreamingText("");
+            const delay = STREAM_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+            await new Promise<void>((resolve) => setTimeout(resolve, delay));
+
+            // Check if user aborted during the delay
+            if (ctrl.signal.aborted) {
+              setIsStreaming(false);
+              setStreamingText("");
+              setStreamReconnectAttempt(0);
+              setStreamError(false);
+              setPendingIsConverse(false);
+              pendingIsConverseRef.current = false;
+              return;
+            }
           }
-          // Network or parse error — fall back to regular mutation
-          setIsStreaming(false);
-          setStreamingText("");
-          setPendingIsConverse(false);
-          pendingIsConverseRef.current = false;
-          sendRegular(content, opts);
         }
       })();
     },
@@ -2212,6 +2325,8 @@ export default function ProjectWorkspacePage() {
     }
     setIsStreaming(false);
     setStreamingText("");
+    setStreamReconnectAttempt(0);
+    setStreamError(false);
     setPendingIsConverse(false);
     pendingIsConverseRef.current = false;
   }, [activeTaskId, projectId, cancelTask]);
@@ -3467,36 +3582,93 @@ export default function ProjectWorkspacePage() {
                       {/* Live streaming bubble — shown while SSE converse stream is active */}
                       {isStreaming && !sendMessage.isPending && (
                         <div className="relative">
-                          {/* Typing indicator: fades out and steps aside when first token arrives */}
-                          <div
-                            className={cn(
-                              "transition-opacity duration-150",
-                              streamingText.length > 0
-                                ? "opacity-0 pointer-events-none absolute top-0 left-0"
-                                : "opacity-100",
-                            )}
-                          >
-                            <TypingIndicator />
-                          </div>
-                          {/* Streaming bubble: fades in as text arrives */}
-                          {streamingText.length > 0 && (
+                          {/* Reconnecting indicator — shown while retrying the stream connection */}
+                          {streamReconnectAttempt > 0 ? (
                             <div className="flex justify-start animate-in fade-in duration-150">
-                              <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
-                                <MarkdownMessage content={streamingText} />
-                                <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
-                                <div className="mt-1.5 flex justify-end">
-                                  <button
-                                    onClick={handleStopStream}
-                                    className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                                    title="Stop generating"
-                                  >
-                                    <Square className="w-2.5 h-2.5 fill-current" />
-                                    Stop
-                                  </button>
-                                </div>
+                              <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs bg-muted border border-amber-500/30 text-amber-400 rounded-bl-sm">
+                                <RefreshCw className="w-3 h-3 animate-spin shrink-0" />
+                                <span>Reconnecting… (attempt {streamReconnectAttempt}/3)</span>
+                                <button
+                                  onClick={handleStopStream}
+                                  className="flex items-center gap-1 text-[10px] text-amber-400/70 hover:text-amber-300 transition-colors ml-1"
+                                  title="Cancel"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
                               </div>
                             </div>
+                          ) : (
+                            <>
+                              {/* Typing indicator: fades out and steps aside when first token arrives */}
+                              <div
+                                className={cn(
+                                  "transition-opacity duration-150",
+                                  streamingText.length > 0
+                                    ? "opacity-0 pointer-events-none absolute top-0 left-0"
+                                    : "opacity-100",
+                                )}
+                              >
+                                <TypingIndicator />
+                              </div>
+                              {/* Streaming bubble: fades in as text arrives */}
+                              {streamingText.length > 0 && (
+                                <div className="flex justify-start animate-in fade-in duration-150">
+                                  <div className="max-w-[90%] px-3 py-2 rounded-xl text-xs bg-muted text-foreground rounded-bl-sm border border-border">
+                                    <MarkdownMessage content={streamingText} />
+                                    <span className="inline-block w-0.5 h-3 bg-foreground/60 animate-pulse ml-0.5 align-middle" />
+                                    <div className="mt-1.5 flex justify-end">
+                                      <button
+                                        onClick={handleStopStream}
+                                        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                                        title="Stop generating"
+                                      >
+                                        <Square className="w-2.5 h-2.5 fill-current" />
+                                        Stop
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </>
                           )}
+                        </div>
+                      )}
+
+                      {/* Stream error bubble — shown when all reconnect attempts are exhausted */}
+                      {streamError && !isStreaming && !sendMessage.isPending && (
+                        <div className="flex justify-start animate-in fade-in duration-150">
+                          <div className="max-w-[90%] px-3 py-2.5 rounded-xl text-xs bg-muted border border-destructive/30 rounded-bl-sm">
+                            <div className="flex items-start gap-2">
+                              <WifiOff className="w-3.5 h-3.5 text-destructive shrink-0 mt-px" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-foreground font-medium">Connection lost</p>
+                                <p className="text-muted-foreground mt-0.5">
+                                  The response couldn't be delivered after 3 attempts.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="mt-2.5 flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  const params = streamRetryParamsRef.current;
+                                  if (params) {
+                                    setStreamError(false);
+                                    send(params.content, params.opts);
+                                  }
+                                }}
+                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-[11px] font-medium hover:opacity-90 transition-opacity"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                Try again
+                              </button>
+                              <button
+                                onClick={() => setStreamError(false)}
+                                className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       )}
 
