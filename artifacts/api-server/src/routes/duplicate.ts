@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
-import { db, projectsTable, projectFilesTable } from "@workspace/db";
+import { db, projectsTable, projectFilesTable, projectActivityTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
 import { enqueueProvisionProjectJob } from "../lib/provisioning";
@@ -71,6 +71,32 @@ router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res)
   });
 
   enqueueProvisionProjectJob(newProject.id);
+
+  // Log activity on source project and new project (best-effort)
+  try {
+    await db.insert(projectActivityTable).values({
+      projectId,
+      actorId: req.userId ?? null,
+      actorName: null,
+      eventType: "duplicate",
+      summary: `Project duplicated to "${newProject.name}"`,
+      metadata: { targetProjectId: newProject.id, targetName: newProject.name },
+    });
+  } catch {
+    // non-fatal
+  }
+  try {
+    await db.insert(projectActivityTable).values({
+      projectId: newProject.id,
+      actorId: req.userId ?? null,
+      actorName: null,
+      eventType: "cloned_from",
+      summary: `Cloned from "${original.name}"`,
+      metadata: { sourceProjectId: projectId, sourceName: original.name },
+    });
+  } catch {
+    // non-fatal
+  }
 
   res.status(201).json({
     id: newProject.id,

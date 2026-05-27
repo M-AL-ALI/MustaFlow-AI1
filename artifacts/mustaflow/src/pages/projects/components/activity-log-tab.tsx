@@ -15,6 +15,9 @@ import {
   AlertTriangle,
   Loader2,
   RefreshCw,
+  Trash2,
+  Mail,
+  GitFork,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -39,6 +42,9 @@ const EVENT_ICONS: Record<string, { icon: React.ElementType; color: string }> = 
   member_leave: { icon: Users, color: "text-muted-foreground" },
   rollback: { icon: GitBranch, color: "text-orange-400" },
   duplicate: { icon: Copy, color: "text-blue-400" },
+  cloned_from: { icon: GitFork, color: "text-blue-400" },
+  delete: { icon: Trash2, color: "text-red-400" },
+  invite: { icon: Mail, color: "text-emerald-400" },
   export: { icon: Download, color: "text-muted-foreground" },
   share_link_created: { icon: Link2, color: "text-blue-400" },
   share_link_revoked: { icon: Link2, color: "text-muted-foreground" },
@@ -90,6 +96,11 @@ export function ActivityLogTab({ projectId }: ActivityLogTabProps) {
     { label: "Builds", value: "build" },
     { label: "Publishes", value: "publish" },
     { label: "Comments", value: "comment" },
+    { label: "Rollbacks", value: "rollback" },
+    { label: "Duplicates", value: "duplicate" },
+    { label: "Cloned from", value: "cloned_from" },
+    { label: "Deletes", value: "delete" },
+    { label: "Invites", value: "invite" },
     { label: "File edits", value: "file_edit" },
     { label: "Members", value: "member_join" },
   ];

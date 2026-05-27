@@ -1,6 +1,12 @@
 import { Router, type IRouter } from "express";
 import { and, eq, isNull, desc, asc } from "drizzle-orm";
-import { db, projectCommentsTable, projectsTable, notificationsTable } from "@workspace/db";
+import {
+  db,
+  projectCommentsTable,
+  projectsTable,
+  notificationsTable,
+  projectActivityTable,
+} from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { z } from "zod";
 import { findClerkUserByUsername } from "../lib/clerk-users";
@@ -161,6 +167,24 @@ router.post("/projects/:id/comments", requireProjectOwnership, async (req, res):
         metadata: { commentId: comment.id, parentId: parsed.data.parentId },
       });
     }
+  }
+
+  // Log comment activity (best-effort)
+  try {
+    await db.insert(projectActivityTable).values({
+      projectId,
+      actorId: userId,
+      actorName: parsed.data.authorName ?? null,
+      eventType: "comment",
+      summary: parsed.data.parentId != null ? "Replied to a comment" : "Left a comment",
+      metadata: {
+        commentId: comment.id,
+        isReply: parsed.data.parentId != null,
+        authorId: userId,
+      },
+    });
+  } catch {
+    // non-fatal
   }
 
   res.status(201).json({ ...comment, replies: [] });

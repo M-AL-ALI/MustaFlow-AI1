@@ -414,6 +414,39 @@ router.post("/orgs/:orgId/invites", async (req, res): Promise<void> => {
     }
   })();
 
+  // Log invite activity on the org's most recently updated project.
+  // project_activity is project-scoped (projectId is NOT NULL with FK), so
+  // invite events are anchored to the newest active org project.
+  // Edge case: if the org has no projects yet the entry is skipped — a schema
+  // change (nullable projectId or a dedicated org_activity table) would be
+  // required to fully resolve this, which is out of scope per task spec.
+  try {
+    const [latestProject] = await db
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.organizationId, orgId), isNull(projectsTable.deletedAt)))
+      .orderBy(desc(projectsTable.updatedAt))
+      .limit(1);
+
+    if (latestProject) {
+      await db.insert(projectActivityTable).values({
+        projectId: latestProject.id,
+        actorId: userId,
+        actorName: null,
+        eventType: "invite",
+        summary: `Invited ${parsed.data.email} as ${parsed.data.role}`,
+        metadata: { inviteeEmail: parsed.data.email, role: parsed.data.role, orgId },
+      });
+    } else {
+      logger.info(
+        { orgId, email: parsed.data.email },
+        "Org invite activity skipped — org has no projects yet",
+      );
+    }
+  } catch (err) {
+    logger.warn({ err, orgId }, "Failed to log invite activity (non-fatal)");
+  }
+
   logger.info({ orgId, email: parsed.data.email }, "Org invite created");
   res.status(201).json({ ...invite, acceptUrl });
 });

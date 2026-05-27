@@ -11,6 +11,7 @@ import {
   taskEventsTable,
   secretsTable,
   dbSnapshotsTable,
+  projectActivityTable,
 } from "@workspace/db";
 import {
   ListVersionsParams,
@@ -360,6 +361,20 @@ router.post(
           completedAt: sql`now()`,
         })
         .where(eq(agentTasksTable.id, rollbackTask.id));
+    }
+
+    // Log rollback to the project activity feed
+    try {
+      await db.insert(projectActivityTable).values({
+        projectId,
+        actorId: req.userId ?? null,
+        actorName: null,
+        eventType: "rollback",
+        summary: `Rolled back to version "${version.label}"`,
+        metadata: { versionId, label: version.label },
+      });
+    } catch (err) {
+      req.log.warn({ err, projectId }, "Failed to log rollback activity (non-fatal)");
     }
 
     // Write a rollback signal to the Knowledge Vault so the AI can learn from it

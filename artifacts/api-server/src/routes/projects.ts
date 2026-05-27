@@ -6,6 +6,7 @@ import {
   projectFilesTable,
   chatMessagesTable,
   agentTasksTable,
+  projectActivityTable,
 } from "@workspace/db";
 import { requireProjectOwnership, requireProjectAccess } from "../lib/auth";
 import {
@@ -1425,6 +1426,31 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
+  }
+
+  // Fetch project name before soft-delete so we can log a meaningful summary
+  const [existing] = await db
+    .select({ id: projectsTable.id, name: projectsTable.name })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, params.data.id), activeProjects));
+
+  if (!existing) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  // Log delete activity before the row is soft-deleted
+  try {
+    await db.insert(projectActivityTable).values({
+      projectId: existing.id,
+      actorId: req.userId ?? null,
+      actorName: null,
+      eventType: "delete",
+      summary: `Project "${existing.name}" was deleted`,
+      metadata: { projectName: existing.name },
+    });
+  } catch {
+    // non-fatal — proceed with the delete regardless
   }
 
   const [project] = await db
