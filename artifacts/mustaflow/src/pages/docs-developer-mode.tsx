@@ -7,6 +7,11 @@ import {
   ExternalLink,
   ChevronRight,
   ArrowDown,
+  Cpu,
+  ListChecks,
+  BookOpen,
+  Plug,
+  KeyRound,
 } from "lucide-react";
 import { Link } from "wouter";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
@@ -377,6 +382,239 @@ export default function DocsDevModePage() {
               agent to run checks after meaningful edits rather than racing to finalize.
             </p>
           </Section>
+
+          <Section
+            number={6}
+            icon={Cpu}
+            title="How the agent picks the right tool"
+            summary="Tools are described to the agent, not hardcoded into it."
+          >
+            <p>
+              The agent does not have built-in knowledge of which tools exist. Every time a session
+              starts, the backend sends the LLM a structured list of available tools — their names,
+              descriptions, and the exact schema of arguments each one accepts. The LLM reads these
+              descriptions and reasons over them to decide which tool fits the situation.
+            </p>
+            <Callout title="What a tool definition looks like internally">
+              <CodeBlock>{`{
+  "name": "run_command",
+  "description": "Run a terminal command in the project
+  container. Use this to install packages, run tests,
+  or execute scripts.",
+  "parameters": {
+    "argv": "string[] — command as an argument array"
+  }
+}`}</CodeBlock>
+            </Callout>
+            <p>
+              When you say "install this package," the agent maps that to{" "}
+              <span className="font-mono text-foreground">run_command</span> with{" "}
+              <span className="font-mono text-foreground">["npm", "install", "..."]</span>. This is
+              not pattern matching — it is semantic reasoning over the tool descriptions using the
+              same language understanding the model uses for everything else.
+            </p>
+            <p>
+              This design means new tools can be added to the agent without retraining the model.
+              The backend just updates the list sent at session start, and the model adapts
+              immediately.
+            </p>
+          </Section>
+
+          <Section
+            number={7}
+            icon={ListChecks}
+            title="The check sequence"
+            summary="The agent mirrors the instincts of an experienced developer."
+          >
+            <p>
+              The checks the agent performs are not arbitrary. They follow the same mental checklist
+              a professional developer runs automatically — absorbed from training on vast amounts
+              of code reviews, debugging sessions, and developer conversations.
+            </p>
+            <Callout title="The check sequence">
+              <p>
+                <span className="text-foreground font-medium">Before writing a file</span> — read
+                the existing file first. Writing blindly risks destroying logic the agent did not
+                know about.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">Before creating something new</span> —
+                search for whether it already exists. Duplicate components, routes, or database
+                tables cause cascading conflicts.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">After running a command</span> — check
+                the exit code and output. A failed <span className="font-mono">npm install</span>{" "}
+                should stop the agent, not let it keep building on broken dependencies.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">After writing code</span> — run a
+                typecheck or linter if available. Catches syntax and type errors before they reach
+                the preview.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">After a multi-step build</span> —
+                re-read key files to confirm the final state matches what was intended. The agent's
+                memory of what it wrote can drift from reality when multiple files were changed in
+                sequence.
+              </p>
+            </Callout>
+            <p>
+              These checkpoints are what separate an agent that compounds errors from one that
+              catches and corrects them in the same loop.
+            </p>
+          </Section>
+
+          <Section
+            number={8}
+            icon={BookOpen}
+            title="How the agent's knowledge grows"
+            summary="Three distinct layers: training, session context, and the Knowledge Vault."
+          >
+            <Callout title="Level 1 — Training (permanent, baked into model weights)">
+              <p>
+                The LLM was trained on GitHub repositories, Stack Overflow, documentation, technical
+                books, and code review threads. It learned common patterns in every major language
+                and framework, how to reason through ambiguous requirements, and how to break large
+                problems into smaller steps. This knowledge is frozen into the model's weights — it
+                does not change during your session.
+              </p>
+            </Callout>
+            <Callout title="Level 2 — Session context (temporary, per conversation)">
+              <p>
+                Within a session, the agent accumulates understanding by building up the
+                conversation window: every file it reads adds to what it knows about your project,
+                every tool result tells it whether its last action succeeded, every user message
+                corrects or extends its understanding. This resets when the session ends.
+              </p>
+            </Callout>
+            <Callout title="Level 3 — Knowledge Vault (persistent, per project)">
+              <p>
+                This is where MustaFlow adds something beyond the base model. The Knowledge Vault
+                stores lessons learned about your specific project after every build, refine,
+                rollback, or publish:
+              </p>
+              <p className="mt-1 italic">
+                "This project uses Tailwind v4 utility classes, not v3."
+                <br />
+                "The user prefers cards over tables for displaying lists."
+                <br />
+                "The database uses UUIDs, not integer IDs."
+              </p>
+              <p className="mt-1">
+                These lessons are injected back into context at the start of future sessions. The
+                agent effectively remembers your project's patterns across separate conversations —
+                even though the LLM itself has no persistent memory.
+              </p>
+            </Callout>
+            <p>
+              The Knowledge Vault exists because of the context window limit: you cannot fit the
+              entire history of a large project into every prompt. The vault is a curated,
+              compressed summary of the most important facts — it lets the agent act like it has
+              been working on your project for months even when starting a fresh session.
+            </p>
+          </Section>
+
+          <Section
+            number={9}
+            icon={Plug}
+            title="How integrations work"
+            summary="Pre-wired connections — the agent calls by name, not by raw API."
+          >
+            <p>
+              An integration is a pre-wired connection between the agent and a third-party service
+              (Stripe, GitHub, Linear, Google Sheets, etc.). Instead of you having to explain the
+              API and provide credentials, the integration layer:
+            </p>
+            <Callout title="What the integration layer provides">
+              <p>
+                <span className="text-foreground font-medium">API surface</span> — the integration
+                already knows the endpoints, authentication flow, and data shapes for the service.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">Stored credentials</span> — API keys
+                and tokens are provisioned and stored securely before the agent ever runs.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">Tool wrappers</span> — the service's
+                API is translated into plain-language tool descriptions the agent can reason over,
+                exactly like any other tool.
+              </p>
+            </Callout>
+            <p>
+              When you say "add Stripe payments," the agent does not look up the Stripe docs. The
+              integration layer has already translated Stripe's API into a set of tools with
+              plain-language descriptions. The agent picks the right tool by matching your request
+              to the description.
+            </p>
+            <p>
+              Under the hood, when the agent calls a Stripe tool, the integration layer retrieves
+              the stored credentials, makes the real API call to Stripe, and returns the result. The
+              agent never sees the raw credentials — it only sees the result. This keeps the agent
+              focused on what to do rather than how to authenticate.
+            </p>
+          </Section>
+
+          <Section
+            number={10}
+            icon={KeyRound}
+            title="Keys — storage, injection, and security"
+            summary="Defense in depth: encrypted at rest, injected at runtime, never exposed."
+            last
+          >
+            <Callout title="Types of credentials">
+              <p>
+                <span className="text-foreground font-medium">Publishable key (PK)</span> — safe to
+                expose in frontend code. Used to initialize client-side SDKs (e.g. Stripe.js,
+                Clerk).
+              </p>
+              <p>
+                <span className="text-foreground font-medium">Secret key (SK)</span> — must never
+                leave the server. Used for privileged API calls (charge a card, create a user).
+              </p>
+              <p>
+                <span className="text-foreground font-medium">DB connection string</span> — gives
+                full read/write access to the database. Treated as the most sensitive credential.
+              </p>
+            </Callout>
+            <p>
+              The agent does not generate keys — it provisions them by calling the relevant
+              service's API. When a new agentic project is created, a Fly.io machine and a Neon
+              Postgres database are provisioned, the connection string is returned and immediately
+              encrypted, and stored. It never appears in plain text.
+            </p>
+            <Callout title="The security chain">
+              <p>
+                <span className="text-foreground font-medium">At rest</span> — AES-256-GCM
+                encryption. Stored as{" "}
+                <span className="font-mono">v1:&lt;iv&gt;:&lt;ciphertext&gt;:&lt;auth_tag&gt;</span>
+                . The encryption key lives in environment secrets, separate from the database —
+                unreadable without it even if the DB is compromised.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">In transit</span> — the server
+                decrypts keys in memory and injects them as environment variables into the running
+                container. They are never written to a file, never logged, never returned to the
+                browser.
+              </p>
+              <p>
+                <span className="text-foreground font-medium">Via the API</span> — requesting a
+                secret returns only a masked preview:{" "}
+                <span className="font-mono text-foreground">••••••••XXXX</span>. The real value
+                never leaves the server.
+              </p>
+            </Callout>
+            <p>
+              The agent itself never knows the value of any key. At the start of each session it is
+              told only which environment variable names are available. When it writes code that
+              needs a credential — for example{" "}
+              <span className="font-mono text-foreground">process.env.STRIPE_SECRET_KEY</span> — it
+              references it by name. The actual value is injected by the server at runtime. The
+              separation is intentional: it keeps the agent stateless with respect to credentials,
+              so even if the agent's context were somehow intercepted, there is nothing sensitive in
+              it.
+            </p>
+          </Section>
         </div>
 
         {/* Why this design */}
@@ -399,6 +637,18 @@ export default function DocsDevModePage() {
               {
                 title: "The HMR chain is intentional.",
                 body: "The agent never restarts the dev server because restarting kills the WebSocket connection and breaks the preview. Instead, every file write automatically triggers the filesystem watcher, which triggers HMR, which updates the iframe. The agent just writes — the rest is infrastructure.",
+              },
+              {
+                title: "Tools are described, not hardcoded.",
+                body: "The agent reasons over tool descriptions sent at session start. New capabilities can be added without retraining the model — just update the list. The model adapts immediately.",
+              },
+              {
+                title: "The Knowledge Vault bridges sessions.",
+                body: "LLMs have no persistent memory. The vault stores curated, compressed lessons from every build and injects them into future sessions, so the agent can act like it has been working on your project for months even when starting fresh.",
+              },
+              {
+                title: "Keys are never exposed to the agent.",
+                body: "The agent references credentials by environment variable name only. Values are encrypted at rest, decrypted in server memory, and injected into the container at runtime. Even if the agent's context were intercepted, there is nothing sensitive in it.",
               },
             ].map(({ title, body }) => (
               <div key={title} className="flex gap-3">
