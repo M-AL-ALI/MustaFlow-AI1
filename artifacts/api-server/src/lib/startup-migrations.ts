@@ -2228,6 +2228,16 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query(`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS origin TEXT`);
     },
   },
+
+  // ── migrate-command-approval (Task #964) ─────────────────────────────────────
+  {
+    name: "migrate-command-approval",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE projects ADD COLUMN IF NOT EXISTS require_command_approval BOOLEAN NOT NULL DEFAULT false`,
+      );
+    },
+  },
 ];
 
 /**

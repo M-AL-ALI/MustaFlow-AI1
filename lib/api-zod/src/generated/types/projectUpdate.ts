@@ -36,4 +36,6 @@ export interface ProjectUpdate {
   scannerHoundDogEnabled?: boolean;
   /** Run Trivy CVE/IaC scanner on every build (Task #545). Default false. */
   scannerTrivyEnabled?: boolean;
+  /** When true, the agent pauses before run_command or pkg_install and asks for user approval. Default false. */
+  requireCommandApproval?: boolean;
 }

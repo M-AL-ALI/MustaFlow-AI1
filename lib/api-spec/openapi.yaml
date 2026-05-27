@@ -5280,6 +5280,9 @@ components:
         scannerTrivyEnabled:
           type: boolean
           description: "When true, the Trivy CVE/IaC scanner runs on every build (Task #545). Default false."
+        requireCommandApproval:
+          type: boolean
+          description: "When true, the agent pauses before run_command or pkg_install and asks the user to approve or reject. Default false."
         stagingPublishedSnapshotId:
           type: ["integer", "null"]
           description: "Version ID currently live on the staging slot. Null = not staged. Set by POST /publish?env=staging, promoted by POST /promote."
@@ -5406,6 +5409,9 @@ components:
         scannerTrivyEnabled:
           type: boolean
           description: "Run Trivy CVE/IaC scanner on every build (Task #545). Default false."
+        requireCommandApproval:
+          type: boolean
+          description: "When true, the agent pauses before run_command or pkg_install and asks for user approval. Default false."
 
     MobileAppSettingsInput:
       type: object

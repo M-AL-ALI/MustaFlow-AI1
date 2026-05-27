@@ -1931,6 +1931,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   policyStrictness:
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
+                  requireCommandApproval: project.requireCommandApproval ?? false,
                   taskId,
                   wallClockMs: input.wallClockCapMs,
                   previewUrl: project.containerUrl ?? null,
@@ -2361,6 +2362,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   policyStrictness:
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
+                  requireCommandApproval: project.requireCommandApproval ?? false,
                   taskId,
                   wallClockMs: input.wallClockCapMs,
                   previewUrl: project.containerUrl ?? null,
@@ -2629,6 +2631,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 policyStrictness:
                   (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                   null,
+                requireCommandApproval: project.requireCommandApproval ?? false,
                 taskId,
                 wallClockMs: input.wallClockCapMs,
                 previewUrl: project.containerUrl ?? null,

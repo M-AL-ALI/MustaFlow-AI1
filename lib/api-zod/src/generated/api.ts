@@ -725,6 +725,7 @@ export const ListProjectsResponseItem = zod.object({
   "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
+  "requireCommandApproval": zod.boolean().optional().describe('When true, the agent pauses before run_command or pkg_install and asks the user to approve or reject. Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
   "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
@@ -815,6 +816,7 @@ export const GetProjectResponse = zod.object({
   "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
+  "requireCommandApproval": zod.boolean().optional().describe('When true, the agent pauses before run_command or pkg_install and asks the user to approve or reject. Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
   "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
@@ -853,7 +855,8 @@ export const UpdateProjectBody = zod.object({
   "redirectWwwApex": zod.boolean().optional(),
   "scannerSemgrepEnabled": zod.boolean().optional().describe('Run Semgrep SAST on every build (Task #545). Default true.'),
   "scannerHoundDogEnabled": zod.boolean().optional().describe('Run HoundDog secret\/PII scanner on every build (Task #545). Default false.'),
-  "scannerTrivyEnabled": zod.boolean().optional().describe('Run Trivy CVE\/IaC scanner on every build (Task #545). Default false.')
+  "scannerTrivyEnabled": zod.boolean().optional().describe('Run Trivy CVE\/IaC scanner on every build (Task #545). Default false.'),
+  "requireCommandApproval": zod.boolean().optional().describe('When true, the agent pauses before run_command or pkg_install and asks for user approval. Default false.')
 })
 
 export const updateProjectResponseHealthScoreMin = 0;
@@ -908,6 +911,7 @@ export const UpdateProjectResponse = zod.object({
   "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
+  "requireCommandApproval": zod.boolean().optional().describe('When true, the agent pauses before run_command or pkg_install and asks the user to approve or reject. Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
   "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
@@ -983,6 +987,7 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
+  "requireCommandApproval": zod.boolean().optional().describe('When true, the agent pauses before run_command or pkg_install and asks the user to approve or reject. Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
   "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
@@ -1058,6 +1063,7 @@ export const RestoreProjectResponse = zod.object({
   "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
+  "requireCommandApproval": zod.boolean().optional().describe('When true, the agent pauses before run_command or pkg_install and asks the user to approve or reject. Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
   "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),
@@ -1132,6 +1138,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "scannerSemgrepEnabled": zod.boolean().optional().describe('When true, Semgrep SAST runs on every build (Task #545). Default true.'),
   "scannerHoundDogEnabled": zod.boolean().optional().describe('When true, the HoundDog secret\/PII scanner runs on every build (Task #545). Default false.'),
   "scannerTrivyEnabled": zod.boolean().optional().describe('When true, the Trivy CVE\/IaC scanner runs on every build (Task #545). Default false.'),
+  "requireCommandApproval": zod.boolean().optional().describe('When true, the agent pauses before run_command or pkg_install and asks the user to approve or reject. Default false.'),
   "stagingPublishedSnapshotId": zod.number().nullish().describe('Version ID currently live on the staging slot. Null = not staged. Set by POST \/publish?env=staging, promoted by POST \/promote.'),
   "testingStatus": zod.enum(['idle', 'stale', 'ready', 'passed']).optional().describe('Task #768. State of the test-then-publish workflow. idle=no test run yet, stale=draft changed after last test, ready=test container healthy and awaiting approval, passed=test approved and ready to publish.'),
   "testingCandidateSnapshotId": zod.number().nullish().describe('Task #768. Version ID of the current immutable test candidate snapshot. Null = no candidate. Set by \/preview-env\/start.'),

@@ -76,6 +76,7 @@ const MIGRATIONS = [
   "migrate-personal-access-tokens",
   "migrate-pat-rotation",
   "migrate-message-origin",
+  "migrate-command-approval",
 ] as const;
 
 async function main(): Promise<void> {

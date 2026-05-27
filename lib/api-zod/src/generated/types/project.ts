@@ -140,6 +140,8 @@ export interface Project {
   scannerHoundDogEnabled?: boolean;
   /** When true, the Trivy CVE/IaC scanner runs on every build (Task #545). Default false. */
   scannerTrivyEnabled?: boolean;
+  /** When true, the agent pauses before run_command or pkg_install and asks the user to approve or reject. Default false. */
+  requireCommandApproval?: boolean;
   /**
      * Version ID currently live on the staging slot. Null = not staged. Set by POST /publish?env=staging, promoted by POST /promote.
      * @nullable

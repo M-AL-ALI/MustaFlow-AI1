@@ -227,6 +227,10 @@ export const projectsTable = pgTable("projects", {
   // Structure: { explorationId, tiles: { [variantId]: { device } } }
   // Saved by PATCH /api/projects/:id/canvas/state; loaded on workspace open.
   canvasState: jsonb("canvas_state").$type<Record<string, unknown>>().default({}),
+  // requireCommandApproval: when true, the agent loop pauses before executing any
+  // run_command or pkg_install call and asks the user to approve or reject it.
+  // Default false — fully autonomous. Users can opt in from Project Settings.
+  requireCommandApproval: boolean("require_command_approval").notNull().default(false),
   // projectMode: surface that created this project.
   // 'builder'   — AI Build Mode (default, existing behaviour).
   // 'developer' — Developer Mode cloud IDE (Task #898).

@@ -110,6 +110,13 @@ export interface AgentLoopInput {
   onEvent: AgentLoopEvent;
   signal: AbortSignal;
   /**
+   * When true, the agent loop pauses before executing any run_command or
+   * pkg_install call and emits a blocking approval prompt to the user.
+   * On rejection the model receives a clear error and must find an alternative.
+   * Default false — fully autonomous (existing behaviour).
+   */
+  requireCommandApproval?: boolean;
+  /**
    * Optional billing hook: invoked when a billable batch of web-sense calls
    * (web_fetch + web_search + extract_branding) completes (every 5 calls).
    * Charged in-loop so the user pays for usage even on cancel/failure paths,
@@ -3864,7 +3871,49 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           };
         }
       }
-      // Install deps on first shell use
+      // Human-in-the-loop approval gate — opt-in via requireCommandApproval.
+      // Runs BEFORE ensureInstalled so no side-effects occur on rejection.
+      if (input.requireCommandApproval && input.taskId) {
+        const fullCmd = argv.join(" ");
+        const { createPrompt } = await import("./agent-prompts");
+        const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+        const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
+        const approvalPayload = {
+          question: `Allow the agent to run this command?\n\`${fullCmd}\``,
+          kind: "boolean" as const,
+          options: [],
+          allowMultiple: false,
+        };
+        const { promptId, promise } = createPrompt({
+          taskId: input.taskId,
+          projectId: input.projectId,
+          kind: "user_query",
+          payload: approvalPayload,
+          signal: input.signal,
+          timeoutMs: promptTimeoutMs,
+        });
+        await safeEvent(
+          input.onEvent,
+          "agent_prompt",
+          JSON.stringify({ promptId, kind: "user_query", payload: approvalPayload }),
+        );
+        const resp = await promise;
+        if (resp.canceled) {
+          // Both abort and wall-clock expiry terminate the task — never feed a
+          // "timed out / rejected" observation back to the model (manual-only gate).
+          throw new Error("Task terminated while awaiting command approval");
+        }
+        const approved =
+          typeof resp.response === "boolean" ? resp.response : resp.response === "true";
+        if (!approved) {
+          return {
+            ok: false,
+            observation: "Command rejected by user — find an alternative approach",
+          };
+        }
+      }
+
+      // Install deps on first shell use (after approval so no side-effects on rejection)
       await ensureInstalled(ctx, input.signal, step);
 
       const timeoutMs =
@@ -4148,6 +4197,47 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           };
         }
       }
+
+      // Human-in-the-loop approval gate — opt-in via requireCommandApproval
+      if (input.requireCommandApproval && input.taskId) {
+        const pkgLabel = `${decision.pkg}${decision.version ? `@${decision.version}` : ""}`;
+        const { createPrompt } = await import("./agent-prompts");
+        const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+        const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
+        const approvalPayload = {
+          question: `Allow the agent to install package \`${pkgLabel}\` via ${decision.manager}?`,
+          kind: "boolean" as const,
+          options: [],
+          allowMultiple: false,
+        };
+        const { promptId, promise } = createPrompt({
+          taskId: input.taskId,
+          projectId: input.projectId,
+          kind: "user_query",
+          payload: approvalPayload,
+          signal: input.signal,
+          timeoutMs: promptTimeoutMs,
+        });
+        await safeEvent(
+          input.onEvent,
+          "agent_prompt",
+          JSON.stringify({ promptId, kind: "user_query", payload: approvalPayload }),
+        );
+        const resp = await promise;
+        if (resp.canceled) {
+          // Both abort and wall-clock expiry terminate the task — manual-only gate.
+          throw new Error("Task terminated while awaiting package installation approval");
+        }
+        const approved =
+          typeof resp.response === "boolean" ? resp.response : resp.response === "true";
+        if (!approved) {
+          return {
+            ok: false,
+            observation: "Package installation rejected by user — find an alternative approach",
+          };
+        }
+      }
+
       await safeEvent(
         input.onEvent,
         "narration",
