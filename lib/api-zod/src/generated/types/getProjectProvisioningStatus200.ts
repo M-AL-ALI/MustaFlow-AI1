@@ -6,12 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GetProjectProvisioningStatus200ProvisioningStatus } from './getProjectProvisioningStatus200ProvisioningStatus';
+import type { GetProjectProvisioningStatus200ProvisioningStep } from './getProjectProvisioningStatus200ProvisioningStep';
 
 export type GetProjectProvisioningStatus200 = {
   builderMode: string;
   provisioningStatus: GetProjectProvisioningStatus200ProvisioningStatus;
   provisioningError?: string | null;
-  provisioningStep?: string | null;
+  provisioningStep?: GetProjectProvisioningStatus200ProvisioningStep;
   estimatedSecondsRemaining?: number | null;
   containerStatus?: string | null;
 };

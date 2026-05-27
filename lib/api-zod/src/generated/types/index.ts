@@ -219,6 +219,7 @@ export * from './getProjectDomainDnsHistory200';
 export * from './getProjectDomainDnsHistoryParams';
 export * from './getProjectProvisioningStatus200';
 export * from './getProjectProvisioningStatus200ProvisioningStatus';
+export * from './getProjectProvisioningStatus200ProvisioningStep';
 export * from './getProjectQueueBatch200';
 export * from './getPublishReadinessEnv';
 export * from './getPublishReadinessParams';

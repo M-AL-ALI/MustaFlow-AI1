@@ -1369,6 +1369,46 @@ export const SendMessageResponse = zod.object({
 
 
 /**
+ * SSE endpoint for converse-family messages (converse, debug, refactor, review, explain).
+Streams OpenAI tokens word-by-word so the UI feels instant. The raw `fetch` + `ReadableStream`
+loop in the frontend is intentional — Orval cannot generate a TanStack Query hook for SSE.
+
+Event shapes emitted on the stream:
+- `{"type":"token","content":"…"}` — incremental text chunk
+- `{"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}` — stream complete
+- `{"type":"fallback","intent":"build"|"plan"}` — not a converse message; client should re-send via `POST /projects/{id}/messages`
+- `{"type":"error","message":"…"}` — something went wrong
+
+ * @summary Stream a conversational AI response over SSE (text/event-stream)
+ */
+export const StreamMessageParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+
+
+export const StreamMessageBody = zod.object({
+  "content": zod.string().min(1),
+  "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
+  "planMode": zod.boolean(),
+  "background": zod.boolean().optional(),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.'),
+  "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt.'),
+  "attachments": zod.array(zod.object({
+  "kind": zod.enum(['image']),
+  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "width": zod.number().optional(),
+  "height": zod.number().optional(),
+  "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
+  "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
+})).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.'),
+  "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.')
+})
+
+
+/**
  * @summary Full-text search across this project's chat history.
  */
 export const SearchMessagesParams = zod.object({
@@ -4465,7 +4505,7 @@ export const GetProjectProvisioningStatusResponse = zod.object({
   "builderMode": zod.string(),
   "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']),
   "provisioningError": zod.string().nullish(),
-  "provisioningStep": zod.string().nullish(),
+  "provisioningStep": zod.enum(['create_container', 'create_database', 'connect_and_test']).nullish(),
   "estimatedSecondsRemaining": zod.number().nullish(),
   "containerStatus": zod.string().nullish()
 })

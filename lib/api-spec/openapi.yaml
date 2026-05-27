@@ -905,6 +905,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChatExchange"
+  /projects/{id}/messages/stream:
+    post:
+      operationId: streamMessage
+      tags: [chat]
+      summary: Stream a conversational AI response over SSE (text/event-stream)
+      description: |
+        SSE endpoint for converse-family messages (converse, debug, refactor, review, explain).
+        Streams OpenAI tokens word-by-word so the UI feels instant. The raw `fetch` + `ReadableStream`
+        loop in the frontend is intentional — Orval cannot generate a TanStack Query hook for SSE.
+
+        Event shapes emitted on the stream:
+        - `{"type":"token","content":"…"}` — incremental text chunk
+        - `{"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}` — stream complete
+        - `{"type":"fallback","intent":"build"|"plan"}` — not a converse message; client should re-send via `POST /projects/{id}/messages`
+        - `{"type":"error","message":"…"}` — something went wrong
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatMessageInput"
+      responses:
+        "200":
+          description: Server-Sent Events stream of token / done / fallback / error frames
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Newline-delimited JSON frames prefixed with "data:"
+        "402":
+          description: Insufficient credits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/messages/search:
     get:
       operationId: searchMessages
@@ -3891,7 +3935,10 @@ paths:
                     type: string
                     enum: [idle, provisioning, ready, hibernated, error]
                   provisioningError: { type: string, nullable: true }
-                  provisioningStep: { type: string, nullable: true }
+                  provisioningStep:
+                    type: string
+                    nullable: true
+                    enum: [create_container, create_database, connect_and_test]
                   estimatedSecondsRemaining: { type: integer, nullable: true }
                   containerStatus: { type: string, nullable: true }
         "404":

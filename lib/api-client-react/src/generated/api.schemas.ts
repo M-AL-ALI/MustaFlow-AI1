@@ -4290,11 +4290,20 @@ export const GetProjectProvisioningStatus200ProvisioningStatus = {
   error: 'error',
 } as const;
 
+export type GetProjectProvisioningStatus200ProvisioningStep = typeof GetProjectProvisioningStatus200ProvisioningStep[keyof typeof GetProjectProvisioningStatus200ProvisioningStep] | null;
+
+
+export const GetProjectProvisioningStatus200ProvisioningStep = {
+  create_container: 'create_container',
+  create_database: 'create_database',
+  connect_and_test: 'connect_and_test',
+} as const;
+
 export type GetProjectProvisioningStatus200 = {
   builderMode: string;
   provisioningStatus: GetProjectProvisioningStatus200ProvisioningStatus;
   provisioningError?: string | null;
-  provisioningStep?: string | null;
+  provisioningStep?: GetProjectProvisioningStatus200ProvisioningStep;
   estimatedSecondsRemaining?: number | null;
   containerStatus?: string | null;
 };

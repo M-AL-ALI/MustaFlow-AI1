@@ -3605,6 +3605,88 @@ export const useSendMessage = <TError = ErrorType<unknown>,
       return useMutation(getSendMessageMutationOptions(options));
     }
 
+export const getStreamMessageUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/messages/stream`
+}
+
+/**
+ * SSE endpoint for converse-family messages (converse, debug, refactor, review, explain).
+Streams OpenAI tokens word-by-word so the UI feels instant. The raw `fetch` + `ReadableStream`
+loop in the frontend is intentional — Orval cannot generate a TanStack Query hook for SSE.
+
+Event shapes emitted on the stream:
+- `{"type":"token","content":"…"}` — incremental text chunk
+- `{"type":"done","userMessageId":N,"assistantMessageId":N,"plan":{…}}` — stream complete
+- `{"type":"fallback","intent":"build"|"plan"}` — not a converse message; client should re-send via `POST /projects/{id}/messages`
+- `{"type":"error","message":"…"}` — something went wrong
+
+ * @summary Stream a conversational AI response over SSE (text/event-stream)
+ */
+export const streamMessage = async (id: number,
+    chatMessageInput: ChatMessageInput, options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getStreamMessageUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      chatMessageInput,)
+  }
+);}
+
+
+
+
+export const getStreamMessageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof streamMessage>>, TError,{id: number;data: BodyType<ChatMessageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof streamMessage>>, TError,{id: number;data: BodyType<ChatMessageInput>}, TContext> => {
+
+const mutationKey = ['streamMessage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof streamMessage>>, {id: number;data: BodyType<ChatMessageInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  streamMessage(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StreamMessageMutationResult = NonNullable<Awaited<ReturnType<typeof streamMessage>>>
+    export type StreamMessageMutationBody = BodyType<ChatMessageInput>
+    export type StreamMessageMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Stream a conversational AI response over SSE (text/event-stream)
+ */
+export const useStreamMessage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof streamMessage>>, TError,{id: number;data: BodyType<ChatMessageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof streamMessage>>,
+        TError,
+        {id: number;data: BodyType<ChatMessageInput>},
+        TContext
+      > => {
+      return useMutation(getStreamMessageMutationOptions(options));
+    }
+
 export const getSearchMessagesUrl = (id: number,
     params: SearchMessagesParams,) => {
   const normalizedParams = new URLSearchParams();
