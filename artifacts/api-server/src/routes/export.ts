@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { strToU8, zipSync } from "fflate";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable, projectFilesTable, secretsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { isBinaryMime } from "../lib/binary-mime";
@@ -172,7 +172,10 @@ function generateEnvExample(secretNames: string[]): string {
 router.get("/projects/:id/export", requireProjectOwnership, async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
 
-  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
+  const [project] = await db
+    .select()
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
   if (!project) {
     res.status(404).json({ error: "Project not found" });
     return;

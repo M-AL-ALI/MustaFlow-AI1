@@ -41,7 +41,9 @@ import {
   getBillingCheckoutSession,
   useGetMyPreferences,
   useUpdateMyPreferences,
+  getGetMyPreferencesQueryKey,
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -428,6 +430,7 @@ function AppearanceOption({
 function ModeSection() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const prefsQuery = useGetMyPreferences({
     query: { queryKey: ["/api/me/preferences"] },
   });
@@ -441,6 +444,7 @@ function ModeSection() {
     setSwitching(mode);
     try {
       await updatePreferences.mutateAsync({ data: { preferredMode: mode } });
+      await queryClient.invalidateQueries({ queryKey: getGetMyPreferencesQueryKey() });
       toast({
         title: "Mode updated",
         description: `Switched to ${mode === "builder" ? "AI Build Mode" : "Developer Mode"}.`,

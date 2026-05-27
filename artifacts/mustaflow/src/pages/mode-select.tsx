@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useUpdateMyPreferences } from "@workspace/api-client-react";
+import { useUpdateMyPreferences, getGetMyPreferencesQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Sparkles, Code2, ArrowRight, Loader2 } from "lucide-react";
@@ -9,6 +10,7 @@ export default function ModeSelectPage() {
   const [, setLocation] = useLocation();
   const [selecting, setSelecting] = useState<"builder" | "developer" | null>(null);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const updatePreferences = useUpdateMyPreferences();
 
   async function handleSelect(mode: "builder" | "developer") {
@@ -16,6 +18,7 @@ export default function ModeSelectPage() {
     setSelecting(mode);
     try {
       await updatePreferences.mutateAsync({ data: { preferredMode: mode } });
+      await queryClient.invalidateQueries({ queryKey: getGetMyPreferencesQueryKey() });
       setLocation(mode === "builder" ? "/projects" : "/dev");
     } catch {
       toast({

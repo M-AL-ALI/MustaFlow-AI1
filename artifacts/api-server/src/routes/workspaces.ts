@@ -37,7 +37,11 @@ async function ensureDefaultWorkspace(userId: string) {
 }
 
 router.get("/workspaces", async (req, res): Promise<void> => {
-  const userId = req.userId ?? "demo-user";
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const userId = req.userId;
   await ensureDefaultWorkspace(userId);
 
   const rows = await db
@@ -50,13 +54,17 @@ router.get("/workspaces", async (req, res): Promise<void> => {
 });
 
 router.post("/workspaces", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const parsed = WorkspaceInputSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
-  const userId = req.userId ?? "demo-user";
+  const userId = req.userId;
   const [workspace] = await db
     .insert(workspacesTable)
     .values({ ownerUserId: userId, ...parsed.data })
@@ -71,13 +79,17 @@ router.post("/workspaces", async (req, res): Promise<void> => {
 });
 
 router.get("/workspaces/:id", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
 
-  const userId = req.userId ?? "demo-user";
+  const userId = req.userId;
   const [workspace] = await db
     .select()
     .from(workspacesTable)
@@ -93,6 +105,10 @@ router.get("/workspaces/:id", async (req, res): Promise<void> => {
 });
 
 router.patch("/workspaces/:id", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) {
     res.status(400).json({ error: "Invalid id" });
@@ -105,7 +121,7 @@ router.patch("/workspaces/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const userId = req.userId ?? "demo-user";
+  const userId = req.userId;
   const [workspace] = await db
     .update(workspacesTable)
     .set({ ...parsed.data, updatedAt: sql`now()` })
@@ -122,13 +138,17 @@ router.patch("/workspaces/:id", async (req, res): Promise<void> => {
 });
 
 router.delete("/workspaces/:id", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
 
-  const userId = req.userId ?? "demo-user";
+  const userId = req.userId;
 
   const existing = await db
     .select()

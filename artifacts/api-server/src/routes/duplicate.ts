@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, projectsTable, projectFilesTable, projectActivityTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { writeKnowledge } from "../lib/knowledge";
@@ -11,7 +11,10 @@ const router: IRouter = Router();
 router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res): Promise<void> => {
   const projectId = Number(req.params.id);
 
-  const [original] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
+  const [original] = await db
+    .select()
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
   if (!original) {
     res.status(404).json({ error: "Project not found" });
     return;

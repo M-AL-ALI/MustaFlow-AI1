@@ -121,7 +121,11 @@ const router: IRouter = Router();
 const activeProjects = isNull(projectsTable.deletedAt);
 
 router.get("/projects", async (req, res): Promise<void> => {
-  const userId = req.userId ?? "demo-user";
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const userId = req.userId;
   const wsId = req.query.workspaceId ? parseInt(req.query.workspaceId as string, 10) : null;
   const mode = req.query.mode as string | undefined;
   const conditions: SQL[] = [eq(projectsTable.ownerId, userId), activeProjects];
@@ -144,10 +148,14 @@ router.get("/projects", async (req, res): Promise<void> => {
 });
 
 router.get("/projects/summary", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const rows = await db
     .select()
     .from(projectsTable)
-    .where(and(eq(projectsTable.ownerId, req.userId ?? "demo-user"), activeProjects));
+    .where(and(eq(projectsTable.ownerId, req.userId), activeProjects));
 
   const byStatus: Record<string, number> = {};
   const byKind: Record<string, number> = {};
@@ -178,6 +186,10 @@ router.get("/projects/summary", async (req, res): Promise<void> => {
 });
 
 router.post("/projects", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
   const parsed = CreateProjectBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -215,7 +227,7 @@ router.post("/projects", async (req, res): Promise<void> => {
   const [project] = await db
     .insert(projectsTable)
     .values({
-      ownerId: req.userId ?? "demo-user",
+      ownerId: req.userId!,
       workspaceId: projectInput.workspaceId ?? null,
       name: projectInput.name,
       description: projectInput.description ?? null,
@@ -1314,7 +1326,11 @@ router.post(
 const TRASH_RECOVERY_DAYS = 30;
 
 router.get("/projects/trash", async (req, res): Promise<void> => {
-  const userId = req.userId ?? "demo-user";
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const userId = req.userId;
   const rows = await db
     .select()
     .from(projectsTable)
