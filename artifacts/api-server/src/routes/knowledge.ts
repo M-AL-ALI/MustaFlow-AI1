@@ -390,6 +390,7 @@ router.get("/knowledge/export", async (req, res): Promise<void> => {
       thumbsUp: knowledgeEntriesTable.thumbsUp,
       thumbsDown: knowledgeEntriesTable.thumbsDown,
       usageCount: knowledgeEntriesTable.usageCount,
+      reinforcedCount: knowledgeEntriesTable.reinforcedCount,
       annotation: knowledgeEntriesTable.annotation,
       createdAt: knowledgeEntriesTable.createdAt,
     })
@@ -472,141 +473,17 @@ router.post("/knowledge/infer-style", async (req, res): Promise<void> => {
   }
 
   try {
-    // Gather existing build/refine entries for this user's projects
-    const ownedProjects = await db
-      .select({ id: projectsTable.id })
-      .from(projectsTable)
-      .where(and(eq(projectsTable.ownerId, userId), isNull(projectsTable.deletedAt)));
+    const { inferStyleForUser } = await import("../lib/knowledge");
+    const result = await inferStyleForUser(userId);
 
-    const ownedIds = ownedProjects.map((p) => p.id);
-    if (ownedIds.length === 0) {
-      res.json({ inferred: 0, message: "No projects found to analyse." });
-      return;
-    }
-
-    const recentEntries = await db
-      .select({
-        title: knowledgeEntriesTable.title,
-        content: knowledgeEntriesTable.content,
-        type: knowledgeEntriesTable.type,
-        category: knowledgeEntriesTable.category,
-      })
-      .from(knowledgeEntriesTable)
-      .where(
-        and(
-          inArray(knowledgeEntriesTable.projectId, ownedIds),
-          isNull(knowledgeEntriesTable.archivedAt),
-          or(
-            eq(knowledgeEntriesTable.type, "build"),
-            eq(knowledgeEntriesTable.type, "refine"),
-            eq(knowledgeEntriesTable.type, "lesson"),
-          ),
-        ),
-      )
-      .orderBy(desc(knowledgeEntriesTable.createdAt))
-      .limit(60);
-
-    if (recentEntries.length === 0) {
-      res.json({ inferred: 0, message: "No build history to analyse yet." });
-      return;
-    }
-
-    // Use OpenAI to extract style preferences from the build history
-    const { openai } = await import("@workspace/integrations-openai-ai-server");
-    const corpus = recentEntries
-      .map((e) => `[${e.type}/${e.category}] ${e.title}: ${e.content}`)
-      .join("\n");
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
-      max_completion_tokens: 2048,
-      messages: [
-        {
-          role: "system",
-          content: `You analyse a user's build history and extract their style preferences. Output STRICT JSON:
-{
-  "preferences": [
-    { "title": string, "content": string, "category": string }
-  ]
-}
-Each preference should be a specific, actionable inferred style rule. Examples:
-- "Prefers dark UI themes with slate/zinc colour palettes"
-- "Always uses Tailwind CSS for styling"
-- "Prefers concise variable names using camelCase"
-- "Favours chart.js for data visualisation"
-Extract 3–8 distinct, confident preferences. Only include preferences you can clearly infer from the data.`,
-        },
-        {
-          role: "user",
-          content: `Here is the build history to analyse:\n\n${corpus.slice(0, 6000)}`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
-
-    const raw = response.choices[0]?.message?.content ?? "{}";
-    let parsed: { preferences?: Array<{ title: string; content: string; category: string }> };
-    try {
-      parsed = JSON.parse(raw) as typeof parsed;
-    } catch {
-      parsed = {};
-    }
-
-    const preferences = parsed.preferences ?? [];
-    if (preferences.length === 0) {
+    if (result.inferred === 0) {
       res.json({ inferred: 0, message: "No strong style preferences could be inferred yet." });
       return;
     }
 
-    // Delete old unreviewed style_memory entries for this user before writing new ones
-    // so we don't accumulate stale inferences.
-    const existingStyleEntries = await db
-      .select({ id: knowledgeEntriesTable.id })
-      .from(knowledgeEntriesTable)
-      .where(
-        and(
-          eq(knowledgeEntriesTable.userId, userId),
-          eq(knowledgeEntriesTable.type, "style_memory"),
-          eq(knowledgeEntriesTable.approvedForReuse, false),
-        ),
-      );
-
-    if (existingStyleEntries.length > 0) {
-      await db
-        .update(knowledgeEntriesTable)
-        .set({ archivedAt: new Date() })
-        .where(
-          inArray(
-            knowledgeEntriesTable.id,
-            existingStyleEntries.map((e) => e.id),
-          ),
-        );
-    }
-
-    const inserted: number[] = [];
-    for (const pref of preferences) {
-      if (!pref.title || !pref.content) continue;
-      const [row] = await db
-        .insert(knowledgeEntriesTable)
-        .values({
-          title: pref.title.slice(0, 500),
-          content: pref.content.slice(0, 5000),
-          category: pref.category ?? "style",
-          type: "style_memory",
-          scope: "user",
-          severity: "info",
-          userId,
-          projectId: null,
-          approvedForReuse: false,
-        })
-        .returning({ id: knowledgeEntriesTable.id });
-      if (row) inserted.push(row.id);
-    }
-
     res.json({
-      inferred: inserted.length,
-      ids: inserted,
-      message: `Inferred ${inserted.length} style preference${inserted.length !== 1 ? "s" : ""} from your build history.`,
+      inferred: result.inferred,
+      message: `Inferred ${result.inferred} style preference${result.inferred !== 1 ? "s" : ""} from your build history.`,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -805,6 +682,7 @@ router.get("/knowledge/public", async (req, res): Promise<void> => {
       thumbsUp: knowledgeEntriesTable.thumbsUp,
       thumbsDown: knowledgeEntriesTable.thumbsDown,
       usageCount: knowledgeEntriesTable.usageCount,
+      reinforcedCount: knowledgeEntriesTable.reinforcedCount,
       createdAt: knowledgeEntriesTable.createdAt,
     })
     .from(knowledgeEntriesTable)

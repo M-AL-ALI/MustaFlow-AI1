@@ -59,7 +59,7 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import type { AgentMode } from "./ai";
 import { detectRequiredStack } from "./ai";
 import { logger } from "./logger";
-import { writeKnowledge, getInstalledBlueprintKnowledge } from "./knowledge";
+import { writeKnowledge, getInstalledBlueprintKnowledge, inferStyleForUser } from "./knowledge";
 import { generateEmbedding, cosineSimilarity } from "./embeddings";
 import type { DiffSummary } from "@workspace/db";
 import {
@@ -619,6 +619,8 @@ async function loadKnowledgeContext(
     const APPROVED_BOOST = 1.5;
     const SEVERITY_SCORE: Record<string, number> = { error: 1.5, warning: 0.5, info: 0 };
     const SAME_PROJECT_BOOST = 2.0;
+    const USAGE_WEIGHT = parseFloat(process.env.KNOWLEDGE_USAGE_WEIGHT ?? "0.1");
+    const FEEDBACK_WEIGHT = parseFloat(process.env.KNOWLEDGE_FEEDBACK_WEIGHT ?? "0.2");
 
     let topEntries: typeof entries;
 
@@ -677,6 +679,10 @@ async function loadKnowledgeContext(
 
         // Severity boost
         score += SEVERITY_SCORE[e.severity] ?? 0;
+
+        // Feedback-weighted boost: usage frequency + thumbs signal
+        score += (e.usageCount ?? 0) * USAGE_WEIGHT;
+        score += ((e.thumbsUp ?? 0) - (e.thumbsDown ?? 0)) * FEEDBACK_WEIGHT;
 
         // Same-project preference
         if (e.projectId === projectId) score += SAME_PROJECT_BOOST;
@@ -4143,6 +4149,34 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           relatedVersionId: version?.id,
           tags: [...report.modulesWired.map((m) => m.id), "mobile", "expo"],
         });
+      }
+
+      // Auto-refresh style memory after every successful build/refine (debounced).
+      // Fire-and-forget — never block the success path on style inference.
+      if (project.ownerId && process.env.KNOWLEDGE_RETRIEVAL_ENABLED !== "false") {
+        void (async () => {
+          try {
+            const recentStyle = await db
+              .select({ createdAt: knowledgeEntriesTable.createdAt })
+              .from(knowledgeEntriesTable)
+              .where(
+                and(
+                  eq(knowledgeEntriesTable.userId, project.ownerId!),
+                  eq(knowledgeEntriesTable.type, "style_memory"),
+                  isNull(knowledgeEntriesTable.archivedAt),
+                ),
+              )
+              .orderBy(desc(knowledgeEntriesTable.createdAt))
+              .limit(1);
+            const lastRefresh = recentStyle[0]?.createdAt;
+            if (lastRefresh && Date.now() - new Date(lastRefresh).getTime() < 5 * 60 * 1000) {
+              return;
+            }
+            await inferStyleForUser(project.ownerId!);
+          } catch (err) {
+            logger.warn({ err }, "Auto style refresh failed — non-fatal");
+          }
+        })();
       }
 
       // Append a system message so the chat shows the report was produced

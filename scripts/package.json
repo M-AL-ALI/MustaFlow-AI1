@@ -79,6 +79,7 @@
     "migrate-command-approval": "tsx ./src/migrate-command-approval.ts",
     "migrate-message-origin": "tsx ./src/migrate-message-origin.ts",
     "backfill-message-origin": "tsx ./src/backfill-message-origin.ts",
+    "migrate-reinforced-count": "tsx ./src/migrate-reinforced-count.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "rotate-encryption-key": "tsx ./src/rotate-encryption-key.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",

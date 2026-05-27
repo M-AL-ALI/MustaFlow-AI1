@@ -6078,6 +6078,7 @@ components:
           thumbsUp,
           thumbsDown,
           usageCount,
+          reinforcedCount,
           isPublic,
           createdAt,
         ]
@@ -6099,6 +6100,7 @@ components:
         thumbsUp: { type: integer }
         thumbsDown: { type: integer }
         usageCount: { type: integer }
+        reinforcedCount: { type: integer }
         diffSummary:
           type: ["object", "null"]
           additionalProperties: true

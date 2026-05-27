@@ -75,6 +75,8 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   thumbsDown: integer("thumbs_down").notNull().default(0),
   // How many times this lesson was applied in a build
   usageCount: integer("usage_count").notNull().default(0),
+  // How many times a near-duplicate was merged into this entry instead of inserting a new row
+  reinforcedCount: integer("reinforced_count").notNull().default(0),
   // Opt-in: share anonymized lesson to the public community pool
   isPublic: boolean("is_public").notNull().default(false),
   // AI-generated embedding vector for semantic similarity ranking.

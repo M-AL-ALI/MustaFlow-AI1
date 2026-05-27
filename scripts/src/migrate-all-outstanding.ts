@@ -77,6 +77,7 @@ const MIGRATIONS = [
   "migrate-pat-rotation",
   "migrate-message-origin",
   "migrate-command-approval",
+  "migrate-reinforced-count",
 ] as const;
 
 async function main(): Promise<void> {

@@ -30,6 +30,7 @@ export interface KnowledgeEntry {
   thumbsUp: number;
   thumbsDown: number;
   usageCount: number;
+  reinforcedCount: number;
   /** @nullable */
   diffSummary?: KnowledgeEntryDiffSummary;
   /** @nullable */
