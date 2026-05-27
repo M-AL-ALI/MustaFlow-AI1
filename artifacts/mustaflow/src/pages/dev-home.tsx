@@ -18,7 +18,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { DevSidebar } from "@/components/dev-sidebar";
+import { SlideOutNav } from "@/components/layout/slide-out-nav";
 import {
   SendHorizonal,
   Clock,
@@ -472,10 +472,10 @@ export default function DevHomePage() {
   }
 
   return (
-    <div className="h-screen bg-background text-foreground flex w-full overflow-hidden">
-      <DevSidebar />
+    <div className="h-screen bg-background text-foreground w-full overflow-hidden">
+      <SlideOutNav />
 
-      <main className="flex-1 min-w-0 overflow-y-auto">
+      <main className="h-full w-full overflow-y-auto pl-14 pt-3">
         <div className="min-h-full flex flex-col">
           {/* Creation zone — centered in the top portion */}
           <div className="flex items-center justify-center px-6 pt-16 pb-12">

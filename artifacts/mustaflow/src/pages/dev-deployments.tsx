@@ -16,7 +16,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DevSidebar } from "@/components/dev-sidebar";
+import { SlideOutNav } from "@/components/layout/slide-out-nav";
 import { cn } from "@/lib/utils";
 
 type DeploymentType = "static" | "autoscale" | "reserved_vm" | "scheduled";
@@ -122,10 +122,10 @@ export default function DevDeploymentsPage() {
   );
 
   return (
-    <div className="h-screen bg-background text-foreground flex w-full overflow-hidden">
-      <DevSidebar />
+    <div className="h-screen bg-background text-foreground w-full overflow-hidden">
+      <SlideOutNav />
 
-      <main className="flex-1 min-w-0 overflow-y-auto">
+      <main className="h-full w-full overflow-y-auto pl-14 pt-3">
         <div className="max-w-5xl mx-auto px-8 py-10">
           {/* Header */}
           <div className="mb-8">
