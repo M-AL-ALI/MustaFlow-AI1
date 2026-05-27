@@ -178,6 +178,7 @@ import { NotificationsBell } from "@/components/notifications-bell";
 import { AgenticOnboardingTooltip } from "@/components/agentic-onboarding-tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { ProvisioningProgress } from "./components/provisioning-progress";
+import { ConnectionQualityIndicator } from "./components/connection-quality-indicator";
 import { cn } from "@/lib/utils";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -2851,6 +2852,10 @@ export default function ProjectWorkspacePage() {
           >
             <AgentIcon size={14} state={isBusy ? "active" : "idle"} />
           </button>
+          <ConnectionQualityIndicator
+            reconnectAttempt={streamReconnectAttempt}
+            hasError={streamError}
+          />
           <SubscriptionTierBadge tier={subscriptionTier} />
           <NotificationsBell />
           <CreditBalancePill />
