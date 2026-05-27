@@ -3751,6 +3751,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/tasks/{taskId}/trace:
+    get:
+      operationId: getTaskTrace
+      tags: [tasks]
+      summary: Return the agent loop trace and tool audit entries for a completed task
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Agent trace data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTraceResponse"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /projects/{id}/tasks/{taskId}/events/stream:
     get:
       operationId: streamTaskEvents
@@ -8081,6 +8103,109 @@ components:
           type: string
           description: "Technology stack: react-vite | nextjs | node-api | python-flask | python-fastapi"
           default: react-vite
+
+    ToolAuditEntry:
+      type: object
+      required: [id, toolName, argv, durationMs, blocked, policyStrictness, createdAt]
+      properties:
+        id: { type: integer }
+        toolName: { type: string }
+        stack: { type: ["string", "null"] }
+        argv:
+          type: array
+          items: { type: string }
+        exitCode: { type: ["integer", "null"] }
+        stdoutTail: { type: ["string", "null"] }
+        stderrTail: { type: ["string", "null"] }
+        durationMs: { type: integer }
+        blocked: { type: boolean }
+        blockReason: { type: ["string", "null"] }
+        policyStrictness: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    AgentLoopToolCall:
+      type: object
+      required: [step, tool, args, ok, durationMs, preview]
+      properties:
+        step: { type: integer }
+        tool: { type: string }
+        args:
+          type: object
+          additionalProperties: true
+        ok: { type: boolean }
+        durationMs: { type: integer }
+        preview: { type: string }
+
+    AgentLoopCommand:
+      type: object
+      required: [step, argv, exitCode, durationMs, stdoutPreview, stderrPreview]
+      properties:
+        step: { type: integer }
+        argv:
+          type: array
+          items: { type: string }
+        exitCode: { type: integer }
+        durationMs: { type: integer }
+        stdoutPreview: { type: string }
+        stderrPreview: { type: string }
+
+    AgentLoopCheckResult:
+      type: object
+      required: [id, label, passed, durationMs, message]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        passed: { type: boolean }
+        durationMs: { type: integer }
+        message: { type: string }
+
+    AgentLoopData:
+      type: object
+      required:
+        [
+          stack,
+          steps,
+          totalToolCalls,
+          totalTokens,
+          terminationReason,
+          toolCalls,
+          commandsRun,
+          checkResults,
+        ]
+      properties:
+        stack: { type: string }
+        steps: { type: integer }
+        totalToolCalls: { type: integer }
+        totalTokens: { type: integer }
+        terminationReason: { type: string }
+        toolCalls:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentLoopToolCall"
+        commandsRun:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentLoopCommand"
+        checkResults:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentLoopCheckResult"
+        skillsLoaded:
+          type: array
+          items: { type: string }
+
+    AgentTraceResponse:
+      type: object
+      required: [toolAudit]
+      properties:
+        agentLoop:
+          oneOf:
+            - $ref: "#/components/schemas/AgentLoopData"
+            - type: "null"
+        toolAudit:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolAuditEntry"
 
     V1Build:
       type: object

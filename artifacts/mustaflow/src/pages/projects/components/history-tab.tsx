@@ -8,6 +8,7 @@ import type { KnowledgeEntry } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { AgentTracePanel } from "./agent-trace-panel";
 import {
   Hammer,
   RefreshCw,
@@ -31,6 +32,7 @@ import {
   Clock,
   Plus,
   ArrowUpRight,
+  Cpu,
 } from "lucide-react";
 
 const PAGE_SIZE = 20;
@@ -137,9 +139,10 @@ interface EntryCardProps {
   projectId: number;
   onRetry?: (prompt: string) => void;
   onViewInChat?: (taskId: number) => void;
+  onViewTrace?: (taskId: number) => void;
 }
 
-function EntryCard({ entry, projectId, onRetry, onViewInChat }: EntryCardProps) {
+function EntryCard({ entry, projectId, onRetry, onViewInChat, onViewTrace }: EntryCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showAnnotationInput, setShowAnnotationInput] = useState(false);
   const [annotationDraft, setAnnotationDraft] = useState(entry.annotation ?? "");
@@ -284,6 +287,18 @@ function EntryCard({ entry, projectId, onRetry, onViewInChat }: EntryCardProps) 
                 View in chat
               </button>
             )}
+            {entry.relatedTaskId != null &&
+              onViewTrace &&
+              (entry.type === "build" || entry.type === "refine") && (
+                <button
+                  onClick={() => onViewTrace(entry.relatedTaskId!)}
+                  className="shrink-0 flex items-center gap-0.5 text-[9px] text-muted-foreground/60 hover:text-primary transition-colors"
+                  title="View AI agent trace for this build"
+                >
+                  <Cpu className="h-2.5 w-2.5" />
+                  Trace
+                </button>
+              )}
           </div>
         </div>
 
@@ -538,8 +553,23 @@ export function HistoryTab({ projectId, onRetry, focusVersionId, onViewInChat }:
   // Pagination: accumulated entries across pages
   const [page, setPage] = useState(0);
   const [accumulated, setAccumulated] = useState<KnowledgeEntry[]>([]);
+  // Agent trace panel state
+  const [traceTaskId, setTraceTaskId] = useState<number | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const historyScrollRef = useRef<HTMLDivElement>(null);
   const scrollKey = `mustaflow_scroll_${projectId}_history`;
+
+  // Detect admin status for the blocked-commands section of the trace panel
+  useEffect(() => {
+    fetch("/api/admin/me")
+      .then((r) => (r.ok ? (r.json() as Promise<{ isAdmin?: boolean }>) : null))
+      .then((data) => {
+        if (data?.isAdmin) setIsAdmin(true);
+      })
+      .catch(() => {
+        /* not admin or not logged in */
+      });
+  }, []);
 
   // Reset pagination when filters change
   const resetPagination = () => {
@@ -656,7 +686,19 @@ export function HistoryTab({ projectId, onRetry, focusVersionId, onViewInChat }:
   }, [accumulated.length]);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
+    <div className="flex-1 min-h-0 flex flex-col relative">
+      {/* Agent trace overlay — renders on top of the history list */}
+      {traceTaskId !== null && (
+        <div className="absolute inset-0 z-20 bg-background flex flex-col">
+          <AgentTracePanel
+            projectId={projectId}
+            taskId={traceTaskId}
+            isAdmin={isAdmin}
+            onClose={() => setTraceTaskId(null)}
+          />
+        </div>
+      )}
+
       {/* Header + controls */}
       <div className="px-3 py-2 border-b border-border/50 space-y-2">
         <div className="flex items-center gap-2">
@@ -751,6 +793,7 @@ export function HistoryTab({ projectId, onRetry, focusVersionId, onViewInChat }:
                   projectId={projectId}
                   onRetry={onRetry}
                   onViewInChat={onViewInChat}
+                  onViewTrace={(taskId) => setTraceTaskId(taskId)}
                 />
               ))}
             </div>

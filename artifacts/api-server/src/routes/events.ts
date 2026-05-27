@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
-import { db, agentTasksTable, taskEventsTable } from "@workspace/db";
+import { db, agentTasksTable, taskEventsTable, toolAuditTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { subscribeTaskEvents, type TaskEventPayload } from "../lib/event-bus";
 
@@ -155,6 +155,62 @@ router.get(
     req.on("close", () => {
       streamClosed = true;
       unsubscribe();
+    });
+  },
+);
+
+/**
+ * GET /projects/:id/tasks/:taskId/trace
+ *
+ * Returns the agentLoop trace from agent_tasks.report.agentLoop plus matching
+ * tool_audit rows (blocked commands) for security review. Loads on demand —
+ * not included in the task list response.
+ */
+router.get(
+  "/projects/:id/tasks/:taskId/trace",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const taskId = Number(req.params.taskId);
+    if (!Number.isFinite(projectId) || !Number.isFinite(taskId)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+
+    const [task] = await db
+      .select({ id: agentTasksTable.id, report: agentTasksTable.report })
+      .from(agentTasksTable)
+      .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)));
+
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    const auditRows = await db
+      .select()
+      .from(toolAuditTable)
+      .where(eq(toolAuditTable.taskId, taskId))
+      .orderBy(asc(toolAuditTable.createdAt));
+
+    const agentLoop = task.report?.agentLoop ?? null;
+
+    res.json({
+      agentLoop,
+      toolAudit: auditRows.map((r) => ({
+        id: r.id,
+        toolName: r.toolName,
+        stack: r.stack ?? null,
+        argv: r.argv,
+        exitCode: r.exitCode ?? null,
+        stdoutTail: r.stdoutTail ?? null,
+        stderrTail: r.stderrTail ?? null,
+        durationMs: r.durationMs,
+        blocked: r.blocked,
+        blockReason: r.blockReason ?? null,
+        policyStrictness: r.policyStrictness,
+        createdAt: r.createdAt,
+      })),
     });
   },
 );

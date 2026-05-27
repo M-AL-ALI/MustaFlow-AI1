@@ -37,6 +37,7 @@ import type {
   AgentInboxList,
   AgentTask,
   AgentTaskInput,
+  AgentTraceResponse,
   AnalyticsPingInput,
   AnalyticsSummary,
   AnalyzePageMapParams,
@@ -12502,6 +12503,88 @@ export function useGetProjectFileRaw<TData = Awaited<ReturnType<typeof getProjec
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetProjectFileRawQueryOptions(id,fileId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetTaskTraceUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}/trace`
+}
+
+/**
+ * @summary Return the agent loop trace and tool audit entries for a completed task
+ */
+export const getTaskTrace = async (id: number,
+    taskId: number, options?: RequestInit): Promise<AgentTraceResponse> => {
+
+  return customFetch<AgentTraceResponse>(getGetTaskTraceUrl(id,taskId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTaskTraceQueryKey = (id: number,
+    taskId: number,) => {
+    return [
+    `/api/projects/${id}/tasks/${taskId}/trace`
+    ] as const;
+    }
+
+
+export const getGetTaskTraceQueryOptions = <TData = Awaited<ReturnType<typeof getTaskTrace>>, TError = ErrorType<ApiError>>(id: number,
+    taskId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTaskTrace>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTaskTraceQueryKey(id,taskId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTaskTrace>>> = ({ signal }) => getTaskTrace(id,taskId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id && taskId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTaskTrace>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTaskTraceQueryResult = NonNullable<Awaited<ReturnType<typeof getTaskTrace>>>
+export type GetTaskTraceQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Return the agent loop trace and tool audit entries for a completed task
+ */
+
+export function useGetTaskTrace<TData = Awaited<ReturnType<typeof getTaskTrace>>, TError = ErrorType<ApiError>>(
+ id: number,
+    taskId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTaskTrace>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTaskTraceQueryOptions(id,taskId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

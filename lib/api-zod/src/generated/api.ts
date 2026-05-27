@@ -4333,6 +4333,63 @@ export const GetProjectFileRawParams = zod.object({
 
 
 /**
+ * @summary Return the agent loop trace and tool audit entries for a completed task
+ */
+export const GetTaskTraceParams = zod.object({
+  "id": zod.coerce.number(),
+  "taskId": zod.coerce.number()
+})
+
+export const GetTaskTraceResponse = zod.object({
+  "agentLoop": zod.union([zod.object({
+  "stack": zod.string(),
+  "steps": zod.number(),
+  "totalToolCalls": zod.number(),
+  "totalTokens": zod.number(),
+  "terminationReason": zod.string(),
+  "toolCalls": zod.array(zod.object({
+  "step": zod.number(),
+  "tool": zod.string(),
+  "args": zod.record(zod.string(), zod.unknown()),
+  "ok": zod.boolean(),
+  "durationMs": zod.number(),
+  "preview": zod.string()
+})),
+  "commandsRun": zod.array(zod.object({
+  "step": zod.number(),
+  "argv": zod.array(zod.string()),
+  "exitCode": zod.number(),
+  "durationMs": zod.number(),
+  "stdoutPreview": zod.string(),
+  "stderrPreview": zod.string()
+})),
+  "checkResults": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "passed": zod.boolean(),
+  "durationMs": zod.number(),
+  "message": zod.string()
+})),
+  "skillsLoaded": zod.array(zod.string()).optional()
+}),zod.null()]).optional(),
+  "toolAudit": zod.array(zod.object({
+  "id": zod.number(),
+  "toolName": zod.string(),
+  "stack": zod.string().nullish(),
+  "argv": zod.array(zod.string()),
+  "exitCode": zod.number().nullish(),
+  "stdoutTail": zod.string().nullish(),
+  "stderrTail": zod.string().nullish(),
+  "durationMs": zod.number(),
+  "blocked": zod.boolean(),
+  "blockReason": zod.string().nullish(),
+  "policyStrictness": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
  * @summary SSE live event stream for a task (text/event-stream)
  */
 export const StreamTaskEventsParams = zod.object({

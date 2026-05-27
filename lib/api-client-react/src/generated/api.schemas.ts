@@ -3490,6 +3490,71 @@ export interface V1CreateProjectInput {
   stack?: string;
 }
 
+export interface ToolAuditEntry {
+  id: number;
+  toolName: string;
+  /** @nullable */
+  stack?: string | null;
+  argv: string[];
+  /** @nullable */
+  exitCode?: number | null;
+  /** @nullable */
+  stdoutTail?: string | null;
+  /** @nullable */
+  stderrTail?: string | null;
+  durationMs: number;
+  blocked: boolean;
+  /** @nullable */
+  blockReason?: string | null;
+  policyStrictness: string;
+  createdAt: string;
+}
+
+export type AgentLoopToolCallArgs = { [key: string]: unknown };
+
+export interface AgentLoopToolCall {
+  step: number;
+  tool: string;
+  args: AgentLoopToolCallArgs;
+  ok: boolean;
+  durationMs: number;
+  preview: string;
+}
+
+export interface AgentLoopCommand {
+  step: number;
+  argv: string[];
+  exitCode: number;
+  durationMs: number;
+  stdoutPreview: string;
+  stderrPreview: string;
+}
+
+export interface AgentLoopCheckResult {
+  id: string;
+  label: string;
+  passed: boolean;
+  durationMs: number;
+  message: string;
+}
+
+export interface AgentLoopData {
+  stack: string;
+  steps: number;
+  totalToolCalls: number;
+  totalTokens: number;
+  terminationReason: string;
+  toolCalls: AgentLoopToolCall[];
+  commandsRun: AgentLoopCommand[];
+  checkResults: AgentLoopCheckResult[];
+  skillsLoaded?: string[];
+}
+
+export interface AgentTraceResponse {
+  agentLoop?: AgentLoopData | null;
+  toolAudit: ToolAuditEntry[];
+}
+
 export interface V1Build {
   id?: number;
   projectId?: number;
