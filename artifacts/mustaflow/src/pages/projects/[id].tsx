@@ -3067,16 +3067,22 @@ export default function ProjectWorkspacePage() {
               <DynamicAtom size={12} animate={zeroPanelOpen || !!zeroBgTaskId} />
               Zero
             </button>
-            {/* Close button for mobile drawer */}
+            {/* Connection quality indicator + close button for mobile drawer */}
             {isMobileLayout && (
-              <button
-                onClick={() => setChatDrawerOpen(false)}
-                className="px-3 py-2 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
-                title="Close"
-                aria-label="Close chat drawer"
-              >
-                <ChevronRight className="h-3.5 w-3.5 rotate-90" />
-              </button>
+              <div className="flex items-center gap-1 pr-1 border-b-2 border-transparent">
+                <ConnectionQualityIndicator
+                  reconnectAttempt={streamReconnectAttempt}
+                  hasError={streamError}
+                />
+                <button
+                  onClick={() => setChatDrawerOpen(false)}
+                  className="px-2 py-2 text-muted-foreground hover:text-foreground transition-colors"
+                  title="Close"
+                  aria-label="Close chat drawer"
+                >
+                  <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+                </button>
+              </div>
             )}
           </div>
 
