@@ -1710,7 +1710,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     // Consumed once (deleted after this read) so it only applies to this turn.
     if (input.taskId) {
       const { consumeSteeringHint } = await import("./steering-hints");
-      const hint = consumeSteeringHint(input.taskId);
+      const hint = await consumeSteeringHint(input.taskId);
       if (hint) {
         messages.push({
           role: "system",

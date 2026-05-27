@@ -504,7 +504,7 @@ router.post(
     }
 
     const { setSteeringHint } = await import("../lib/steering-hints");
-    setSteeringHint(taskId, hint);
+    await setSteeringHint(taskId, hint);
     req.log.info({ projectId, taskId, hintLen: hint.length }, "steering hint queued");
     res.json({ ok: true });
   },
