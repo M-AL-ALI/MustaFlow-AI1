@@ -2036,11 +2036,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             project.containerUrl ?? null,
           );
           if (!preflightResult.ok) {
-            await emitEvent(
-              taskId,
-              "failed",
-              preflightResult.message ?? "Pre-flight check failed.",
-            );
+            const preflightMsg = preflightResult.message ?? "Pre-flight check failed.";
+            await emitEvent(taskId, "preflight_error", preflightMsg);
+            await emitEvent(taskId, "failed", preflightMsg);
             await db
               .update(agentTasksTable)
               .set({ status: "failed", completedAt: new Date() })
@@ -2514,11 +2512,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             project.containerUrl ?? null,
           );
           if (!preflightResult.ok) {
-            await emitEvent(
-              taskId,
-              "failed",
-              preflightResult.message ?? "Pre-flight check failed.",
-            );
+            const preflightMsg = preflightResult.message ?? "Pre-flight check failed.";
+            await emitEvent(taskId, "preflight_error", preflightMsg);
+            await emitEvent(taskId, "failed", preflightMsg);
             await db
               .update(agentTasksTable)
               .set({ status: "failed", completedAt: new Date() })

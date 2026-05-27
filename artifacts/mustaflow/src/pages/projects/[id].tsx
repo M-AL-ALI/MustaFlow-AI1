@@ -1025,6 +1025,13 @@ export default function ProjectWorkspacePage() {
   // Holds the latest pendingFeedTaskId so handleStopStream can cancel it even
   // though that value is computed further down the component body.
   const pendingFeedTaskIdRef = useRef<number | null>(null);
+  // Banner shown when a build is blocked by a pre-flight container/DB failure
+  const [preflightBanner, setPreflightBanner] = useState<{
+    message: string;
+    lastPrompt: string;
+  } | null>(null);
+  // Tracks the most recent user-typed prompt so "Retry" can re-submit it
+  const lastSentPromptRef = useRef<string>("");
 
   // Auto-clear the Zero background pill when its task reaches a terminal status.
   // This runs independent of the panel being open so the pill is never stale.
@@ -1795,6 +1802,11 @@ export default function ProjectWorkspacePage() {
           } catch {
             /* malformed prompt frame */
           }
+        } else if (event.eventType === "preflight_error" && event.message) {
+          setPreflightBanner({
+            message: event.message,
+            lastPrompt: lastSentPromptRef.current,
+          });
         } else if (
           event.eventType === "completed" ||
           event.eventType === "failed" ||
@@ -1806,6 +1818,7 @@ export default function ProjectWorkspacePage() {
           // Reload the preview iframe so the freshly-built files are visible.
           if (event.eventType === "completed") {
             setBuildRefreshCount((n) => n + 1);
+            setPreflightBanner(null);
           }
         }
       } catch {
@@ -1970,6 +1983,8 @@ export default function ProjectWorkspacePage() {
         }
       }
 
+      lastSentPromptRef.current = content;
+      setPreflightBanner(null);
       setActiveTaskId(null);
       chatAtBottomRef.current = true;
       setPendingBuildStartedAt(new Date());
@@ -2706,6 +2721,41 @@ export default function ProjectWorkspacePage() {
           </button>
         </div>
       </div>
+
+      {/* ── Pre-flight failure banner ── */}
+      {preflightBanner && (
+        <div className="shrink-0 flex items-center gap-3 px-4 py-2.5 bg-destructive/10 border-b border-destructive/20 z-10 relative">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-xs font-semibold text-destructive mr-1.5">Build blocked.</span>
+            <span className="text-xs text-destructive/80 break-words">
+              {preflightBanner.message}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {preflightBanner.lastPrompt && (
+              <button
+                onClick={() => {
+                  const promptToRetry = preflightBanner.lastPrompt;
+                  setPreflightBanner(null);
+                  send(promptToRetry);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-destructive/15 border border-destructive/30 text-destructive text-xs font-medium hover:bg-destructive/25 transition-colors"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Retry
+              </button>
+            )}
+            <button
+              onClick={() => setPreflightBanner(null)}
+              className="flex items-center justify-center h-6 w-6 rounded-md text-destructive/70 hover:text-destructive hover:bg-destructive/15 transition-colors"
+              aria-label="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Main split: chat LEFT + preview RIGHT ── */}
       <div
