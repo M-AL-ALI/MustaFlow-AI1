@@ -19,6 +19,7 @@ import { eq, desc, sql, and, like, isNull, gte } from "drizzle-orm";
 import {
   db,
   creditTransactionsTable,
+  creditGrantsTable,
   stripeProcessedEventsTable,
   userCreditsTable,
   workspaceSubscriptionsTable,
@@ -184,28 +185,76 @@ async function ensureStripeCustomer(
 }
 
 // Grant monthly credits on subscription renewal (invoice.paid).
-// Idempotent — skips if already granted in the current period.
-async function maybeGrantMonthlyCredits(userId: string, periodEnd: Date): Promise<void> {
+//
+// Fully atomic: the credit_grants insert, credit balance increment, and
+// transaction log entry all execute inside a single db.transaction(). If any
+// step fails the entire transaction rolls back — including the credit_grants
+// row — so Stripe's next retry can re-claim the grant cleanly. The unique
+// constraint on (subscription_id, period_start) is the primary dedup guard:
+// a row already existing means credits were already granted for this period.
+async function maybeGrantMonthlyCredits(
+  userId: string,
+  subscriptionId: string,
+  periodStart: Date,
+): Promise<void> {
   const sub = await getOrCreateSubscription(userId);
   const tier = (sub.tier ?? "free") as keyof typeof TIER_MONTHLY_CREDITS;
   const monthlyAmount = TIER_MONTHLY_CREDITS[tier] ?? TIER_MONTHLY_CREDITS.free;
   if (monthlyAmount <= 0) return;
 
-  // Check if already granted for this period
-  if (
-    sub.lastMonthlyGrantAt &&
-    sub.lastMonthlyGrantAt >= new Date(periodEnd.getTime() - 35 * 24 * 60 * 60 * 1000)
-  ) {
-    logger.info({ userId, tier }, "Monthly credit grant already issued — skipping");
+  // Ensure the user_credits row exists before opening the transaction so we
+  // don't run a potentially slow upsert inside a serialised write transaction.
+  await getOrCreateCredits(userId);
+
+  let granted = false;
+  await db.transaction(async (tx) => {
+    // Attempt to claim this billing period. ON CONFLICT DO NOTHING means an
+    // existing row (already-granted period) causes inserted.length === 0.
+    const inserted = await tx
+      .insert(creditGrantsTable)
+      .values({ userId, subscriptionId, periodStart, amount: monthlyAmount })
+      .onConflictDoNothing()
+      .returning({ id: creditGrantsTable.id });
+
+    if (inserted.length === 0) return; // already granted — leave granted=false
+
+    // Both operations in the same transaction so a partial failure cannot
+    // produce an orphaned credit_grants row (tx rolls back entirely).
+    const [updated] = await tx
+      .update(userCreditsTable)
+      .set({
+        balance: sql`${userCreditsTable.balance} + ${monthlyAmount}`,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(userCreditsTable.userId, userId))
+      .returning({ balance: userCreditsTable.balance });
+
+    const newBalance = updated?.balance ?? monthlyAmount;
+
+    await tx.insert(creditTransactionsTable).values({
+      userId,
+      type: "subscription_grant",
+      amount: monthlyAmount,
+      description: `Monthly ${tier} grant (${monthlyAmount} credits)`,
+      balanceAfter: newBalance,
+    });
+
+    granted = true;
+  });
+
+  if (!granted) {
+    logger.info(
+      { userId, tier, subscriptionId },
+      "Monthly credit grant already issued for this period — skipping",
+    );
     return;
   }
 
-  await grantCredits(userId, monthlyAmount, `Monthly ${tier} grant (${monthlyAmount} credits)`);
   await db
     .update(userSubscriptionsTable)
     .set({ lastMonthlyGrantAt: sql`now()`, updatedAt: sql`now()` })
     .where(eq(userSubscriptionsTable.userId, userId));
-  logger.info({ userId, tier, monthlyAmount }, "Monthly credits granted");
+  logger.info({ userId, tier, monthlyAmount, subscriptionId }, "Monthly credits granted");
 }
 
 // ── Stripe webhook handler ────────────────────────────────────────────────────
@@ -412,6 +461,53 @@ async function handleStripeWebhook(
     return;
   }
 
+  // ── Unified idempotency: claim the event with status-based deduplication ────
+  //
+  // On new event:    INSERT with status='processing' succeeds → we own it.
+  // On conflict where status='failed':  re-claim (Stripe retry is legitimate).
+  // On conflict where status='processing' AND age>5min: re-claim (stuck job).
+  // On conflict otherwise (status='succeeded' or fresh 'processing'): skip.
+  //
+  // The row is NEVER deleted — on failure we set status='failed' so the next
+  // Stripe retry can reclaim it cleanly.
+  const claimed = await db
+    .insert(stripeProcessedEventsTable)
+    .values({
+      eventId: event.id,
+      type: event.type,
+      status: "processing",
+      processingStartedAt: sql`now()`,
+    })
+    .onConflictDoUpdate({
+      target: stripeProcessedEventsTable.eventId,
+      set: {
+        status: "processing",
+        processingStartedAt: sql`now()`,
+      },
+      setWhere: sql`${stripeProcessedEventsTable.status} = 'failed' OR (${stripeProcessedEventsTable.status} = 'processing' AND ${stripeProcessedEventsTable.processingStartedAt} < now() - interval '5 minutes')`,
+    })
+    .returning({ eventId: stripeProcessedEventsTable.eventId });
+
+  if (claimed.length === 0) {
+    logger.info({ eventId: event.id, type: event.type }, "Stripe webhook duplicate — skipping");
+    res.json({ ok: true, duplicate: true });
+    return;
+  }
+
+  const markEventSucceeded = async () => {
+    await db
+      .update(stripeProcessedEventsTable)
+      .set({ status: "succeeded", succeededAt: sql`now()` })
+      .where(eq(stripeProcessedEventsTable.eventId, event!.id));
+  };
+
+  const markEventFailed = async (errorMessage: string) => {
+    await db
+      .update(stripeProcessedEventsTable)
+      .set({ status: "failed", failedAt: sql`now()`, errorMessage })
+      .where(eq(stripeProcessedEventsTable.eventId, event!.id));
+  };
+
   // ── Subscription lifecycle events ───────────────────────────────────────────
   // customer.subscription.{created,updated,deleted} — sync workspace plan tier
   // (Task #644) and user subscription state.
@@ -422,29 +518,14 @@ async function handleStripeWebhook(
   ) {
     try {
       await handleSubscriptionEvent(event);
-      await db
-        .insert(stripeProcessedEventsTable)
-        .values({ eventId: event.id, type: event.type })
-        .onConflictDoNothing();
+      await markEventSucceeded();
       res.json({ ok: true, type: event.type, processed: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unexpected error";
       logger.error({ err: msg, eventId: event.id, type: event.type }, "Subscription sync failed");
+      await markEventFailed(msg);
       res.status(500).json({ error: "Subscription sync failed", willRetry: true });
     }
-    return;
-  }
-
-  // Idempotency: mark event as processed.
-  const deduped = await db
-    .insert(stripeProcessedEventsTable)
-    .values({ eventId: event.id, type: event.type })
-    .onConflictDoNothing()
-    .returning({ eventId: stripeProcessedEventsTable.eventId });
-
-  if (deduped.length === 0) {
-    logger.info({ eventId: event.id, type: event.type }, "Stripe webhook duplicate — skipping");
-    res.json({ ok: true, duplicate: true });
     return;
   }
 
@@ -486,15 +567,10 @@ async function handleStripeWebhook(
           { eventId: event.id, sessionType },
           "Domain webhook: missing userId or hostname in metadata",
         );
+        await markEventFailed("Missing userId or hostname in session metadata");
         res.status(400).json({ error: "Missing userId or hostname in session metadata" });
         return;
       }
-
-      // Record idempotency + fulfill (non-credit path — uses its own dedup on purchased_domains)
-      await db
-        .insert(stripeProcessedEventsTable)
-        .values({ eventId: event.id, type: event.type })
-        .onConflictDoNothing();
 
       if (sessionType === "domain_purchase") {
         try {
@@ -517,6 +593,7 @@ async function handleStripeWebhook(
             projectId,
           });
 
+          await markEventSucceeded();
           logger.info(
             { eventId: event.id, hostname, alreadyRegistered },
             "Domain purchase webhook fulfillment complete",
@@ -528,15 +605,14 @@ async function handleStripeWebhook(
             { err: msg, eventId: event.id, hostname },
             "Domain purchase webhook fulfillment failed — Stripe will retry",
           );
-          // 500 so Stripe retries. Idempotency row was already inserted, so
-          // on retry we need to check if the domain was already fulfilled first.
-          // The fulfillDomainPurchase idempotency check handles this correctly.
+          await markEventFailed(msg);
           res.status(500).json({ error: "Domain fulfillment failed", willRetry: true });
         }
       } else {
         // domain_transfer: the transfer-in/confirm endpoint handles Namecheap
         // transfer initiation.  Webhook acknowledges payment only; the client
         // confirm endpoint is responsible for the full transfer flow.
+        await markEventSucceeded();
         logger.info(
           { eventId: event.id, hostname },
           "Domain transfer webhook: payment acknowledged, client confirm handles transfer initiation",
@@ -574,6 +650,7 @@ async function handleStripeWebhook(
       default:
         logger.info({ eventId: event.id, type: event.type }, "Stripe webhook unhandled event type");
     }
+    await markEventSucceeded();
     res.json({ ok: true, type: event.type });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
@@ -581,10 +658,8 @@ async function handleStripeWebhook(
       { err: msg, eventId: event.id, type: event.type },
       "Stripe webhook handler threw — Stripe will retry",
     );
-    // Roll back idempotency mark so retry can reprocess
-    await db
-      .delete(stripeProcessedEventsTable)
-      .where(eq(stripeProcessedEventsTable.eventId, event.id));
+    // Mark failed WITHOUT deleting so Stripe's next retry can reclaim the row.
+    await markEventFailed(msg);
     res.status(500).json({ error: "Handler failed", willRetry: true });
   }
 }
@@ -611,9 +686,12 @@ async function handleCheckoutCompleted(
     }
     // Fetch current period from Stripe
     const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
-    const currentPeriodEnd = new Date(
-      (stripeSub as unknown as { current_period_end: number }).current_period_end * 1000,
-    );
+    const rawSub = stripeSub as unknown as {
+      current_period_start: number;
+      current_period_end: number;
+    };
+    const currentPeriodStart = new Date(rawSub.current_period_start * 1000);
+    const currentPeriodEnd = new Date(rawSub.current_period_end * 1000);
 
     await db
       .update(userSubscriptionsTable)
@@ -629,7 +707,7 @@ async function handleCheckoutCompleted(
       .where(eq(userSubscriptionsTable.userId, userId));
 
     // Grant first monthly credits immediately
-    await maybeGrantMonthlyCredits(userId, currentPeriodEnd);
+    await maybeGrantMonthlyCredits(userId, subscriptionId, currentPeriodStart);
     logger.info({ userId, tier, subscriptionId }, "Subscription activated via checkout");
     return;
   }
@@ -688,7 +766,12 @@ async function handleInvoicePaid(event: {
   const invoice = event.data.object;
   const customerId = invoice.customer as string | null;
   const subscriptionId = invoice.subscription as string | null;
-  const lines = invoice.lines as { data?: Array<{ period?: { end?: number } }> } | undefined;
+  const lines = invoice.lines as
+    | {
+        data?: Array<{ period?: { start?: number; end?: number } }>;
+      }
+    | undefined;
+  const periodStart = lines?.data?.[0]?.period?.start;
   const periodEnd = lines?.data?.[0]?.period?.end;
   if (!customerId || !subscriptionId) return;
 
@@ -702,13 +785,18 @@ async function handleInvoicePaid(event: {
   const currentPeriodEnd = periodEnd
     ? new Date(periodEnd * 1000)
     : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  // Fall back to 30 days before period end if Stripe doesn't supply period start
+  const currentPeriodStart = periodStart
+    ? new Date(periodStart * 1000)
+    : new Date(currentPeriodEnd.getTime() - 30 * 24 * 60 * 60 * 1000);
+
   await db
     .update(userSubscriptionsTable)
     .set({ status: "active", currentPeriodEnd, gracePeriodEnd: null, updatedAt: sql`now()` })
     .where(eq(userSubscriptionsTable.userId, sub.userId));
 
-  // Grant monthly credits
-  await maybeGrantMonthlyCredits(sub.userId, currentPeriodEnd);
+  // Grant monthly credits atomically — credit_grants unique constraint prevents duplicates
+  await maybeGrantMonthlyCredits(sub.userId, subscriptionId, currentPeriodStart);
   logger.info(
     { userId: sub.userId, customerId },
     "invoice.paid: subscription renewed, credits granted",
