@@ -607,7 +607,18 @@ export async function provisionContainer(
       .where(eq(projectsTable.id, projectId));
 
     // Wait for machine to start (up to 30s)
-    await waitForMachineReady(machineId, 30);
+    const newReady = await waitForMachineReady(machineId, 30);
+    if (!newReady) {
+      logger.warn(
+        { projectId, machineId },
+        "New container timed out waiting to start — resetting to stopped",
+      );
+      await db
+        .update(projectsTable)
+        .set({ containerStatus: "stopped" })
+        .where(eq(projectsTable.id, projectId));
+      return null;
+    }
 
     // Sync files to container
     await syncFilesToContainer(machineId, projectId, files);
@@ -619,7 +630,18 @@ export async function provisionContainer(
     await updateContainerEnv(machineId, projectId, extraEnv ?? {});
     // Wake existing machine
     await startContainer(machineId, projectId);
-    await waitForMachineReady(machineId, 30);
+    const wakeReady = await waitForMachineReady(machineId, 30);
+    if (!wakeReady) {
+      logger.warn(
+        { projectId, machineId },
+        "Existing container timed out waiting to wake — resetting to stopped",
+      );
+      await db
+        .update(projectsTable)
+        .set({ containerStatus: "stopped" })
+        .where(eq(projectsTable.id, projectId));
+      return null;
+    }
   }
 
   // Mark as running. Task #738 — once the container is back up, flip a
@@ -646,14 +668,18 @@ export async function provisionContainer(
   return { containerId: machineId, status: "running", containerUrl };
 }
 
-/** Poll Fly.io until the machine is in "started" state, up to timeoutSeconds. */
-async function waitForMachineReady(machineId: string, timeoutSeconds: number): Promise<void> {
+/**
+ * Poll Fly.io until the machine is in "started" state, up to timeoutSeconds.
+ * Returns true when the machine is ready, false if the deadline was exceeded.
+ */
+async function waitForMachineReady(machineId: string, timeoutSeconds: number): Promise<boolean> {
   const deadline = Date.now() + timeoutSeconds * 1000;
   while (Date.now() < deadline) {
     const status = await getContainerStatus(machineId);
-    if (status === "running") return;
+    if (status === "running") return true;
     await new Promise((r) => setTimeout(r, 2000));
   }
+  return false;
 }
 
 /**

@@ -133,10 +133,22 @@ const ERROR_HTML = (projectId: number, reason: string): string => `<!doctype htm
   <p><a href="/projects/${projectId}?tab=logs" target="_top">View container logs →</a></p>
 </div></body></html>`;
 
+/**
+ * Per-project set of in-flight wake attempts. Prevents multiple concurrent
+ * provisionContainer calls (one per 2-second browser refresh of the 503 page)
+ * from racing each other and leaving containerStatus permanently at "starting".
+ */
+const wakingProjects = new Set<number>();
+
 /** Kick off an async wake of the container. Best-effort, never throws. */
 function wakeContainer(projectId: number): void {
+  // If a wake is already in progress for this project, skip — the in-flight
+  // call will update the DB when it finishes (or times out).
+  if (wakingProjects.has(projectId)) return;
+
   setImmediate(() => {
     void (async () => {
+      wakingProjects.add(projectId);
       try {
         const [fileRows, envVars] = await Promise.all([
           db
@@ -154,6 +166,8 @@ function wakeContainer(projectId: number): void {
         await provisionContainer(projectId, fileRows, envVars);
       } catch (err) {
         logger.warn({ err, projectId }, "wakeContainer (preview proxy) failed");
+      } finally {
+        wakingProjects.delete(projectId);
       }
     })();
   });
