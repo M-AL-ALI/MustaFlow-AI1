@@ -28,6 +28,7 @@ import type {
   AddDomainResponse,
   AdminAuditLogPage,
   AdminInboxRecentUnread,
+  AdminJobQueue,
   AdminLaunchReadiness,
   AdminMe,
   AdminRoleInput,
@@ -114,6 +115,7 @@ import type {
   GetAccountSecurityFindingsParams,
   GetAdminAuditLogParams,
   GetAdminEvalResults200,
+  GetAdminJobQueueParams,
   GetAdminSkillDraft200,
   GetAgentRouting200,
   GetAgentRoutingParams,
@@ -15514,6 +15516,90 @@ export function useGetAdminAuditLog<TData = Awaited<ReturnType<typeof getAdminAu
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAdminAuditLogQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetAdminJobQueueUrl = (params?: GetAdminJobQueueParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/job-queue?${stringifiedParams}` : `/api/admin/job-queue`
+}
+
+/**
+ * @summary pg-boss job queue stats and recent jobs (admin only)
+ */
+export const getAdminJobQueue = async (params?: GetAdminJobQueueParams, options?: RequestInit): Promise<AdminJobQueue> => {
+
+  return customFetch<AdminJobQueue>(getGetAdminJobQueueUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminJobQueueQueryKey = (params?: GetAdminJobQueueParams,) => {
+    return [
+    `/api/admin/job-queue`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAdminJobQueueQueryOptions = <TData = Awaited<ReturnType<typeof getAdminJobQueue>>, TError = ErrorType<unknown>>(params?: GetAdminJobQueueParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminJobQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminJobQueueQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminJobQueue>>> = ({ signal }) => getAdminJobQueue(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminJobQueue>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminJobQueueQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminJobQueue>>>
+export type GetAdminJobQueueQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary pg-boss job queue stats and recent jobs (admin only)
+ */
+
+export function useGetAdminJobQueue<TData = Awaited<ReturnType<typeof getAdminJobQueue>>, TError = ErrorType<unknown>>(
+ params?: GetAdminJobQueueParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminJobQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminJobQueueQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

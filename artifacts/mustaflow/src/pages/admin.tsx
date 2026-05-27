@@ -43,9 +43,17 @@ import {
   rejectAdminSkillDraft,
   toggleAdminSkill,
   getAdminEvalResults,
+  listAdminRecentUnreadInbox,
+  getAdminJobQueue,
 } from "@workspace/api-client-react";
 
-import type { AdminLaunchCheck, AdminRole, AdminAuditLogEntry } from "@workspace/api-client-react";
+import type {
+  AdminLaunchCheck,
+  AdminRole,
+  AdminAuditLogEntry,
+  AdminInboxRecentUnread,
+  AdminJobQueue,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 function isHttpError(err: unknown): err is { status: number; data: unknown; message: string } {
@@ -1197,28 +1205,14 @@ type EvalFullRecord = EvalSummary & {
   };
 };
 
-type InboxRecentItem = {
-  id: number;
-  projectId: number;
-  projectName: string;
-  category: string;
-  severity: string;
-  description: string;
-  status: string;
-  screenshotUrl: string | null;
-  createdAt: string;
-};
-
 function InboxRecentUnreadTile() {
-  const [data, setData] = useState<{ items: InboxRecentItem[]; totalUnread: number } | null>(null);
+  const [data, setData] = useState<AdminInboxRecentUnread | null>(null);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     void (async () => {
       try {
-        const r = await fetch("/api/admin/inbox/recent-unread?limit=10");
-        if (r.ok) {
-          setData((await r.json()) as { items: InboxRecentItem[]; totalUnread: number });
-        }
+        const result = await listAdminRecentUnreadInbox({ limit: 10 });
+        setData(result);
       } catch {
         /* ignore */
       } finally {
@@ -1481,28 +1475,8 @@ function AdminItem({
 
 // ── Job Queue Tile ─────────────────────────────────────────────────────────────
 
-type RecentJobEntry = {
-  id: string;
-  state: string;
-  createdon: string;
-  completedon: string | null;
-  output: unknown;
-};
-
-type JobQueueEntry = {
-  name: string;
-  label: string;
-  active: number;
-  queued: number;
-  failed: number;
-  total: number;
-  recent: RecentJobEntry[];
-};
-
-type JobQueueData = { available: boolean; queues: JobQueueEntry[] };
-
 function JobQueueTile() {
-  const [data, setData] = useState<JobQueueData | null>(null);
+  const [data, setData] = useState<AdminJobQueue | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -1510,12 +1484,9 @@ function JobQueueTile() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/job-queue?recentLimit=5", { credentials: "include" });
-      if (res.ok) {
-        const json = (await res.json()) as JobQueueData;
-        setData(json);
-        setLastUpdated(new Date());
-      }
+      const result = await getAdminJobQueue({ recentLimit: 5 });
+      setData(result);
+      setLastUpdated(new Date());
     } catch {
       // non-fatal
     } finally {

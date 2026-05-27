@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import {
   useListProjects,
@@ -34,7 +34,6 @@ import {
   FileCode2,
   Zap,
 } from "lucide-react";
-
 
 const TEMPLATE_CHIPS: Array<{
   label: string;
@@ -286,7 +285,9 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
     <div className="flex flex-col items-center gap-6 w-full max-w-2xl mx-auto">
       <div className="text-center">
         <h1 className="text-3xl font-bold tracking-tight mb-1">What do you want to build?</h1>
-        <p className="text-sm text-muted-foreground">Describe your project and let the AI get started</p>
+        <p className="text-sm text-muted-foreground">
+          Describe your project and let the AI get started
+        </p>
       </div>
 
       {/* Prompt card */}

@@ -844,6 +844,30 @@ export interface AdminInboxRecentUnread {
   totalUnread: number;
 }
 
+export interface AdminRecentJobEntry {
+  id: string;
+  state: string;
+  createdon: string;
+  /** @nullable */
+  completedon?: string | null;
+  output?: unknown;
+}
+
+export interface AdminJobQueueEntry {
+  name: string;
+  label: string;
+  active: number;
+  queued: number;
+  failed: number;
+  total: number;
+  recent: AdminRecentJobEntry[];
+}
+
+export interface AdminJobQueue {
+  available: boolean;
+  queues: AdminJobQueueEntry[];
+}
+
 export type ChatMessageRole = typeof ChatMessageRole[keyof typeof ChatMessageRole];
 
 
@@ -4270,6 +4294,8 @@ export type GetProjectProvisioningStatus200 = {
   builderMode: string;
   provisioningStatus: GetProjectProvisioningStatus200ProvisioningStatus;
   provisioningError?: string | null;
+  provisioningStep?: string | null;
+  estimatedSecondsRemaining?: number | null;
   containerStatus?: string | null;
 };
 
@@ -4424,6 +4450,10 @@ limit?: number;
  * @minimum 0
  */
 offset?: number;
+};
+
+export type GetAdminJobQueueParams = {
+recentLimit?: number;
 };
 
 export type ListAdminSkills200SkillsItem = { [key: string]: unknown };

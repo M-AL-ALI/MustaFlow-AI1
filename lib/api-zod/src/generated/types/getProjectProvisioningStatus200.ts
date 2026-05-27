@@ -11,5 +11,7 @@ export type GetProjectProvisioningStatus200 = {
   builderMode: string;
   provisioningStatus: GetProjectProvisioningStatus200ProvisioningStatus;
   provisioningError?: string | null;
+  provisioningStep?: string | null;
+  estimatedSecondsRemaining?: number | null;
   containerStatus?: string | null;
 };

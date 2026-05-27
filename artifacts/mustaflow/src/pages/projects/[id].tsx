@@ -1396,10 +1396,10 @@ export default function ProjectWorkspacePage() {
               setActiveTab("preview");
             }
             setProvisioningError(data.provisioningError ?? null);
-            setProvisioningStep(data.provisioningStep ?? null);
+            setProvisioningStep((data.provisioningStep ?? null) as ProvisioningStep);
             setEstimatedSecondsRemaining(data.estimatedSecondsRemaining ?? null);
-          },
-        )
+          }
+        })
         .catch(() => {});
     }, 4000);
     return () => clearInterval(t);

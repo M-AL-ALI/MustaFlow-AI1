@@ -3891,6 +3891,8 @@ paths:
                     type: string
                     enum: [idle, provisioning, ready, hibernated, error]
                   provisioningError: { type: string, nullable: true }
+                  provisioningStep: { type: string, nullable: true }
+                  estimatedSecondsRemaining: { type: integer, nullable: true }
                   containerStatus: { type: string, nullable: true }
         "404":
           description: Not found
@@ -4770,6 +4772,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+
+  /admin/job-queue:
+    get:
+      operationId: getAdminJobQueue
+      tags: [admin]
+      summary: pg-boss job queue stats and recent jobs (admin only)
+      parameters:
+        - { name: recentLimit, in: query, required: false, schema: { type: integer } }
+      responses:
+        "200":
+          description: Job queue stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminJobQueue"
 
   /admin/skills:
     get:
@@ -6165,6 +6182,43 @@ components:
           items:
             $ref: "#/components/schemas/AdminInboxRecentUnreadEntry"
         totalUnread: { type: integer }
+
+    AdminRecentJobEntry:
+      type: object
+      required: [id, state, createdon]
+      properties:
+        id: { type: string }
+        state: { type: string }
+        createdon: { type: string, format: date-time }
+        completedon:
+          type: ["string", "null"]
+          format: date-time
+        output: {}
+
+    AdminJobQueueEntry:
+      type: object
+      required: [name, label, active, queued, failed, total, recent]
+      properties:
+        name: { type: string }
+        label: { type: string }
+        active: { type: integer }
+        queued: { type: integer }
+        failed: { type: integer }
+        total: { type: integer }
+        recent:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminRecentJobEntry"
+
+    AdminJobQueue:
+      type: object
+      required: [available, queues]
+      properties:
+        available: { type: boolean }
+        queues:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminJobQueueEntry"
 
     ChatMessage:
       type: object

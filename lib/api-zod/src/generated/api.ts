@@ -4465,6 +4465,8 @@ export const GetProjectProvisioningStatusResponse = zod.object({
   "builderMode": zod.string(),
   "provisioningStatus": zod.enum(['idle', 'provisioning', 'ready', 'hibernated', 'error']),
   "provisioningError": zod.string().nullish(),
+  "provisioningStep": zod.string().nullish(),
+  "estimatedSecondsRemaining": zod.number().nullish(),
   "containerStatus": zod.string().nullish()
 })
 
@@ -5106,6 +5108,33 @@ export const GetAdminAuditLogResponse = zod.object({
   "total": zod.number(),
   "limit": zod.number(),
   "offset": zod.number()
+})
+
+
+/**
+ * @summary pg-boss job queue stats and recent jobs (admin only)
+ */
+export const GetAdminJobQueueQueryParams = zod.object({
+  "recentLimit": zod.coerce.number().optional()
+})
+
+export const GetAdminJobQueueResponse = zod.object({
+  "available": zod.boolean(),
+  "queues": zod.array(zod.object({
+  "name": zod.string(),
+  "label": zod.string(),
+  "active": zod.number(),
+  "queued": zod.number(),
+  "failed": zod.number(),
+  "total": zod.number(),
+  "recent": zod.array(zod.object({
+  "id": zod.string(),
+  "state": zod.string(),
+  "createdon": zod.coerce.date(),
+  "completedon": zod.coerce.date().nullish(),
+  "output": zod.unknown().optional()
+}))
+}))
 })
 
 
